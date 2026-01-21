@@ -1,0 +1,164 @@
+name: Update Microsoft Forms
+
+on:
+  push:
+    paths:
+      - 'config/apparatus.csv'
+      - 'config/personnel.json'
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (do not actually update)'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  update-forms:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install httpx pydantic pydantic-settings
+
+      - name: Parse configuration files
+        id: config
+        run: |
+          python << 'EOF'
+          import json
+          import csv
+          import os
+          from pathlib import Path
+
+          # Parse apparatus.csv
+          apparatus = []
+          csv_path = Path("config/apparatus.csv")
+          if csv_path.exists():
+              with open(csv_path) as f:
+                  reader = csv.DictReader(f)
+                  for row in reader:
+                      if row.get("active", "").lower() == "true":
+                          apparatus.append({
+                              "code": row["code"],
+                              "name": row["name"],
+                              "type": row["type"],
+                              "station": row.get("station", ""),
+                          })
+
+          # Parse personnel.json
+          personnel = []
+          json_path = Path("config/personnel.json")
+          if json_path.exists():
+              with open(json_path) as f:
+                  data = json.load(f)
+                  personnel = data.get("personnel", [])
+
+          # Build choices
+          apparatus_choices = [f"{a['code']} - {a['name']}" for a in apparatus]
+          personnel_choices = [f"{p['fullName']} - {p['esoId']}" for p in personnel]
+
+          # Output for GitHub Actions
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"apparatus_count={len(apparatus)}\n")
+              f.write(f"personnel_count={len(personnel)}\n")
+
+          # Save full payload
+          payload = {
+              "updateType": "config_sync",
+              "source": "github_actions",
+              "commit": os.environ.get("GITHUB_SHA", ""),
+              "apparatus": apparatus,
+              "personnel": personnel,
+              "apparatusChoices": apparatus_choices,
+              "personnelChoices": personnel_choices,
+          }
+          with open("payload.json", "w") as f:
+              json.dump(payload, f, indent=2)
+
+          print(f"Apparatus: {len(apparatus)} items")
+          print(f"Personnel: {len(personnel)} items")
+          EOF
+
+      - name: Display payload summary
+        run: |
+          echo "=== Payload Summary ==="
+          echo "Apparatus: ${{ steps.config.outputs.apparatus_count }} items"
+          echo "Personnel: ${{ steps.config.outputs.personnel_count }} items"
+          echo ""
+          echo "=== Payload Preview ==="
+          python -c "import json; d=json.load(open('payload.json')); print('Apparatus choices:', d['apparatusChoices'][:5], '...' if len(d['apparatusChoices'])>5 else ''); print('Personnel choices:', d['personnelChoices'][:5], '...' if len(d['personnelChoices'])>5 else '')"
+
+      - name: Send to Power Automate
+        if: ${{ vars.POWER_AUTOMATE_URL != '' && (github.event.inputs.dry_run != 'true') }}
+        run: |
+          python << 'EOF'
+          import httpx
+          import json
+          import os
+
+          url = os.environ.get("POWER_AUTOMATE_URL")
+          if not url:
+              print("Error: POWER_AUTOMATE_URL not set")
+              exit(1)
+
+          with open("payload.json") as f:
+              payload = json.load(f)
+
+          print(f"Sending to Power Automate...")
+          response = httpx.post(url, json=payload, timeout=30.0)
+
+          print(f"Status: {response.status_code}")
+          if response.is_success:
+              print("✓ Form update triggered successfully!")
+          else:
+              print(f"✗ Failed: {response.text[:500]}")
+              exit(1)
+          EOF
+        env:
+          POWER_AUTOMATE_URL: ${{ vars.POWER_AUTOMATE_URL }}
+
+      - name: Skip (URL not configured or dry run)
+        if: ${{ vars.POWER_AUTOMATE_URL == '' || github.event.inputs.dry_run == 'true' }}
+        run: |
+          if [ "${{ vars.POWER_AUTOMATE_URL }}" == "" ]; then
+            echo "::warning::POWER_AUTOMATE_URL not configured. Skipping form update."
+            echo ""
+            echo "To enable automatic form updates:"
+            echo "1. Create a Power Automate flow with HTTP trigger"
+            echo "2. Add the URL as a repository variable: POWER_AUTOMATE_URL"
+          else
+            echo "Dry run mode - not sending update"
+          fi
+          echo ""
+          echo "Payload that would be sent:"
+          cat payload.json
+
+      - name: Create job summary
+        run: |
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          ## Microsoft Forms Update
+
+          | Config | Count |
+          |--------|-------|
+          | Apparatus | ${{ steps.config.outputs.apparatus_count }} |
+          | Personnel | ${{ steps.config.outputs.personnel_count }} |
+
+          EOF
+
+          if [ "${{ vars.POWER_AUTOMATE_URL }}" != "" ] && [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+            echo "**Status:** ✓ Update sent to Power Automate" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Status:** ⏸ Update skipped (URL not configured or dry run)" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {},
+  "triggers": {
+    "manual": {
+      "type": "Request",
+      "kind": "Button",
+      "inputs": {}
+    }
+  },
+  "actions": {
+    "Create_Form": {
+      "type": "OpenApiConnection",
+      "inputs": {
+        "host": {
+          "connectionName": "shared_microsoftforms",
+          "operationId": "CreateForm",
+          "apiId": "/providers/Microsoft.PowerApps/apis/shared_microsoftforms"
+        },
+        "parameters": {
+          "title": "Fire Incident Report",
+          "description": "Incident report form based on ESO NFIRS incident reporting structure"
+        }
+      }
+    }
+  }
+}

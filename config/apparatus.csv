@@ -1,0 +1,18 @@
+code,name,type,station,active
+BN31,Battalion 31,OTHER,31,true
+E31,Engine 31,SUPPRESSION,31,true
+E32,Engine 32,SUPPRESSION,32,true
+E33,Engine 33,SUPPRESSION,33,true
+E34,Engine 34,SUPPRESSION,34,true
+L31,Ladder 31,SUPPRESSION,31,true
+M31,Medic 31,EMS,31,true
+M32,Medic 32,EMS,32,true
+OPS31,Operations 31,OTHER,31,true
+FB31,Fireboat 31,OTHER,31,true
+R31,Rescue 31,SUPPRESSION,31,true
+T31,Tender 31,SUPPRESSION,31,true
+T32,Tender 32,SUPPRESSION,32,true
+BR31,Brush 31,SUPPRESSION,31,true
+BR32,Brush 32,SUPPRESSION,32,true
+POV,Private Vehicle,OTHER,,true
+UTIL31,Utility 31,OTHER,31,true

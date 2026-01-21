@@ -1,0 +1,139 @@
+{
+  "scrapedAt": "2026-01-21T15:46:19.319Z",
+  "source": "ESO Suite",
+  "count": 22,
+  "personnel": [
+    {
+      "lastName": "Chadwick",
+      "firstName": "Stephen",
+      "esoId": "2502",
+      "fullName": "Stephen Chadwick"
+    },
+    {
+      "lastName": "Coryell",
+      "firstName": "Mike",
+      "esoId": "2504",
+      "fullName": "Mike Coryell"
+    },
+    {
+      "lastName": "Dassow",
+      "firstName": "Michelangelo",
+      "esoId": "226",
+      "fullName": "Michelangelo Dassow"
+    },
+    {
+      "lastName": "Dodd",
+      "firstName": "Kyle",
+      "esoId": "193",
+      "fullName": "Kyle Dodd"
+    },
+    {
+      "lastName": "Duncan",
+      "firstName": "Benjamin",
+      "esoId": "2329",
+      "fullName": "Benjamin Duncan"
+    },
+    {
+      "lastName": "English",
+      "firstName": "Kati",
+      "esoId": "230",
+      "fullName": "Kati English"
+    },
+    {
+      "lastName": "Greene",
+      "firstName": "Adam",
+      "esoId": "231",
+      "fullName": "Adam Greene"
+    },
+    {
+      "lastName": "Hartzell",
+      "firstName": "Michael",
+      "esoId": "421",
+      "fullName": "Michael Hartzell"
+    },
+    {
+      "lastName": "Howitt",
+      "firstName": "David",
+      "esoId": "400",
+      "fullName": "David Howitt"
+    },
+    {
+      "lastName": "Jones",
+      "firstName": "Jaden",
+      "esoId": "2326",
+      "fullName": "Jaden Jones"
+    },
+    {
+      "lastName": "Kuetzing",
+      "firstName": "Karl",
+      "esoId": "234",
+      "fullName": "Karl Kuetzing"
+    },
+    {
+      "lastName": "Loura",
+      "firstName": "Drew",
+      "esoId": "2506",
+      "fullName": "Drew Loura"
+    },
+    {
+      "lastName": "Mcconnell",
+      "firstName": "Craig",
+      "esoId": "235",
+      "fullName": "Craig Mcconnell"
+    },
+    {
+      "lastName": "Monin",
+      "firstName": "Noel",
+      "esoId": "313",
+      "fullName": "Noel Monin"
+    },
+    {
+      "lastName": "Newell",
+      "firstName": "Izaac",
+      "esoId": "248",
+      "fullName": "Izaac Newell"
+    },
+    {
+      "lastName": "Pollack",
+      "firstName": "Jordan",
+      "esoId": "2420",
+      "fullName": "Jordan Pollack"
+    },
+    {
+      "lastName": "Salinas",
+      "firstName": "John",
+      "esoId": "220",
+      "fullName": "John Salinas"
+    },
+    {
+      "lastName": "See",
+      "firstName": "Harry",
+      "esoId": "402",
+      "fullName": "Harry See"
+    },
+    {
+      "lastName": "Smith",
+      "firstName": "Brad",
+      "esoId": "252",
+      "fullName": "Brad Smith"
+    },
+    {
+      "lastName": "Venegas",
+      "firstName": "Ricardo",
+      "esoId": "2328",
+      "fullName": "Ricardo Venegas"
+    },
+    {
+      "lastName": "Voskamp",
+      "firstName": "Irene",
+      "esoId": "2508",
+      "fullName": "Irene Voskamp"
+    },
+    {
+      "lastName": "Warmenhoven",
+      "firstName": "Chad",
+      "esoId": "2114",
+      "fullName": "Chad Warmenhoven"
+    }
+  ]
+}
