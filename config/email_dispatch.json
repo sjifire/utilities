@@ -1,0 +1,12 @@
+{
+  "dispatch_email": "dispatch_incident_report@sjifire.org",
+  "allowed_senders": ["adam.greene@gmail.com"],
+  "archive_folder": "Archive",
+  "retention_days": 90,
+  "azure": {
+    "resource_group": "sjifire-dispatch-rg",
+    "location": "westus2",
+    "function_app": "sjifire-dispatch-func",
+    "storage_account": "sjifiredispatchstor"
+  }
+}
