@@ -16,6 +16,7 @@ dependencies = [
 aladtec-list = "sjifire.scripts.aladtec_list:main"
 aladtec-audit = "sjifire.scripts.aladtec_audit:main"
 aladtec-import = "sjifire.scripts.aladtec_import:main"
+analyze-mappings = "sjifire.scripts.analyze_mappings:main"
 
 [dependency-groups]
 dev = [
