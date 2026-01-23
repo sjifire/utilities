@@ -194,6 +194,71 @@ class EntraGroupManager:
             logger.error(f"Failed to remove user {user_id} from group {group_id}: {e}")
             return False
 
+    async def delete_group(self, group_id: str) -> bool:
+        """Delete a group from Entra ID.
+
+        Args:
+            group_id: The group ID to delete
+
+        Returns:
+            True if successful
+        """
+        try:
+            await self.client.groups.by_group_id(group_id).delete()
+            logger.info(f"Deleted group: {group_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete group {group_id}: {e}")
+            return False
+
+    async def delete_security_groups_from_config(
+        self,
+        config_path: Path | str,
+        dry_run: bool = False,
+    ) -> dict[str, bool]:
+        """Delete security groups defined in the mapping config file.
+
+        Args:
+            config_path: Path to the group_mappings.json config file
+            dry_run: If True, don't delete groups, just report what would be done
+
+        Returns:
+            Dict mapping group name to success status
+        """
+        config_path = Path(config_path)
+        with open(config_path) as f:
+            config = json.load(f)
+
+        security_groups = config.get("ms_security_group_ids", {})
+        results: dict[str, bool] = {}
+
+        for group_key, _description in security_groups.items():
+            # Extract group name from key (e.g., "TODO:sg-firefighters" -> "sg-firefighters")
+            if group_key.startswith("TODO:"):
+                group_name = group_key.replace("TODO:", "")
+            else:
+                group_name = group_key
+
+            # Check if group exists
+            existing = await self.get_group_by_name(group_name)
+            if not existing:
+                logger.info(f"Security group does not exist: {group_name}")
+                results[group_name] = True  # Nothing to delete
+                continue
+
+            if dry_run:
+                logger.info(f"Would delete security group: {group_name} (ID: {existing.id})")
+                results[group_name] = True
+            else:
+                success = await self.delete_group(existing.id)
+                results[group_name] = success
+                if success:
+                    logger.info(f"Deleted security group: {group_name}")
+                else:
+                    logger.error(f"Failed to delete security group: {group_name}")
+
+        return results
+
     async def create_security_group(
         self,
         display_name: str,
@@ -283,14 +348,15 @@ class EntraGroupManager:
         with open(config_path) as f:
             config = json.load(f)
 
-        groups_to_create = config.get("security_groups_to_create", {})
+        security_groups = config.get("ms_security_group_ids", {})
         results: dict[str, str | None] = {}
 
-        for group_name, group_info in groups_to_create.items():
-            if group_name.startswith("_"):
-                continue  # Skip metadata fields
-
-            description = group_info.get("description", "")
+        for group_key, description in security_groups.items():
+            # Extract group name from key (e.g., "TODO:sg-firefighters" -> "sg-firefighters")
+            if group_key.startswith("TODO:"):
+                group_name = group_key.replace("TODO:", "")
+            else:
+                group_name = group_key
 
             # Check if group already exists
             existing = await self.get_group_by_name(group_name)

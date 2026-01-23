@@ -7,238 +7,140 @@
     "M365 groups are for collaboration (Teams, SharePoint, shared mailbox)"
   ],
 
+  "ms_group_ids": {
+    "20c4ee28-9b6c-47f9-98c7-548952b24929": "FF (M365 - Firefighters)",
+    "b87c77fd-0de1-400a-9a44-748f44c23ee5": "WFF (M365 - Wildland Fire Fighters)",
+    "c4177942-882a-4e49-ac8d-680de2741f82": "Officer's Coordination and Collaboration (M365)",
+    "2e0a96b8-e990-475a-b44d-a47e5ef0f3fc": "Duty Officers (M365)",
+    "3ecb1ae8-1ca7-44a9-b22a-2f2695f13222": "San Juan County Chiefs (M365)",
+    "8fbc02c2-13c1-4b6c-9cb5-b7b51479bb8a": "Executive Leadership (M365)",
+    "2cd387fa-bdf3-464a-b9ab-6c9ef27a9649": "County Training Academy (M365)",
+    "f7b8f454-5324-4be5-80be-06a1fa2bc247": "Marine Group (M365)",
+    "0c99e7b7-c554-44ce-914e-e251864b17d6": "Support (M365)",
+    "ef46b755-a91a-4bb8-a430-fbb6453c4e18": "Administration (M365)",
+    "9fe017d3-f7dd-41fa-92a4-b1b5c19ba886": "Logistics (M365)",
+    "cc897411-0ebf-4769-a1c9-3de5bcde3154": "volunteers (Distribution list)",
+    "dab584c2-dfd8-483c-b24d-c6cc42137bf8": "Station 31 (M365)",
+    "859b2078-24c2-455f-8191-3b21f91e3810": "Station 32 (M365)",
+    "b3082f21-79ac-48ad-a20e-bf927c5240d3": "Station 33 (M365)",
+    "b1c6456a-5ef7-4934-a4f4-40fb112879db": "Station 34 (M365)",
+    "e3eea61e-9400-41a9-b3d8-87236ff1ae26": "Station 35 (M365)",
+    "0f1e50b3-a6fd-485b-aaa9-029b10bdc177": "Station 36 (M365)"
+  },
+
+  "ms_security_group_ids": {
+    "TODO:sg-firefighters": "All firefighting personnel - app access and resource permissions",
+    "TODO:sg-officers": "Company officers and above - elevated access to personnel/incident data",
+    "TODO:sg-chiefs": "Chief officers - administrative and HR system access",
+    "TODO:sg-marine": "Marine operations personnel - marine-specific resources",
+    "TODO:sg-admin": "Administrative staff - office and business system access",
+    "TODO:sg-support": "Support personnel - support-specific resources",
+    "TODO:sg-paid-staff": "All paid staff - E3/E5 license assignment",
+    "TODO:sg-volunteers": "All volunteers - F3 license assignment"
+  },
+
   "position_mappings": {
     "_description": "Maps Aladtec position names to Entra groups",
 
     "Firefighter": {
-      "groups": [
-        {
-          "id": "20c4ee28-9b6c-47f9-98c7-548952b24929",
-          "_comment": "FF (M365 - Firefighters collaboration)"
-        },
-        {
-          "id": "TODO:sg-firefighters",
-          "_comment": "sg-firefighters (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["20c4ee28-9b6c-47f9-98c7-548952b24929"],
+      "ms_security_groups": ["TODO:sg-firefighters"],
       "job_title": "Firefighter"
     },
 
     "Wildland Firefighter": {
-      "groups": [
-        {
-          "id": "b87c77fd-0de1-400a-9a44-748f44c23ee5",
-          "_comment": "WFF (M365 - Wildland Fire Fighters)"
-        },
-        {
-          "id": "TODO:sg-firefighters",
-          "_comment": "sg-firefighters (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["b87c77fd-0de1-400a-9a44-748f44c23ee5"],
+      "ms_security_groups": ["TODO:sg-firefighters"],
       "job_title": "Wildland Firefighter"
     },
 
     "Apparatus Operator": {
-      "groups": [
-        {
-          "id": "20c4ee28-9b6c-47f9-98c7-548952b24929",
-          "_comment": "FF (M365 - Firefighters collaboration)"
-        },
-        {
-          "id": "TODO:sg-firefighters",
-          "_comment": "sg-firefighters (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["20c4ee28-9b6c-47f9-98c7-548952b24929"],
+      "ms_security_groups": ["TODO:sg-firefighters"],
       "job_title": "Apparatus Operator"
     },
 
     "Lieutenant": {
-      "groups": [
-        {
-          "id": "c4177942-882a-4e49-ac8d-680de2741f82",
-          "_comment": "Officer's Coordination and Collaboration (M365)"
-        },
-        {
-          "id": "TODO:sg-officers",
-          "_comment": "sg-officers (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["c4177942-882a-4e49-ac8d-680de2741f82"],
+      "ms_security_groups": ["TODO:sg-officers"],
       "job_title": "Lieutenant"
     },
 
     "Captain": {
-      "groups": [
-        {
-          "id": "c4177942-882a-4e49-ac8d-680de2741f82",
-          "_comment": "Officer's Coordination and Collaboration (M365)"
-        },
-        {
-          "id": "TODO:sg-officers",
-          "_comment": "sg-officers (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["c4177942-882a-4e49-ac8d-680de2741f82"],
+      "ms_security_groups": ["TODO:sg-officers"],
       "job_title": "Captain"
     },
 
     "Backup Duty Officer": {
-      "groups": [
-        {
-          "id": "2e0a96b8-e990-475a-b44d-a47e5ef0f3fc",
-          "_comment": "Duty Officers (M365)"
-        },
-        {
-          "id": "TODO:sg-officers",
-          "_comment": "sg-officers (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["2e0a96b8-e990-475a-b44d-a47e5ef0f3fc"],
+      "ms_security_groups": ["TODO:sg-officers"],
       "job_title": "Backup Duty Officer"
     },
 
     "Chief": {
-      "groups": [
-        {
-          "id": "3ecb1ae8-1ca7-44a9-b22a-2f2695f13222",
-          "_comment": "San Juan County Chiefs (M365)"
-        },
-        {
-          "id": "8fbc02c2-13c1-4b6c-9cb5-b7b51479bb8a",
-          "_comment": "Executive Leadership (M365)"
-        },
-        {
-          "id": "TODO:sg-chiefs",
-          "_comment": "sg-chiefs (Security - needs to be created)"
-        }
+      "ms_groups": [
+        "3ecb1ae8-1ca7-44a9-b22a-2f2695f13222",
+        "8fbc02c2-13c1-4b6c-9cb5-b7b51479bb8a"
       ],
+      "ms_security_groups": ["TODO:sg-chiefs"],
       "job_title": "Chief"
     },
 
     "Training Officer": {
-      "groups": [
-        {
-          "id": "2cd387fa-bdf3-464a-b9ab-6c9ef27a9649",
-          "_comment": "County Training Academy (M365)"
-        },
-        {
-          "id": "TODO:sg-officers",
-          "_comment": "sg-officers (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["2cd387fa-bdf3-464a-b9ab-6c9ef27a9649"],
+      "ms_security_groups": ["TODO:sg-officers"],
       "job_title": "Training Officer"
     },
 
     "Pilot": {
-      "groups": [
-        {
-          "id": "f7b8f454-5324-4be5-80be-06a1fa2bc247",
-          "_comment": "Marine Group (M365)"
-        },
-        {
-          "id": "TODO:sg-marine",
-          "_comment": "sg-marine (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["f7b8f454-5324-4be5-80be-06a1fa2bc247"],
+      "ms_security_groups": ["TODO:sg-marine"],
       "job_title": "Pilot"
     },
 
     "Mate": {
-      "groups": [
-        {
-          "id": "f7b8f454-5324-4be5-80be-06a1fa2bc247",
-          "_comment": "Marine Group (M365)"
-        },
-        {
-          "id": "TODO:sg-marine",
-          "_comment": "sg-marine (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["f7b8f454-5324-4be5-80be-06a1fa2bc247"],
+      "ms_security_groups": ["TODO:sg-marine"],
       "job_title": "Mate"
     },
 
     "Support": {
-      "groups": [
-        {
-          "id": "0c99e7b7-c554-44ce-914e-e251864b17d6",
-          "_comment": "Support (M365)"
-        },
-        {
-          "id": "TODO:sg-support",
-          "_comment": "sg-support (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["0c99e7b7-c554-44ce-914e-e251864b17d6"],
+      "ms_security_groups": ["TODO:sg-support"],
       "job_title": "Support"
     },
 
     "Administrative": {
-      "groups": [
-        {
-          "id": "ef46b755-a91a-4bb8-a430-fbb6453c4e18",
-          "_comment": "Administration (M365)"
-        },
-        {
-          "id": "TODO:sg-admin",
-          "_comment": "sg-admin (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["ef46b755-a91a-4bb8-a430-fbb6453c4e18"],
+      "ms_security_groups": ["TODO:sg-admin"],
       "job_title": "Administrative"
     },
 
     "Administrative Assistant": {
-      "groups": [
-        {
-          "id": "ef46b755-a91a-4bb8-a430-fbb6453c4e18",
-          "_comment": "Administration (M365)"
-        },
-        {
-          "id": "TODO:sg-admin",
-          "_comment": "sg-admin (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["ef46b755-a91a-4bb8-a430-fbb6453c4e18"],
+      "ms_security_groups": ["TODO:sg-admin"],
       "job_title": "Administrative Assistant"
     },
 
     "Executive Assistant": {
-      "groups": [
-        {
-          "id": "ef46b755-a91a-4bb8-a430-fbb6453c4e18",
-          "_comment": "Administration (M365)"
-        },
-        {
-          "id": "8fbc02c2-13c1-4b6c-9cb5-b7b51479bb8a",
-          "_comment": "Executive Leadership (M365)"
-        },
-        {
-          "id": "TODO:sg-admin",
-          "_comment": "sg-admin (Security - needs to be created)"
-        }
+      "ms_groups": [
+        "ef46b755-a91a-4bb8-a430-fbb6453c4e18",
+        "8fbc02c2-13c1-4b6c-9cb5-b7b51479bb8a"
       ],
+      "ms_security_groups": ["TODO:sg-admin"],
       "job_title": "Executive Assistant"
     },
 
     "Logistics Manager": {
-      "groups": [
-        {
-          "id": "9fe017d3-f7dd-41fa-92a4-b1b5c19ba886",
-          "_comment": "Logistics (M365)"
-        },
-        {
-          "id": "TODO:sg-admin",
-          "_comment": "sg-admin (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["9fe017d3-f7dd-41fa-92a4-b1b5c19ba886"],
+      "ms_security_groups": ["TODO:sg-admin"],
       "job_title": "Logistics Manager"
     },
 
     "Project Manager": {
-      "groups": [
-        {
-          "id": "ef46b755-a91a-4bb8-a430-fbb6453c4e18",
-          "_comment": "Administration (M365)"
-        },
-        {
-          "id": "TODO:sg-admin",
-          "_comment": "sg-admin (Security - needs to be created)"
-        }
-      ],
+      "ms_groups": ["ef46b755-a91a-4bb8-a430-fbb6453c4e18"],
+      "ms_security_groups": ["TODO:sg-admin"],
       "job_title": "Project Manager"
     }
   },
@@ -247,122 +149,36 @@
     "_description": "Maps Aladtec work groups to Entra groups for license/access management",
 
     "Volunteer": {
-      "groups": [
-        {
-          "id": "cc897411-0ebf-4769-a1c9-3de5bcde3154",
-          "_comment": "volunteers (Distribution list)"
-        },
-        {
-          "id": "TODO:sg-volunteers",
-          "_comment": "sg-volunteers (Security - for F3 license assignment)"
-        }
-      ]
+      "ms_groups": ["cc897411-0ebf-4769-a1c9-3de5bcde3154"],
+      "ms_security_groups": ["TODO:sg-volunteers"]
     },
 
     "FT Line Staff": {
-      "groups": [
-        {
-          "id": "TODO:sg-paid-staff",
-          "_comment": "sg-paid-staff (Security - for E3/E5 license assignment)"
-        }
-      ]
+      "ms_security_groups": ["TODO:sg-paid-staff"]
     },
 
     "PT Line Staff": {
-      "groups": [
-        {
-          "id": "TODO:sg-paid-staff",
-          "_comment": "sg-paid-staff (Security - for E3/E5 license assignment)"
-        }
-      ]
+      "ms_security_groups": ["TODO:sg-paid-staff"]
     },
 
     "Day Staff": {
-      "groups": [
-        {
-          "id": "TODO:sg-paid-staff",
-          "_comment": "sg-paid-staff (Security - for E3/E5 license assignment)"
-        }
-      ]
+      "ms_security_groups": ["TODO:sg-paid-staff"]
     },
 
     "Administrative": {
-      "groups": [
-        {
-          "id": "ef46b755-a91a-4bb8-a430-fbb6453c4e18",
-          "_comment": "Administration (M365)"
-        },
-        {
-          "id": "TODO:sg-paid-staff",
-          "_comment": "sg-paid-staff (Security - for E3/E5 license assignment)"
-        }
-      ]
+      "ms_groups": ["ef46b755-a91a-4bb8-a430-fbb6453c4e18"],
+      "ms_security_groups": ["TODO:sg-paid-staff"]
     }
   },
 
   "station_mappings": {
     "_description": "Maps Aladtec station_assignment field to Station M365 groups",
 
-    "Station 31": {
-      "id": "dab584c2-dfd8-483c-b24d-c6cc42137bf8",
-      "_comment": "Station 31 (M365)"
-    },
-    "Station 32": {
-      "id": "859b2078-24c2-455f-8191-3b21f91e3810",
-      "_comment": "Station 32 (M365)"
-    },
-    "Station 33": {
-      "id": "b3082f21-79ac-48ad-a20e-bf927c5240d3",
-      "_comment": "Station 33 (M365)"
-    },
-    "Station 34": {
-      "id": "b1c6456a-5ef7-4934-a4f4-40fb112879db",
-      "_comment": "Station 34 (M365)"
-    },
-    "Station 35": {
-      "id": "e3eea61e-9400-41a9-b3d8-87236ff1ae26",
-      "_comment": "Station 35 (M365)"
-    },
-    "Station 36": {
-      "id": "0f1e50b3-a6fd-485b-aaa9-029b10bdc177",
-      "_comment": "Station 36 (M365)"
-    }
-  },
-
-  "security_groups_to_create": {
-    "_description": "Security groups that need to be created in Entra ID for access control",
-
-    "sg-firefighters": {
-      "description": "All firefighting personnel - for app access and resource permissions",
-      "suggested_members": ["Firefighter", "Wildland Firefighter", "Apparatus Operator"]
-    },
-    "sg-officers": {
-      "description": "Company officers and above - for elevated access to personnel/incident data",
-      "suggested_members": ["Lieutenant", "Captain", "Backup Duty Officer", "Training Officer"]
-    },
-    "sg-chiefs": {
-      "description": "Chief officers - for administrative and HR system access",
-      "suggested_members": ["Chief"]
-    },
-    "sg-marine": {
-      "description": "Marine operations personnel - for marine-specific resources",
-      "suggested_members": ["Pilot", "Mate"]
-    },
-    "sg-admin": {
-      "description": "Administrative staff - for office and business system access",
-      "suggested_members": ["Administrative", "Administrative Assistant", "Executive Assistant", "Logistics Manager", "Project Manager"]
-    },
-    "sg-support": {
-      "description": "Support personnel - for support-specific resources",
-      "suggested_members": ["Support"]
-    },
-    "sg-paid-staff": {
-      "description": "All paid staff - for E3/E5 license assignment",
-      "suggested_work_groups": ["FT Line Staff", "PT Line Staff", "Day Staff", "Administrative"]
-    },
-    "sg-volunteers": {
-      "description": "All volunteers - for F3 license assignment",
-      "suggested_work_groups": ["Volunteer"]
-    }
+    "Station 31": "dab584c2-dfd8-483c-b24d-c6cc42137bf8",
+    "Station 32": "859b2078-24c2-455f-8191-3b21f91e3810",
+    "Station 33": "b3082f21-79ac-48ad-a20e-bf927c5240d3",
+    "Station 34": "b1c6456a-5ef7-4934-a4f4-40fb112879db",
+    "Station 35": "e3eea61e-9400-41a9-b3d8-87236ff1ae26",
+    "Station 36": "0f1e50b3-a6fd-485b-aaa9-029b10bdc177"
   }
 }

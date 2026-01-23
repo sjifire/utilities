@@ -1,4 +1,4 @@
-"""CLI script to create security groups from the mapping config."""
+"""CLI script to create/delete security groups from the mapping config."""
 
 import argparse
 import asyncio
@@ -89,10 +89,65 @@ async def run_create_groups(
     return 0
 
 
+async def run_delete_groups(
+    config_path: Path,
+    dry_run: bool = False,
+) -> int:
+    """Delete security groups defined in the mapping config.
+
+    Args:
+        config_path: Path to the group_mappings.json config file
+        dry_run: If True, don't delete groups, just show what would be done
+
+    Returns:
+        Exit code
+    """
+    logger.info("=" * 50)
+    logger.info("Delete Security Groups from Config")
+    logger.info("=" * 50)
+
+    if dry_run:
+        logger.info("DRY RUN - no groups will be deleted")
+
+    logger.info(f"Config file: {config_path}")
+    logger.info("")
+
+    if not config_path.exists():
+        logger.error(f"Config file not found: {config_path}")
+        return 1
+
+    try:
+        group_manager = EntraGroupManager()
+        results = await group_manager.delete_security_groups_from_config(
+            config_path=config_path,
+            dry_run=dry_run,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to delete security groups: {e}")
+        return 1
+
+    # Output results
+    logger.info("")
+    logger.info("=" * 50)
+    logger.info("Results")
+    logger.info("=" * 50)
+
+    success_count = sum(1 for success in results.values() if success)
+    failed_count = len(results) - success_count
+
+    logger.info(f"Processed: {len(results)} groups")
+    logger.info(f"  - Deleted/Not found: {success_count}")
+    if failed_count:
+        logger.info(f"  - Failed: {failed_count}")
+
+    return 0 if failed_count == 0 else 1
+
+
 def main():
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Create security groups defined in the mapping config",
+        description="Create or delete security groups defined in the mapping config",
     )
     parser.add_argument(
         "--config",
@@ -103,17 +158,30 @@ def main():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show what would be done without creating groups",
+        help="Show what would be done without making changes",
+    )
+    parser.add_argument(
+        "--delete",
+        action="store_true",
+        help="Delete security groups instead of creating them",
     )
 
     args = parser.parse_args()
 
-    exit_code = asyncio.run(
-        run_create_groups(
-            config_path=args.config,
-            dry_run=args.dry_run,
+    if args.delete:
+        exit_code = asyncio.run(
+            run_delete_groups(
+                config_path=args.config,
+                dry_run=args.dry_run,
+            )
         )
-    )
+    else:
+        exit_code = asyncio.run(
+            run_create_groups(
+                config_path=args.config,
+                dry_run=args.dry_run,
+            )
+        )
     sys.exit(exit_code)
 
 
