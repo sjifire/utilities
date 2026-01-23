@@ -232,14 +232,8 @@ class EntraGroupManager:
         security_groups = config.get("ms_security_group_ids", {})
         results: dict[str, bool] = {}
 
-        for group_key, _description in security_groups.items():
-            # Extract group name from key (e.g., "TODO:sg-firefighters" -> "sg-firefighters")
-            if group_key.startswith("TODO:"):
-                group_name = group_key.replace("TODO:", "")
-            else:
-                group_name = group_key
-
-            # Check if group exists
+        for group_name, _group_id in security_groups.items():
+            # Check if group exists (by name, since ID might be "TODO")
             existing = await self.get_group_by_name(group_name)
             if not existing:
                 logger.info(f"Security group does not exist: {group_name}")
@@ -349,21 +343,24 @@ class EntraGroupManager:
             config = json.load(f)
 
         security_groups = config.get("ms_security_group_ids", {})
+        descriptions = config.get("ms_security_group_descriptions", {})
         results: dict[str, str | None] = {}
 
-        for group_key, description in security_groups.items():
-            # Extract group name from key (e.g., "TODO:sg-firefighters" -> "sg-firefighters")
-            if group_key.startswith("TODO:"):
-                group_name = group_key.replace("TODO:", "")
-            else:
-                group_name = group_key
+        for group_name, group_id in security_groups.items():
+            # Skip if already has a valid UUID (not "TODO")
+            if group_id != "TODO":
+                logger.info(f"Security group already configured: {group_name} (ID: {group_id})")
+                results[group_name] = group_id
+                continue
 
-            # Check if group already exists
+            # Check if group already exists in Entra
             existing = await self.get_group_by_name(group_name)
             if existing:
                 logger.info(f"Security group already exists: {group_name} (ID: {existing.id})")
                 results[group_name] = existing.id
                 continue
+
+            description = descriptions.get(group_name, "")
 
             if dry_run:
                 logger.info(f"Would create security group: {group_name}")
