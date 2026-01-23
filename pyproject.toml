@@ -15,7 +15,7 @@ dependencies = [
 [project.scripts]
 aladtec-list = "sjifire.scripts.aladtec_list:main"
 aladtec-audit = "sjifire.scripts.aladtec_audit:main"
-aladtec-sync = "sjifire.scripts.aladtec_sync:main"
+aladtec-import = "sjifire.scripts.aladtec_import:main"
 
 [dependency-groups]
 dev = [

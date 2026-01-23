@@ -22,8 +22,7 @@ def get_aladtec_credentials() -> tuple[str, str, str]:
 
     if not url or not username or not password:
         raise ValueError(
-            "Aladtec credentials not set. Required: "
-            "ALADTEC_URL, ALADTEC_USERNAME, ALADTEC_PASSWORD"
+            "Aladtec credentials not set. Required: ALADTEC_URL, ALADTEC_USERNAME, ALADTEC_PASSWORD"
         )
 
     return url, username, password

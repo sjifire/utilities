@@ -10,7 +10,7 @@ from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
 from sjifire.aladtec.models import Member
 from sjifire.aladtec.scraper import AladtecScraper
-from sjifire.core.graph_client import get_graph_client
+from sjifire.core.msgraph_client import get_graph_client
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
