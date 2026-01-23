@@ -13,3 +13,6 @@ build/
 .idea/
 .vscode/
 *.swp
+
+# Backups (contain sensitive member/user data)
+backups/

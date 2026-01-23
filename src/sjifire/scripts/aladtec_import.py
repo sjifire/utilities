@@ -8,7 +8,9 @@ import sys
 from dataclasses import asdict
 
 from sjifire.aladtec.scraper import AladtecScraper
+from sjifire.core.backup import backup_aladtec_members, backup_entra_users
 from sjifire.entra.aladtec_import import AladtecImporter
+from sjifire.entra.users import EntraUserManager
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -18,6 +20,7 @@ async def run_import(
     dry_run: bool = False,
     disable_inactive: bool = False,
     output_json: bool = False,
+    backup: bool = False,
 ) -> int:
     """Run the Aladtec to Entra import.
 
@@ -25,6 +28,7 @@ async def run_import(
         dry_run: If True, don't make changes
         disable_inactive: If True, disable accounts for inactive members
         output_json: If True, output results as JSON
+        backup: If True, backup Aladtec and Entra data before import
 
     Returns:
         Exit code
@@ -61,6 +65,26 @@ async def run_import(
     except Exception as e:
         logger.error(f"Failed to fetch Aladtec members: {e}")
         return 1
+
+    # Backup data before making changes
+    if backup:
+        logger.info("")
+        logger.info("Creating backups...")
+
+        try:
+            # Backup Aladtec members
+            aladtec_backup = backup_aladtec_members(members)
+            logger.info(f"Aladtec backup: {aladtec_backup}")
+
+            # Backup Entra users
+            user_manager = EntraUserManager()
+            entra_users = await user_manager.get_users(include_disabled=True)
+            entra_backup = backup_entra_users(entra_users)
+            logger.info(f"Entra backup: {entra_backup}")
+
+        except Exception as e:
+            logger.error(f"Failed to create backups: {e}")
+            return 1
 
     # Import to Entra ID
     logger.info("")
@@ -123,6 +147,11 @@ def main():
         dest="output_json",
         help="Output results as JSON",
     )
+    parser.add_argument(
+        "--backup",
+        action="store_true",
+        help="Backup Aladtec and Entra data before importing",
+    )
 
     args = parser.parse_args()
 
@@ -131,6 +160,7 @@ def main():
             dry_run=args.dry_run,
             disable_inactive=args.disable_inactive,
             output_json=args.output_json,
+            backup=args.backup,
         )
     )
     sys.exit(exit_code)

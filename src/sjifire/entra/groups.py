@@ -1,8 +1,10 @@
 """Entra ID group management operations."""
 
+import json
 import logging
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph import GraphServiceClient
@@ -191,3 +193,142 @@ class EntraGroupManager:
         except Exception as e:
             logger.error(f"Failed to remove user {user_id} from group {group_id}: {e}")
             return False
+
+    async def create_security_group(
+        self,
+        display_name: str,
+        description: str | None = None,
+        mail_nickname: str | None = None,
+    ) -> EntraGroup | None:
+        """Create a new security group in Entra ID.
+
+        Args:
+            display_name: The display name for the group
+            description: Optional description
+            mail_nickname: Mail nickname (defaults to display_name with special chars removed)
+
+        Returns:
+            Created EntraGroup or None on failure
+        """
+        if not mail_nickname:
+            # Generate mail nickname from display name (alphanumeric only)
+            mail_nickname = "".join(c for c in display_name if c.isalnum() or c == "-")
+
+        group = Group(
+            display_name=display_name,
+            description=description,
+            mail_enabled=False,
+            mail_nickname=mail_nickname,
+            security_enabled=True,
+            group_types=[],  # Empty for security groups
+        )
+
+        try:
+            created = await self.client.groups.post(group)
+            if created:
+                logger.info(f"Created security group: {display_name} (ID: {created.id})")
+                return self._to_entra_group(created)
+        except Exception as e:
+            logger.error(f"Failed to create security group {display_name}: {e}")
+
+        return None
+
+    async def get_group_by_name(self, display_name: str) -> EntraGroup | None:
+        """Find a group by display name.
+
+        Args:
+            display_name: The display name to search for
+
+        Returns:
+            EntraGroup if found, None otherwise
+        """
+        query_params = GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters(
+            filter=f"displayName eq '{display_name}'",
+            select=[
+                "id",
+                "displayName",
+                "description",
+                "mail",
+                "mailEnabled",
+                "securityEnabled",
+                "groupTypes",
+            ],
+        )
+        config = RequestConfiguration(query_parameters=query_params)
+
+        try:
+            result = await self.client.groups.get(request_configuration=config)
+            if result and result.value and len(result.value) > 0:
+                return self._to_entra_group(result.value[0])
+        except Exception as e:
+            logger.error(f"Failed to find group {display_name}: {e}")
+
+        return None
+
+    async def create_security_groups_from_config(
+        self,
+        config_path: Path | str,
+        dry_run: bool = False,
+    ) -> dict[str, str | None]:
+        """Create security groups defined in the mapping config file.
+
+        Args:
+            config_path: Path to the group_mappings.json config file
+            dry_run: If True, don't create groups, just report what would be done
+
+        Returns:
+            Dict mapping group name to created group ID (or None if failed/skipped)
+        """
+        config_path = Path(config_path)
+        with open(config_path) as f:
+            config = json.load(f)
+
+        groups_to_create = config.get("security_groups_to_create", {})
+        results: dict[str, str | None] = {}
+
+        for group_name, group_info in groups_to_create.items():
+            if group_name.startswith("_"):
+                continue  # Skip metadata fields
+
+            description = group_info.get("description", "")
+
+            # Check if group already exists
+            existing = await self.get_group_by_name(group_name)
+            if existing:
+                logger.info(f"Security group already exists: {group_name} (ID: {existing.id})")
+                results[group_name] = existing.id
+                continue
+
+            if dry_run:
+                logger.info(f"Would create security group: {group_name}")
+                logger.info(f"  Description: {description}")
+                results[group_name] = None
+            else:
+                created = await self.create_security_group(
+                    display_name=group_name,
+                    description=description,
+                )
+                results[group_name] = created.id if created else None
+
+        return results
+
+
+def load_group_mappings(config_path: Path | str | None = None) -> dict:
+    """Load group mappings from config file.
+
+    Args:
+        config_path: Path to config file. If None, uses default location.
+
+    Returns:
+        Parsed config dict
+    """
+    if config_path is None:
+        # Default to config/group_mappings.json relative to project root
+        config_path = Path(__file__).parent.parent.parent.parent / "config" / "group_mappings.json"
+
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    with open(config_path) as f:
+        return json.load(f)
