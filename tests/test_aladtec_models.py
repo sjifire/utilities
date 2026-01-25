@@ -1,6 +1,5 @@
 """Tests for sjifire.aladtec.models."""
 
-
 from sjifire.aladtec.models import Member
 
 

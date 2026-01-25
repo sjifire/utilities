@@ -1,6 +1,5 @@
 """Tests for sjifire.entra.groups."""
 
-
 from sjifire.entra.groups import EntraGroup, GroupType
 
 
