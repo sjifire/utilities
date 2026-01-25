@@ -9,7 +9,15 @@ __pycache__/
 dist/
 build/
 
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+
 # IDE
 .idea/
 .vscode/
 *.swp
+
+# Backups (contain sensitive member/user data)
+backups/

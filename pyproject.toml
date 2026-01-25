@@ -1,15 +1,32 @@
 [project]
 name = "sjifire-utilities"
 version = "0.1.0"
-description = "Add your description here"
+description = "SJI Fire District utilities for integrations"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "azure-identity>=1.19.0",
+    "beautifulsoup4>=4.12.0",
+    "httpx>=0.28.0",
+    "msgraph-sdk>=1.12.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+aladtec-list = "sjifire.scripts.aladtec_list:main"
+aladtec-audit = "sjifire.scripts.aladtec_audit:main"
+aladtec-import = "sjifire.scripts.aladtec_import:main"
+analyze-mappings = "sjifire.scripts.analyze_mappings:main"
+create-security-groups = "sjifire.scripts.create_security_groups:main"
 
 [dependency-groups]
 dev = [
     "ruff>=0.14.13",
     "ty>=0.0.13",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "respx>=0.22.0",
 ]
 
 [tool.ruff]
@@ -26,11 +43,57 @@ select = [
     "C4",     # flake8-comprehensions
     "UP",     # pyupgrade
     "SIM",    # flake8-simplify
+    "N",      # pep8-naming
+    "D",      # pydocstyle
+    "S",      # flake8-bandit (security)
+    "PTH",    # prefer pathlib
+    "RUF",    # ruff-specific rules
+    "ASYNC",  # async best practices
+    "T20",    # no print statements
+    "A",      # don't shadow builtins
+    "PERF",   # performance anti-patterns
 ]
+ignore = [
+    "D100",     # Missing docstring in public module
+    "D104",     # Missing docstring in public package
+    "D106",     # Missing docstring in public nested class
+    "ASYNC230", # Blocking file I/O in async - acceptable for small config files
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"src/sjifire/scripts/*.py" = ["T201"]  # CLI scripts use print for output
+"tests/**/*.py" = ["S101", "S105", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords, skip docstrings, allow long lines
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 
-[tool.ty]
+[tool.ty.environment]
 python-version = "3.14"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sjifire"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["src/sjifire"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]

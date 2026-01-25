@@ -1,2 +1,126 @@
-# utilities
-helper scripts and files
+# SJI Fire District Utilities
+
+Utility scripts for SJI Fire District integrations between Aladtec (scheduling) and Microsoft Entra ID (identity management).
+
+## Requirements
+
+- Python 3.14+
+- [uv](https://docs.astral.sh/uv/) package manager
+
+## Setup
+
+1. Clone the repository and install dependencies:
+
+```bash
+uv sync --group dev
+```
+
+2. Create a `.env` file with required credentials:
+
+```bash
+# Aladtec credentials
+ALADTEC_URL=https://your-org.aladtec.com
+ALADTEC_USERNAME=your-username
+ALADTEC_PASSWORD=your-password
+
+# Microsoft Graph API credentials
+MS_GRAPH_TENANT_ID=your-tenant-id
+MS_GRAPH_CLIENT_ID=your-client-id
+MS_GRAPH_CLIENT_SECRET=your-client-secret
+```
+
+## CLI Commands
+
+### Aladtec Tools
+
+**List members:**
+```bash
+uv run aladtec-list                    # List active members (table format)
+uv run aladtec-list --format json      # JSON output
+uv run aladtec-list --format csv       # CSV output
+uv run aladtec-list --include-inactive # Include inactive members
+```
+
+**Audit members:**
+```bash
+uv run aladtec-audit                   # Full audit with Entra ID comparison
+uv run aladtec-audit --skip-entra      # Aladtec data quality checks only
+```
+
+The audit checks for:
+- Members without positions
+- Members without @sjifire.org email
+- Members without employee ID
+- Inactive members
+- Aladtec members not in Entra ID
+- Entra ID users not in Aladtec
+- Entra ID users to deactivate (matched to inactive Aladtec members)
+
+### Entra ID Tools
+
+**Analyze group mappings:**
+```bash
+uv run analyze-mappings                # Analyze position-to-group mappings
+```
+
+**Create security groups:**
+```bash
+uv run create-security-groups          # Create security groups from config
+uv run create-security-groups --dry-run
+```
+
+## Configuration
+
+Group mappings are configured in `config/group_mappings.json`:
+
+- `ms_365_group_ids`: Microsoft 365 group name to ID mappings
+- `ms_security_group_ids`: Security group name to ID mappings
+- `position_mappings`: Aladtec position to M365/security group assignments
+- `work_group_mappings`: Aladtec work group to M365 group assignments
+- `conditional_mappings`: Complex rules (e.g., "Apparatus Operator but not Firefighter")
+
+## Development
+
+### Linting
+
+```bash
+uv run ruff check .                    # Check for issues
+uv run ruff check . --fix              # Auto-fix issues
+uv run ruff format .                   # Format code
+```
+
+### Type Checking
+
+```bash
+uv run ty check
+```
+
+### Testing
+
+```bash
+uv run pytest                          # Run all tests
+uv run pytest -v                       # Verbose output
+uv run pytest --cov=sjifire            # With coverage report
+uv run pytest --cov=sjifire --cov-report=html  # HTML coverage report
+```
+
+## Project Structure
+
+```
+src/sjifire/
+├── aladtec/           # Aladtec integration
+│   ├── models.py      # Member data model
+│   └── scraper.py     # Web scraper for CSV export
+├── core/              # Shared utilities
+│   ├── backup.py      # Backup utilities
+│   ├── config.py      # Configuration loading
+│   └── msgraph_client.py  # MS Graph client
+├── entra/             # Entra ID integration
+│   ├── groups.py      # Group management
+│   └── users.py       # User management
+└── scripts/           # CLI entry points
+    ├── aladtec_audit.py
+    ├── aladtec_list.py
+    ├── analyze_mappings.py
+    └── create_security_groups.py
+```
