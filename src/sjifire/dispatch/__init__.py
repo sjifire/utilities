@@ -3,4 +3,4 @@
 from sjifire.dispatch.cleanup import cleanup_old_emails
 from sjifire.dispatch.processor import process_email
 
-__all__ = ["process_email", "cleanup_old_emails"]
+__all__ = ["cleanup_old_emails", "process_email"]

@@ -24,7 +24,7 @@ def get_function_app_name() -> str | None:
     from sjifire.core.config import get_project_root
 
     config_path = get_project_root() / "config" / "email_dispatch.json"
-    with open(config_path) as f:
+    with config_path.open() as f:
         config = json.load(f)
     return config.get("azure", {}).get("function_app")
 
@@ -50,9 +50,10 @@ def deploy_function_app(function_app: str) -> bool:
 
     logger.info(f"Deploying to {function_app}...")
 
-    result = subprocess.run(
-        ["func", "azure", "functionapp", "publish", function_app, "--python"],
+    result = subprocess.run(  # noqa: S603  # Trusted CLI tool invocation
+        ["func", "azure", "functionapp", "publish", function_app, "--python"],  # noqa: S607
         cwd=functions_dir,
+        check=False,
     )
 
     return result.returncode == 0
@@ -242,11 +243,13 @@ def main():
     )
 
     args = parser.parse_args()
-    exit_code = asyncio.run(run_setup(
-        list_only=args.list_only,
-        deploy=args.deploy,
-        subscribe=args.subscribe,
-    ))
+    exit_code = asyncio.run(
+        run_setup(
+            list_only=args.list_only,
+            deploy=args.deploy,
+            subscribe=args.subscribe,
+        )
+    )
     sys.exit(exit_code)
 
 

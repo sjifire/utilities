@@ -32,9 +32,7 @@ async def cleanup_old_emails(client: GraphServiceClient, config: DispatchConfig)
 
     logger.info(f"Starting cleanup for emails older than {cutoff_str} ({retention_days} days)")
 
-    archive_folder_id = await get_or_create_archive_folder(
-        client, user_id, config.archive_folder
-    )
+    archive_folder_id = await get_or_create_archive_folder(client, user_id, config.archive_folder)
 
     query_params = MessagesRequestBuilder.MessagesRequestBuilderGetQueryParameters(
         filter=f"receivedDateTime lt {cutoff_str}",
@@ -61,11 +59,7 @@ async def cleanup_old_emails(client: GraphServiceClient, config: DispatchConfig)
                 continue
 
             try:
-                await (
-                    client.users.by_user_id(user_id)
-                    .messages.by_message_id(message.id)
-                    .delete()
-                )
+                await client.users.by_user_id(user_id).messages.by_message_id(message.id).delete()
                 deleted_count += 1
                 deleted_ids.append(message.id)
                 logger.info(f"Deleted message {message.id}: {message.subject}")

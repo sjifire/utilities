@@ -12,7 +12,7 @@ from sjifire.dispatch.processor import process_email
 
 app = func.FunctionApp()
 
-VALIDATION_TOKEN_PARAM = "validationToken"
+VALIDATION_TOKEN_PARAM = "validationToken"  # noqa: S105  # Not a password, MS Graph query param
 CLIENT_STATE = "sjifire-dispatch-secret"
 
 

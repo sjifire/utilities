@@ -89,7 +89,7 @@ def load_dispatch_config(require_mailbox: bool = True) -> DispatchConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(config_path) as f:
+    with config_path.open() as f:
         config_data = json.load(f)
 
     mailbox_user_id = os.getenv("DISPATCH_MAILBOX_USER_ID")

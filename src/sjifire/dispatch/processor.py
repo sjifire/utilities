@@ -107,9 +107,7 @@ async def process_email(
 
     logger.info(f"Received email from {sender_email}: {subject}")
 
-    archive_folder_id = await get_or_create_archive_folder(
-        client, user_id, config.archive_folder
-    )
+    archive_folder_id = await get_or_create_archive_folder(client, user_id, config.archive_folder)
 
     await mark_as_read(client, user_id, message_id)
     await move_to_archive(client, user_id, message_id, archive_folder_id)
