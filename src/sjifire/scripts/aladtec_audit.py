@@ -206,13 +206,16 @@ def compare_systems(
 
 
 def print_section(title: str, items: list, format_func) -> None:
-    """Print a section with items."""
+    """Print a section with items.
+
+    Note: This CLI tool intentionally outputs member data for admin review.
+    """
     print(f"\n{'=' * 60}")
     print(f"{title} ({len(items)})")
     print("=" * 60)
     if items:
         for item in items:
-            print(f"  - {format_func(item)}")
+            print(f"  - {format_func(item)}")  # lgtm[py/clear-text-logging-sensitive-data]
     else:
         print("  (none)")
 
