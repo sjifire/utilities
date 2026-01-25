@@ -39,7 +39,28 @@ select = [
     "C4",     # flake8-comprehensions
     "UP",     # pyupgrade
     "SIM",    # flake8-simplify
+    "N",      # pep8-naming
+    "D",      # pydocstyle
+    "S",      # flake8-bandit (security)
+    "PTH",    # prefer pathlib
+    "RUF",    # ruff-specific rules
+    "ASYNC",  # async best practices
+    "T20",    # no print statements
+    "A",      # don't shadow builtins
+    "PERF",   # performance anti-patterns
 ]
+ignore = [
+    "D100",     # Missing docstring in public module
+    "D104",     # Missing docstring in public package
+    "D106",     # Missing docstring in public nested class
+    "ASYNC230", # Blocking file I/O in async - acceptable for small config files
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"src/sjifire/scripts/*.py" = ["T201"]  # CLI scripts use print for output
 
 [tool.ruff.format]
 quote-style = "double"

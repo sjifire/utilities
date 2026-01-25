@@ -76,36 +76,25 @@ async def get_entra_users() -> list[dict]:
     config = RequestConfiguration(query_parameters=query_params)
     result = await client.users.get(request_configuration=config)
 
+    def _user_to_dict(user):
+        return {
+            "id": user.id,
+            "display_name": user.display_name,
+            "first_name": user.given_name,
+            "last_name": user.surname,
+            "email": user.mail,
+            "upn": user.user_principal_name,
+            "employee_id": user.employee_id,
+        }
+
     if result and result.value:
-        for user in result.value:
-            users.append(
-                {
-                    "id": user.id,
-                    "display_name": user.display_name,
-                    "first_name": user.given_name,
-                    "last_name": user.surname,
-                    "email": user.mail,
-                    "upn": user.user_principal_name,
-                    "employee_id": user.employee_id,
-                }
-            )
+        users.extend(_user_to_dict(user) for user in result.value)
 
     # Handle pagination
     while result and result.odata_next_link:
         result = await client.users.with_url(result.odata_next_link).get()
         if result and result.value:
-            for user in result.value:
-                users.append(
-                    {
-                        "id": user.id,
-                        "display_name": user.display_name,
-                        "first_name": user.given_name,
-                        "last_name": user.surname,
-                        "email": user.mail,
-                        "upn": user.user_principal_name,
-                        "employee_id": user.employee_id,
-                    }
-                )
+            users.extend(_user_to_dict(user) for user in result.value)
 
     return users
 

@@ -57,7 +57,7 @@ def backup_aladtec_members(
         "members": [_member_to_dict(m) for m in members],
     }
 
-    with open(filepath, "w") as f:
+    with filepath.open("w") as f:
         json.dump(data, f, indent=2, default=str)
 
     logger.info(f"Backed up {len(members)} Aladtec members to {filepath}")
@@ -92,7 +92,7 @@ def backup_entra_users(
         "users": [asdict(u) for u in users],
     }
 
-    with open(filepath, "w") as f:
+    with filepath.open("w") as f:
         json.dump(data, f, indent=2, default=str)
 
     logger.info(f"Backed up {len(users)} Entra users to {filepath}")

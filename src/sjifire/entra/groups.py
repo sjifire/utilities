@@ -141,12 +141,9 @@ class EntraGroupManager:
             List of member user IDs
         """
         result = await self.client.groups.by_group_id(group_id).members.get()
-        member_ids = []
         if result and result.value:
-            for member in result.value:
-                if member.id:
-                    member_ids.append(member.id)
-        return member_ids
+            return [member.id for member in result.value if member.id]
+        return []
 
     async def add_user_to_group(self, group_id: str, user_id: str) -> bool:
         """Add a user to a group.
@@ -226,13 +223,13 @@ class EntraGroupManager:
             Dict mapping group name to success status
         """
         config_path = Path(config_path)
-        with open(config_path) as f:
+        with config_path.open() as f:
             config = json.load(f)
 
         security_groups = config.get("ms_security_group_ids", {})
         results: dict[str, bool] = {}
 
-        for group_name, _group_id in security_groups.items():
+        for group_name in security_groups:
             # Check if group exists (by name, since ID might be "TODO")
             existing = await self.get_group_by_name(group_name)
             if not existing:
@@ -339,7 +336,7 @@ class EntraGroupManager:
             Dict mapping group name to created group ID (or None if failed/skipped)
         """
         config_path = Path(config_path)
-        with open(config_path) as f:
+        with config_path.open() as f:
             config = json.load(f)
 
         security_groups = config.get("ms_security_group_ids", {})
@@ -393,5 +390,5 @@ def load_group_mappings(config_path: Path | str | None = None) -> dict:
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(config_path) as f:
+    with config_path.open() as f:
         return json.load(f)
