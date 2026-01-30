@@ -431,82 +431,88 @@ class TestGroupSyncManagerVisibility:
     def test_apply_group_visibility_dry_run_returns_true(self):
         """Verify dry run mode returns True without calling the manager."""
         import asyncio
-        from unittest.mock import AsyncMock
+        from unittest.mock import AsyncMock, patch
 
         from sjifire.entra.group_sync import GroupSyncManager
         from sjifire.entra.groups import EntraGroup
 
-        manager = GroupSyncManager()
-        manager.group_manager = AsyncMock()
+        with patch("sjifire.entra.group_sync.EntraGroupManager"), \
+             patch("sjifire.entra.group_sync.EntraUserManager"):
+            manager = GroupSyncManager()
+            manager.group_manager = AsyncMock()
 
-        group = EntraGroup(
-            id="test-id",
-            display_name="Test Group",
-            description="Test",
-            mail="test@sjifire.org",
-            mail_enabled=True,
-            security_enabled=False,
-            group_types=["Unified"],
-        )
+            group = EntraGroup(
+                id="test-id",
+                display_name="Test Group",
+                description="Test",
+                mail="test@sjifire.org",
+                mail_enabled=True,
+                security_enabled=False,
+                group_types=["Unified"],
+            )
 
-        result = asyncio.run(manager._apply_group_visibility(group, dry_run=True))
+            result = asyncio.run(manager._apply_group_visibility(group, dry_run=True))
 
-        assert result is True
-        # Should not call update_group_visibility in dry run
-        manager.group_manager.update_group_visibility.assert_not_called()
+            assert result is True
+            # Should not call update_group_visibility in dry run
+            manager.group_manager.update_group_visibility.assert_not_called()
 
     def test_apply_group_visibility_calls_manager_with_public(self):
         """Verify real run calls manager with Public visibility."""
         import asyncio
-        from unittest.mock import AsyncMock
+        from unittest.mock import AsyncMock, patch
 
         from sjifire.entra.group_sync import GroupSyncManager
         from sjifire.entra.groups import EntraGroup
 
-        manager = GroupSyncManager()
-        manager.group_manager = AsyncMock()
-        manager.group_manager.update_group_visibility = AsyncMock(return_value=True)
+        with patch("sjifire.entra.group_sync.EntraGroupManager"), \
+             patch("sjifire.entra.group_sync.EntraUserManager"):
+            manager = GroupSyncManager()
+            manager.group_manager = AsyncMock()
+            manager.group_manager.update_group_visibility = AsyncMock(return_value=True)
 
-        group = EntraGroup(
-            id="test-group-id",
-            display_name="Station 31",
-            description="Test",
-            mail="station31@sjifire.org",
-            mail_enabled=True,
-            security_enabled=False,
-            group_types=["Unified"],
-        )
+            group = EntraGroup(
+                id="test-group-id",
+                display_name="Station 31",
+                description="Test",
+                mail="station31@sjifire.org",
+                mail_enabled=True,
+                security_enabled=False,
+                group_types=["Unified"],
+            )
 
-        result = asyncio.run(manager._apply_group_visibility(group, dry_run=False))
+            result = asyncio.run(manager._apply_group_visibility(group, dry_run=False))
 
-        assert result is True
-        manager.group_manager.update_group_visibility.assert_called_once_with(
-            group_id="test-group-id",
-            visibility="Public",
-        )
+            assert result is True
+            manager.group_manager.update_group_visibility.assert_called_once_with(
+                group_id="test-group-id",
+                visibility="Public",
+            )
 
     def test_apply_group_visibility_returns_false_on_failure(self):
         """Verify returns False when manager update fails."""
         import asyncio
-        from unittest.mock import AsyncMock
+        from unittest.mock import AsyncMock, patch
 
         from sjifire.entra.group_sync import GroupSyncManager
         from sjifire.entra.groups import EntraGroup
 
-        manager = GroupSyncManager()
-        manager.group_manager = AsyncMock()
-        manager.group_manager.update_group_visibility = AsyncMock(return_value=False)
+        with patch("sjifire.entra.group_sync.EntraGroupManager"), \
+             patch("sjifire.entra.group_sync.EntraUserManager"):
+            manager = GroupSyncManager()
+            manager.group_manager = AsyncMock()
+            manager.group_manager.update_group_visibility = AsyncMock(return_value=False)
 
-        group = EntraGroup(
-            id="test-group-id",
-            display_name="Station 31",
-            description="Test",
-            mail="station31@sjifire.org",
-            mail_enabled=True,
-            security_enabled=False,
-            group_types=["Unified"],
-        )
+            group = EntraGroup(
+                id="test-group-id",
+                display_name="Station 31",
+                description="Test",
+                mail="station31@sjifire.org",
+                mail_enabled=True,
+                security_enabled=False,
+                group_types=["Unified"],
+            )
 
-        result = asyncio.run(manager._apply_group_visibility(group, dry_run=False))
+            result = asyncio.run(manager._apply_group_visibility(group, dry_run=False))
 
-        assert result is False
+            assert result is False
