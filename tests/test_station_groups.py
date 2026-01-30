@@ -166,7 +166,7 @@ class TestFirefighterGroupStrategy:
         self.strategy = FirefighterGroupStrategy()
 
     def test_name(self):
-        assert self.strategy.name == "firefighters"
+        assert self.strategy.name == "ff"
 
     def test_automation_notice(self):
         notice = self.strategy.automation_notice
@@ -174,9 +174,9 @@ class TestFirefighterGroupStrategy:
         assert "Firefighter" in notice
 
     def test_get_group_config(self):
-        display_name, mail_nickname, description = self.strategy.get_group_config("Firefighters")
-        assert display_name == "Firefighters"
-        assert mail_nickname == "firefighters"
+        display_name, mail_nickname, description = self.strategy.get_group_config("FF")
+        assert display_name == "FF"
+        assert mail_nickname == "ff"
         assert "Firefighter" in description
 
     def test_get_groups_to_sync_empty(self):
@@ -190,8 +190,8 @@ class TestFirefighterGroupStrategy:
             positions=["Firefighter"],
         )
         result = self.strategy.get_groups_to_sync([member])
-        assert "Firefighters" in result
-        assert len(result["Firefighters"]) == 1
+        assert "FF" in result
+        assert len(result["FF"]) == 1
 
     def test_get_groups_to_sync_ignores_non_firefighter(self):
         member = Member(
@@ -216,7 +216,70 @@ class TestFirefighterGroupStrategy:
         ]
         result = self.strategy.get_groups_to_sync(members)
         assert len(result) == 1
-        assert len(result["Firefighters"]) == 2
+        assert len(result["FF"]) == 2
+
+
+class TestWildlandFirefighterGroupStrategy:
+    """Tests for WildlandFirefighterGroupStrategy."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from sjifire.entra.group_sync import WildlandFirefighterGroupStrategy
+
+        self.strategy = WildlandFirefighterGroupStrategy()
+
+    def test_name(self):
+        assert self.strategy.name == "wff"
+
+    def test_automation_notice(self):
+        notice = self.strategy.automation_notice
+        assert "automatically" in notice.lower()
+        assert "Wildland Firefighter" in notice
+
+    def test_get_group_config(self):
+        display_name, mail_nickname, description = self.strategy.get_group_config("WFF")
+        assert display_name == "WFF"
+        assert mail_nickname == "wff"
+        assert "Wildland Firefighter" in description
+
+    def test_get_groups_to_sync_empty(self):
+        assert self.strategy.get_groups_to_sync([]) == {}
+
+    def test_get_groups_to_sync_wff_position(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            positions=["Wildland Firefighter"],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert "WFF" in result
+        assert len(result["WFF"]) == 1
+
+    def test_get_groups_to_sync_ignores_non_wff(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            positions=["Firefighter", "Support"],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert result == {}
+
+    def test_get_groups_to_sync_multiple_members(self):
+        members = [
+            Member(id="1", first_name="John", last_name="Doe", positions=["Wildland Firefighter"]),
+            Member(
+                id="2",
+                first_name="Jane",
+                last_name="Smith",
+                positions=["Wildland Firefighter", "Firefighter"],
+            ),
+            Member(id="3", first_name="Bob", last_name="Wilson", positions=["Support"]),
+        ]
+        result = self.strategy.get_groups_to_sync(members)
+        assert len(result) == 1
+        assert len(result["WFF"]) == 2
 
 
 class TestMarineGroupStrategy:

@@ -14,6 +14,7 @@ from sjifire.entra.group_sync import (
     StationGroupStrategy,
     SupportGroupStrategy,
     VolunteerGroupStrategy,
+    WildlandFirefighterGroupStrategy,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -28,7 +29,8 @@ logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(l
 STRATEGIES = {
     "stations": StationGroupStrategy,
     "support": SupportGroupStrategy,
-    "firefighters": FirefighterGroupStrategy,
+    "ff": FirefighterGroupStrategy,
+    "wff": WildlandFirefighterGroupStrategy,
     "marine": MarineGroupStrategy,
     "volunteers": VolunteerGroupStrategy,
 }
