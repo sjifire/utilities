@@ -1,14 +1,21 @@
 """Tests for group sync management."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from sjifire.aladtec.models import MARINE_POSITIONS, OPERATIONAL_POSITIONS, Member
 from sjifire.entra.group_sync import (
     FullSyncResult,
+    GroupSyncManager,
     GroupSyncResult,
     MarineGroupStrategy,
     StationGroupStrategy,
     SupportGroupStrategy,
     VolunteerGroupStrategy,
 )
+from sjifire.entra.groups import EntraGroup
+from sjifire.entra.users import EntraUser
 
 
 class TestStationGroupStrategy:
@@ -708,3 +715,466 @@ class TestGroupSyncManagerVisibility:
             result = asyncio.run(manager._apply_group_visibility(group, dry_run=False))
 
             assert result is False
+
+
+def make_entra_user(
+    user_id="user-1",
+    display_name="Test User",
+    first_name="Test",
+    last_name="User",
+    email="test@sjifire.org",
+    upn="test.user@sjifire.org",
+    employee_id="123",
+):
+    """Helper to create an EntraUser with all required fields."""
+    return EntraUser(
+        id=user_id,
+        display_name=display_name,
+        first_name=first_name,
+        last_name=last_name,
+        email=email,
+        upn=upn,
+        employee_id=employee_id,
+    )
+
+
+class TestGroupSyncManagerLoadUsers:
+    """Tests for GroupSyncManager._load_entra_users method."""
+
+    @pytest.fixture
+    def manager(self):
+        """Create a GroupSyncManager with mocked dependencies."""
+        with (
+            patch("sjifire.entra.group_sync.EntraGroupManager"),
+            patch("sjifire.entra.group_sync.EntraUserManager"),
+        ):
+            mgr = GroupSyncManager()
+            mgr.group_manager = AsyncMock()
+            mgr.user_manager = AsyncMock()
+        return mgr
+
+    async def test_load_entra_users_caches_users(self, manager):
+        """Test that users are loaded and cached."""
+        users = [
+            make_entra_user(
+                user_id="user-1",
+                display_name="John Doe",
+                first_name="John",
+                last_name="Doe",
+                email="john@sjifire.org",
+                upn="john.doe@sjifire.org",
+            ),
+            make_entra_user(
+                user_id="user-2",
+                display_name="Jane Smith",
+                first_name="Jane",
+                last_name="Smith",
+                email="jane@sjifire.org",
+                upn="jane.smith@sjifire.org",
+            ),
+        ]
+        manager.user_manager.get_users = AsyncMock(return_value=users)
+
+        await manager._load_entra_users()
+
+        assert manager._entra_users == users
+        assert "john@sjifire.org" in manager._user_by_email
+        assert "jane.smith@sjifire.org" in manager._user_by_upn
+
+    async def test_load_entra_users_only_loads_once(self, manager):
+        """Test that users are only loaded once."""
+        users = [make_entra_user(user_id="user-1", display_name="John", email="john@sjifire.org")]
+        manager.user_manager.get_users = AsyncMock(return_value=users)
+
+        await manager._load_entra_users()
+        await manager._load_entra_users()
+
+        # Should only be called once
+        manager.user_manager.get_users.assert_called_once()
+
+
+class TestGroupSyncManagerFindUser:
+    """Tests for GroupSyncManager._find_entra_user method."""
+
+    @pytest.fixture
+    def manager(self):
+        """Create a GroupSyncManager with mocked dependencies."""
+        with (
+            patch("sjifire.entra.group_sync.EntraGroupManager"),
+            patch("sjifire.entra.group_sync.EntraUserManager"),
+        ):
+            mgr = GroupSyncManager()
+            mgr.user_manager = MagicMock()
+            mgr.user_manager.generate_upn = MagicMock(
+                side_effect=lambda first, last: f"{first.lower()}.{last.lower()}@sjifire.org"
+            )
+        return mgr
+
+    def test_find_entra_user_by_email(self, manager):
+        """Test finding user by email."""
+        user = make_entra_user(user_id="user-1", display_name="John", email="john@sjifire.org")
+        manager._user_by_email = {"john@sjifire.org": user}
+        manager._user_by_upn = {}
+
+        member = Member(id="1", first_name="John", last_name="Doe", email="john@sjifire.org")
+        result = manager._find_entra_user(member)
+
+        assert result == user
+
+    def test_find_entra_user_by_upn(self, manager):
+        """Test finding user by UPN when email doesn't match."""
+        user = make_entra_user(user_id="user-1", display_name="John", upn="john.doe@sjifire.org")
+        manager._user_by_email = {}
+        manager._user_by_upn = {"john.doe@sjifire.org": user}
+
+        member = Member(id="1", first_name="John", last_name="Doe", email=None)
+        result = manager._find_entra_user(member)
+
+        assert result == user
+
+    def test_find_entra_user_not_found(self, manager):
+        """Test when user is not found."""
+        manager._user_by_email = {}
+        manager._user_by_upn = {}
+
+        member = Member(id="1", first_name="Unknown", last_name="User", email="unknown@test.com")
+        result = manager._find_entra_user(member)
+
+        assert result is None
+
+
+class TestGroupSyncManagerGetOrCreateGroup:
+    """Tests for GroupSyncManager._get_or_create_group method."""
+
+    @pytest.fixture
+    def manager(self):
+        """Create a GroupSyncManager with mocked dependencies."""
+        with (
+            patch("sjifire.entra.group_sync.EntraGroupManager"),
+            patch("sjifire.entra.group_sync.EntraUserManager"),
+        ):
+            mgr = GroupSyncManager()
+            mgr.group_manager = AsyncMock()
+        return mgr
+
+    def _make_group(self, group_id="g1", display_name="Test", description="Desc"):
+        """Helper to create an EntraGroup."""
+        return EntraGroup(
+            id=group_id,
+            display_name=display_name,
+            description=description,
+            mail=f"{display_name.lower()}@sjifire.org",
+            mail_enabled=True,
+            security_enabled=False,
+            group_types=["Unified"],
+        )
+
+    async def test_get_existing_group_by_mail_nickname(self, manager):
+        """Test getting existing group by mail nickname."""
+        existing = self._make_group(description="Existing desc")
+        manager.group_manager.get_group_by_mail_nickname = AsyncMock(return_value=existing)
+
+        group, created, desc_updated = await manager._get_or_create_group(
+            display_name="Test",
+            mail_nickname="test",
+            description="Existing desc",
+        )
+
+        assert group == existing
+        assert created is False
+        assert desc_updated is False
+
+    async def test_get_existing_group_updates_description(self, manager):
+        """Test that description is updated when different."""
+        existing = self._make_group(description="Old description")
+        manager.group_manager.get_group_by_mail_nickname = AsyncMock(return_value=existing)
+        manager.group_manager.update_group_description = AsyncMock(return_value=True)
+
+        group, created, desc_updated = await manager._get_or_create_group(
+            display_name="Test",
+            mail_nickname="test",
+            description="New description",
+        )
+
+        assert group == existing
+        assert created is False
+        assert desc_updated is True
+        manager.group_manager.update_group_description.assert_called_once()
+
+    async def test_create_group_when_not_exists(self, manager):
+        """Test creating a new group when it doesn't exist."""
+        manager.group_manager.get_group_by_mail_nickname = AsyncMock(return_value=None)
+        manager.group_manager.get_group_by_name = AsyncMock(return_value=None)
+        new_group = self._make_group(group_id="new-id")
+        manager.group_manager.create_m365_group = AsyncMock(return_value=new_group)
+
+        group, created, desc_updated = await manager._get_or_create_group(
+            display_name="New Group",
+            mail_nickname="newgroup",
+            description="New group description",
+        )
+
+        assert group == new_group
+        assert created is True
+        assert desc_updated is False
+
+    async def test_dry_run_does_not_create(self, manager):
+        """Test dry run mode doesn't create groups."""
+        manager.group_manager.get_group_by_mail_nickname = AsyncMock(return_value=None)
+        manager.group_manager.get_group_by_name = AsyncMock(return_value=None)
+
+        group, created, _desc_updated = await manager._get_or_create_group(
+            display_name="New Group",
+            mail_nickname="newgroup",
+            description="Desc",
+            dry_run=True,
+        )
+
+        assert group is None
+        assert created is True
+        manager.group_manager.create_m365_group.assert_not_called()
+
+
+class TestGroupSyncManagerSyncMembership:
+    """Tests for GroupSyncManager._sync_group_membership method."""
+
+    @pytest.fixture
+    def manager(self):
+        """Create a GroupSyncManager with mocked dependencies."""
+        with (
+            patch("sjifire.entra.group_sync.EntraGroupManager"),
+            patch("sjifire.entra.group_sync.EntraUserManager"),
+        ):
+            mgr = GroupSyncManager()
+            mgr.group_manager = AsyncMock()
+            mgr._entra_users = []
+        return mgr
+
+    def _make_group(self, group_id="g1"):
+        """Helper to create an EntraGroup."""
+        return EntraGroup(
+            id=group_id,
+            display_name="Test Group",
+            description="Test",
+            mail="test@sjifire.org",
+            mail_enabled=True,
+            security_enabled=False,
+            group_types=["Unified"],
+        )
+
+    async def test_sync_adds_missing_members(self, manager):
+        """Test adding members who should be in the group."""
+        group = self._make_group()
+        manager.group_manager.get_group_members = AsyncMock(return_value=[])
+        manager.group_manager.add_user_to_group = AsyncMock(return_value=True)
+
+        # Set up user matching
+        user = make_entra_user(user_id="user-1", display_name="John Doe", email="john@sjifire.org")
+        manager._user_by_email = {"john@sjifire.org": user}
+        manager._user_by_upn = {}
+
+        member = Member(id="1", first_name="John", last_name="Doe", email="john@sjifire.org")
+
+        added, removed, errors = await manager._sync_group_membership(
+            group=group,
+            should_be_members=[member],
+        )
+
+        assert added == ["John Doe"]
+        assert removed == []
+        assert errors == []
+
+    async def test_sync_removes_extra_members(self, manager):
+        """Test removing members who shouldn't be in the group."""
+        group = self._make_group()
+        manager.group_manager.get_group_members = AsyncMock(return_value=["user-extra"])
+        manager.group_manager.remove_user_from_group = AsyncMock(return_value=True)
+
+        # No members should be in the group
+        manager._user_by_email = {}
+        manager._user_by_upn = {}
+        manager._entra_users = [
+            make_entra_user(
+                user_id="user-extra", display_name="Extra User", email="extra@sjifire.org"
+            )
+        ]
+
+        added, removed, errors = await manager._sync_group_membership(
+            group=group,
+            should_be_members=[],
+        )
+
+        assert added == []
+        assert removed == ["Extra User"]
+        assert errors == []
+
+    async def test_sync_dry_run_does_not_modify(self, manager):
+        """Test dry run mode doesn't modify membership."""
+        group = self._make_group()
+        manager.group_manager.get_group_members = AsyncMock(return_value=["user-extra"])
+
+        user = make_entra_user(user_id="user-new", display_name="New User", email="new@sjifire.org")
+        manager._user_by_email = {"new@sjifire.org": user}
+        manager._user_by_upn = {}
+        manager._entra_users = [
+            make_entra_user(
+                user_id="user-extra", display_name="Extra User", email="extra@sjifire.org"
+            )
+        ]
+
+        member = Member(id="1", first_name="New", last_name="User", email="new@sjifire.org")
+
+        added, removed, _errors = await manager._sync_group_membership(
+            group=group,
+            should_be_members=[member],
+            dry_run=True,
+        )
+
+        assert added == ["New User"]
+        assert removed == ["Extra User"]
+        manager.group_manager.add_user_to_group.assert_not_called()
+        manager.group_manager.remove_user_from_group.assert_not_called()
+
+
+class TestGroupSyncManagerSync:
+    """Tests for GroupSyncManager.sync method."""
+
+    @pytest.fixture
+    def manager(self):
+        """Create a GroupSyncManager with mocked dependencies."""
+        with (
+            patch("sjifire.entra.group_sync.EntraGroupManager"),
+            patch("sjifire.entra.group_sync.EntraUserManager"),
+        ):
+            mgr = GroupSyncManager()
+            mgr.group_manager = AsyncMock()
+            mgr.user_manager = AsyncMock()
+        return mgr
+
+    def _make_group(self, group_id="g1", display_name="Test"):
+        """Helper to create an EntraGroup."""
+        return EntraGroup(
+            id=group_id,
+            display_name=display_name,
+            description="Test",
+            mail=f"{display_name.lower()}@sjifire.org",
+            mail_enabled=True,
+            security_enabled=False,
+            group_types=["Unified"],
+        )
+
+    async def test_sync_returns_empty_result_when_no_groups(self, manager):
+        """Test sync returns empty result when strategy produces no groups."""
+        manager.user_manager.get_users = AsyncMock(return_value=[])
+
+        strategy = SupportGroupStrategy()
+        members = [Member(id="1", first_name="John", last_name="Doe", positions=["Firefighter"])]
+
+        result = await manager.sync(strategy=strategy, members=members)
+
+        assert result.group_type == "support"
+        assert result.groups == []
+
+    async def test_sync_processes_groups_from_strategy(self, manager):
+        """Test sync processes groups returned by strategy."""
+        # Set up user matching
+        entra_user = make_entra_user(
+            user_id="user-1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email="john@sjifire.org",
+            upn="john.doe@sjifire.org",
+        )
+        manager.user_manager.get_users = AsyncMock(return_value=[entra_user])
+
+        # Set up group operations
+        group = self._make_group(group_id="support-id", display_name="Support")
+        manager.group_manager.get_group_by_mail_nickname = AsyncMock(return_value=group)
+        manager.group_manager.get_group_members = AsyncMock(return_value=[])
+        manager.group_manager.add_user_to_group = AsyncMock(return_value=True)
+        manager.group_manager.update_group_visibility = AsyncMock(return_value=True)
+
+        strategy = SupportGroupStrategy()
+        members = [
+            Member(
+                id="1",
+                first_name="John",
+                last_name="Doe",
+                email="john@sjifire.org",
+                positions=["Support"],
+            )
+        ]
+
+        result = await manager.sync(strategy=strategy, members=members)
+
+        assert result.group_type == "support"
+        assert len(result.groups) == 1
+        assert result.groups[0].group_name == "Support"
+        assert result.groups[0].members_added == ["John Doe"]
+
+    async def test_sync_handles_group_creation_failure(self, manager):
+        """Test sync handles group creation failure gracefully."""
+        manager.user_manager.get_users = AsyncMock(return_value=[])
+
+        # Group doesn't exist and creation fails
+        manager.group_manager.get_group_by_mail_nickname = AsyncMock(return_value=None)
+        manager.group_manager.get_group_by_name = AsyncMock(return_value=None)
+        manager.group_manager.create_m365_group = AsyncMock(return_value=None)
+
+        strategy = SupportGroupStrategy()
+        members = [Member(id="1", first_name="John", last_name="Doe", positions=["Support"])]
+
+        result = await manager.sync(strategy=strategy, members=members)
+
+        assert len(result.groups) == 1
+        assert result.groups[0].errors == ["Failed to get or create group: Support"]
+
+
+class TestGroupSyncManagerBackup:
+    """Tests for GroupSyncManager.backup_all_groups method."""
+
+    @pytest.fixture
+    def manager(self):
+        """Create a GroupSyncManager with mocked dependencies."""
+        with (
+            patch("sjifire.entra.group_sync.EntraGroupManager"),
+            patch("sjifire.entra.group_sync.EntraUserManager"),
+        ):
+            mgr = GroupSyncManager()
+            mgr.group_manager = AsyncMock()
+        return mgr
+
+    def _make_group(self, group_id="g1", display_name="Test"):
+        """Helper to create an EntraGroup."""
+        return EntraGroup(
+            id=group_id,
+            display_name=display_name,
+            description="Test",
+            mail=f"{display_name.lower()}@sjifire.org",
+            mail_enabled=True,
+            security_enabled=False,
+            group_types=["Unified"],
+        )
+
+    async def test_backup_all_groups_success(self, manager):
+        """Test successful backup of all groups."""
+        groups = [self._make_group("g1", "Group 1"), self._make_group("g2", "Group 2")]
+        manager.group_manager.get_groups = AsyncMock(return_value=groups)
+        manager.group_manager.get_group_members = AsyncMock(return_value=["user-1"])
+
+        with patch("sjifire.entra.group_sync.backup_entra_groups") as mock_backup:
+            mock_backup.return_value = "/path/to/backup.json"
+
+            result = await manager.backup_all_groups()
+
+            assert result == "/path/to/backup.json"
+            mock_backup.assert_called_once()
+
+    async def test_backup_all_groups_handles_error(self, manager):
+        """Test backup handles errors gracefully."""
+        manager.group_manager.get_groups = AsyncMock(side_effect=Exception("API error"))
+
+        result = await manager.backup_all_groups()
+
+        assert result is None
