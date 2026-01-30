@@ -1,0 +1,4 @@
+# file: /Users/greene/Documents/dev/sjifire/utilities/.venv/bin/pytest
+# hypothesis_version: 6.151.0
+
+['-script.pyw', '.exe', '__main__']

@@ -490,9 +490,7 @@ class TestHandleExistingUserDisableInactive:
         # Should be skipped or updated, not disabled
         assert len(result.disabled) == 0
 
-    async def test_does_not_disable_active_member(
-        self, importer, active_entra_user, active_member
-    ):
+    async def test_does_not_disable_active_member(self, importer, active_entra_user, active_member):
         """Should not disable when Aladtec member is active."""
         result = ImportResult()
         importer.user_manager.disable_user = AsyncMock()
@@ -617,19 +615,61 @@ class TestImportMembersDisableInactive:
     async def test_disables_multiple_inactive_members(self, importer):
         """Should disable all inactive members with active Entra accounts."""
         members = [
-            Member(id="1", first_name="John", last_name="Smith", email="jsmith@testfire.org", status="Inactive"),
-            Member(id="2", first_name="Jane", last_name="Doe", email="jdoe@testfire.org", status="Inactive"),
-            Member(id="3", first_name="Bob", last_name="Jones", email="bjones@testfire.org", status="Active"),
+            Member(
+                id="1",
+                first_name="John",
+                last_name="Smith",
+                email="jsmith@testfire.org",
+                status="Inactive",
+            ),
+            Member(
+                id="2",
+                first_name="Jane",
+                last_name="Doe",
+                email="jdoe@testfire.org",
+                status="Inactive",
+            ),
+            Member(
+                id="3",
+                first_name="Bob",
+                last_name="Jones",
+                email="bjones@testfire.org",
+                status="Active",
+            ),
         ]
 
         existing_users = [
-            EntraUser(id="u1", display_name="John Smith", first_name="John", last_name="Smith",
-                      email="jsmith@testfire.org", upn="jsmith@testfire.org", employee_id=None, account_enabled=True),
-            EntraUser(id="u2", display_name="Jane Doe", first_name="Jane", last_name="Doe",
-                      email="jdoe@testfire.org", upn="jdoe@testfire.org", employee_id=None, account_enabled=True),
-            EntraUser(id="u3", display_name="Bob Jones", first_name="Bob", last_name="Jones",
-                      email="bjones@testfire.org", upn="bjones@testfire.org", employee_id=None, account_enabled=True,
-                      company_name="Test Fire Department"),
+            EntraUser(
+                id="u1",
+                display_name="John Smith",
+                first_name="John",
+                last_name="Smith",
+                email="jsmith@testfire.org",
+                upn="jsmith@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+            ),
+            EntraUser(
+                id="u2",
+                display_name="Jane Doe",
+                first_name="Jane",
+                last_name="Doe",
+                email="jdoe@testfire.org",
+                upn="jdoe@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+            ),
+            EntraUser(
+                id="u3",
+                display_name="Bob Jones",
+                first_name="Bob",
+                last_name="Jones",
+                email="bjones@testfire.org",
+                upn="bjones@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+                company_name="Test Fire Department",
+            ),
         ]
 
         importer.user_manager.get_users = AsyncMock(return_value=existing_users)
@@ -647,8 +687,20 @@ class TestImportMembersDisableInactive:
     async def test_skips_inactive_members_not_in_entra(self, importer):
         """Inactive members without Entra accounts should be skipped, not created."""
         members = [
-            Member(id="1", first_name="John", last_name="Smith", email="jsmith@testfire.org", status="Inactive"),
-            Member(id="2", first_name="Jane", last_name="Doe", email="jdoe@testfire.org", status="Inactive"),
+            Member(
+                id="1",
+                first_name="John",
+                last_name="Smith",
+                email="jsmith@testfire.org",
+                status="Inactive",
+            ),
+            Member(
+                id="2",
+                first_name="Jane",
+                last_name="Doe",
+                email="jdoe@testfire.org",
+                status="Inactive",
+            ),
         ]
 
         importer.user_manager.get_users = AsyncMock(return_value=[])  # No existing users
@@ -666,23 +718,71 @@ class TestImportMembersDisableInactive:
         """Test with mix of active/inactive members and various Entra states."""
         members = [
             # Inactive in Aladtec, active in Entra → should disable
-            Member(id="1", first_name="Inactive", last_name="ToDisable", email="disable@testfire.org", status="Inactive"),
+            Member(
+                id="1",
+                first_name="Inactive",
+                last_name="ToDisable",
+                email="disable@testfire.org",
+                status="Inactive",
+            ),
             # Inactive in Aladtec, already disabled in Entra → should skip
-            Member(id="2", first_name="Inactive", last_name="AlreadyDisabled", email="already@testfire.org", status="Inactive"),
+            Member(
+                id="2",
+                first_name="Inactive",
+                last_name="AlreadyDisabled",
+                email="already@testfire.org",
+                status="Inactive",
+            ),
             # Inactive in Aladtec, not in Entra → should skip (not create)
-            Member(id="3", first_name="Inactive", last_name="NotInEntra", email="notexist@testfire.org", status="Inactive"),
+            Member(
+                id="3",
+                first_name="Inactive",
+                last_name="NotInEntra",
+                email="notexist@testfire.org",
+                status="Inactive",
+            ),
             # Active in Aladtec, in Entra → should update/skip based on changes
-            Member(id="4", first_name="Active", last_name="Member", email="active@testfire.org", status="Active"),
+            Member(
+                id="4",
+                first_name="Active",
+                last_name="Member",
+                email="active@testfire.org",
+                status="Active",
+            ),
         ]
 
         existing_users = [
-            EntraUser(id="u1", display_name="Inactive ToDisable", first_name="Inactive", last_name="ToDisable",
-                      email="disable@testfire.org", upn="disable@testfire.org", employee_id=None, account_enabled=True),
-            EntraUser(id="u2", display_name="Inactive AlreadyDisabled", first_name="Inactive", last_name="AlreadyDisabled",
-                      email="already@testfire.org", upn="already@testfire.org", employee_id=None, account_enabled=False),
-            EntraUser(id="u4", display_name="Active Member", first_name="Active", last_name="Member",
-                      email="active@testfire.org", upn="active@testfire.org", employee_id=None, account_enabled=True,
-                      company_name="Test Fire Department"),
+            EntraUser(
+                id="u1",
+                display_name="Inactive ToDisable",
+                first_name="Inactive",
+                last_name="ToDisable",
+                email="disable@testfire.org",
+                upn="disable@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+            ),
+            EntraUser(
+                id="u2",
+                display_name="Inactive AlreadyDisabled",
+                first_name="Inactive",
+                last_name="AlreadyDisabled",
+                email="already@testfire.org",
+                upn="already@testfire.org",
+                employee_id=None,
+                account_enabled=False,
+            ),
+            EntraUser(
+                id="u4",
+                display_name="Active Member",
+                first_name="Active",
+                last_name="Member",
+                email="active@testfire.org",
+                upn="active@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+                company_name="Test Fire Department",
+            ),
         ]
 
         importer.user_manager.get_users = AsyncMock(return_value=existing_users)
@@ -705,12 +805,26 @@ class TestImportMembersDisableInactive:
     async def test_dry_run_does_not_call_disable(self, importer):
         """Dry run should not actually disable any accounts."""
         members = [
-            Member(id="1", first_name="John", last_name="Smith", email="jsmith@testfire.org", status="Inactive"),
+            Member(
+                id="1",
+                first_name="John",
+                last_name="Smith",
+                email="jsmith@testfire.org",
+                status="Inactive",
+            ),
         ]
 
         existing_users = [
-            EntraUser(id="u1", display_name="John Smith", first_name="John", last_name="Smith",
-                      email="jsmith@testfire.org", upn="jsmith@testfire.org", employee_id=None, account_enabled=True),
+            EntraUser(
+                id="u1",
+                display_name="John Smith",
+                first_name="John",
+                last_name="Smith",
+                email="jsmith@testfire.org",
+                upn="jsmith@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+            ),
         ]
 
         importer.user_manager.get_users = AsyncMock(return_value=existing_users)

@@ -618,14 +618,21 @@ class AladtecScraper:
         if not next_td:
             return []
 
-        # Get checked position checkboxes
+        # Try to get positions from list items first (view mode)
         positions = []
-        for cb in next_td.find_all("input", {"type": "checkbox"}):
-            if cb.has_attr("checked"):
-                cb_id = cb.get("id", "")
-                label = next_td.find("label", {"for": cb_id})
-                if label:
-                    positions.append(label.get_text(strip=True))
+        for li in next_td.find_all("li"):
+            text = li.get_text(strip=True)
+            if text:
+                positions.append(text)
+
+        # If no list items found, try checked checkboxes (edit mode)
+        if not positions:
+            for cb in next_td.find_all("input", {"type": "checkbox"}):
+                if cb.has_attr("checked"):
+                    cb_id = cb.get("id", "")
+                    label = next_td.find("label", {"for": cb_id})
+                    if label:
+                        positions.append(label.get_text(strip=True))
 
         return positions
 

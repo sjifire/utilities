@@ -1,0 +1,4 @@
+# file: /Users/greene/Documents/dev/sjifire/utilities/src/sjifire/entra/users.py
+# hypothesis_version: 6.151.0
+
+[204, '!@#$%', "'", '-', '/', '403', '@', 'Authorization', 'Content-Type', 'accountEnabled', 'application/json', 'businessPhones', 'companyName', 'department', 'displayName', 'employeeHireDate', 'employeeId', 'employeeType', 'extensionAttribute1', 'extensionAttribute2', 'extensionAttribute3', 'givenName', 'id', 'jobTitle', 'mail', 'mobilePhone', 'officeLocation', 'otherMails', 'sjifire.org', 'surname', 'userPrincipalName']

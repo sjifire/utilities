@@ -1,0 +1,4 @@
+# file: /Users/greene/Documents/dev/sjifire/utilities/src/sjifire/entra/users.py
+# hypothesis_version: 6.151.0
+
+['!@#$%', "'", '-', '/', '@', 'accountEnabled', 'businessPhones', 'displayName', 'employeeHireDate', 'employeeId', 'employeeType', 'givenName', 'id', 'jobTitle', 'mail', 'mobilePhone', 'officeLocation', 'otherMails', 'sjifire.org', 'surname', 'userPrincipalName']
