@@ -177,6 +177,55 @@ class StationGroupStrategy(GroupSyncStrategy):
         return None
 
 
+class PositionGroupStrategy(GroupSyncStrategy):
+    """Sync strategy for position-based groups.
+
+    Maps Aladtec positions to M365 groups. Currently supports:
+    - Support position → Support group
+    """
+
+    # Map position names to group config (display_name, mail_nickname)
+    POSITION_GROUPS: dict[str, tuple[str, str]] = {
+        "Support": ("Support", "support"),
+    }
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "positions"
+
+    @property
+    def automation_notice(self) -> str:
+        """Return automation notice for position groups."""
+        return (
+            "⚠️ Membership is automatically managed based on Positions "
+            "in Aladtec. Manual changes will be overwritten."
+        )
+
+    def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
+        """Group members by position, filtered to configured positions."""
+        by_position: dict[str, list[Member]] = {}
+
+        for member in members:
+            for position in member.positions:
+                # Only include positions we have group mappings for
+                if position in self.POSITION_GROUPS:
+                    if position not in by_position:
+                        by_position[position] = []
+                    by_position[position].append(member)
+
+        return by_position
+
+    def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:
+        """Get position group configuration."""
+        display_name, mail_nickname = self.POSITION_GROUPS[group_key]
+        return (
+            display_name,
+            mail_nickname,
+            f"Members with {group_key} position",
+        )
+
+
 class GroupSyncManager:
     """Manages group synchronization across different strategies."""
 

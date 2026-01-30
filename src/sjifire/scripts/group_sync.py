@@ -9,6 +9,7 @@ from sjifire.aladtec.scraper import AladtecScraper
 from sjifire.entra.group_sync import (
     FullSyncResult,
     GroupSyncManager,
+    PositionGroupStrategy,
     StationGroupStrategy,
 )
 
@@ -18,9 +19,7 @@ logger = logging.getLogger(__name__)
 # Available sync strategies
 STRATEGIES = {
     "stations": StationGroupStrategy,
-    # Future strategies can be added here:
-    # "positions": PositionGroupStrategy,
-    # "workgroups": WorkGroupStrategy,
+    "positions": PositionGroupStrategy,
 }
 
 

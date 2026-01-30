@@ -6,6 +6,7 @@ from sjifire.aladtec.models import Member
 from sjifire.entra.group_sync import (
     FullSyncResult,
     GroupSyncResult,
+    PositionGroupStrategy,
     StationGroupStrategy,
 )
 
@@ -97,6 +98,62 @@ class TestStationGroupStrategy:
         result = self.strategy.get_groups_to_sync(members)
         assert len(result) == 1
         assert "31" in result
+
+
+class TestPositionGroupStrategy:
+    """Tests for PositionGroupStrategy."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.strategy = PositionGroupStrategy()
+
+    def test_name(self):
+        assert self.strategy.name == "positions"
+
+    def test_automation_notice(self):
+        notice = self.strategy.automation_notice
+        assert "automatically" in notice.lower()
+        assert "Positions" in notice
+
+    def test_get_group_config_support(self):
+        display_name, mail_nickname, description = self.strategy.get_group_config("Support")
+        assert display_name == "Support"
+        assert mail_nickname == "support"
+        assert "Support" in description
+
+    def test_get_groups_to_sync_empty(self):
+        assert self.strategy.get_groups_to_sync([]) == {}
+
+    def test_get_groups_to_sync_support_position(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            positions=["Support"],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert "Support" in result
+        assert len(result["Support"]) == 1
+
+    def test_get_groups_to_sync_ignores_unmapped_positions(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            positions=["Firefighter", "EMT"],  # Not in POSITION_GROUPS
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert result == {}
+
+    def test_get_groups_to_sync_multiple_members(self):
+        members = [
+            Member(id="1", first_name="John", last_name="Doe", positions=["Support"]),
+            Member(id="2", first_name="Jane", last_name="Smith", positions=["Support", "Admin"]),
+            Member(id="3", first_name="Bob", last_name="Wilson", positions=["Firefighter"]),
+        ]
+        result = self.strategy.get_groups_to_sync(members)
+        assert len(result) == 1
+        assert len(result["Support"]) == 2
 
 
 class TestGroupSyncResult:
