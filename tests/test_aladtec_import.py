@@ -475,9 +475,9 @@ class TestHandleExistingUserDisableInactive:
     async def test_disables_active_entra_user_when_member_inactive(
         self, importer, active_entra_user, inactive_member
     ):
-        """Should disable Entra account when Aladtec member is inactive."""
+        """Should disable Entra account and remove licenses when Aladtec member is inactive."""
         result = ImportResult()
-        importer.user_manager.disable_user = AsyncMock(return_value=True)
+        importer.user_manager.disable_and_remove_licenses = AsyncMock(return_value=(True, True))
 
         await importer._handle_existing_user(
             member=inactive_member,
@@ -487,10 +487,11 @@ class TestHandleExistingUserDisableInactive:
             disable_inactive=True,
         )
 
-        importer.user_manager.disable_user.assert_called_once_with("user-123")
+        importer.user_manager.disable_and_remove_licenses.assert_called_once_with("user-123")
         assert len(result.disabled) == 1
         assert result.disabled[0]["member"] == "John Smith"
         assert result.disabled[0]["user_id"] == "user-123"
+        assert result.disabled[0]["licenses_removed"] is True
         assert len(result.errors) == 0
 
     async def test_dry_run_reports_would_disable(
@@ -498,7 +499,7 @@ class TestHandleExistingUserDisableInactive:
     ):
         """Dry run should report would disable without calling API."""
         result = ImportResult()
-        importer.user_manager.disable_user = AsyncMock()
+        importer.user_manager.disable_and_remove_licenses = AsyncMock()
 
         await importer._handle_existing_user(
             member=inactive_member,
@@ -508,9 +509,10 @@ class TestHandleExistingUserDisableInactive:
             disable_inactive=True,
         )
 
-        importer.user_manager.disable_user.assert_not_called()
+        importer.user_manager.disable_and_remove_licenses.assert_not_called()
         assert len(result.disabled) == 1
         assert result.disabled[0]["member"] == "John Smith"
+        assert result.disabled[0]["action"] == "would disable and remove licenses"
 
     async def test_skips_already_disabled_user(
         self, importer, disabled_entra_user, inactive_member
@@ -520,7 +522,7 @@ class TestHandleExistingUserDisableInactive:
         inactive_member.email = "jdoe@testfire.org"
         inactive_member.first_name = "Jane"
         inactive_member.last_name = "Doe"
-        importer.user_manager.disable_user = AsyncMock()
+        importer.user_manager.disable_and_remove_licenses = AsyncMock()
 
         await importer._handle_existing_user(
             member=inactive_member,
@@ -530,7 +532,7 @@ class TestHandleExistingUserDisableInactive:
             disable_inactive=True,
         )
 
-        importer.user_manager.disable_user.assert_not_called()
+        importer.user_manager.disable_and_remove_licenses.assert_not_called()
         assert len(result.disabled) == 0
         assert len(result.skipped) == 1
         assert result.skipped[0]["reason"] == "already disabled"
@@ -540,7 +542,7 @@ class TestHandleExistingUserDisableInactive:
     ):
         """Should not disable when disable_inactive=False."""
         result = ImportResult()
-        importer.user_manager.disable_user = AsyncMock()
+        importer.user_manager.disable_and_remove_licenses = AsyncMock()
         importer.user_manager.update_user = AsyncMock(return_value=True)
 
         # Make sure member needs no update so it gets skipped
@@ -554,14 +556,14 @@ class TestHandleExistingUserDisableInactive:
             disable_inactive=False,
         )
 
-        importer.user_manager.disable_user.assert_not_called()
+        importer.user_manager.disable_and_remove_licenses.assert_not_called()
         # Should be skipped or updated, not disabled
         assert len(result.disabled) == 0
 
     async def test_does_not_disable_active_member(self, importer, active_entra_user, active_member):
         """Should not disable when Aladtec member is active."""
         result = ImportResult()
-        importer.user_manager.disable_user = AsyncMock()
+        importer.user_manager.disable_and_remove_licenses = AsyncMock()
         importer.user_manager.update_user = AsyncMock(return_value=True)
         active_entra_user.email = "bjones@testfire.org"
         active_entra_user.upn = "bjones@testfire.org"
@@ -575,7 +577,7 @@ class TestHandleExistingUserDisableInactive:
             disable_inactive=True,
         )
 
-        importer.user_manager.disable_user.assert_not_called()
+        importer.user_manager.disable_and_remove_licenses.assert_not_called()
         assert len(result.disabled) == 0
 
     async def test_records_error_when_disable_fails(
@@ -583,7 +585,7 @@ class TestHandleExistingUserDisableInactive:
     ):
         """Should record error when disable_user API call fails."""
         result = ImportResult()
-        importer.user_manager.disable_user = AsyncMock(return_value=False)
+        importer.user_manager.disable_and_remove_licenses = AsyncMock(return_value=(False, False))
 
         await importer._handle_existing_user(
             member=inactive_member,
@@ -741,13 +743,13 @@ class TestImportMembersDisableInactive:
         ]
 
         importer.user_manager.get_users = AsyncMock(return_value=existing_users)
-        importer.user_manager.disable_user = AsyncMock(return_value=True)
+        importer.user_manager.disable_and_remove_licenses = AsyncMock(return_value=(True, True))
         importer.user_manager.update_user = AsyncMock(return_value=True)
 
         result = await importer.import_members(members, dry_run=False, disable_inactive=True)
 
         assert len(result.disabled) == 2
-        assert importer.user_manager.disable_user.call_count == 2
+        assert importer.user_manager.disable_and_remove_licenses.call_count == 2
         disabled_names = [d["member"] for d in result.disabled]
         assert "John Smith" in disabled_names
         assert "Jane Doe" in disabled_names
@@ -854,7 +856,7 @@ class TestImportMembersDisableInactive:
         ]
 
         importer.user_manager.get_users = AsyncMock(return_value=existing_users)
-        importer.user_manager.disable_user = AsyncMock(return_value=True)
+        importer.user_manager.disable_and_remove_licenses = AsyncMock(return_value=(True, True))
         importer.user_manager.update_user = AsyncMock(return_value=True)
 
         result = await importer.import_members(members, dry_run=False, disable_inactive=True)
@@ -896,11 +898,11 @@ class TestImportMembersDisableInactive:
         ]
 
         importer.user_manager.get_users = AsyncMock(return_value=existing_users)
-        importer.user_manager.disable_user = AsyncMock()
+        importer.user_manager.disable_and_remove_licenses = AsyncMock()
 
         result = await importer.import_members(members, dry_run=True, disable_inactive=True)
 
-        importer.user_manager.disable_user.assert_not_called()
+        importer.user_manager.disable_and_remove_licenses.assert_not_called()
         assert len(result.disabled) == 1  # Reported as would-be-disabled
 
 

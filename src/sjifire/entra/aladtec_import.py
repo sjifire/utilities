@@ -212,20 +212,29 @@ class AladtecImporter:
                             "member": member.display_name,
                             "email": member.email,
                             "user_id": existing.id,
+                            "action": "would disable and remove licenses",
                         }
                     )
-                    logger.info(f"Would disable: {member.display_name}")
+                    logger.info(f"Would disable and remove licenses: {member.display_name}")
                 else:
-                    success = await self.user_manager.disable_user(existing.id)
-                    if success:
+                    disable_ok, license_ok = await self.user_manager.disable_and_remove_licenses(
+                        existing.id
+                    )
+                    if disable_ok:
                         result.disabled.append(
                             {
                                 "member": member.display_name,
                                 "email": member.email,
                                 "user_id": existing.id,
+                                "licenses_removed": license_ok,
                             }
                         )
-                        logger.info(f"Disabled: {member.display_name}")
+                        if license_ok:
+                            logger.info(f"Disabled and removed licenses: {member.display_name}")
+                        else:
+                            logger.warning(
+                                f"Disabled {member.display_name} but failed to remove licenses"
+                            )
                     else:
                         result.errors.append(
                             {
