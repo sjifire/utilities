@@ -436,8 +436,10 @@ class TestGroupSyncManagerVisibility:
         from sjifire.entra.group_sync import GroupSyncManager
         from sjifire.entra.groups import EntraGroup
 
-        with patch("sjifire.entra.group_sync.EntraGroupManager"), \
-             patch("sjifire.entra.group_sync.EntraUserManager"):
+        with (
+            patch("sjifire.entra.group_sync.EntraGroupManager"),
+            patch("sjifire.entra.group_sync.EntraUserManager"),
+        ):
             manager = GroupSyncManager()
             manager.group_manager = AsyncMock()
 
@@ -465,8 +467,10 @@ class TestGroupSyncManagerVisibility:
         from sjifire.entra.group_sync import GroupSyncManager
         from sjifire.entra.groups import EntraGroup
 
-        with patch("sjifire.entra.group_sync.EntraGroupManager"), \
-             patch("sjifire.entra.group_sync.EntraUserManager"):
+        with (
+            patch("sjifire.entra.group_sync.EntraGroupManager"),
+            patch("sjifire.entra.group_sync.EntraUserManager"),
+        ):
             manager = GroupSyncManager()
             manager.group_manager = AsyncMock()
             manager.group_manager.update_group_visibility = AsyncMock(return_value=True)
@@ -497,8 +501,10 @@ class TestGroupSyncManagerVisibility:
         from sjifire.entra.group_sync import GroupSyncManager
         from sjifire.entra.groups import EntraGroup
 
-        with patch("sjifire.entra.group_sync.EntraGroupManager"), \
-             patch("sjifire.entra.group_sync.EntraUserManager"):
+        with (
+            patch("sjifire.entra.group_sync.EntraGroupManager"),
+            patch("sjifire.entra.group_sync.EntraUserManager"),
+        ):
             manager = GroupSyncManager()
             manager.group_manager = AsyncMock()
             manager.group_manager.update_group_visibility = AsyncMock(return_value=False)
