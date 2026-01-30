@@ -2,7 +2,7 @@
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -66,6 +66,15 @@ class DispatchConfig:
     mailbox_user_id: str
 
 
+@dataclass
+class EntraSyncConfig:
+    """Configuration for Aladtec to Entra ID sync."""
+
+    company_name: str
+    domain: str
+    skip_emails: list[str] = field(default_factory=list)
+
+
 def get_project_root() -> Path:
     """Get the project root directory."""
     current = Path(__file__).resolve()
@@ -102,4 +111,26 @@ def load_dispatch_config(require_mailbox: bool = True) -> DispatchConfig:
         archive_folder=config_data["archive_folder"],
         retention_days=config_data["retention_days"],
         mailbox_user_id=mailbox_user_id or "",
+    )
+
+
+def load_entra_sync_config() -> EntraSyncConfig:
+    """Load Entra sync configuration from config file.
+
+    Returns:
+        EntraSyncConfig with company_name and domain
+    """
+    project_root = get_project_root()
+    config_path = project_root / "config" / "entra_sync.json"
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    with config_path.open() as f:
+        config_data = json.load(f)
+
+    return EntraSyncConfig(
+        company_name=config_data["company_name"],
+        domain=config_data.get("domain", "sjifire.org"),
+        skip_emails=config_data.get("skip_emails", []),
     )
