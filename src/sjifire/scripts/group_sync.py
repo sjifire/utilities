@@ -7,6 +7,7 @@ import sys
 
 from sjifire.aladtec.scraper import AladtecScraper
 from sjifire.entra.group_sync import (
+    ApparatusOperatorGroupStrategy,
     FirefighterGroupStrategy,
     FullSyncResult,
     GroupSyncManager,
@@ -31,6 +32,7 @@ STRATEGIES = {
     "support": SupportGroupStrategy,
     "ff": FirefighterGroupStrategy,
     "wff": WildlandFirefighterGroupStrategy,
+    "ao": ApparatusOperatorGroupStrategy,
     "marine": MarineGroupStrategy,
     "volunteers": VolunteerGroupStrategy,
 }

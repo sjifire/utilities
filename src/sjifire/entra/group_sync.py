@@ -246,6 +246,41 @@ class FirefighterGroupStrategy(GroupSyncStrategy):
         )
 
 
+class ApparatusOperatorGroupStrategy(GroupSyncStrategy):
+    """Sync strategy for Apparatus Operator group.
+
+    Creates an Apparatus Operator M365 group containing members with EVIP certification.
+    """
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "ao"
+
+    @property
+    def automation_notice(self) -> str:
+        """Return automation notice for apparatus operator group."""
+        return (
+            "⚠️ Membership is automatically managed based on EVIP certification "
+            "in Aladtec. Manual changes will be overwritten."
+        )
+
+    def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
+        """Get members with EVIP certification."""
+        ao_members = [m for m in members if m.evip]
+        if ao_members:
+            return {"Apparatus Operator": ao_members}
+        return {}
+
+    def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:
+        """Get apparatus operator group configuration."""
+        return (
+            "Apparatus Operator",
+            "apparatus-operator",
+            "Members with EVIP certification (Apparatus Operators)",
+        )
+
+
 class WildlandFirefighterGroupStrategy(GroupSyncStrategy):
     """Sync strategy for Wildland Firefighter group.
 

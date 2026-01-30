@@ -282,6 +282,66 @@ class TestWildlandFirefighterGroupStrategy:
         assert len(result["WFF"]) == 2
 
 
+class TestApparatusOperatorGroupStrategy:
+    """Tests for ApparatusOperatorGroupStrategy."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from sjifire.entra.group_sync import ApparatusOperatorGroupStrategy
+
+        self.strategy = ApparatusOperatorGroupStrategy()
+
+    def test_name(self):
+        assert self.strategy.name == "ao"
+
+    def test_automation_notice(self):
+        notice = self.strategy.automation_notice
+        assert "automatically" in notice.lower()
+        assert "EVIP" in notice
+
+    def test_get_group_config(self):
+        display_name, mail_nickname, description = self.strategy.get_group_config(
+            "Apparatus Operator"
+        )
+        assert display_name == "Apparatus Operator"
+        assert mail_nickname == "apparatus-operator"
+        assert "EVIP" in description
+
+    def test_get_groups_to_sync_empty(self):
+        assert self.strategy.get_groups_to_sync([]) == {}
+
+    def test_get_groups_to_sync_with_evip(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            evip="2026-06-30",
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert "Apparatus Operator" in result
+        assert len(result["Apparatus Operator"]) == 1
+
+    def test_get_groups_to_sync_without_evip(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            evip=None,
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert result == {}
+
+    def test_get_groups_to_sync_multiple_members(self):
+        members = [
+            Member(id="1", first_name="John", last_name="Doe", evip="2026-06-30"),
+            Member(id="2", first_name="Jane", last_name="Smith", evip="2026-12-31"),
+            Member(id="3", first_name="Bob", last_name="Wilson", evip=None),
+        ]
+        result = self.strategy.get_groups_to_sync(members)
+        assert len(result) == 1
+        assert len(result["Apparatus Operator"]) == 2
+
+
 class TestMarineGroupStrategy:
     """Tests for MarineGroupStrategy."""
 
