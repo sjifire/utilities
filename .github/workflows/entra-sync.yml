@@ -2,8 +2,8 @@ name: Entra ID Sync
 
 on:
   schedule:
-    # Run at 5:00 AM Pacific (12:00 UTC in winter, 13:00 UTC in summer)
-    - cron: '0 12 * * *'
+    # Run at noon Pacific, Monday-Friday (20:00 UTC = 12pm PST / 1pm PDT)
+    - cron: '0 20 * * 1-5'
   workflow_dispatch:
     inputs:
       dry_run:

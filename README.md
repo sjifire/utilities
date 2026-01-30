@@ -124,7 +124,7 @@ Runs on push/PR to main:
 - Run tests with pytest
 
 ### Entra Sync (entra-sync.yml)
-Runs daily at 5:00 AM Pacific:
+Runs weekdays at noon Pacific:
 - Syncs Aladtec members to Entra ID
 - Uploads backup artifacts (30-day retention)
 - Can be triggered manually with dry-run option
