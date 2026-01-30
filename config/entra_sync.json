@@ -2,7 +2,8 @@
   "company_name": "San Juan Island Fire & Rescue",
   "domain": "sjifire.org",
   "skip_emails": [
-    "aladtec.admin@sjifire.org"
+    "aladtec.admin@sjifire.org",
+    "api@sjifire.org"
   ],
   "extension_attributes": {
     "extensionAttribute1": "Rank (Captain, Lieutenant, Chief, etc.)",

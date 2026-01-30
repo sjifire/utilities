@@ -1,4 +1,0 @@
-# file: /Users/greene/Documents/dev/sjifire/utilities/src/sjifire/core/backup.py
-# hypothesis_version: 6.151.0
-
-['%Y%m%d_%H%M%S', '*.json', 'aladtec', 'aladtec_members', 'backup_type', 'backups', 'count', 'date_hired', 'display_name', 'email', 'employee_id', 'entra', 'entra_users', 'evip', 'first_name', 'home_phone', 'id', 'is_active', 'last_name', 'members', 'pay_profile', 'phone', 'position', 'positions', 'station_assignment', 'status', 'timestamp', 'title', 'users', 'w', 'work_group']
