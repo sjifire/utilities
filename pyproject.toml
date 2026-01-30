@@ -17,10 +17,10 @@ dependencies = [
 [project.scripts]
 aladtec-list = "sjifire.scripts.aladtec_list:main"
 entra-audit = "sjifire.scripts.entra_audit:main"
-entra-sync = "sjifire.scripts.entra_sync:main"
+entra-user-sync = "sjifire.scripts.entra_user_sync:main"
+entra-group-sync = "sjifire.scripts.entra_group_sync:main"
 analyze-mappings = "sjifire.scripts.analyze_mappings:main"
 create-security-groups = "sjifire.scripts.create_security_groups:main"
-group-sync = "sjifire.scripts.group_sync:main"
 
 [dependency-groups]
 dev = [
