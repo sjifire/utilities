@@ -389,7 +389,7 @@ class GroupSyncManager:
             backup_path = backup_entra_groups(
                 groups=all_groups,
                 memberships=memberships,
-                prefix="entra_groups",
+                prefix="entra",
             )
             return str(backup_path)
 
