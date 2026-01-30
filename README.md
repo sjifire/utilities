@@ -31,15 +31,15 @@ MS_GRAPH_CLIENT_SECRET=your-client-secret
 
 ## CLI Commands
 
-### Aladtec to Entra Sync
+### Aladtec to Entra User Sync
 
 **Sync members to Entra ID:**
 ```bash
-uv run entra-sync                      # Sync all active members
-uv run entra-sync --dry-run            # Preview changes without applying
-uv run entra-sync --json               # Output results as JSON
-uv run entra-sync --disable-inactive   # Also disable accounts for inactive members
-uv run entra-sync --individual EMAIL   # Sync a single member by email
+uv run entra-user-sync                      # Sync all active members
+uv run entra-user-sync --dry-run            # Preview changes without applying
+uv run entra-user-sync --json               # Output results as JSON
+uv run entra-user-sync --disable-inactive   # Also disable accounts for inactive members
+uv run entra-user-sync --individual EMAIL   # Sync a single member by email
 ```
 
 The sync:
@@ -52,7 +52,36 @@ The sync:
 - Prefixes display names with rank (e.g., "Chief John Smith")
 - Automatically backs up Entra ID users before making changes
 
-**Automated sync:** Runs daily at 5:00 AM Pacific via GitHub Actions. See `.github/workflows/entra-sync.yml`.
+### Aladtec to Entra Group Sync
+
+**Sync M365 groups from Aladtec:**
+```bash
+uv run entra-group-sync --all              # Sync all group strategies
+uv run entra-group-sync --all --dry-run    # Preview changes without applying
+uv run entra-group-sync --strategy stations # Sync only station groups
+uv run entra-group-sync --strategy ff --strategy wff  # Sync specific strategies
+```
+
+Available strategies:
+
+| Strategy | Group | Membership Criteria |
+|----------|-------|---------------------|
+| `stations` | Station 31, 32, etc. | Aladtec station assignment |
+| `support` | Support | Has "Support" position |
+| `ff` | FF | Has "Firefighter" position |
+| `wff` | WFF | Has "Wildland Firefighter" position |
+| `ao` | Apparatus Operator | Has EVIP certification |
+| `marine` | Marine | Has "Mate" or "Pilot" position |
+| `volunteers` | Volunteers | Work Group = "Volunteer" + operational position |
+
+The sync:
+- Creates M365 groups if they don't exist
+- Adds/removes members based on Aladtec data
+- Sets group visibility to Public
+- Adds automation notice to group descriptions
+- Backs up all groups before making changes
+
+**Automated sync:** Runs weekdays at noon Pacific via GitHub Actions. See `.github/workflows/entra-sync.yml`.
 
 ### Aladtec Tools
 
@@ -125,7 +154,8 @@ Runs on push/PR to main:
 
 ### Entra Sync (entra-sync.yml)
 Runs weekdays at noon Pacific:
-- Syncs Aladtec members to Entra ID
+- Syncs Aladtec members to Entra ID users
+- Syncs Aladtec data to M365 groups (all strategies)
 - Uploads backup artifacts (30-day retention)
 - Can be triggered manually with dry-run option
 
@@ -163,20 +193,22 @@ uv run pytest --cov=sjifire --cov-report=html  # HTML coverage report
 ```
 src/sjifire/
 ├── aladtec/           # Aladtec integration
-│   ├── models.py      # Member data model
+│   ├── models.py      # Member data model with position constants
 │   └── scraper.py     # Web scraper for CSV export
 ├── core/              # Shared utilities
-│   ├── backup.py      # Backup utilities
+│   ├── backup.py      # Backup utilities for users and groups
 │   ├── config.py      # Configuration loading
 │   └── msgraph_client.py  # MS Graph client
 ├── entra/             # Entra ID integration
-│   ├── aladtec_import.py  # Aladtec to Entra sync logic
-│   ├── groups.py      # Group management
+│   ├── aladtec_import.py  # Aladtec to Entra user sync logic
+│   ├── group_sync.py  # Group sync strategies and manager
+│   ├── groups.py      # Group management (create, update, members)
 │   └── users.py       # User management
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
     ├── create_security_groups.py
     ├── entra_audit.py
-    └── entra_sync.py
+    ├── entra_group_sync.py  # M365 group sync CLI
+    └── entra_user_sync.py   # User sync CLI
 ```

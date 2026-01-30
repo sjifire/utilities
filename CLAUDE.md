@@ -57,10 +57,21 @@ src/sjifire/
 │   ├── config.py      # EntraSyncConfig, credentials from .env
 │   └── msgraph_client.py  # Azure credential setup
 ├── entra/
-│   ├── aladtec_import.py  # Main sync logic, handles matching/create/update
+│   ├── aladtec_import.py  # User sync logic, handles matching/create/update
+│   ├── group_sync.py  # Group sync strategies and GroupSyncManager
+│   ├── groups.py      # EntraGroupManager for M365 group operations
 │   └── users.py       # EntraUserManager for Graph API calls
-└── scripts/           # CLI entry points
+└── scripts/           # CLI entry points (entra_user_sync.py, entra_group_sync.py)
 ```
+
+### Group Sync Strategy Pattern
+Group sync uses a strategy pattern. Each `GroupSyncStrategy` subclass defines:
+- `name`: Strategy identifier (e.g., "stations", "ff", "ao")
+- `get_groups_to_sync(members)`: Returns dict of group_key -> list of members
+- `get_group_config(group_key)`: Returns (display_name, mail_nickname, description)
+- `automation_notice`: Warning text added to group descriptions
+
+Available strategies: `StationGroupStrategy`, `SupportGroupStrategy`, `FirefighterGroupStrategy`, `WildlandFirefighterGroupStrategy`, `ApparatusOperatorGroupStrategy`, `MarineGroupStrategy`, `VolunteerGroupStrategy`
 
 ## Important Patterns
 
@@ -92,15 +103,22 @@ Tests use pytest-asyncio for async code. Mocking is done with respx for HTTP cal
 
 ## Common Tasks
 
-### Run sync manually
+### Run user sync manually
 ```bash
-uv run entra-sync --dry-run  # Preview
-uv run entra-sync            # Apply changes
+uv run entra-user-sync --dry-run  # Preview
+uv run entra-user-sync            # Apply changes
 ```
 
 ### Sync single user
 ```bash
-uv run entra-sync --individual user@sjifire.org
+uv run entra-user-sync --individual user@sjifire.org
+```
+
+### Run group sync manually
+```bash
+uv run entra-group-sync --all --dry-run  # Preview all strategies
+uv run entra-group-sync --all            # Apply changes
+uv run entra-group-sync --strategy ff    # Sync specific strategy
 ```
 
 ### Check linting
@@ -118,4 +136,4 @@ uv run ruff format --check .
 ## GitHub Actions
 
 - `ci.yml`: Lint + test on PR/push
-- `entra-sync.yml`: Daily sync at 5 AM Pacific, uploads backup artifacts
+- `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
