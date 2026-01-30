@@ -1,0 +1,415 @@
+"""Group synchronization from Aladtec data.
+
+Manages M365 groups based on Aladtec member attributes like
+station assignments, positions, work groups, etc.
+"""
+
+import logging
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+
+from sjifire.aladtec.models import Member
+from sjifire.core.backup import backup_entra_groups
+from sjifire.entra.groups import EntraGroup, EntraGroupManager, GroupType
+from sjifire.entra.users import EntraUser, EntraUserManager
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GroupSyncResult:
+    """Result of syncing a single group."""
+
+    group_name: str
+    group_id: str | None
+    created: bool
+    members_added: list[str] = field(default_factory=list)
+    members_removed: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def has_changes(self) -> bool:
+        """Check if any changes were made."""
+        return self.created or bool(self.members_added) or bool(self.members_removed)
+
+
+@dataclass
+class FullSyncResult:
+    """Result of a full group sync operation."""
+
+    group_type: str
+    backup_path: str | None
+    groups: list[GroupSyncResult] = field(default_factory=list)
+
+    @property
+    def total_created(self) -> int:
+        """Count of groups created."""
+        return sum(1 for g in self.groups if g.created)
+
+    @property
+    def total_added(self) -> int:
+        """Count of members added across all groups."""
+        return sum(len(g.members_added) for g in self.groups)
+
+    @property
+    def total_removed(self) -> int:
+        """Count of members removed across all groups."""
+        return sum(len(g.members_removed) for g in self.groups)
+
+    @property
+    def total_errors(self) -> int:
+        """Count of errors across all groups."""
+        return sum(len(g.errors) for g in self.groups)
+
+
+class GroupSyncStrategy(ABC):
+    """Base class for group sync strategies.
+
+    Each strategy defines how to:
+    - Identify which groups should exist
+    - Determine which members belong in each group
+    - Configure the group properties (name, mail, etc.)
+    """
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Human-readable name for this sync strategy."""
+
+    @abstractmethod
+    def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
+        """Determine which groups should exist and their members.
+
+        Args:
+            members: List of Aladtec members
+
+        Returns:
+            Dict mapping group key to list of members that should be in that group
+        """
+
+    @abstractmethod
+    def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:
+        """Get configuration for a group.
+
+        Args:
+            group_key: The key identifying this group (e.g., station number)
+
+        Returns:
+            Tuple of (display_name, mail_nickname, description)
+        """
+
+
+class StationGroupStrategy(GroupSyncStrategy):
+    """Sync strategy for station-based groups.
+
+    Creates M365 groups like "Station 31" (station31@domain) based on
+    member station assignments from Aladtec.
+    """
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "station"
+
+    def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
+        """Group members by station assignment."""
+        by_station: dict[str, list[Member]] = {}
+        for member in members:
+            station = self._parse_station(member.station_assignment)
+            if station:
+                if station not in by_station:
+                    by_station[station] = []
+                by_station[station].append(member)
+        return by_station
+
+    def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:
+        """Get station group configuration."""
+        return (
+            f"Station {group_key}",
+            f"station{group_key}",
+            f"Members assigned to Station {group_key}",
+        )
+
+    def _parse_station(self, station_assignment: str | None) -> str | None:
+        """Extract station number from assignment field."""
+        if not station_assignment:
+            return None
+
+        station = station_assignment.strip()
+
+        if station.isdigit():
+            return station
+
+        if station.lower().startswith("station "):
+            num = station[8:].strip()
+            if num.isdigit():
+                return num
+
+        return None
+
+
+class GroupSyncManager:
+    """Manages group synchronization across different strategies."""
+
+    def __init__(self, domain: str = "sjifire.org") -> None:
+        """Initialize the sync manager.
+
+        Args:
+            domain: Email domain for user lookups
+        """
+        self.domain = domain
+        self.group_manager = EntraGroupManager()
+        self.user_manager = EntraUserManager(domain=domain)
+        self._entra_users: list[EntraUser] | None = None
+        self._user_by_email: dict[str, EntraUser] = {}
+        self._user_by_upn: dict[str, EntraUser] = {}
+
+    async def _load_entra_users(self) -> None:
+        """Load and cache Entra users."""
+        if self._entra_users is None:
+            self._entra_users = await self.user_manager.get_users()
+            logger.info(f"Loaded {len(self._entra_users)} Entra ID users")
+
+            for user in self._entra_users:
+                if user.email:
+                    self._user_by_email[user.email.lower()] = user
+                if user.upn:
+                    self._user_by_upn[user.upn.lower()] = user
+
+    def _find_entra_user(self, member: Member) -> EntraUser | None:
+        """Find Entra user matching an Aladtec member."""
+        if member.email:
+            user = self._user_by_email.get(member.email.lower())
+            if user:
+                return user
+            user = self._user_by_upn.get(member.email.lower())
+            if user:
+                return user
+
+        # Try generated UPN
+        upn = self.user_manager.generate_upn(member.first_name, member.last_name)
+        return self._user_by_upn.get(upn.lower())
+
+    async def _get_or_create_group(
+        self,
+        display_name: str,
+        mail_nickname: str,
+        description: str | None,
+        dry_run: bool = False,
+    ) -> tuple[EntraGroup | None, bool]:
+        """Get existing group or create new M365 group.
+
+        Returns:
+            Tuple of (group, was_created)
+        """
+        # Check by mail nickname first
+        existing = await self.group_manager.get_group_by_mail_nickname(mail_nickname)
+        if existing:
+            return existing, False
+
+        # Check by display name as fallback
+        existing = await self.group_manager.get_group_by_name(display_name)
+        if existing:
+            return existing, False
+
+        if dry_run:
+            logger.info(f"Would create M365 group: {display_name}")
+            return None, True
+
+        created = await self.group_manager.create_m365_group(
+            display_name=display_name,
+            mail_nickname=mail_nickname,
+            description=description,
+        )
+        return created, created is not None
+
+    async def _sync_group_membership(
+        self,
+        group: EntraGroup,
+        should_be_members: list[Member],
+        dry_run: bool = False,
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Sync group membership.
+
+        Returns:
+            Tuple of (added_names, removed_names, errors)
+        """
+        added: list[str] = []
+        removed: list[str] = []
+        errors: list[str] = []
+
+        # Get current members
+        current_member_ids = set(await self.group_manager.get_group_members(group.id))
+
+        # Determine who should be in the group
+        should_be: dict[str, tuple[EntraUser, Member]] = {}
+        for member in should_be_members:
+            entra_user = self._find_entra_user(member)
+            if entra_user:
+                should_be[entra_user.id] = (entra_user, member)
+            else:
+                logger.warning(
+                    f"Could not find Entra user for: {member.display_name} "
+                    f"(email: {member.email})"
+                )
+
+        should_be_ids = set(should_be.keys())
+
+        # Add missing members
+        for user_id in should_be_ids - current_member_ids:
+            entra_user, _ = should_be[user_id]
+            name = entra_user.display_name or user_id
+
+            if dry_run:
+                logger.info(f"Would add {name} to {group.display_name}")
+                added.append(name)
+            else:
+                if await self.group_manager.add_user_to_group(group.id, user_id):
+                    added.append(name)
+                else:
+                    errors.append(f"Failed to add {name}")
+
+        # Remove extra members
+        for user_id in current_member_ids - should_be_ids:
+            # Find user name for logging
+            name = user_id
+            if self._entra_users:
+                for user in self._entra_users:
+                    if user.id == user_id:
+                        name = user.display_name or user_id
+                        break
+
+            if dry_run:
+                logger.info(f"Would remove {name} from {group.display_name}")
+                removed.append(name)
+            else:
+                if await self.group_manager.remove_user_from_group(group.id, user_id):
+                    removed.append(name)
+                else:
+                    errors.append(f"Failed to remove {name}")
+
+        return added, removed, errors
+
+    async def _backup_groups(self, strategy: GroupSyncStrategy) -> str | None:
+        """Backup current state of groups managed by this strategy.
+
+        Returns:
+            Path to backup file, or None if backup failed
+        """
+        try:
+            # Get all M365 groups
+            all_groups = await self.group_manager.get_groups(
+                include_types=[GroupType.MICROSOFT_365]
+            )
+
+            # Get memberships for each group
+            memberships: dict[str, list[str]] = {}
+            for group in all_groups:
+                members = await self.group_manager.get_group_members(group.id)
+                memberships[group.id] = members
+
+            # Create backup
+            backup_path = backup_entra_groups(
+                groups=all_groups,
+                memberships=memberships,
+                prefix=f"entra_{strategy.name}",
+            )
+            return str(backup_path)
+
+        except Exception as e:
+            logger.error(f"Failed to backup groups: {e}")
+            return None
+
+    async def sync(
+        self,
+        strategy: GroupSyncStrategy,
+        members: list[Member],
+        dry_run: bool = False,
+    ) -> FullSyncResult:
+        """Sync groups using the given strategy.
+
+        Args:
+            strategy: The sync strategy to use
+            members: List of Aladtec members
+            dry_run: If True, don't make changes
+
+        Returns:
+            FullSyncResult with details of all changes
+        """
+        # Load Entra users
+        await self._load_entra_users()
+
+        # Backup before making changes (skip for dry run)
+        backup_path = None
+        if not dry_run:
+            logger.info("Creating backup of current group state...")
+            backup_path = await self._backup_groups(strategy)
+
+        # Get groups to sync from strategy
+        groups_to_sync = strategy.get_groups_to_sync(members)
+
+        if not groups_to_sync:
+            logger.warning(f"No groups to sync for strategy: {strategy.name}")
+            return FullSyncResult(
+                group_type=strategy.name,
+                backup_path=backup_path,
+            )
+
+        logger.info(
+            f"Syncing {len(groups_to_sync)} {strategy.name} groups: "
+            f"{', '.join(sorted(groups_to_sync.keys()))}"
+        )
+
+        results: list[GroupSyncResult] = []
+
+        for group_key in sorted(groups_to_sync.keys()):
+            group_members = groups_to_sync[group_key]
+            display_name, mail_nickname, description = strategy.get_group_config(group_key)
+
+            logger.info(f"Processing {display_name} ({len(group_members)} members)")
+
+            # Get or create group
+            group, created = await self._get_or_create_group(
+                display_name=display_name,
+                mail_nickname=mail_nickname,
+                description=description,
+                dry_run=dry_run,
+            )
+
+            if group is None and not dry_run:
+                results.append(
+                    GroupSyncResult(
+                        group_name=display_name,
+                        group_id=None,
+                        created=False,
+                        errors=[f"Failed to get or create group: {display_name}"],
+                    )
+                )
+                continue
+
+            # Sync membership
+            if group:
+                added, removed, errors = await self._sync_group_membership(
+                    group=group,
+                    should_be_members=group_members,
+                    dry_run=dry_run,
+                )
+            else:
+                added, removed, errors = [], [], []
+
+            results.append(
+                GroupSyncResult(
+                    group_name=display_name,
+                    group_id=group.id if group else None,
+                    created=created,
+                    members_added=added,
+                    members_removed=removed,
+                    errors=errors,
+                )
+            )
+
+        return FullSyncResult(
+            group_type=strategy.name,
+            backup_path=backup_path,
+            groups=results,
+        )

@@ -289,6 +289,88 @@ class EntraGroupManager:
 
         return None
 
+    async def create_m365_group(
+        self,
+        display_name: str,
+        mail_nickname: str,
+        description: str | None = None,
+        owner_ids: list[str] | None = None,
+    ) -> EntraGroup | None:
+        """Create a new Microsoft 365 group in Entra ID.
+
+        M365 groups provide shared mailbox, calendar, files, and Teams integration.
+
+        Args:
+            display_name: The display name for the group (e.g., "Station 31")
+            mail_nickname: Mail prefix without domain (e.g., "station31")
+            description: Optional description
+            owner_ids: Optional list of user IDs to set as owners
+
+        Returns:
+            Created EntraGroup or None on failure
+        """
+        group = Group(
+            display_name=display_name,
+            description=description,
+            mail_enabled=True,
+            mail_nickname=mail_nickname,
+            security_enabled=False,
+            group_types=["Unified"],  # "Unified" = M365 group
+        )
+
+        # Add owners if provided
+        if owner_ids:
+            group.additional_data = {
+                "owners@odata.bind": [
+                    f"https://graph.microsoft.com/v1.0/users/{uid}" for uid in owner_ids
+                ]
+            }
+
+        try:
+            created = await self.client.groups.post(group)
+            if created:
+                logger.info(
+                    f"Created M365 group: {display_name} ({mail_nickname}@...) "
+                    f"(ID: {created.id})"
+                )
+                return self._to_entra_group(created)
+        except Exception as e:
+            logger.error(f"Failed to create M365 group {display_name}: {e}")
+
+        return None
+
+    async def get_group_by_mail_nickname(self, mail_nickname: str) -> EntraGroup | None:
+        """Find a group by mail nickname.
+
+        Args:
+            mail_nickname: The mail nickname to search for (e.g., "station31")
+
+        Returns:
+            EntraGroup if found, None otherwise
+        """
+        query_params = GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters(
+            filter=f"mailNickname eq '{mail_nickname}'",
+            select=[
+                "id",
+                "displayName",
+                "description",
+                "mail",
+                "mailEnabled",
+                "securityEnabled",
+                "groupTypes",
+            ],
+        )
+        config = RequestConfiguration(query_parameters=query_params)
+
+        try:
+            result = await self.client.groups.get(request_configuration=config)
+            if result and result.value and len(result.value) > 0:
+                return self._to_entra_group(result.value[0])
+        except Exception as e:
+            logger.error(f"Failed to find group by mail nickname {mail_nickname}: {e}")
+
+        return None
+
     async def get_group_by_name(self, display_name: str) -> EntraGroup | None:
         """Find a group by display name.
 
