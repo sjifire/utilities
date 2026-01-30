@@ -6,10 +6,12 @@ from sjifire.aladtec.models import Member
 from sjifire.core.backup import (
     _member_to_dict,
     backup_aladtec_members,
+    backup_entra_groups,
     backup_entra_users,
     get_backup_dir,
     list_backups,
 )
+from sjifire.entra.groups import EntraGroup
 from sjifire.entra.users import EntraUser
 
 
@@ -215,3 +217,107 @@ class TestListBackups:
     def test_empty_directory(self, temp_backup_dir):
         backups = list_backups(temp_backup_dir)
         assert backups == []
+
+
+class TestBackupEntraGroups:
+    """Tests for backup_entra_groups function."""
+
+    def test_creates_backup_file(self, temp_backup_dir):
+        groups = [
+            EntraGroup(
+                id="group-1",
+                display_name="Station 31",
+                description="Members at Station 31",
+                mail="station31@sjifire.org",
+                mail_enabled=True,
+                security_enabled=False,
+                group_types=["Unified"],
+            ),
+        ]
+
+        filepath = backup_entra_groups(groups, backup_dir=temp_backup_dir)
+
+        assert filepath.exists()
+        assert "entra_groups_" in filepath.name
+
+    def test_backup_contains_correct_data(self, temp_backup_dir):
+        groups = [
+            EntraGroup(
+                id="group-1",
+                display_name="Station 31",
+                description="Members at Station 31",
+                mail="station31@sjifire.org",
+                mail_enabled=True,
+                security_enabled=False,
+                group_types=["Unified"],
+            ),
+        ]
+
+        filepath = backup_entra_groups(groups, backup_dir=temp_backup_dir)
+
+        with filepath.open() as f:
+            data = json.load(f)
+
+        assert data["backup_type"] == "entra_groups"
+        assert data["count"] == 1
+        assert data["groups"][0]["display_name"] == "Station 31"
+        assert data["groups"][0]["mail"] == "station31@sjifire.org"
+        assert data["groups"][0]["group_type"] == "microsoft365"
+
+    def test_backup_includes_memberships(self, temp_backup_dir):
+        groups = [
+            EntraGroup(
+                id="group-1",
+                display_name="Station 31",
+                description=None,
+                mail="station31@sjifire.org",
+                mail_enabled=True,
+                security_enabled=False,
+                group_types=["Unified"],
+            ),
+        ]
+        memberships = {"group-1": ["user-1", "user-2", "user-3"]}
+
+        filepath = backup_entra_groups(groups, memberships=memberships, backup_dir=temp_backup_dir)
+
+        with filepath.open() as f:
+            data = json.load(f)
+
+        assert data["groups"][0]["members"] == ["user-1", "user-2", "user-3"]
+
+    def test_backup_without_memberships(self, temp_backup_dir):
+        groups = [
+            EntraGroup(
+                id="group-1",
+                display_name="Station 31",
+                description=None,
+                mail="station31@sjifire.org",
+                mail_enabled=True,
+                security_enabled=False,
+                group_types=["Unified"],
+            ),
+        ]
+
+        filepath = backup_entra_groups(groups, backup_dir=temp_backup_dir)
+
+        with filepath.open() as f:
+            data = json.load(f)
+
+        assert "members" not in data["groups"][0]
+
+    def test_custom_prefix(self, temp_backup_dir):
+        groups = [
+            EntraGroup(
+                id="group-1",
+                display_name="Station 31",
+                description=None,
+                mail=None,
+                mail_enabled=False,
+                security_enabled=True,
+                group_types=[],
+            ),
+        ]
+
+        filepath = backup_entra_groups(groups, backup_dir=temp_backup_dir, prefix="station")
+
+        assert "station_groups_" in filepath.name

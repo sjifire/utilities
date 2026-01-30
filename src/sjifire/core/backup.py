@@ -1,13 +1,19 @@
 """Backup utilities for Aladtec and Entra data."""
 
+from __future__ import annotations
+
 import json
 import logging
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sjifire.aladtec.models import Member
 from sjifire.entra.users import EntraUser
+
+if TYPE_CHECKING:
+    from sjifire.entra.groups import EntraGroup
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +134,59 @@ def _member_to_dict(member: Member) -> dict:
         "evip": member.evip,
         "date_hired": member.date_hired,
     }
+
+
+def backup_entra_groups(
+    groups: list[EntraGroup],
+    memberships: dict[str, list[str]] | None = None,
+    backup_dir: Path | str | None = None,
+    prefix: str = "entra",
+) -> Path:
+    """Backup Entra groups and their memberships to a JSON file.
+
+    Args:
+        groups: List of EntraGroup objects to backup
+        memberships: Optional dict mapping group_id to list of member user_ids
+        backup_dir: Directory to save backup. If None, uses default.
+        prefix: Prefix for the backup filename
+
+    Returns:
+        Path to the created backup file
+    """
+    backup_dir = get_backup_dir(backup_dir)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{prefix}_groups_{timestamp}.json"
+    filepath = backup_dir / filename
+
+    # Convert groups to serializable format
+    groups_data = []
+    for g in groups:
+        group_dict = {
+            "id": g.id,
+            "display_name": g.display_name,
+            "description": g.description,
+            "mail": g.mail,
+            "mail_enabled": g.mail_enabled,
+            "security_enabled": g.security_enabled,
+            "group_types": g.group_types,
+            "group_type": g.group_type.value,
+        }
+        if memberships and g.id in memberships:
+            group_dict["members"] = memberships[g.id]
+        groups_data.append(group_dict)
+
+    data = {
+        "backup_type": "entra_groups",
+        "timestamp": datetime.now().isoformat(),
+        "count": len(groups),
+        "groups": groups_data,
+    }
+
+    with filepath.open("w") as f:
+        json.dump(data, f, indent=2, default=str)
+
+    logger.info(f"Backed up {len(groups)} Entra groups to {filepath}")
+    return filepath
 
 
 def list_backups(backup_dir: Path | str | None = None) -> list[Path]:

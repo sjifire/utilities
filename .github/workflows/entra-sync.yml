@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run Entra sync
+      - name: Run Entra user sync
         env:
           ALADTEC_URL: ${{ secrets.ALADTEC_URL }}
           ALADTEC_USERNAME: ${{ secrets.ALADTEC_USERNAME }}
@@ -42,9 +42,24 @@ jobs:
           MS_GRAPH_CLIENT_SECRET: ${{ secrets.MS_GRAPH_CLIENT_SECRET }}
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run entra-sync --disable-inactive --dry-run --json
+            uv run entra-user-sync --disable-inactive --dry-run --json
           else
-            uv run entra-sync --disable-inactive --json
+            uv run entra-user-sync --disable-inactive --json
+          fi
+
+      - name: Run Entra group sync
+        env:
+          ALADTEC_URL: ${{ secrets.ALADTEC_URL }}
+          ALADTEC_USERNAME: ${{ secrets.ALADTEC_USERNAME }}
+          ALADTEC_PASSWORD: ${{ secrets.ALADTEC_PASSWORD }}
+          MS_GRAPH_TENANT_ID: ${{ secrets.MS_GRAPH_TENANT_ID }}
+          MS_GRAPH_CLIENT_ID: ${{ secrets.MS_GRAPH_CLIENT_ID }}
+          MS_GRAPH_CLIENT_SECRET: ${{ secrets.MS_GRAPH_CLIENT_SECRET }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            uv run entra-group-sync --all --dry-run
+          else
+            uv run entra-group-sync --all
           fi
 
       - name: Upload backup artifacts
