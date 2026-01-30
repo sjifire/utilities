@@ -9,8 +9,10 @@ from sjifire.aladtec.scraper import AladtecScraper
 from sjifire.entra.group_sync import (
     FullSyncResult,
     GroupSyncManager,
-    PositionGroupStrategy,
+    MarineGroupStrategy,
     StationGroupStrategy,
+    SupportGroupStrategy,
+    VolunteerGroupStrategy,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -24,7 +26,9 @@ logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(l
 # Available sync strategies
 STRATEGIES = {
     "stations": StationGroupStrategy,
-    "positions": PositionGroupStrategy,
+    "support": SupportGroupStrategy,
+    "marine": MarineGroupStrategy,
+    "volunteers": VolunteerGroupStrategy,
 }
 
 

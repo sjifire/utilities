@@ -7,9 +7,8 @@ station assignments, positions, work groups, etc.
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import ClassVar
 
-from sjifire.aladtec.models import Member
+from sjifire.aladtec.models import MARINE_POSITIONS, OPERATIONAL_POSITIONS, Member
 from sjifire.core.backup import backup_entra_groups
 from sjifire.entra.groups import EntraGroup, EntraGroupManager, GroupType
 from sjifire.entra.users import EntraUser, EntraUserManager
@@ -177,52 +176,121 @@ class StationGroupStrategy(GroupSyncStrategy):
         return None
 
 
-class PositionGroupStrategy(GroupSyncStrategy):
-    """Sync strategy for position-based groups.
+class SupportGroupStrategy(GroupSyncStrategy):
+    """Sync strategy for Support group.
 
-    Maps Aladtec positions to M365 groups. Currently supports:
-    - Support position → Support group
+    Creates a Support M365 group containing members with the Support position.
     """
-
-    # Map position names to group config (display_name, mail_nickname)
-    POSITION_GROUPS: ClassVar[dict[str, tuple[str, str]]] = {
-        "Support": ("Support", "support"),
-    }
 
     @property
     def name(self) -> str:
         """Return strategy name."""
-        return "positions"
+        return "support"
 
     @property
     def automation_notice(self) -> str:
-        """Return automation notice for position groups."""
+        """Return automation notice for support group."""
         return (
-            "⚠️ Membership is automatically managed based on Positions "
+            "⚠️ Membership is automatically managed based on Support position "
             "in Aladtec. Manual changes will be overwritten."
         )
 
     def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
-        """Group members by position, filtered to configured positions."""
-        by_position: dict[str, list[Member]] = {}
-
-        for member in members:
-            for position in member.positions:
-                # Only include positions we have group mappings for
-                if position in self.POSITION_GROUPS:
-                    if position not in by_position:
-                        by_position[position] = []
-                    by_position[position].append(member)
-
-        return by_position
+        """Get members with Support position."""
+        support_members = [m for m in members if "Support" in (m.positions or [])]
+        if support_members:
+            return {"Support": support_members}
+        return {}
 
     def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:
-        """Get position group configuration."""
-        display_name, mail_nickname = self.POSITION_GROUPS[group_key]
+        """Get support group configuration."""
         return (
-            display_name,
-            mail_nickname,
-            f"Members with {group_key} position",
+            "Support",
+            "support",
+            "Members with Support position",
+        )
+
+
+class MarineGroupStrategy(GroupSyncStrategy):
+    """Sync strategy for Marine group.
+
+    Creates a Marine M365 group containing members with Mate or Pilot positions.
+    """
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "marine"
+
+    @property
+    def automation_notice(self) -> str:
+        """Return automation notice for marine group."""
+        return (
+            "⚠️ Membership is automatically managed based on Mate/Pilot positions "
+            "in Aladtec. Manual changes will be overwritten."
+        )
+
+    def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
+        """Get members with marine positions (Mate or Pilot)."""
+        marine_members = [m for m in members if set(m.positions or []) & MARINE_POSITIONS]
+        if marine_members:
+            return {"Marine": marine_members}
+        return {}
+
+    def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:
+        """Get marine group configuration."""
+        return (
+            "Marine",
+            "marine",
+            "Members with Mate or Pilot positions",
+        )
+
+
+class VolunteerGroupStrategy(GroupSyncStrategy):
+    """Sync strategy for volunteer group.
+
+    Creates a Volunteers M365 group containing members who:
+    - Have Work Group = "Volunteer" in Aladtec
+    - AND have at least one operational position (defined in OPERATIONAL_POSITIONS)
+    """
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "volunteers"
+
+    @property
+    def automation_notice(self) -> str:
+        """Return automation notice for volunteer group."""
+        return (
+            "⚠️ Membership is automatically managed based on Work Group and "
+            "Positions in Aladtec. Manual changes will be overwritten."
+        )
+
+    def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
+        """Get volunteers with operational positions."""
+        volunteers: list[Member] = []
+
+        for member in members:
+            # Must be in Volunteer work group
+            if member.work_group != "Volunteer":
+                continue
+
+            # Must have at least one operational position
+            member_positions = set(member.positions or [])
+            if member_positions & OPERATIONAL_POSITIONS:
+                volunteers.append(member)
+
+        if volunteers:
+            return {"Volunteers": volunteers}
+        return {}
+
+    def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:
+        """Get volunteer group configuration."""
+        return (
+            "Volunteers",
+            "volunteers",
+            "Volunteer members with operational positions",
         )
 
 
@@ -274,32 +342,75 @@ class GroupSyncManager:
         mail_nickname: str,
         description: str | None,
         dry_run: bool = False,
-    ) -> tuple[EntraGroup | None, bool]:
+    ) -> tuple[EntraGroup | None, bool, bool]:
         """Get existing group or create new M365 group.
 
+        Also updates description if it differs from expected.
+
         Returns:
-            Tuple of (group, was_created)
+            Tuple of (group, was_created, description_updated)
         """
         # Check by mail nickname first
         existing = await self.group_manager.get_group_by_mail_nickname(mail_nickname)
-        if existing:
-            return existing, False
+        if not existing:
+            # Check by display name as fallback
+            existing = await self.group_manager.get_group_by_name(display_name)
 
-        # Check by display name as fallback
-        existing = await self.group_manager.get_group_by_name(display_name)
         if existing:
-            return existing, False
+            # Check if description needs updating
+            description_updated = False
+            if description and existing.description != description:
+                if dry_run:
+                    logger.info(f"Would update description for {display_name}")
+                else:
+                    if await self.group_manager.update_group_description(existing.id, description):
+                        description_updated = True
+            return existing, False, description_updated
 
         if dry_run:
             logger.info(f"Would create M365 group: {display_name}")
-            return None, True
+            return None, True, False
 
         created = await self.group_manager.create_m365_group(
             display_name=display_name,
             mail_nickname=mail_nickname,
             description=description,
         )
-        return created, created is not None
+        return created, created is not None, False
+
+    async def _apply_group_settings(
+        self,
+        group: EntraGroup,
+        dry_run: bool = False,
+    ) -> bool:
+        """Apply default settings to a group.
+
+        Default settings:
+        - visibility = "Public" (anyone in org can see members)
+        - allow_external_senders = False (only org members can send)
+        - auto_subscribe_new_members = True (new members get emails automatically)
+        - hide_from_address_lists = False (visible in Global Address List)
+        - hide_from_outlook_clients = False (visible in Outlook group discovery)
+
+        Args:
+            group: The group to configure
+            dry_run: If True, don't make changes
+
+        Returns:
+            True if settings were updated
+        """
+        if dry_run:
+            logger.info(f"Would apply default settings to {group.display_name}")
+            return True
+
+        return await self.group_manager.update_group_settings(
+            group_id=group.id,
+            visibility="Public",
+            allow_external_senders=False,
+            auto_subscribe_new_members=True,
+            hide_from_address_lists=False,
+            hide_from_outlook_clients=False,
+        )
 
     async def _sync_group_membership(
         self,
@@ -437,13 +548,19 @@ class GroupSyncManager:
 
             logger.info(f"Processing {display_name} ({len(group_members)} members)")
 
-            # Get or create group
-            group, created = await self._get_or_create_group(
+            # Get or create group (also updates description if needed)
+            group, created, description_updated = await self._get_or_create_group(
                 display_name=display_name,
                 mail_nickname=mail_nickname,
                 description=full_description,
                 dry_run=dry_run,
             )
+            if description_updated:
+                logger.info(f"Updated description for {display_name}")
+
+            # Apply default settings (e.g., block external senders)
+            if group:
+                await self._apply_group_settings(group, dry_run=dry_run)
 
             if group is None and not dry_run:
                 results.append(

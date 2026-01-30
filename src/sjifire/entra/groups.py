@@ -338,6 +338,72 @@ class EntraGroupManager:
 
         return None
 
+    async def update_group_description(
+        self,
+        group_id: str,
+        description: str,
+    ) -> bool:
+        """Update a group's description.
+
+        Args:
+            group_id: The group ID
+            description: New description
+
+        Returns:
+            True if successful
+        """
+        group = Group(description=description)
+
+        try:
+            await self.client.groups.by_group_id(group_id).patch(group)
+            logger.info(f"Updated description for group {group_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update group {group_id} description: {e}")
+            return False
+
+    async def update_group_settings(
+        self,
+        group_id: str,
+        visibility: str | None = None,
+        allow_external_senders: bool | None = None,
+        auto_subscribe_new_members: bool | None = None,
+        hide_from_address_lists: bool | None = None,
+        hide_from_outlook_clients: bool | None = None,
+    ) -> bool:
+        """Update M365 group settings.
+
+        Args:
+            group_id: The group ID
+            visibility: "Public" or "Private"
+            allow_external_senders: If False, only org members can send to group
+            auto_subscribe_new_members: If True, new members auto-subscribe to emails
+            hide_from_address_lists: If True, hide from Global Address List
+            hide_from_outlook_clients: If True, hide from Outlook group discovery
+
+        Returns:
+            True if successful
+        """
+        group = Group()
+        if visibility is not None:
+            group.visibility = visibility
+        if allow_external_senders is not None:
+            group.allow_external_senders = allow_external_senders
+        if auto_subscribe_new_members is not None:
+            group.auto_subscribe_new_members = auto_subscribe_new_members
+        if hide_from_address_lists is not None:
+            group.hide_from_address_lists = hide_from_address_lists
+        if hide_from_outlook_clients is not None:
+            group.hide_from_outlook_clients = hide_from_outlook_clients
+
+        try:
+            await self.client.groups.by_group_id(group_id).patch(group)
+            logger.info(f"Updated settings for group {group_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update group {group_id} settings: {e}")
+            return False
+
     async def get_group_by_mail_nickname(self, mail_nickname: str) -> EntraGroup | None:
         """Find a group by mail nickname.
 
