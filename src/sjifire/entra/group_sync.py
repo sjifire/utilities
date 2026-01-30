@@ -211,6 +211,41 @@ class SupportGroupStrategy(GroupSyncStrategy):
         )
 
 
+class FirefighterGroupStrategy(GroupSyncStrategy):
+    """Sync strategy for Firefighter group.
+
+    Creates a Firefighters M365 group containing members with the Firefighter position.
+    """
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "firefighters"
+
+    @property
+    def automation_notice(self) -> str:
+        """Return automation notice for firefighter group."""
+        return (
+            "⚠️ Membership is automatically managed based on Firefighter position "
+            "in Aladtec. Manual changes will be overwritten."
+        )
+
+    def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
+        """Get members with Firefighter position."""
+        ff_members = [m for m in members if "Firefighter" in (m.positions or [])]
+        if ff_members:
+            return {"Firefighters": ff_members}
+        return {}
+
+    def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:
+        """Get firefighter group configuration."""
+        return (
+            "Firefighters",
+            "firefighters",
+            "Members with Firefighter position",
+        )
+
+
 class MarineGroupStrategy(GroupSyncStrategy):
     """Sync strategy for Marine group.
 

@@ -156,6 +156,69 @@ class TestSupportGroupStrategy:
         assert len(result["Support"]) == 2
 
 
+class TestFirefighterGroupStrategy:
+    """Tests for FirefighterGroupStrategy."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from sjifire.entra.group_sync import FirefighterGroupStrategy
+
+        self.strategy = FirefighterGroupStrategy()
+
+    def test_name(self):
+        assert self.strategy.name == "firefighters"
+
+    def test_automation_notice(self):
+        notice = self.strategy.automation_notice
+        assert "automatically" in notice.lower()
+        assert "Firefighter" in notice
+
+    def test_get_group_config(self):
+        display_name, mail_nickname, description = self.strategy.get_group_config("Firefighters")
+        assert display_name == "Firefighters"
+        assert mail_nickname == "firefighters"
+        assert "Firefighter" in description
+
+    def test_get_groups_to_sync_empty(self):
+        assert self.strategy.get_groups_to_sync([]) == {}
+
+    def test_get_groups_to_sync_firefighter_position(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            positions=["Firefighter"],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert "Firefighters" in result
+        assert len(result["Firefighters"]) == 1
+
+    def test_get_groups_to_sync_ignores_non_firefighter(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            positions=["Support", "EMT"],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert result == {}
+
+    def test_get_groups_to_sync_multiple_members(self):
+        members = [
+            Member(id="1", first_name="John", last_name="Doe", positions=["Firefighter"]),
+            Member(
+                id="2",
+                first_name="Jane",
+                last_name="Smith",
+                positions=["Firefighter", "EMT"],
+            ),
+            Member(id="3", first_name="Bob", last_name="Wilson", positions=["Support"]),
+        ]
+        result = self.strategy.get_groups_to_sync(members)
+        assert len(result) == 1
+        assert len(result["Firefighters"]) == 2
+
+
 class TestMarineGroupStrategy:
     """Tests for MarineGroupStrategy."""
 
