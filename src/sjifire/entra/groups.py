@@ -330,8 +330,7 @@ class EntraGroupManager:
             created = await self.client.groups.post(group)
             if created:
                 logger.info(
-                    f"Created M365 group: {display_name} ({mail_nickname}@...) "
-                    f"(ID: {created.id})"
+                    f"Created M365 group: {display_name} ({mail_nickname}@...) (ID: {created.id})"
                 )
                 return self._to_entra_group(created)
         except Exception as e:

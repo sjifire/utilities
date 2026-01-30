@@ -1,7 +1,5 @@
 """Tests for group sync management."""
 
-import pytest
-
 from sjifire.aladtec.models import Member
 from sjifire.entra.group_sync import (
     FullSyncResult,

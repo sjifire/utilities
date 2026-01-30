@@ -7,6 +7,7 @@ station assignments, positions, work groups, etc.
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from sjifire.aladtec.models import Member
 from sjifire.core.backup import backup_entra_groups
@@ -185,7 +186,7 @@ class PositionGroupStrategy(GroupSyncStrategy):
     """
 
     # Map position names to group config (display_name, mail_nickname)
-    POSITION_GROUPS: dict[str, tuple[str, str]] = {
+    POSITION_GROUPS: ClassVar[dict[str, tuple[str, str]]] = {
         "Support": ("Support", "support"),
     }
 
@@ -327,8 +328,7 @@ class GroupSyncManager:
                 should_be[entra_user.id] = (entra_user, member)
             else:
                 logger.warning(
-                    f"Could not find Entra user for: {member.display_name} "
-                    f"(email: {member.email})"
+                    f"Could not find Entra user for: {member.display_name} (email: {member.email})"
                 )
 
         should_be_ids = set(should_be.keys())
