@@ -378,38 +378,31 @@ class GroupSyncManager:
         )
         return created, created is not None, False
 
-    async def _apply_group_settings(
+    async def _apply_group_visibility(
         self,
         group: EntraGroup,
         dry_run: bool = False,
     ) -> bool:
-        """Apply default settings to a group.
-
-        Default settings:
-        - visibility = "Public" (anyone in org can see members)
-        - allow_external_senders = False (only org members can send)
-        - auto_subscribe_new_members = True (new members get emails automatically)
-        - hide_from_address_lists = False (visible in Global Address List)
-        - hide_from_outlook_clients = False (visible in Outlook group discovery)
+        """Ensure group visibility is set to Public.
 
         Args:
             group: The group to configure
             dry_run: If True, don't make changes
 
         Returns:
-            True if settings were updated
+            True if visibility was updated
+
+        Note:
+            Other settings like allowExternalSenders require Exchange Online
+            PowerShell - they cannot be set via Graph API.
         """
         if dry_run:
-            logger.info(f"Would apply default settings to {group.display_name}")
+            logger.info(f"Would set visibility to Public for {group.display_name}")
             return True
 
-        return await self.group_manager.update_group_settings(
+        return await self.group_manager.update_group_visibility(
             group_id=group.id,
             visibility="Public",
-            allow_external_senders=False,
-            auto_subscribe_new_members=True,
-            hide_from_address_lists=False,
-            hide_from_outlook_clients=False,
         )
 
     async def _sync_group_membership(
@@ -558,9 +551,9 @@ class GroupSyncManager:
             if description_updated:
                 logger.info(f"Updated description for {display_name}")
 
-            # Apply default settings (e.g., block external senders)
+            # Ensure group visibility is Public
             if group:
-                await self._apply_group_settings(group, dry_run=dry_run)
+                await self._apply_group_visibility(group, dry_run=dry_run)
 
             if group is None and not dry_run:
                 results.append(

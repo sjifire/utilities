@@ -425,13 +425,13 @@ class TestFullSyncResult:
         assert result.total_errors == 1
 
 
-class TestGroupSyncManagerSettings:
-    """Tests for GroupSyncManager settings functionality."""
+class TestGroupSyncManagerVisibility:
+    """Tests for GroupSyncManager visibility functionality."""
 
-    def test_apply_group_settings_dry_run_returns_true(self):
+    def test_apply_group_visibility_dry_run_returns_true(self):
         """Verify dry run mode returns True without calling the manager."""
         import asyncio
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import AsyncMock
 
         from sjifire.entra.group_sync import GroupSyncManager
         from sjifire.entra.groups import EntraGroup
@@ -449,14 +449,14 @@ class TestGroupSyncManagerSettings:
             group_types=["Unified"],
         )
 
-        result = asyncio.run(manager._apply_group_settings(group, dry_run=True))
+        result = asyncio.run(manager._apply_group_visibility(group, dry_run=True))
 
         assert result is True
-        # Should not call update_group_settings in dry run
-        manager.group_manager.update_group_settings.assert_not_called()
+        # Should not call update_group_visibility in dry run
+        manager.group_manager.update_group_visibility.assert_not_called()
 
-    def test_apply_group_settings_calls_manager_with_correct_values(self):
-        """Verify real run calls manager with expected default settings."""
+    def test_apply_group_visibility_calls_manager_with_public(self):
+        """Verify real run calls manager with Public visibility."""
         import asyncio
         from unittest.mock import AsyncMock
 
@@ -465,7 +465,7 @@ class TestGroupSyncManagerSettings:
 
         manager = GroupSyncManager()
         manager.group_manager = AsyncMock()
-        manager.group_manager.update_group_settings = AsyncMock(return_value=True)
+        manager.group_manager.update_group_visibility = AsyncMock(return_value=True)
 
         group = EntraGroup(
             id="test-group-id",
@@ -477,19 +477,15 @@ class TestGroupSyncManagerSettings:
             group_types=["Unified"],
         )
 
-        result = asyncio.run(manager._apply_group_settings(group, dry_run=False))
+        result = asyncio.run(manager._apply_group_visibility(group, dry_run=False))
 
         assert result is True
-        manager.group_manager.update_group_settings.assert_called_once_with(
+        manager.group_manager.update_group_visibility.assert_called_once_with(
             group_id="test-group-id",
             visibility="Public",
-            allow_external_senders=False,
-            auto_subscribe_new_members=True,
-            hide_from_address_lists=False,
-            hide_from_outlook_clients=False,
         )
 
-    def test_apply_group_settings_returns_false_on_failure(self):
+    def test_apply_group_visibility_returns_false_on_failure(self):
         """Verify returns False when manager update fails."""
         import asyncio
         from unittest.mock import AsyncMock
@@ -499,7 +495,7 @@ class TestGroupSyncManagerSettings:
 
         manager = GroupSyncManager()
         manager.group_manager = AsyncMock()
-        manager.group_manager.update_group_settings = AsyncMock(return_value=False)
+        manager.group_manager.update_group_visibility = AsyncMock(return_value=False)
 
         group = EntraGroup(
             id="test-group-id",
@@ -511,6 +507,6 @@ class TestGroupSyncManagerSettings:
             group_types=["Unified"],
         )
 
-        result = asyncio.run(manager._apply_group_settings(group, dry_run=False))
+        result = asyncio.run(manager._apply_group_visibility(group, dry_run=False))
 
         assert result is False
