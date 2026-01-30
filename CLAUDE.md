@@ -94,13 +94,13 @@ Tests use pytest-asyncio for async code. Mocking is done with respx for HTTP cal
 
 ### Run sync manually
 ```bash
-uv run aladtec-import --dry-run  # Preview
-uv run aladtec-import            # Apply changes
+uv run entra-sync --dry-run  # Preview
+uv run entra-sync            # Apply changes
 ```
 
 ### Sync single user
 ```bash
-uv run aladtec-import --individual user@sjifire.org
+uv run entra-sync --individual user@sjifire.org
 ```
 
 ### Check linting

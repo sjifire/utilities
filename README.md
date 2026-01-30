@@ -35,11 +35,11 @@ MS_GRAPH_CLIENT_SECRET=your-client-secret
 
 **Sync members to Entra ID:**
 ```bash
-uv run aladtec-import                  # Sync all active members
-uv run aladtec-import --dry-run        # Preview changes without applying
-uv run aladtec-import --json           # Output results as JSON
-uv run aladtec-import --disable-inactive  # Also disable accounts for inactive members
-uv run aladtec-import --individual EMAIL  # Sync a single member by email
+uv run entra-sync                      # Sync all active members
+uv run entra-sync --dry-run            # Preview changes without applying
+uv run entra-sync --json               # Output results as JSON
+uv run entra-sync --disable-inactive   # Also disable accounts for inactive members
+uv run entra-sync --individual EMAIL   # Sync a single member by email
 ```
 
 The sync:
@@ -66,8 +66,8 @@ uv run aladtec-list --include-inactive # Include inactive members
 
 **Audit members:**
 ```bash
-uv run aladtec-audit                   # Full audit with Entra ID comparison
-uv run aladtec-audit --skip-entra      # Aladtec data quality checks only
+uv run entra-audit                     # Full audit with Entra ID comparison
+uv run entra-audit --skip-entra        # Aladtec data quality checks only
 ```
 
 The audit checks for:
@@ -174,9 +174,9 @@ src/sjifire/
 │   ├── groups.py      # Group management
 │   └── users.py       # User management
 └── scripts/           # CLI entry points
-    ├── aladtec_audit.py
-    ├── aladtec_import.py
     ├── aladtec_list.py
     ├── analyze_mappings.py
-    └── create_security_groups.py
+    ├── create_security_groups.py
+    ├── entra_audit.py
+    └── entra_sync.py
 ```

@@ -42,9 +42,9 @@ jobs:
           MS_GRAPH_CLIENT_SECRET: ${{ secrets.MS_GRAPH_CLIENT_SECRET }}
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run aladtec-import --disable-inactive --dry-run --json
+            uv run entra-sync --disable-inactive --dry-run --json
           else
-            uv run aladtec-import --disable-inactive --json
+            uv run entra-sync --disable-inactive --json
           fi
 
       - name: Upload backup artifacts
