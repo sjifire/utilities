@@ -188,7 +188,7 @@ class TestFullSyncResult:
     """Tests for FullSyncResult dataclass."""
 
     def test_totals_empty(self):
-        result = FullSyncResult(group_type="test", backup_path=None)
+        result = FullSyncResult(group_type="test")
         assert result.total_created == 0
         assert result.total_added == 0
         assert result.total_removed == 0
@@ -197,7 +197,6 @@ class TestFullSyncResult:
     def test_totals_with_groups(self):
         result = FullSyncResult(
             group_type="test",
-            backup_path="/path/to/backup.json",
             groups=[
                 GroupSyncResult(
                     group_name="Group1",

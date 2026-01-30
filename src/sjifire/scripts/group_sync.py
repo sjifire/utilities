@@ -27,12 +27,8 @@ def print_result(result: FullSyncResult, dry_run: bool = False) -> None:
     """Print sync results in a readable format."""
     logger.info("")
     logger.info("=" * 50)
-    logger.info("Results")
+    logger.info(f"Results: {result.group_type}")
     logger.info("=" * 50)
-
-    if result.backup_path:
-        logger.info(f"Backup created: {result.backup_path}")
-        logger.info("")
 
     for group_result in result.groups:
         logger.info(f"\n{group_result.group_name}:")
@@ -116,6 +112,16 @@ async def run_sync(
     # Run sync for each strategy
     manager = GroupSyncManager()
     total_errors = 0
+
+    # Backup all groups once before making any changes
+    if not dry_run:
+        logger.info("")
+        logger.info("Creating backup of all M365 groups...")
+        backup_path = await manager.backup_all_groups()
+        if backup_path:
+            logger.info(f"Backup created: {backup_path}")
+        else:
+            logger.warning("Backup failed, continuing anyway...")
 
     for strategy_name in strategies:
         logger.info("")

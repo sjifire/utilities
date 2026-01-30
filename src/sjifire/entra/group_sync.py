@@ -39,7 +39,6 @@ class FullSyncResult:
     """Result of a full group sync operation."""
 
     group_type: str
-    backup_path: str | None
     groups: list[GroupSyncResult] = field(default_factory=list)
 
     @property
@@ -368,8 +367,8 @@ class GroupSyncManager:
 
         return added, removed, errors
 
-    async def _backup_groups(self, strategy: GroupSyncStrategy) -> str | None:
-        """Backup current state of groups managed by this strategy.
+    async def backup_all_groups(self) -> str | None:
+        """Backup current state of all M365 groups.
 
         Returns:
             Path to backup file, or None if backup failed
@@ -390,7 +389,7 @@ class GroupSyncManager:
             backup_path = backup_entra_groups(
                 groups=all_groups,
                 memberships=memberships,
-                prefix=f"entra_{strategy.name}",
+                prefix="entra_groups",
             )
             return str(backup_path)
 
@@ -417,21 +416,12 @@ class GroupSyncManager:
         # Load Entra users
         await self._load_entra_users()
 
-        # Backup before making changes (skip for dry run)
-        backup_path = None
-        if not dry_run:
-            logger.info("Creating backup of current group state...")
-            backup_path = await self._backup_groups(strategy)
-
         # Get groups to sync from strategy
         groups_to_sync = strategy.get_groups_to_sync(members)
 
         if not groups_to_sync:
             logger.warning(f"No groups to sync for strategy: {strategy.name}")
-            return FullSyncResult(
-                group_type=strategy.name,
-                backup_path=backup_path,
-            )
+            return FullSyncResult(group_type=strategy.name)
 
         logger.info(
             f"Syncing {len(groups_to_sync)} {strategy.name} groups: "
@@ -489,6 +479,5 @@ class GroupSyncManager:
 
         return FullSyncResult(
             group_type=strategy.name,
-            backup_path=backup_path,
             groups=results,
         )
