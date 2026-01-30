@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass, field
 
 from sjifire.aladtec.models import Member
+from sjifire.core.config import load_entra_sync_config
 from sjifire.entra.users import EntraUser, EntraUserManager
 
 logger = logging.getLogger(__name__)
@@ -44,14 +45,22 @@ class ImportResult:
 class AladtecImporter:
     """Import Aladtec members into Entra ID."""
 
-    def __init__(self, domain: str = "sjifire.org") -> None:
+    def __init__(
+        self,
+        domain: str | None = None,
+        company_name: str | None = None,
+    ) -> None:
         """Initialize the importer.
 
         Args:
-            domain: Email domain for generating UPNs
+            domain: Email domain for generating UPNs (loaded from config if not provided)
+            company_name: Company name for Entra ID users (loaded from config if not provided)
         """
-        self.domain = domain
-        self.user_manager = EntraUserManager(domain=domain)
+        config = load_entra_sync_config()
+        self.domain = domain or config.domain
+        self.company_name = company_name or config.company_name
+        self.skip_emails = {e.lower() for e in config.skip_emails}
+        self.user_manager = EntraUserManager(domain=self.domain)
 
     async def import_members(
         self,
@@ -141,15 +150,24 @@ class AladtecImporter:
             )
             return
 
+        # Skip emails in the skip list (test/api accounts)
+        if member.email.lower() in self.skip_emails:
+            result.skipped.append(
+                {
+                    "member": member.display_name,
+                    "reason": "email in skip list",
+                    "email": member.email,
+                }
+            )
+            return
+
         # Find existing Entra user
+        # UPN should be the email address
         email_lower = member.email.lower()
-        upn = self.user_manager.generate_upn(member.first_name, member.last_name)
-        upn_lower = upn.lower()
 
         existing = (
             user_by_email.get(email_lower)
             or user_by_upn.get(email_lower)
-            or user_by_upn.get(upn_lower)
             or user_by_name.get(member.display_name.lower())
         )
 
@@ -164,7 +182,6 @@ class AladtecImporter:
         else:
             await self._handle_new_user(
                 member=member,
-                upn=upn,
                 result=result,
                 dry_run=dry_run,
             )
@@ -189,17 +206,33 @@ class AladtecImporter:
         # Check if member is inactive and should be disabled
         if not member.is_active and disable_inactive:
             if existing.account_enabled:
-                action = "Would disable" if dry_run else "Disabled"
-                if not dry_run:
-                    await self.user_manager.disable_user(existing.id)
-                result.disabled.append(
-                    {
-                        "member": member.display_name,
-                        "email": member.email,
-                        "user_id": existing.id,
-                    }
-                )
-                logger.info(f"{action}: {member.display_name}")
+                if dry_run:
+                    result.disabled.append(
+                        {
+                            "member": member.display_name,
+                            "email": member.email,
+                            "user_id": existing.id,
+                        }
+                    )
+                    logger.info(f"Would disable: {member.display_name}")
+                else:
+                    success = await self.user_manager.disable_user(existing.id)
+                    if success:
+                        result.disabled.append(
+                            {
+                                "member": member.display_name,
+                                "email": member.email,
+                                "user_id": existing.id,
+                            }
+                        )
+                        logger.info(f"Disabled: {member.display_name}")
+                    else:
+                        result.errors.append(
+                            {
+                                "member": member.display_name,
+                                "error": "Failed to disable user in Entra ID",
+                            }
+                        )
             else:
                 result.skipped.append(
                     {
@@ -211,22 +244,57 @@ class AladtecImporter:
 
         # Check if update needed
         if self._needs_update(existing, member):
-            action = "Would update" if dry_run else "Updated"
-            if not dry_run:
-                await self.user_manager.update_user(
+            if dry_run:
+                result.updated.append(
+                    {
+                        "member": member.display_name,
+                        "email": member.email,
+                    }
+                )
+                logger.info(f"Would update: {member.display_name}")
+            else:
+                # Build business phones list from home_phone if available
+                business_phones = [member.home_phone] if member.home_phone else None
+
+                # Build display name with rank prefix (e.g., "Captain Kyle Dodd")
+                display_name = self._build_display_name(member)
+
+                # Build positions as comma-delimited string
+                positions_str = ",".join(member.positions) if member.positions else None
+
+                success = await self.user_manager.update_user(
                     user_id=existing.id,
-                    display_name=member.display_name,
+                    display_name=display_name,
                     first_name=member.first_name,
                     last_name=member.last_name,
                     employee_id=member.employee_id,
+                    job_title=member.job_title,
+                    mobile_phone=member.phone,
+                    business_phones=business_phones,
+                    office_location=member.office_location,
+                    employee_hire_date=member.date_hired,
+                    employee_type=member.work_group,
+                    personal_email=member.personal_email,
+                    company_name=self.company_name,
+                    extension_attribute1=member.rank,
+                    extension_attribute2=member.evip,
+                    extension_attribute3=positions_str,
                 )
-            result.updated.append(
-                {
-                    "member": member.display_name,
-                    "email": member.email,
-                }
-            )
-            logger.info(f"{action}: {member.display_name}")
+                if success:
+                    result.updated.append(
+                        {
+                            "member": member.display_name,
+                            "email": member.email,
+                        }
+                    )
+                    logger.info(f"Updated: {member.display_name}")
+                else:
+                    result.errors.append(
+                        {
+                            "member": member.display_name,
+                            "error": "Failed to update user in Entra ID",
+                        }
+                    )
         else:
             result.skipped.append(
                 {
@@ -238,7 +306,6 @@ class AladtecImporter:
     async def _handle_new_user(
         self,
         member: Member,
-        upn: str,
         result: ImportResult,
         dry_run: bool,
     ) -> None:
@@ -246,7 +313,6 @@ class AladtecImporter:
 
         Args:
             member: Aladtec member
-            upn: Generated UPN for the user
             result: ImportResult to update
             dry_run: If True, don't make changes
         """
@@ -260,24 +326,77 @@ class AladtecImporter:
             )
             return
 
-        action = "Would create" if dry_run else "Created"
-        if not dry_run:
-            await self.user_manager.create_user(
-                display_name=member.display_name,
+        # UPN is the email address (already validated as non-None in _process_member)
+        upn = member.email
+        assert upn is not None  # noqa: S101
+
+        if dry_run:
+            result.created.append(
+                {
+                    "member": member.display_name,
+                    "email": member.email,
+                    "upn": upn,
+                }
+            )
+            logger.info(f"Would create: {member.display_name} ({upn})")
+        else:
+            # Build business phones list from home_phone if available
+            business_phones = [member.home_phone] if member.home_phone else None
+
+            # Build display name with rank prefix (e.g., "Captain Kyle Dodd")
+            display_name = self._build_display_name(member)
+
+            # Build positions as comma-delimited string
+            positions_str = ",".join(member.positions) if member.positions else None
+
+            created_user = await self.user_manager.create_user(
+                display_name=display_name,
                 first_name=member.first_name,
                 last_name=member.last_name,
                 upn=upn,
                 email=member.email,
                 employee_id=member.employee_id,
+                job_title=member.job_title,
+                mobile_phone=member.phone,
+                business_phones=business_phones,
+                office_location=member.office_location,
+                employee_hire_date=member.date_hired,
+                employee_type=member.work_group,
+                personal_email=member.personal_email,
+                company_name=self.company_name,
+                extension_attribute1=member.rank,
+                extension_attribute2=member.evip,
+                extension_attribute3=positions_str,
             )
-        result.created.append(
-            {
-                "member": member.display_name,
-                "email": member.email,
-                "upn": upn,
-            }
-        )
-        logger.info(f"{action}: {member.display_name} ({upn})")
+            if created_user:
+                result.created.append(
+                    {
+                        "member": member.display_name,
+                        "email": member.email,
+                        "upn": upn,
+                    }
+                )
+                logger.info(f"Created: {member.display_name} ({upn})")
+            else:
+                result.errors.append(
+                    {
+                        "member": member.display_name,
+                        "error": "Failed to create user in Entra ID",
+                    }
+                )
+
+    def _build_display_name(self, member: Member) -> str:
+        """Build display name with rank prefix if applicable.
+
+        Args:
+            member: Aladtec member
+
+        Returns:
+            Display name, e.g. "Chief Michael Hartzell" or "Kyle Dodd"
+        """
+        if member.display_rank:
+            return f"{member.display_rank} {member.first_name} {member.last_name}"
+        return member.display_name
 
     def _needs_update(self, existing: EntraUser, member: Member) -> bool:
         """Check if an existing user needs to be updated.
@@ -293,6 +412,59 @@ class AladtecImporter:
             return True
         if existing.last_name != member.last_name:
             return True
-        if existing.display_name != member.display_name:
+        # Check display name with rank prefix
+        expected_display = self._build_display_name(member)
+        if existing.display_name != expected_display:
             return True
-        return bool(member.employee_id and existing.employee_id != member.employee_id)
+        # Aladtec is authoritative - if values differ, update (even if Aladtec is blank)
+        if existing.employee_id != member.employee_id:
+            return True
+        if existing.job_title != member.job_title:
+            return True
+        if existing.mobile_phone != member.phone:
+            return True
+        if existing.office_location != member.office_location:
+            return True
+        # Work group goes to employee_type
+        if existing.employee_type != member.work_group:
+            return True
+        # Check home_phone against business_phones
+        if member.home_phone:
+            existing_phones = existing.business_phones or []
+            if member.home_phone not in existing_phones:
+                return True
+        # Check hire date - only update if Aladtec date <= Entra date
+        if member.date_hired:
+            member_date = member.date_hired.replace("/", "-")
+            if existing.employee_hire_date:
+                # Only update if dates differ AND Aladtec is older or equal
+                if not existing.employee_hire_date.startswith(member_date):
+                    # Compare dates - Aladtec should be <= Entra
+                    if member_date <= existing.employee_hire_date[:10]:
+                        return True
+                    else:
+                        # Aladtec date is newer - flag but don't update
+                        entra_date = existing.employee_hire_date[:10]
+                        logger.warning(
+                            f"Hire date conflict for {member.display_name}: "
+                            f"Aladtec={member_date} is newer than Entra={entra_date}"
+                        )
+            else:
+                # Entra has no hire date, safe to set
+                return True
+        # Check personal email
+        if existing.personal_email != member.personal_email:
+            return True
+        # Check company name
+        if existing.company_name != self.company_name:
+            return True
+        # Check extension attributes
+        # extensionAttribute1 = rank
+        if existing.extension_attribute1 != member.rank:
+            return True
+        # extensionAttribute2 = EVIP
+        if existing.extension_attribute2 != member.evip:
+            return True
+        # extensionAttribute3 = positions (comma-delimited)
+        positions_str = ",".join(member.positions) if member.positions else None
+        return existing.extension_attribute3 != positions_str

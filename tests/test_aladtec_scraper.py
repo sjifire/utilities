@@ -98,14 +98,14 @@ class TestAladtecScraperCSVRowParsing:
         row = {
             "first name": "John",
             "last name": "Doe",
-            "email": "john@example.com",
+            "email": "john.doe@sjifire.org",
         }
         member = scraper._parse_csv_row(row)
 
         assert member is not None
         assert member.first_name == "John"
         assert member.last_name == "Doe"
-        assert member.email == "john@example.com"
+        assert member.email == "john.doe@sjifire.org"
 
     def test_parse_csv_row_normalized_keys(self, mock_env_vars):
         scraper = AladtecScraper()
@@ -132,12 +132,13 @@ class TestAladtecScraperCSVRowParsing:
         row = {
             "first name": "John",
             "last name": "Doe",
-            "email": "john@example.com, john.personal@gmail.com",
+            "email": "john.doe@sjifire.org, john.personal@gmail.com",
         }
         member = scraper._parse_csv_row(row)
 
         assert member is not None
-        assert member.email == "john@example.com"
+        assert member.email == "john.doe@sjifire.org"
+        assert member.personal_email == "john.personal@gmail.com"
 
     def test_parse_csv_row_name_column_with_comma(self, mock_env_vars):
         scraper = AladtecScraper()

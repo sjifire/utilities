@@ -1,0 +1,12 @@
+{
+  "company_name": "San Juan Island Fire & Rescue",
+  "domain": "sjifire.org",
+  "skip_emails": [
+    "aladtec.admin@sjifire.org"
+  ],
+  "extension_attributes": {
+    "extensionAttribute1": "Rank (Captain, Lieutenant, Chief, etc.)",
+    "extensionAttribute2": "EVIP Expiration Date",
+    "extensionAttribute3": "Positions (comma-delimited scheduling positions)"
+  }
+}
