@@ -67,8 +67,8 @@ async def compare_memberships(config_path: Path, verbose: bool = False) -> None:
                 if pos in position_mappings:
                     for group_name in position_mappings[pos].get("ms_365_groups", []):
                         expected_memberships[group_name].add(member.display_name)
-        elif member.position and member.position in position_mappings:
-            for group_name in position_mappings[member.position].get("ms_365_groups", []):
+        elif member.employee_type and member.employee_type in position_mappings:
+            for group_name in position_mappings[member.employee_type].get("ms_365_groups", []):
                 expected_memberships[group_name].add(member.display_name)
 
         # Check work group mappings

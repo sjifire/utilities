@@ -68,7 +68,7 @@ class TestMember:
             email="john.doe@sjifire.org",
             phone="555-1234",
             home_phone="555-5678",
-            position="Firefighter",
+            employee_type="Firefighter",
             positions=["Firefighter", "EMT"],
             title="Captain",
             status="Active",
@@ -85,7 +85,7 @@ class TestMember:
         assert member.email == "john.doe@sjifire.org"
         assert member.phone == "555-1234"
         assert member.home_phone == "555-5678"
-        assert member.position == "Firefighter"
+        assert member.employee_type == "Firefighter"
         assert member.positions == ["Firefighter", "EMT"]
         assert member.title == "Captain"
         assert member.status == "Active"
@@ -101,15 +101,15 @@ class TestMemberRank:
     """Tests for the rank property."""
 
     def test_rank_from_position_captain(self):
-        member = Member(id="1", first_name="Kyle", last_name="Dodd", position="Captain")
+        member = Member(id="1", first_name="Kyle", last_name="Dodd", employee_type="Captain")
         assert member.rank == "Captain"
 
     def test_rank_from_position_lieutenant(self):
-        member = Member(id="1", first_name="Tom", last_name="Eades", position="Lieutenant")
+        member = Member(id="1", first_name="Tom", last_name="Eades", employee_type="Lieutenant")
         assert member.rank == "Lieutenant"
 
     def test_rank_from_position_chief(self):
-        member = Member(id="1", first_name="Mike", last_name="Hartzell", position="Chief")
+        member = Member(id="1", first_name="Mike", last_name="Hartzell", employee_type="Chief")
         assert member.rank == "Chief"
 
     def test_rank_from_title_when_position_not_rank(self):
@@ -117,7 +117,7 @@ class TestMemberRank:
             id="1",
             first_name="John",
             last_name="Doe",
-            position="Firefighter",
+            employee_type="Firefighter",
             title="Captain",
         )
         assert member.rank == "Captain"
@@ -128,7 +128,7 @@ class TestMemberRank:
             id="1",
             first_name="John",
             last_name="Doe",
-            position="Captain",
+            employee_type="Captain",
             title="Lieutenant",
         )
         assert member.rank == "Lieutenant"
@@ -138,7 +138,7 @@ class TestMemberRank:
             id="1",
             first_name="John",
             last_name="Doe",
-            position="Firefighter",
+            employee_type="Firefighter",
             title="EMT",
         )
         assert member.rank is None
@@ -148,15 +148,15 @@ class TestMemberRank:
         assert member.rank is None
 
     def test_rank_case_insensitive(self):
-        member = Member(id="1", first_name="John", last_name="Doe", position="CAPTAIN")
+        member = Member(id="1", first_name="John", last_name="Doe", employee_type="CAPTAIN")
         assert member.rank == "Captain"
 
     def test_division_chief_rank(self):
-        member = Member(id="1", first_name="John", last_name="Doe", position="Division Chief")
+        member = Member(id="1", first_name="John", last_name="Doe", employee_type="Division Chief")
         assert member.rank == "Division Chief"
 
     def test_battalion_chief_rank(self):
-        member = Member(id="1", first_name="John", last_name="Doe", position="Battalion Chief")
+        member = Member(id="1", first_name="John", last_name="Doe", employee_type="Battalion Chief")
         assert member.rank == "Battalion Chief"
 
 
@@ -214,7 +214,7 @@ class TestMemberJobTitle:
             id="1",
             first_name="Tad",
             last_name="Lean",
-            position="Captain",
+            employee_type="Captain",
             title="Maintenance Officer",
         )
         assert member.job_title == "Maintenance Officer"

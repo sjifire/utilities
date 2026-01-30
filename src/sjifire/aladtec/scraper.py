@@ -476,12 +476,12 @@ class AladtecScraper:
         home_phone_raw = get_field("home phone", "home", "landline")
         home_phone = format_phone(home_phone_raw)
 
-        # Position/Employee Type (may be multiple, comma-separated)
-        position_raw = get_field("employee type", "position", "positions", "rank", "role")
-        position = position_raw
+        # Employee Type (may be multiple, comma-separated in CSV)
+        employee_type_raw = get_field("employee type", "position", "positions", "rank", "role")
+        employee_type = employee_type_raw
         positions: list[str] = []
-        if position_raw:
-            positions = [p.strip() for p in position_raw.split(",") if p.strip()]
+        if employee_type_raw:
+            positions = [p.strip() for p in employee_type_raw.split(",") if p.strip()]
 
         # Title - clean up newlines and duplicates (only from Title column)
         title_raw = get_field("title")
@@ -523,7 +523,7 @@ class AladtecScraper:
             personal_email=personal_email,
             phone=phone,
             home_phone=home_phone,
-            position=position,
+            employee_type=employee_type,
             positions=positions,
             title=title,
             status=status,

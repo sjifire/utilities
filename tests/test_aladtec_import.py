@@ -83,7 +83,7 @@ class TestBuildDisplayName:
             id="1",
             first_name="Kyle",
             last_name="Dodd",
-            position="Captain",
+            employee_type="Captain",
         )
         assert importer._build_display_name(member) == "Captain Kyle Dodd"
 
@@ -92,7 +92,7 @@ class TestBuildDisplayName:
             id="1",
             first_name="Tom",
             last_name="Eades",
-            position="Lieutenant",
+            employee_type="Lieutenant",
         )
         assert importer._build_display_name(member) == "Lieutenant Tom Eades"
 
@@ -101,7 +101,7 @@ class TestBuildDisplayName:
             id="1",
             first_name="Mike",
             last_name="Hartzell",
-            position="Chief",
+            employee_type="Chief",
         )
         assert importer._build_display_name(member) == "Chief Mike Hartzell"
 
@@ -110,7 +110,7 @@ class TestBuildDisplayName:
             id="1",
             first_name="John",
             last_name="Smith",
-            position="Firefighter",
+            employee_type="Firefighter",
         )
         assert importer._build_display_name(member) == "John Smith"
 
@@ -195,7 +195,7 @@ class TestNeedsUpdate:
             first_name="Kyle",
             last_name="Dodd",
             email="kdodd@testfire.org",
-            position="Captain",
+            employee_type="Captain",
         )
         # Should need update because display name should be "Captain Kyle Dodd"
         assert importer._needs_update(existing, member) is True
@@ -236,7 +236,7 @@ class TestNeedsUpdate:
             first_name="John",
             last_name="Smith",
             email="jsmith@testfire.org",
-            position="Captain",
+            employee_type="Captain",
         )
         assert importer._needs_update(existing, member) is True
 

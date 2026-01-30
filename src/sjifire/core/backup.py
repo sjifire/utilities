@@ -116,7 +116,7 @@ def _member_to_dict(member: Member) -> dict:
         "email": member.email,
         "phone": member.phone,
         "home_phone": member.home_phone,
-        "position": member.position,
+        "employee_type": member.employee_type,
         "positions": member.positions,
         "title": member.title,
         "status": member.status,

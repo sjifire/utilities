@@ -17,7 +17,7 @@ class Member:
     personal_email: str | None = None
     phone: str | None = None
     home_phone: str | None = None
-    position: str | None = None
+    employee_type: str | None = None  # "Employee Type" field from Aladtec CSV
     positions: list[str] = field(default_factory=list)
     title: str | None = None
     status: str | None = None
@@ -56,8 +56,8 @@ class Member:
         Prioritizes Title field (more specific) over Employee Type.
         Returns the full rank (e.g., "Battalion Chief") for extensionAttribute1.
         """
-        # Check Title first (more specific), then Employee Type (position)
-        for field_value in (self.title, self.position):
+        # Check Title first (more specific), then Employee Type
+        for field_value in (self.title, self.employee_type):
             if not field_value:
                 continue
             for rank in RANK_HIERARCHY:
