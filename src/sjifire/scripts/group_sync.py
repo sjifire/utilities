@@ -16,6 +16,11 @@ from sjifire.entra.group_sync import (
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+# Silence verbose HTTP request logging
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("azure.identity").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+
 # Available sync strategies
 STRATEGIES = {
     "stations": StationGroupStrategy,
