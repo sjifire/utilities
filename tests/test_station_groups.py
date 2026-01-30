@@ -20,6 +20,17 @@ class TestStationGroupStrategy:
     def test_name(self):
         assert self.strategy.name == "station"
 
+    def test_automation_notice(self):
+        notice = self.strategy.automation_notice
+        assert "automatically" in notice.lower()
+        assert "Aladtec" in notice
+
+    def test_get_full_description(self):
+        full_desc = self.strategy.get_full_description("31")
+        assert "Station 31" in full_desc
+        assert "Aladtec" in full_desc
+        assert "automatically" in full_desc.lower()
+
     def test_parse_station_none(self):
         assert self.strategy._parse_station(None) is None
 

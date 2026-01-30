@@ -76,6 +76,11 @@ class GroupSyncStrategy(ABC):
     def name(self) -> str:
         """Human-readable name for this sync strategy."""
 
+    @property
+    @abstractmethod
+    def automation_notice(self) -> str:
+        """Notice to append to group descriptions indicating automated management."""
+
     @abstractmethod
     def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
         """Determine which groups should exist and their members.
@@ -98,6 +103,22 @@ class GroupSyncStrategy(ABC):
             Tuple of (display_name, mail_nickname, description)
         """
 
+    def get_full_description(self, group_key: str) -> str:
+        """Get full description including automation notice.
+
+        Args:
+            group_key: The key identifying this group
+
+        Returns:
+            Full description with automation notice appended
+        """
+        _, _, base_description = self.get_group_config(group_key)
+        parts = []
+        if base_description:
+            parts.append(base_description)
+        parts.append(self.automation_notice)
+        return "\n\n".join(parts)
+
 
 class StationGroupStrategy(GroupSyncStrategy):
     """Sync strategy for station-based groups.
@@ -110,6 +131,14 @@ class StationGroupStrategy(GroupSyncStrategy):
     def name(self) -> str:
         """Return strategy name."""
         return "station"
+
+    @property
+    def automation_notice(self) -> str:
+        """Return automation notice for station groups."""
+        return (
+            "⚠️ Membership is automatically managed based on Station Assignment "
+            "in Aladtec. Manual changes will be overwritten."
+        )
 
     def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
         """Group members by station assignment."""
@@ -364,7 +393,8 @@ class GroupSyncManager:
 
         for group_key in sorted(groups_to_sync.keys()):
             group_members = groups_to_sync[group_key]
-            display_name, mail_nickname, description = strategy.get_group_config(group_key)
+            display_name, mail_nickname, _ = strategy.get_group_config(group_key)
+            full_description = strategy.get_full_description(group_key)
 
             logger.info(f"Processing {display_name} ({len(group_members)} members)")
 
@@ -372,7 +402,7 @@ class GroupSyncManager:
             group, created = await self._get_or_create_group(
                 display_name=display_name,
                 mail_nickname=mail_nickname,
-                description=description,
+                description=full_description,
                 dry_run=dry_run,
             )
 
