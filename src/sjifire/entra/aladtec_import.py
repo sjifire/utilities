@@ -260,7 +260,8 @@ class AladtecImporter:
                 display_name = self._build_display_name(member)
 
                 # Build positions as comma-delimited string
-                positions_str = ",".join(member.positions) if member.positions else None
+                # Use empty string (not None) to clear the field if positions is empty
+                positions_str = ",".join(member.positions) if member.positions else ""
 
                 success = await self.user_manager.update_user(
                     user_id=existing.id,
@@ -276,8 +277,9 @@ class AladtecImporter:
                     employee_type=member.work_group,
                     personal_email=member.personal_email,
                     company_name=self.company_name,
-                    extension_attribute1=member.rank,
-                    extension_attribute2=member.evip,
+                    # Use empty string to clear if None, so Graph API clears the field
+                    extension_attribute1=member.rank or "",
+                    extension_attribute2=member.evip or "",
                     extension_attribute3=positions_str,
                 )
                 if success:
@@ -458,13 +460,13 @@ class AladtecImporter:
         # Check company name
         if existing.company_name != self.company_name:
             return True
-        # Check extension attributes
+        # Check extension attributes (normalize None to "" for comparison)
         # extensionAttribute1 = rank
-        if existing.extension_attribute1 != member.rank:
+        if (existing.extension_attribute1 or "") != (member.rank or ""):
             return True
         # extensionAttribute2 = EVIP
-        if existing.extension_attribute2 != member.evip:
+        if (existing.extension_attribute2 or "") != (member.evip or ""):
             return True
         # extensionAttribute3 = positions (comma-delimited)
-        positions_str = ",".join(member.positions) if member.positions else None
-        return existing.extension_attribute3 != positions_str
+        positions_str = ",".join(member.positions) if member.positions else ""
+        return (existing.extension_attribute3 or "") != positions_str

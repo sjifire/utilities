@@ -350,6 +350,74 @@ class TestNeedsUpdate:
         )
         assert importer._needs_update(existing, member) is True
 
+    def test_positions_cleared_when_empty(self, importer):
+        """When Aladtec has no positions but Entra does, should need update to clear."""
+        existing = EntraUser(
+            id="user-1",
+            display_name="John Smith",
+            first_name="John",
+            last_name="Smith",
+            email="jsmith@testfire.org",
+            upn="jsmith@testfire.org",
+            employee_id=None,
+            company_name="Test Fire Department",
+            extension_attribute3="Commissioner",  # Has positions in Entra
+        )
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Smith",
+            email="jsmith@testfire.org",
+            positions=[],  # Empty positions in Aladtec
+        )
+        assert importer._needs_update(existing, member) is True
+
+    def test_rank_cleared_when_none(self, importer):
+        """When Aladtec has no rank but Entra does, should need update to clear."""
+        existing = EntraUser(
+            id="user-1",
+            display_name="Captain John Smith",
+            first_name="John",
+            last_name="Smith",
+            email="jsmith@testfire.org",
+            upn="jsmith@testfire.org",
+            employee_id=None,
+            company_name="Test Fire Department",
+            extension_attribute1="Captain",  # Has rank in Entra
+        )
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Smith",
+            email="jsmith@testfire.org",
+            # No position field, so rank is None
+        )
+        assert importer._needs_update(existing, member) is True
+
+    def test_no_update_when_both_empty(self, importer):
+        """When both Aladtec and Entra have no positions, no update needed."""
+        existing = EntraUser(
+            id="user-1",
+            display_name="John Smith",
+            first_name="John",
+            last_name="Smith",
+            email="jsmith@testfire.org",
+            upn="jsmith@testfire.org",
+            employee_id=None,
+            company_name="Test Fire Department",
+            extension_attribute1=None,
+            extension_attribute2=None,
+            extension_attribute3=None,  # No positions in Entra
+        )
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Smith",
+            email="jsmith@testfire.org",
+            positions=[],  # No positions in Aladtec
+        )
+        assert importer._needs_update(existing, member) is False
+
 
 class TestHandleExistingUserDisableInactive:
     """Tests for _handle_existing_user with disable_inactive functionality."""
