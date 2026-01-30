@@ -149,7 +149,7 @@ class TestMemberToDict:
             email="john@example.com",
             phone="555-1234",
             home_phone="555-5678",
-            position="Captain",
+            employee_type="Captain",
             positions=["Firefighter", "EMT"],
             title="Captain",
             status="Active",

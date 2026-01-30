@@ -1,10 +1,15 @@
 """Tests for sjifire.core.config."""
 
+import json
 from unittest.mock import patch
 
 import pytest
 
-from sjifire.core.config import get_aladtec_credentials, get_graph_credentials
+from sjifire.core.config import (
+    get_aladtec_credentials,
+    get_graph_credentials,
+    load_entra_sync_config,
+)
 
 
 class TestGetAladtecCredentials:
@@ -105,3 +110,53 @@ class TestGetGraphCredentials:
             pytest.raises(ValueError, match="MS_GRAPH_CLIENT_SECRET"),
         ):
             get_graph_credentials()
+
+
+class TestLoadEntraSyncConfig:
+    """Tests for load_entra_sync_config function."""
+
+    def test_loads_company_name(self, tmp_path):
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        config_file = config_dir / "entra_sync.json"
+        config_file.write_text(json.dumps({"company_name": "Test Fire Dept", "domain": "test.org"}))
+
+        with patch("sjifire.core.config.get_project_root", return_value=tmp_path):
+            config = load_entra_sync_config()
+
+        assert config.company_name == "Test Fire Dept"
+
+    def test_loads_domain(self, tmp_path):
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        config_file = config_dir / "entra_sync.json"
+        config_file.write_text(
+            json.dumps({"company_name": "Test Fire Dept", "domain": "testfire.org"})
+        )
+
+        with patch("sjifire.core.config.get_project_root", return_value=tmp_path):
+            config = load_entra_sync_config()
+
+        assert config.domain == "testfire.org"
+
+    def test_default_domain_when_missing(self, tmp_path):
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        config_file = config_dir / "entra_sync.json"
+        config_file.write_text(json.dumps({"company_name": "Test Fire Dept"}))
+
+        with patch("sjifire.core.config.get_project_root", return_value=tmp_path):
+            config = load_entra_sync_config()
+
+        assert config.domain == "sjifire.org"
+
+    def test_raises_when_file_missing(self, tmp_path):
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        # Don't create the file
+
+        with (
+            patch("sjifire.core.config.get_project_root", return_value=tmp_path),
+            pytest.raises(FileNotFoundError),
+        ):
+            load_entra_sync_config()

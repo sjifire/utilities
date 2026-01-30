@@ -95,8 +95,8 @@ async def analyze_mappings(verbose: bool = False) -> None:
         if member.positions:
             for pos in member.positions:
                 position_members[pos].append(member.display_name)
-        elif member.position:
-            position_members[member.position].append(member.display_name)
+        elif member.employee_type:
+            position_members[member.employee_type].append(member.display_name)
 
     positions = sorted(position_members.keys())
     logger.info(f"Found {len(positions)} unique positions across {len(members)} members")

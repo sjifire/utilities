@@ -1,0 +1,56 @@
+name: Entra ID Sync
+
+on:
+  schedule:
+    # Run at noon Pacific, Monday-Friday (20:00 UTC = 12pm PST / 1pm PDT)
+    - cron: '0 20 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no changes)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  sync:
+    name: Sync Aladtec to Entra ID
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run Entra sync
+        env:
+          ALADTEC_URL: ${{ secrets.ALADTEC_URL }}
+          ALADTEC_USERNAME: ${{ secrets.ALADTEC_USERNAME }}
+          ALADTEC_PASSWORD: ${{ secrets.ALADTEC_PASSWORD }}
+          MS_GRAPH_TENANT_ID: ${{ secrets.MS_GRAPH_TENANT_ID }}
+          MS_GRAPH_CLIENT_ID: ${{ secrets.MS_GRAPH_CLIENT_ID }}
+          MS_GRAPH_CLIENT_SECRET: ${{ secrets.MS_GRAPH_CLIENT_SECRET }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            uv run entra-sync --disable-inactive --dry-run --json
+          else
+            uv run entra-sync --disable-inactive --json
+          fi
+
+      - name: Upload backup artifacts
+        if: ${{ inputs.dry_run != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: entra-backup-${{ github.run_id }}
+          path: backups/
+          retention-days: 30

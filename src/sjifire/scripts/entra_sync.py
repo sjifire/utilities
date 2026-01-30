@@ -8,7 +8,7 @@ import sys
 from dataclasses import asdict
 
 from sjifire.aladtec.scraper import AladtecScraper
-from sjifire.core.backup import backup_aladtec_members, backup_entra_users
+from sjifire.core.backup import backup_entra_users
 from sjifire.entra.aladtec_import import AladtecImporter
 from sjifire.entra.users import EntraUserManager
 
@@ -20,15 +20,17 @@ async def run_import(
     dry_run: bool = False,
     disable_inactive: bool = False,
     output_json: bool = False,
-    backup: bool = False,
+    individual: str | None = None,
 ) -> int:
     """Run the Aladtec to Entra import.
 
+    Automatically backs up Entra ID users before making any changes.
+
     Args:
-        dry_run: If True, don't make changes
+        dry_run: If True, don't make changes (skips backup)
         disable_inactive: If True, disable accounts for inactive members
         output_json: If True, output results as JSON
-        backup: If True, backup Aladtec and Entra data before import
+        individual: If set, only sync this individual by email
 
     Returns:
         Exit code
@@ -62,28 +64,35 @@ async def run_import(
             f"Found {len(members)} members ({active_count} active, {inactive_count} inactive)"
         )
 
+        # Filter to individual if specified (by email)
+        if individual:
+            individual_lower = individual.lower()
+            matching = [m for m in members if m.email and m.email.lower() == individual_lower]
+
+            if not matching:
+                logger.error(f"No member found with email '{individual}'")
+                return 1
+            members = matching
+            logger.info(f"Filtering to individual: {members[0].display_name}")
+
     except Exception as e:
         logger.error(f"Failed to fetch Aladtec members: {e}")
         return 1
 
-    # Backup data before making changes
-    if backup:
+    # Backup Entra data before making changes (automatic, not optional)
+    # Skip backup only for dry runs since no changes will be made
+    if not dry_run:
         logger.info("")
-        logger.info("Creating backups...")
+        logger.info("Creating backup of Entra ID users...")
 
         try:
-            # Backup Aladtec members
-            aladtec_backup = backup_aladtec_members(members)
-            logger.info(f"Aladtec backup: {aladtec_backup}")
-
-            # Backup Entra users
             user_manager = EntraUserManager()
             entra_users = await user_manager.get_users(include_disabled=True)
             entra_backup = backup_entra_users(entra_users)
             logger.info(f"Entra backup: {entra_backup}")
 
         except Exception as e:
-            logger.error(f"Failed to create backups: {e}")
+            logger.error(f"Failed to create Entra backup: {e}")
             return 1
 
     # Import to Entra ID
@@ -148,9 +157,10 @@ def main():
         help="Output results as JSON",
     )
     parser.add_argument(
-        "--backup",
-        action="store_true",
-        help="Backup Aladtec and Entra data before importing",
+        "--individual",
+        type=str,
+        metavar="EMAIL",
+        help="Only sync a single individual by work email address",
     )
 
     args = parser.parse_args()
@@ -160,7 +170,7 @@ def main():
             dry_run=args.dry_run,
             disable_inactive=args.disable_inactive,
             output_json=args.output_json,
-            backup=args.backup,
+            individual=args.individual,
         )
     )
     sys.exit(exit_code)

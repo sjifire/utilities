@@ -3,6 +3,7 @@
 import csv
 import io
 import logging
+import re
 from typing import Self
 
 import httpx
@@ -12,6 +13,81 @@ from sjifire.aladtec.models import Member
 from sjifire.core.config import get_aladtec_credentials
 
 logger = logging.getLogger(__name__)
+
+
+def format_phone(phone: str | None) -> str | None:
+    """Format phone number to standard US format using libphonenumber.
+
+    Args:
+        phone: Raw phone number string
+
+    Returns:
+        Formatted phone number in national format, or None if invalid
+    """
+    if not phone:
+        return None
+
+    import phonenumbers
+
+    try:
+        # Parse as US number (default region)
+        parsed = phonenumbers.parse(phone, "US")
+
+        # Validate it's a possible number
+        if not phonenumbers.is_possible_number(parsed):
+            return phone.strip()
+
+        # Format in national format: (XXX) XXX-XXXX
+        return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.NATIONAL)
+    except phonenumbers.NumberParseException:
+        # Return original if parsing fails
+        return phone.strip() if phone else None
+
+
+def clean_title(title: str | None) -> str | None:
+    """Clean up title field - handle newlines and duplicates.
+
+    Args:
+        title: Raw title string (may contain newlines and duplicates)
+
+    Returns:
+        Cleaned title (first unique value)
+    """
+    if not title:
+        return None
+
+    # Split on newlines and take first non-empty line
+    lines = [line.strip() for line in title.replace("\r", "").split("\n")]
+    for line in lines:
+        if line:
+            return line
+
+    return None
+
+
+def validate_email(email: str | None, context: str = "") -> str | None:
+    """Validate email address format.
+
+    Args:
+        email: Email address to validate
+        context: Context for logging (e.g., member name)
+
+    Returns:
+        Valid email or None if invalid
+    """
+    if not email:
+        return None
+
+    from email_validator import EmailNotValidError
+    from email_validator import validate_email as ev
+
+    try:
+        # Validate and normalize the email
+        result = ev(email, check_deliverability=False)
+        return result.normalized
+    except EmailNotValidError as e:
+        logger.warning(f"Invalid email '{email}'{f' for {context}' if context else ''}: {e}")
+        return None
 
 
 class AladtecScraper:
@@ -244,8 +320,23 @@ class AladtecScraper:
             if not first_name or not last_name:
                 continue
 
-            # Get email
-            email = row.get("Email", "").strip() or None
+            # Get email - parse business and personal
+            email_raw = row.get("Email", "").strip()
+            email = None
+            personal_email = None
+            member_context = f"{first_name} {last_name}"
+            if email_raw:
+                emails = [e.strip() for e in email_raw.split(",") if e.strip()]
+                for e in emails:
+                    if e.endswith("@sjifire.org"):
+                        if not email:
+                            email = e
+                    else:
+                        if not personal_email:
+                            # Validate personal email
+                            validated = validate_email(e, member_context)
+                            if validated:
+                                personal_email = validated
 
             # Create member
             member_id = f"{first_name.lower()}.{last_name.lower()}"
@@ -258,6 +349,7 @@ class AladtecScraper:
                 first_name=first_name,
                 last_name=last_name,
                 email=email,
+                personal_email=personal_email,
                 status=status,
                 work_group=work_group,
                 pay_profile=pay_profile,
@@ -355,27 +447,45 @@ class AladtecScraper:
         if not first_name or not last_name:
             return None
 
-        # Email
-        email = get_field("email", "e-mail", "email address")
-        # Handle multiple emails (comma-separated in Aladtec)
-        if email and "," in email:
-            email = email.split(",")[0].strip()
+        # Email - parse business (@sjifire.org) and personal emails
+        email_raw = get_field("email", "e-mail", "email address", "emails")
+        email = None
+        personal_email = None
+        member_context = f"{first_name} {last_name}"
+        if email_raw:
+            # Split multiple emails (comma-separated in Aladtec)
+            emails = [e.strip() for e in email_raw.split(",") if e.strip()]
+            for e in emails:
+                if e.endswith("@sjifire.org"):
+                    if not email:  # Take first business email
+                        email = e
+                else:
+                    if not personal_email:  # Take first personal email
+                        # Validate personal email
+                        validated = validate_email(e, member_context)
+                        if validated:
+                            personal_email = validated
 
-        # Phone (cell/mobile)
-        phone = get_field("mobile phone", "phone", "phone number", "mobile", "cell", "cell phone")
+        # Phone (cell/mobile) - format to standard
+        phone_raw = get_field(
+            "mobile phone", "phone", "phone number", "mobile", "cell", "cell phone"
+        )
+        phone = format_phone(phone_raw)
 
-        # Home phone
-        home_phone = get_field("home phone", "home", "landline")
+        # Home phone - format to standard
+        home_phone_raw = get_field("home phone", "home", "landline")
+        home_phone = format_phone(home_phone_raw)
 
-        # Position/Employee Type (may be multiple, comma-separated)
-        position_raw = get_field("employee type", "position", "positions", "rank", "role")
-        position = position_raw
+        # Employee Type (may be multiple, comma-separated in CSV)
+        employee_type_raw = get_field("employee type", "position", "positions", "rank", "role")
+        employee_type = employee_type_raw
         positions: list[str] = []
-        if position_raw:
-            positions = [p.strip() for p in position_raw.split(",") if p.strip()]
+        if employee_type_raw:
+            positions = [p.strip() for p in employee_type_raw.split(",") if p.strip()]
 
-        # Title
-        title = get_field("title", "employee type")
+        # Title - clean up newlines and duplicates (only from Title column)
+        title_raw = get_field("title")
+        title = clean_title(title_raw)
 
         # Status
         status = get_field("member status", "status")
@@ -386,8 +496,10 @@ class AladtecScraper:
         # Pay profile
         pay_profile = get_field("pay profile", "payroll profile", "payprofile", "pay")
 
-        # Employee ID
+        # Employee ID (remove commas from formatted numbers like "2,512")
         employee_id = get_field("employee id", "employeeid", "emp id", "id")
+        if employee_id:
+            employee_id = employee_id.replace(",", "")
 
         # Station assignment
         station_assignment = get_field(
@@ -408,9 +520,10 @@ class AladtecScraper:
             first_name=first_name,
             last_name=last_name,
             email=email,
+            personal_email=personal_email,
             phone=phone,
             home_phone=home_phone,
-            position=position,
+            employee_type=employee_type,
             positions=positions,
             title=title,
             status=status,
@@ -434,7 +547,6 @@ class AladtecScraper:
             return {}
 
         import json
-        import re
 
         response = self.client.get(
             f"{self.base_url}/index.php",
@@ -506,14 +618,21 @@ class AladtecScraper:
         if not next_td:
             return []
 
-        # Get checked position checkboxes
+        # Try to get positions from list items first (view mode)
         positions = []
-        for cb in next_td.find_all("input", {"type": "checkbox"}):
-            if cb.has_attr("checked"):
-                cb_id = cb.get("id", "")
-                label = next_td.find("label", {"for": cb_id})
-                if label:
-                    positions.append(label.get_text(strip=True))
+        for li in next_td.find_all("li"):
+            text = li.get_text(strip=True)
+            if text:
+                positions.append(text)
+
+        # If no list items found, try checked checkboxes (edit mode)
+        if not positions:
+            for cb in next_td.find_all("input", {"type": "checkbox"}):
+                if cb.has_attr("checked"):
+                    cb_id = cb.get("id", "")
+                    label = next_td.find("label", {"for": cb_id})
+                    if label:
+                        positions.append(label.get_text(strip=True))
 
         return positions
 
@@ -546,8 +665,9 @@ class AladtecScraper:
                 continue
 
             positions = self.get_member_positions(user_id)
+            # Always set positions (even if empty) to clear any incorrect initial value
+            member.positions = positions
             if positions:
-                member.positions = positions
                 logger.debug(f"{member.display_name}: {len(positions)} positions")
 
         logger.info("Position enrichment complete")
@@ -615,17 +735,25 @@ class AladtecScraper:
             if not first_name or not last_name:
                 return None
 
-            # Look for email in any cell
+            # Look for emails in any cell - separate business and personal
             email = None
+            personal_email = None
             for cell in cells:
                 link = cell.find("a", href=lambda h: h and "mailto:" in h)
                 if link:
-                    email = link.get("href", "").replace("mailto:", "")
-                    break
+                    found_email = link.get("href", "").replace("mailto:", "")
+                    if found_email.endswith("@sjifire.org"):
+                        if not email:
+                            email = found_email
+                    elif not personal_email:
+                        personal_email = found_email
                 text = cell.get_text(strip=True)
                 if "@" in text:
-                    email = text
-                    break
+                    if text.endswith("@sjifire.org"):
+                        if not email:
+                            email = text
+                    elif not personal_email:
+                        personal_email = text
 
             member_id = f"{first_name.lower()}.{last_name.lower()}"
 
@@ -634,6 +762,7 @@ class AladtecScraper:
                 first_name=first_name,
                 last_name=last_name,
                 email=email,
+                personal_email=personal_email,
             )
         except (IndexError, AttributeError):
             return None

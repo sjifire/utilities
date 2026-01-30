@@ -7,15 +7,17 @@ requires-python = ">=3.14"
 dependencies = [
     "azure-identity>=1.19.0",
     "beautifulsoup4>=4.12.0",
+    "email-validator>=2.3.0",
     "httpx>=0.28.0",
     "msgraph-sdk>=1.12.0",
+    "phonenumbers>=9.0.22",
     "python-dotenv>=1.0.0",
 ]
 
 [project.scripts]
 aladtec-list = "sjifire.scripts.aladtec_list:main"
-aladtec-audit = "sjifire.scripts.aladtec_audit:main"
-aladtec-import = "sjifire.scripts.aladtec_import:main"
+entra-audit = "sjifire.scripts.entra_audit:main"
+entra-sync = "sjifire.scripts.entra_sync:main"
 analyze-mappings = "sjifire.scripts.analyze_mappings:main"
 create-security-groups = "sjifire.scripts.create_security_groups:main"
 
@@ -65,6 +67,7 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "src/sjifire/scripts/*.py" = ["T201"]  # CLI scripts use print for output
+"scripts/*.py" = ["T201"]  # Utility scripts use print for output
 "tests/**/*.py" = ["S101", "S105", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords, skip docstrings, allow long lines
 
 [tool.ruff.format]

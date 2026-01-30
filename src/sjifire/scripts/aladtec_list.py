@@ -19,7 +19,7 @@ ALL_COLUMNS = [
     "email",
     "phone",
     "home_phone",
-    "position",
+    "employee_type",
     "positions",
     "title",
     "status",

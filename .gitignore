@@ -12,6 +12,7 @@ build/
 # Testing
 .coverage
 .pytest_cache/
+.hypothesis/
 htmlcov/
 
 # IDE

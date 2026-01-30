@@ -98,14 +98,14 @@ class TestAladtecScraperCSVRowParsing:
         row = {
             "first name": "John",
             "last name": "Doe",
-            "email": "john@example.com",
+            "email": "john.doe@sjifire.org",
         }
         member = scraper._parse_csv_row(row)
 
         assert member is not None
         assert member.first_name == "John"
         assert member.last_name == "Doe"
-        assert member.email == "john@example.com"
+        assert member.email == "john.doe@sjifire.org"
 
     def test_parse_csv_row_normalized_keys(self, mock_env_vars):
         scraper = AladtecScraper()
@@ -132,12 +132,13 @@ class TestAladtecScraperCSVRowParsing:
         row = {
             "first name": "John",
             "last name": "Doe",
-            "email": "john@example.com, john.personal@gmail.com",
+            "email": "john.doe@sjifire.org, john.personal@gmail.com",
         }
         member = scraper._parse_csv_row(row)
 
         assert member is not None
-        assert member.email == "john@example.com"
+        assert member.email == "john.doe@sjifire.org"
+        assert member.personal_email == "john.personal@gmail.com"
 
     def test_parse_csv_row_name_column_with_comma(self, mock_env_vars):
         scraper = AladtecScraper()
@@ -204,3 +205,117 @@ class TestAladtecScraperContextManager:
         scraper = AladtecScraper()
         with pytest.raises(RuntimeError, match="must be used as context manager"):
             scraper.get_members()
+
+
+class TestGetMemberPositions:
+    """Tests for get_member_positions HTML parsing."""
+
+    def test_parses_positions_from_list_items(self, mock_env_vars):
+        """Should parse positions from <li> elements in view mode."""
+        from unittest.mock import MagicMock
+
+        scraper = AladtecScraper()
+        scraper.client = MagicMock()
+
+        # Simulate HTML response with positions as list items
+        html = """
+        <table>
+            <tr>
+                <td>Positions:</td>
+                <td class="value">
+                    <ul class="ul-arrow">
+                        <li>Firefighter</li>
+                        <li>EMT</li>
+                        <li>Wildland Firefighter</li>
+                    </ul>
+                </td>
+            </tr>
+        </table>
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = html
+        scraper.client.get.return_value = mock_response
+
+        positions = scraper.get_member_positions("123")
+
+        assert positions == ["Firefighter", "EMT", "Wildland Firefighter"]
+
+    def test_parses_positions_from_checkboxes(self, mock_env_vars):
+        """Should parse positions from checked checkboxes in edit mode."""
+        from unittest.mock import MagicMock
+
+        scraper = AladtecScraper()
+        scraper.client = MagicMock()
+
+        # Simulate HTML response with positions as checkboxes
+        html = """
+        <table>
+            <tr>
+                <td>Positions:</td>
+                <td class="value">
+                    <input type="checkbox" id="pos1" checked>
+                    <label for="pos1">Firefighter</label>
+                    <input type="checkbox" id="pos2">
+                    <label for="pos2">EMT</label>
+                    <input type="checkbox" id="pos3" checked>
+                    <label for="pos3">Captain</label>
+                </td>
+            </tr>
+        </table>
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = html
+        scraper.client.get.return_value = mock_response
+
+        positions = scraper.get_member_positions("123")
+
+        assert positions == ["Firefighter", "Captain"]
+
+    def test_returns_empty_list_when_no_positions_section(self, mock_env_vars):
+        """Should return empty list if Positions section not found."""
+        from unittest.mock import MagicMock
+
+        scraper = AladtecScraper()
+        scraper.client = MagicMock()
+
+        html = "<html><body>No positions here</body></html>"
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = html
+        scraper.client.get.return_value = mock_response
+
+        positions = scraper.get_member_positions("123")
+
+        assert positions == []
+
+    def test_prefers_list_items_over_checkboxes(self, mock_env_vars):
+        """Should use list items when both formats present."""
+        from unittest.mock import MagicMock
+
+        scraper = AladtecScraper()
+        scraper.client = MagicMock()
+
+        # HTML with both list items and checkboxes
+        html = """
+        <table>
+            <tr>
+                <td>Positions:</td>
+                <td class="value">
+                    <ul><li>From List</li></ul>
+                    <input type="checkbox" id="pos1" checked>
+                    <label for="pos1">From Checkbox</label>
+                </td>
+            </tr>
+        </table>
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = html
+        scraper.client.get.return_value = mock_response
+
+        positions = scraper.get_member_positions("123")
+
+        # Should only get list items, not checkboxes
+        assert positions == ["From List"]
