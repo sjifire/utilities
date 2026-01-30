@@ -119,9 +119,7 @@ class TestLoadEntraSyncConfig:
         config_dir = tmp_path / "config"
         config_dir.mkdir()
         config_file = config_dir / "entra_sync.json"
-        config_file.write_text(
-            json.dumps({"company_name": "Test Fire Dept", "domain": "test.org"})
-        )
+        config_file.write_text(json.dumps({"company_name": "Test Fire Dept", "domain": "test.org"}))
 
         with patch("sjifire.core.config.get_project_root", return_value=tmp_path):
             config = load_entra_sync_config()

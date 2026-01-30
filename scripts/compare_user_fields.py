@@ -177,7 +177,7 @@ async def compare_fields() -> None:
                         old_val = old_val[:25] + "..."
                     if len(new_val) > 28:
                         new_val = new_val[:25] + "..."
-                    print("│  {:25} {:30} {:30}".format(field, old_val, new_val))
+                    print(f"│  {field:25} {old_val:30} {new_val:30}")
                 else:
                     print(f"│  {diff}")
             else:

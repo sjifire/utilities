@@ -430,9 +430,7 @@ class EntraUserManager:
         except Exception as e:
             error_str = str(e)
             # Check if this is a permission error (likely admin user) and we have a phone
-            is_permission_error = (
-                "Authorization_RequestDenied" in error_str or "403" in error_str
-            )
+            is_permission_error = "Authorization_RequestDenied" in error_str or "403" in error_str
             if is_permission_error and (mobile_phone or personal_email or business_phones):
                 # For admin users, phone fields and otherMails require elevated privileges
                 skipped = []
@@ -443,13 +441,13 @@ class EntraUserManager:
                 if personal_email:
                     skipped.append("otherMails")
                 logger.warning(
-                    f"Permission denied for {user_id}, retrying without: "
-                    f"{', '.join(skipped)}"
+                    f"Permission denied for {user_id}, retrying without: {', '.join(skipped)}"
                 )
                 # Retry without sensitive fields (mobilePhone, businessPhones, otherMails)
                 # Remove those from fields_to_clear too
                 retry_fields_to_clear = {
-                    k: v for k, v in fields_to_clear.items()
+                    k: v
+                    for k, v in fields_to_clear.items()
                     if k not in ("mobilePhone", "businessPhones", "otherMails")
                 }
                 user_retry = User(
@@ -492,8 +490,7 @@ class EntraUserManager:
                 try:
                     await self.client.users.by_user_id(user_id).patch(user_retry)
                     logger.info(
-                        f"Updated user (partial): {user_id} "
-                        f"(skipped: {', '.join(skipped)})"
+                        f"Updated user (partial): {user_id} (skipped: {', '.join(skipped)})"
                     )
                     return True
                 except Exception as retry_error:

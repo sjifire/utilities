@@ -232,15 +232,11 @@ class TestMemberOfficeLocation:
         assert member.office_location == "Station 31"
 
     def test_station_prefix_not_duplicated(self):
-        member = Member(
-            id="1", first_name="John", last_name="Doe", station_assignment="Station 31"
-        )
+        member = Member(id="1", first_name="John", last_name="Doe", station_assignment="Station 31")
         assert member.office_location == "Station 31"
 
     def test_station_prefix_case_insensitive(self):
-        member = Member(
-            id="1", first_name="John", last_name="Doe", station_assignment="station 31"
-        )
+        member = Member(id="1", first_name="John", last_name="Doe", station_assignment="station 31")
         assert member.office_location == "station 31"
 
     def test_none_when_empty(self):

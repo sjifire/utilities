@@ -67,10 +67,7 @@ async def run_import(
         # Filter to individual if specified (by email)
         if individual:
             individual_lower = individual.lower()
-            matching = [
-                m for m in members
-                if m.email and m.email.lower() == individual_lower
-            ]
+            matching = [m for m in members if m.email and m.email.lower() == individual_lower]
 
             if not matching:
                 logger.error(f"No member found with email '{individual}'")

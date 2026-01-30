@@ -1,7 +1,7 @@
 """Tests for sjifire.entra.aladtec_import."""
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -17,10 +17,12 @@ def mock_config(tmp_path):
     config_dir.mkdir()
     config_file = config_dir / "entra_sync.json"
     config_file.write_text(
-        json.dumps({
-            "company_name": "Test Fire Department",
-            "domain": "testfire.org",
-        })
+        json.dumps(
+            {
+                "company_name": "Test Fire Department",
+                "domain": "testfire.org",
+            }
+        )
     )
     return tmp_path
 

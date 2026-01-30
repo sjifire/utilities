@@ -31,6 +31,29 @@ MS_GRAPH_CLIENT_SECRET=your-client-secret
 
 ## CLI Commands
 
+### Aladtec to Entra Sync
+
+**Sync members to Entra ID:**
+```bash
+uv run aladtec-import                  # Sync all active members
+uv run aladtec-import --dry-run        # Preview changes without applying
+uv run aladtec-import --json           # Output results as JSON
+uv run aladtec-import --disable-inactive  # Also disable accounts for inactive members
+uv run aladtec-import --individual EMAIL  # Sync a single member by email
+```
+
+The sync:
+- Creates new Entra ID accounts for Aladtec members with @sjifire.org emails
+- Updates user fields: display name, first/last name, employee ID, phone, hire date
+- Sets extension attributes:
+  - `extensionAttribute1`: Rank (Captain, Lieutenant, Chief, etc.)
+  - `extensionAttribute2`: EVIP expiration date
+  - `extensionAttribute3`: Positions (comma-delimited scheduling positions)
+- Prefixes display names with rank (e.g., "Chief John Smith")
+- Automatically backs up Entra ID users before making changes
+
+**Automated sync:** Runs daily at 5:00 AM Pacific via GitHub Actions. See `.github/workflows/entra-sync.yml`.
+
 ### Aladtec Tools
 
 **List members:**
@@ -71,6 +94,20 @@ uv run create-security-groups --dry-run
 
 ## Configuration
 
+### Entra Sync Configuration
+
+Sync settings in `config/entra_sync.json`:
+
+```json
+{
+  "company_name": "San Juan Island Fire & Rescue",
+  "domain": "sjifire.org",
+  "skip_emails": ["service-account@sjifire.org"]
+}
+```
+
+### Group Mappings
+
 Group mappings are configured in `config/group_mappings.json`:
 
 - `ms_365_group_ids`: Microsoft 365 group name to ID mappings
@@ -78,6 +115,23 @@ Group mappings are configured in `config/group_mappings.json`:
 - `position_mappings`: Aladtec position to M365/security group assignments
 - `work_group_mappings`: Aladtec work group to M365 group assignments
 - `conditional_mappings`: Complex rules (e.g., "Apparatus Operator but not Firefighter")
+
+## GitHub Actions
+
+### CI (ci.yml)
+Runs on push/PR to main:
+- Lint with ruff
+- Run tests with pytest
+
+### Entra Sync (entra-sync.yml)
+Runs daily at 5:00 AM Pacific:
+- Syncs Aladtec members to Entra ID
+- Uploads backup artifacts (30-day retention)
+- Can be triggered manually with dry-run option
+
+**Required secrets:**
+- `ALADTEC_URL`, `ALADTEC_USERNAME`, `ALADTEC_PASSWORD`
+- `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`
 
 ## Development
 
@@ -116,10 +170,12 @@ src/sjifire/
 │   ├── config.py      # Configuration loading
 │   └── msgraph_client.py  # MS Graph client
 ├── entra/             # Entra ID integration
+│   ├── aladtec_import.py  # Aladtec to Entra sync logic
 │   ├── groups.py      # Group management
 │   └── users.py       # User management
 └── scripts/           # CLI entry points
     ├── aladtec_audit.py
+    ├── aladtec_import.py
     ├── aladtec_list.py
     ├── analyze_mappings.py
     └── create_security_groups.py

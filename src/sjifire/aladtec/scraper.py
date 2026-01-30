@@ -38,9 +38,7 @@ def format_phone(phone: str | None) -> str | None:
             return phone.strip()
 
         # Format in national format: (XXX) XXX-XXXX
-        return phonenumbers.format_number(
-            parsed, phonenumbers.PhoneNumberFormat.NATIONAL
-        )
+        return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.NATIONAL)
     except phonenumbers.NumberParseException:
         # Return original if parsing fails
         return phone.strip() if phone else None

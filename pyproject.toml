@@ -67,6 +67,7 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "src/sjifire/scripts/*.py" = ["T201"]  # CLI scripts use print for output
+"scripts/*.py" = ["T201"]  # Utility scripts use print for output
 "tests/**/*.py" = ["S101", "S105", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords, skip docstrings, allow long lines
 
 [tool.ruff.format]
