@@ -4,6 +4,7 @@ import logging
 import secrets
 import string
 from dataclasses import dataclass
+from uuid import UUID
 
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph import GraphServiceClient
@@ -12,6 +13,9 @@ from msgraph.generated.models.on_premises_extension_attributes import (
 )
 from msgraph.generated.models.password_profile import PasswordProfile
 from msgraph.generated.models.user import User
+from msgraph.generated.users.item.assign_license.assign_license_post_request_body import (
+    AssignLicensePostRequestBody,
+)
 from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
 from sjifire.core.msgraph_client import get_graph_client
@@ -540,6 +544,65 @@ class EntraUserManager:
         except Exception as e:
             logger.error(f"Failed to enable user {user_id}: {e}")
             return False
+
+    async def get_user_licenses(self, user_id: str) -> list[str]:
+        """Get list of license SKU IDs assigned to a user.
+
+        Args:
+            user_id: Entra user ID or UPN
+
+        Returns:
+            List of SKU ID strings (GUIDs)
+        """
+        try:
+            result = await self.client.users.by_user_id(user_id).license_details.get()
+            if result and result.value:
+                return [str(lic.sku_id) for lic in result.value if lic.sku_id]
+            return []
+        except Exception as e:
+            logger.error(f"Failed to get licenses for {user_id}: {e}")
+            return []
+
+    async def remove_all_licenses(self, user_id: str) -> bool:
+        """Remove all licenses from a user.
+
+        Args:
+            user_id: Entra user ID or UPN
+
+        Returns:
+            True if successful (or user had no licenses)
+        """
+        # First get the user's current licenses
+        license_ids = await self.get_user_licenses(user_id)
+
+        if not license_ids:
+            logger.info(f"User {user_id} has no licenses to remove")
+            return True
+
+        try:
+            request_body = AssignLicensePostRequestBody(
+                add_licenses=[],
+                remove_licenses=[UUID(lic_id) for lic_id in license_ids],
+            )
+            await self.client.users.by_user_id(user_id).assign_license.post(request_body)
+            logger.info(f"Removed {len(license_ids)} license(s) from user: {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to remove licenses from {user_id}: {e}")
+            return False
+
+    async def disable_and_remove_licenses(self, user_id: str) -> tuple[bool, bool]:
+        """Disable a user account and remove all their licenses.
+
+        Args:
+            user_id: Entra user ID or UPN
+
+        Returns:
+            Tuple of (disable_success, license_removal_success)
+        """
+        disable_success = await self.disable_user(user_id)
+        license_success = await self.remove_all_licenses(user_id)
+        return disable_success, license_success
 
     def _generate_temp_password(self) -> str:
         """Generate a temporary password for new users.

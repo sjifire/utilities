@@ -16,6 +16,78 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
+async def cleanup_disabled_licenses(dry_run: bool = False) -> int:
+    """Remove licenses from all disabled Entra users.
+
+    Args:
+        dry_run: If True, don't make changes, just report what would happen
+
+    Returns:
+        Exit code
+    """
+    logger.info("=" * 50)
+    logger.info("Cleanup: Remove Licenses from Disabled Users")
+    logger.info("=" * 50)
+
+    if dry_run:
+        logger.info("DRY RUN - no changes will be made")
+
+    user_manager = EntraUserManager()
+
+    # Get all users including disabled
+    logger.info("")
+    logger.info("Fetching Entra ID users...")
+    all_users = await user_manager.get_users(include_disabled=True)
+
+    # Filter to only disabled users
+    disabled_users = [u for u in all_users if not u.account_enabled]
+    logger.info(f"Found {len(disabled_users)} disabled users")
+
+    if not disabled_users:
+        logger.info("No disabled users found - nothing to do")
+        return 0
+
+    # Process each disabled user
+    results = {"cleaned": [], "skipped": [], "errors": []}
+
+    for user in disabled_users:
+        display = user.display_name or user.upn or user.id
+        logger.info(f"Checking {display}...")
+
+        # Get current licenses
+        licenses = await user_manager.get_user_licenses(user.id)
+
+        if not licenses:
+            logger.info(f"  {display}: no licenses to remove")
+            results["skipped"].append({"user": display, "reason": "no licenses"})
+            continue
+
+        logger.info(f"  {display}: has {len(licenses)} license(s)")
+
+        if dry_run:
+            logger.info(f"  Would remove {len(licenses)} license(s) from {display}")
+            results["cleaned"].append({"user": display, "licenses": len(licenses)})
+        else:
+            success = await user_manager.remove_all_licenses(user.id)
+            if success:
+                logger.info(f"  Removed {len(licenses)} license(s) from {display}")
+                results["cleaned"].append({"user": display, "licenses": len(licenses)})
+            else:
+                logger.error(f"  Failed to remove licenses from {display}")
+                results["errors"].append({"user": display, "error": "API call failed"})
+
+    # Summary
+    logger.info("")
+    logger.info("=" * 50)
+    logger.info("Results")
+    logger.info("=" * 50)
+    logger.info(f"Licenses removed: {len(results['cleaned'])} users")
+    logger.info(f"Skipped (no licenses): {len(results['skipped'])} users")
+    logger.info(f"Errors: {len(results['errors'])} users")
+
+    return 0 if not results["errors"] else 1
+
+
 async def run_import(
     dry_run: bool = False,
     disable_inactive: bool = False,
@@ -151,6 +223,11 @@ def main():
         help="Disable Entra accounts for inactive Aladtec members",
     )
     parser.add_argument(
+        "--cleanup-disabled-licenses",
+        action="store_true",
+        help="Remove licenses from all disabled users (standalone operation, skips sync)",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="output_json",
@@ -164,6 +241,11 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Handle cleanup mode separately
+    if args.cleanup_disabled_licenses:
+        exit_code = asyncio.run(cleanup_disabled_licenses(dry_run=args.dry_run))
+        sys.exit(exit_code)
 
     exit_code = asyncio.run(
         run_import(
