@@ -81,6 +81,34 @@ class EntraUser:
         """Get rank from extensionAttribute1."""
         return self.extension_attribute1
 
+    @property
+    def evip(self) -> str | None:
+        """Get EVIP expiration date from extensionAttribute2."""
+        return self.extension_attribute2
+
+    @property
+    def has_valid_evip(self) -> bool:
+        """Check if user has valid (non-expired) EVIP certification.
+
+        Returns True if extensionAttribute2 contains a date that is today or in the future.
+        """
+        if not self.extension_attribute2:
+            return False
+        from datetime import date, datetime
+
+        try:
+            # Try common date formats
+            evip_str = self.extension_attribute2.strip()
+            for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%Y/%m/%d"):
+                try:
+                    evip_date = datetime.strptime(evip_str, fmt).date()
+                    return evip_date >= date.today()
+                except ValueError:
+                    continue
+            return False
+        except Exception:
+            return False
+
 
 class EntraUserManager:
     """Manage users in Entra ID."""
