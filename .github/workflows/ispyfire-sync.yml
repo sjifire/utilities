@@ -30,7 +30,7 @@ jobs:
         with:
           client-id: bb2cb591-58ff-4687-bf14-502049dee01b
           tenant-id: 4122848f-c317-4267-9c07-7c504150d1bd
-          subscription-id: a024ad2f-9eef-48ca-b6b6-404c98c4cc6c
+          allow-no-subscriptions: true
 
       - name: Get secrets from Key Vault
         uses: azure/cli@v2
