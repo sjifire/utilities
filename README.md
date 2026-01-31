@@ -27,6 +27,11 @@ ALADTEC_PASSWORD=your-password
 MS_GRAPH_TENANT_ID=your-tenant-id
 MS_GRAPH_CLIENT_ID=your-client-id
 MS_GRAPH_CLIENT_SECRET=your-client-secret
+
+# iSpyFire credentials
+ISPYFIRE_URL=https://your-org.ispyfire.com
+ISPYFIRE_USERNAME=your-username
+ISPYFIRE_PASSWORD=your-password
 ```
 
 ## CLI Commands
@@ -82,6 +87,40 @@ The sync:
 - Backs up all groups before making changes
 
 **Automated sync:** Runs weekdays at noon Pacific via GitHub Actions. See `.github/workflows/entra-sync.yml`.
+
+### iSpyFire Sync
+
+**Sync operational personnel to iSpyFire:**
+```bash
+uv run ispyfire-sync --dry-run    # Preview changes without applying
+uv run ispyfire-sync              # Apply changes
+uv run ispyfire-sync --email user@sjifire.org  # Sync single user
+uv run ispyfire-sync -v           # Verbose logging
+```
+
+The sync:
+- Syncs Entra ID users with operational positions to iSpyFire
+- Only includes @sjifire.org users with cell phones
+- Positions synced: Firefighter, Apparatus Operator, Support, Wildland Firefighter, Mate, Pilot
+- Detects duplicates by name to avoid creating duplicate entries
+- Excludes utility/service accounts from automatic removal
+- New users receive invite email to set their password
+- Deactivation logs out push notifications, removes devices, and disables login
+- Reactivation sends password reset email
+- Rate limiting handled with tenacity retry logic
+- Automatically backs up iSpyFire people before making changes
+
+**Automated sync:** Runs every 30 minutes via GitHub Actions. See `.github/workflows/ispyfire-sync.yml`.
+
+### iSpyFire Admin
+
+**Manage iSpyFire users:**
+```bash
+uv run ispyfire-admin list                    # List all active users
+uv run ispyfire-admin list --inactive         # Include inactive users
+uv run ispyfire-admin activate user@sjifire.org   # Reactivate and send password reset
+uv run ispyfire-admin deactivate user@sjifire.org # Logout devices and deactivate
+```
 
 ### Aladtec Tools
 
@@ -163,6 +202,18 @@ Runs weekdays at noon Pacific:
 - `ALADTEC_URL`, `ALADTEC_USERNAME`, `ALADTEC_PASSWORD`
 - `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`
 
+### iSpyFire Sync (ispyfire-sync.yml)
+Runs every 30 minutes:
+- Syncs Entra ID users with operational positions to iSpyFire
+- Creates new users with invite emails
+- Deactivates users no longer in Entra (with device logout)
+- Uploads backup artifacts (30-day retention)
+- Can be triggered manually with dry-run option
+
+**Required secrets:**
+- `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`
+- `ISPYFIRE_URL`, `ISPYFIRE_USERNAME`, `ISPYFIRE_PASSWORD`
+
 ## Development
 
 ### Linting
@@ -193,22 +244,29 @@ uv run pytest --cov=sjifire --cov-report=html  # HTML coverage report
 ```
 src/sjifire/
 ├── aladtec/           # Aladtec integration
-│   ├── models.py      # Member data model with position constants
+│   ├── models.py      # Member data model
 │   └── scraper.py     # Web scraper for CSV export
 ├── core/              # Shared utilities
 │   ├── backup.py      # Backup utilities for users and groups
 │   ├── config.py      # Configuration loading
+│   ├── constants.py   # Position constants (OPERATIONAL_POSITIONS, etc.)
 │   └── msgraph_client.py  # MS Graph client
 ├── entra/             # Entra ID integration
 │   ├── aladtec_import.py  # Aladtec to Entra user sync logic
 │   ├── group_sync.py  # Group sync strategies and manager
 │   ├── groups.py      # Group management (create, update, members)
 │   └── users.py       # User management
+├── ispyfire/          # iSpyFire integration
+│   ├── client.py      # API client for iSpyFire
+│   ├── models.py      # ISpyFirePerson data model
+│   └── sync.py        # Sync logic and comparison
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
     ├── create_security_groups.py
     ├── entra_audit.py
     ├── entra_group_sync.py  # M365 group sync CLI
-    └── entra_user_sync.py   # User sync CLI
+    ├── entra_user_sync.py   # User sync CLI
+    ├── ispyfire_admin.py    # iSpyFire admin CLI (activate/deactivate)
+    └── ispyfire_sync.py     # iSpyFire sync CLI
 ```
