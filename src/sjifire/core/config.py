@@ -131,7 +131,8 @@ def get_ispyfire_credentials() -> tuple[str, str, str]:
 
     if not url or not username or not password:
         raise ValueError(
-            "iSpyFire credentials not set. Required: ISPYFIRE_URL, ISPYFIRE_USERNAME, ISPYFIRE_PASSWORD"
+            "iSpyFire credentials not set. "
+            "Required: ISPYFIRE_URL, ISPYFIRE_USERNAME, ISPYFIRE_PASSWORD"
         )
 
     return url, username, password

@@ -1,11 +1,8 @@
 """Tests for sjifire.ispyfire module."""
 
-import pytest
-
 from sjifire.entra.users import EntraUser
 from sjifire.ispyfire.models import ISpyFirePerson
 from sjifire.ispyfire.sync import (
-    SyncComparison,
     compare_entra_to_ispyfire,
     entra_user_to_ispyfire_person,
     fields_need_update,
@@ -544,7 +541,7 @@ class TestCompareEntraToISpyFire:
 
     def _make_entra_user(
         self,
-        id: str,
+        user_id: str,
         first: str,
         last: str,
         email: str,
@@ -554,13 +551,13 @@ class TestCompareEntraToISpyFire:
     ) -> EntraUser:
         """Helper to create an EntraUser."""
         return EntraUser(
-            id=id,
+            id=user_id,
             display_name=f"{first} {last}",
             first_name=first,
             last_name=last,
             email=email,
             upn=email,
-            employee_id=id,
+            employee_id=user_id,
             mobile_phone=phone,
             extension_attribute1=rank,
             extension_attribute3=positions,
@@ -568,7 +565,7 @@ class TestCompareEntraToISpyFire:
 
     def _make_ispy_person(
         self,
-        id: str,
+        person_id: str,
         first: str,
         last: str,
         email: str,
@@ -578,7 +575,7 @@ class TestCompareEntraToISpyFire:
     ) -> ISpyFirePerson:
         """Helper to create an ISpyFirePerson."""
         return ISpyFirePerson(
-            id=id,
+            id=person_id,
             first_name=first,
             last_name=last,
             email=email,

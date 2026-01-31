@@ -27,6 +27,11 @@ ALADTEC_PASSWORD=your-password
 MS_GRAPH_TENANT_ID=your-tenant-id
 MS_GRAPH_CLIENT_ID=your-client-id
 MS_GRAPH_CLIENT_SECRET=your-client-secret
+
+# iSpyFire credentials
+ISPYFIRE_URL=https://your-org.ispyfire.com
+ISPYFIRE_USERNAME=your-username
+ISPYFIRE_PASSWORD=your-password
 ```
 
 ## CLI Commands
@@ -82,6 +87,24 @@ The sync:
 - Backs up all groups before making changes
 
 **Automated sync:** Runs weekdays at noon Pacific via GitHub Actions. See `.github/workflows/entra-sync.yml`.
+
+### iSpyFire Sync
+
+**Sync operational personnel to iSpyFire:**
+```bash
+uv run ispyfire-sync --dry-run    # Preview changes without applying
+uv run ispyfire-sync              # Apply changes
+uv run ispyfire-sync -v           # Verbose logging
+```
+
+The sync:
+- Syncs Entra ID users with operational positions to iSpyFire
+- Only includes @sjifire.org users with cell phones
+- Positions synced: Firefighter, Apparatus Operator, Support, Wildland Firefighter, Mate, Pilot
+- Detects duplicates by name to avoid creating duplicate entries
+- Excludes utility/service accounts (svc-*) from automatic removal
+- Deactivation logs out mobile devices and disables login
+- Automatically backs up iSpyFire people before making changes
 
 ### Aladtec Tools
 
@@ -204,11 +227,16 @@ src/sjifire/
 │   ├── group_sync.py  # Group sync strategies and manager
 │   ├── groups.py      # Group management (create, update, members)
 │   └── users.py       # User management
+├── ispyfire/          # iSpyFire integration
+│   ├── client.py      # API client for iSpyFire
+│   ├── models.py      # ISpyFirePerson data model
+│   └── sync.py        # Sync logic and comparison
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
     ├── create_security_groups.py
     ├── entra_audit.py
     ├── entra_group_sync.py  # M365 group sync CLI
-    └── entra_user_sync.py   # User sync CLI
+    ├── entra_user_sync.py   # User sync CLI
+    └── ispyfire_sync.py     # iSpyFire sync CLI
 ```
