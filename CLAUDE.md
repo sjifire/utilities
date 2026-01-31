@@ -163,4 +163,4 @@ uv run ruff format --check .
 
 - `ci.yml`: Lint + test on PR/push
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
-- `ispyfire-sync.yml`: Daily sync at 6 PM Pacific (Entra to iSpyFire), uploads backup artifacts
+- `ispyfire-sync.yml`: Sync every 30 minutes (Entra to iSpyFire), uploads backup artifacts

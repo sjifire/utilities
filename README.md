@@ -110,7 +110,7 @@ The sync:
 - Rate limiting handled with tenacity retry logic
 - Automatically backs up iSpyFire people before making changes
 
-**Automated sync:** Runs daily at 6 PM Pacific via GitHub Actions. See `.github/workflows/ispyfire-sync.yml`.
+**Automated sync:** Runs every 30 minutes via GitHub Actions. See `.github/workflows/ispyfire-sync.yml`.
 
 ### iSpyFire Admin
 
@@ -203,7 +203,7 @@ Runs weekdays at noon Pacific:
 - `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`
 
 ### iSpyFire Sync (ispyfire-sync.yml)
-Runs daily at 6 PM Pacific:
+Runs every 30 minutes:
 - Syncs Entra ID users with operational positions to iSpyFire
 - Creates new users with invite emails
 - Deactivates users no longer in Entra (with device logout)

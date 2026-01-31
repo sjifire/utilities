@@ -2,8 +2,8 @@ name: iSpyFire Sync
 
 on:
   schedule:
-    # Run at 6 PM Pacific daily (02:00 UTC = 6pm PST / 7pm PDT)
-    - cron: '0 2 * * *'
+    # Run every 30 minutes
+    - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
