@@ -220,9 +220,8 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
         print("\nApplying changes...")
 
         # Add new people (creates user, sets active flags, sends invite email)
-        for i, user in enumerate(comparison.to_add):
-            if i > 0:
-                ispy_client._delay_for_bulk()
+        for user in comparison.to_add:
+            ispy_client._delay_for_bulk()
             person = entra_user_to_ispyfire_person(user)
             logger.info(f"Creating: {person.display_name}")
             result = ispy_client.create_and_invite(person)
@@ -232,9 +231,8 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
                 logger.error("  Failed to create")
 
         # Update existing people
-        for i, (user, person) in enumerate(comparison.to_update):
-            if i > 0:
-                ispy_client._delay_for_bulk()
+        for user, person in comparison.to_update:
+            ispy_client._delay_for_bulk()
             logger.info(f"Updating: {person.display_name}")
             # Update fields from Entra
             if user.first_name:
@@ -255,13 +253,12 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
         # Reactivate any matched users who are inactive in iSpyFire
         # (handles manual deactivation in iSpyFire UI)
         to_reactivate = [
-            (user, person)
-            for user, person in comparison.matched + comparison.to_update
+            person
+            for _user, person in comparison.matched + comparison.to_update
             if not person.is_active
         ]
-        for i, (_user, person) in enumerate(to_reactivate):
-            if i > 0:
-                ispy_client._delay_for_bulk()
+        for person in to_reactivate:
+            ispy_client._delay_for_bulk()
             logger.info(f"Reactivating: {person.display_name}")
             if ispy_client.reactivate_person(person.id, email=person.email):
                 logger.info("  Reactivated successfully")
@@ -269,9 +266,8 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
                 logger.error("  Failed to reactivate")
 
         # Deactivate removed people
-        for i, person in enumerate(comparison.to_remove):
-            if i > 0:
-                ispy_client._delay_for_bulk()
+        for person in comparison.to_remove:
+            ispy_client._delay_for_bulk()
             logger.info(f"Deactivating: {person.display_name}")
             if ispy_client.deactivate_person(person.id, email=person.email):
                 logger.info("  Deactivated successfully")
