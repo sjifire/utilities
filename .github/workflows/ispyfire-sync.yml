@@ -37,12 +37,29 @@ jobs:
         with:
           azcliversion: latest
           inlineScript: |
-            echo "MS_GRAPH_TENANT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-TENANT-ID --query value -o tsv)" >> $GITHUB_ENV
-            echo "MS_GRAPH_CLIENT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-ID --query value -o tsv)" >> $GITHUB_ENV
-            echo "MS_GRAPH_CLIENT_SECRET=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-SECRET --query value -o tsv)" >> $GITHUB_ENV
-            echo "ISPYFIRE_URL=$(az keyvault secret show --vault-name gh-website-utilities --name ISPYFIRE-URL --query value -o tsv)" >> $GITHUB_ENV
-            echo "ISPYFIRE_USERNAME=$(az keyvault secret show --vault-name gh-website-utilities --name ISPYFIRE-USERNAME --query value -o tsv)" >> $GITHUB_ENV
-            echo "ISPYFIRE_PASSWORD=$(az keyvault secret show --vault-name gh-website-utilities --name ISPYFIRE-PASSWORD --query value -o tsv)" >> $GITHUB_ENV
+            MS_GRAPH_TENANT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-TENANT-ID --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_TENANT_ID"
+            echo "MS_GRAPH_TENANT_ID=$MS_GRAPH_TENANT_ID" >> $GITHUB_ENV
+
+            MS_GRAPH_CLIENT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-ID --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_CLIENT_ID"
+            echo "MS_GRAPH_CLIENT_ID=$MS_GRAPH_CLIENT_ID" >> $GITHUB_ENV
+
+            MS_GRAPH_CLIENT_SECRET=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-SECRET --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_CLIENT_SECRET"
+            echo "MS_GRAPH_CLIENT_SECRET=$MS_GRAPH_CLIENT_SECRET" >> $GITHUB_ENV
+
+            ISPYFIRE_URL=$(az keyvault secret show --vault-name gh-website-utilities --name ISPYFIRE-URL --query value -o tsv)
+            echo "::add-mask::$ISPYFIRE_URL"
+            echo "ISPYFIRE_URL=$ISPYFIRE_URL" >> $GITHUB_ENV
+
+            ISPYFIRE_USERNAME=$(az keyvault secret show --vault-name gh-website-utilities --name ISPYFIRE-USERNAME --query value -o tsv)
+            echo "::add-mask::$ISPYFIRE_USERNAME"
+            echo "ISPYFIRE_USERNAME=$ISPYFIRE_USERNAME" >> $GITHUB_ENV
+
+            ISPYFIRE_PASSWORD=$(az keyvault secret show --vault-name gh-website-utilities --name ISPYFIRE-PASSWORD --query value -o tsv)
+            echo "::add-mask::$ISPYFIRE_PASSWORD"
+            echo "ISPYFIRE_PASSWORD=$ISPYFIRE_PASSWORD" >> $GITHUB_ENV
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5

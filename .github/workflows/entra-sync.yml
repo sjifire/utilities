@@ -37,12 +37,29 @@ jobs:
         with:
           azcliversion: latest
           inlineScript: |
-            echo "ALADTEC_URL=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-URL --query value -o tsv)" >> $GITHUB_ENV
-            echo "ALADTEC_USERNAME=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-USERNAME --query value -o tsv)" >> $GITHUB_ENV
-            echo "ALADTEC_PASSWORD=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-PASSWORD --query value -o tsv)" >> $GITHUB_ENV
-            echo "MS_GRAPH_TENANT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-TENANT-ID --query value -o tsv)" >> $GITHUB_ENV
-            echo "MS_GRAPH_CLIENT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-ID --query value -o tsv)" >> $GITHUB_ENV
-            echo "MS_GRAPH_CLIENT_SECRET=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-SECRET --query value -o tsv)" >> $GITHUB_ENV
+            ALADTEC_URL=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-URL --query value -o tsv)
+            echo "::add-mask::$ALADTEC_URL"
+            echo "ALADTEC_URL=$ALADTEC_URL" >> $GITHUB_ENV
+
+            ALADTEC_USERNAME=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-USERNAME --query value -o tsv)
+            echo "::add-mask::$ALADTEC_USERNAME"
+            echo "ALADTEC_USERNAME=$ALADTEC_USERNAME" >> $GITHUB_ENV
+
+            ALADTEC_PASSWORD=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-PASSWORD --query value -o tsv)
+            echo "::add-mask::$ALADTEC_PASSWORD"
+            echo "ALADTEC_PASSWORD=$ALADTEC_PASSWORD" >> $GITHUB_ENV
+
+            MS_GRAPH_TENANT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-TENANT-ID --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_TENANT_ID"
+            echo "MS_GRAPH_TENANT_ID=$MS_GRAPH_TENANT_ID" >> $GITHUB_ENV
+
+            MS_GRAPH_CLIENT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-ID --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_CLIENT_ID"
+            echo "MS_GRAPH_CLIENT_ID=$MS_GRAPH_CLIENT_ID" >> $GITHUB_ENV
+
+            MS_GRAPH_CLIENT_SECRET=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-SECRET --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_CLIENT_SECRET"
+            echo "MS_GRAPH_CLIENT_SECRET=$MS_GRAPH_CLIENT_SECRET" >> $GITHUB_ENV
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
