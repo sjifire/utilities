@@ -12,6 +12,10 @@ on:
         default: false
         type: boolean
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   sync:
     name: Sync Entra to iSpyFire
@@ -20,6 +24,25 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Azure login with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: bb2cb591-58ff-4687-bf14-502049dee01b
+          tenant-id: 4122848f-c317-4267-9c07-7c504150d1bd
+          allow-no-subscriptions: true
+
+      - name: Get secrets from Key Vault
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            echo "MS_GRAPH_TENANT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-TENANT-ID --query value -o tsv)" >> $GITHUB_ENV
+            echo "MS_GRAPH_CLIENT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-ID --query value -o tsv)" >> $GITHUB_ENV
+            echo "MS_GRAPH_CLIENT_SECRET=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-SECRET --query value -o tsv)" >> $GITHUB_ENV
+            echo "ISPYFIRE_URL=$(az keyvault secret show --vault-name gh-website-utilities --name ISPYFIRE-URL --query value -o tsv)" >> $GITHUB_ENV
+            echo "ISPYFIRE_USERNAME=$(az keyvault secret show --vault-name gh-website-utilities --name ISPYFIRE-USERNAME --query value -o tsv)" >> $GITHUB_ENV
+            echo "ISPYFIRE_PASSWORD=$(az keyvault secret show --vault-name gh-website-utilities --name ISPYFIRE-PASSWORD --query value -o tsv)" >> $GITHUB_ENV
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -33,13 +56,6 @@ jobs:
         run: uv sync
 
       - name: Run iSpyFire sync
-        env:
-          MS_GRAPH_TENANT_ID: ${{ secrets.MS_GRAPH_TENANT_ID }}
-          MS_GRAPH_CLIENT_ID: ${{ secrets.MS_GRAPH_CLIENT_ID }}
-          MS_GRAPH_CLIENT_SECRET: ${{ secrets.MS_GRAPH_CLIENT_SECRET }}
-          ISPYFIRE_URL: ${{ secrets.ISPYFIRE_URL }}
-          ISPYFIRE_USERNAME: ${{ secrets.ISPYFIRE_USERNAME }}
-          ISPYFIRE_PASSWORD: ${{ secrets.ISPYFIRE_PASSWORD }}
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             uv run ispyfire-sync --dry-run
