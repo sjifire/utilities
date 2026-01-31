@@ -212,6 +212,11 @@ async def run_sync(dry_run: bool = True) -> int:
             result = ispy_client.create_person(person)
             if result:
                 logger.info(f"  Created with ID: {result.id}")
+                # Send invite email so they can set up their password
+                if person.email and ispy_client.send_invite_email(person.email):
+                    logger.info("  Invite email sent")
+                else:
+                    logger.warning("  Failed to send invite email")
             else:
                 logger.error("  Failed to create")
 

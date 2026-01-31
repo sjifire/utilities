@@ -293,6 +293,7 @@ def entra_user_to_ispyfire_person(user: EntraUser) -> ISpyFirePerson:
         cell_phone=user.mobile_phone,
         title=user.extension_attribute1,
         is_active=True,
+        is_login_active=True,  # Allow login immediately
         message_email=True,  # Default to email notifications
         message_cell=True,  # Default to SMS notifications
     )

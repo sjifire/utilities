@@ -26,6 +26,22 @@ class TestISpyFirePerson:
         person = ISpyFirePerson(id="123", first_name="Mary Jane", last_name="Watson")
         assert person.display_name == "Mary Jane Watson"
 
+    def test_set_active_true(self):
+        person = ISpyFirePerson(
+            id="123", first_name="John", last_name="Doe", is_active=False, is_login_active=False
+        )
+        person.set_active(True)
+        assert person.is_active is True
+        assert person.is_login_active is True
+
+    def test_set_active_false(self):
+        person = ISpyFirePerson(
+            id="123", first_name="John", last_name="Doe", is_active=True, is_login_active=True
+        )
+        person.set_active(False)
+        assert person.is_active is False
+        assert person.is_login_active is False
+
     def test_from_api(self):
         data = {
             "_id": "abc123",

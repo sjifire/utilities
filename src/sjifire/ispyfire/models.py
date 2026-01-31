@@ -14,7 +14,7 @@ class ISpyFirePerson:
     cell_phone: str | None = None
     title: str | None = None
     is_active: bool = True
-    is_login_active: bool = False
+    is_login_active: bool = True  # Always match is_active
     is_utility: bool = False
     group_set_acls: list[str] = field(default_factory=list)
     message_email: bool = False
@@ -24,6 +24,14 @@ class ISpyFirePerson:
     def display_name(self) -> str:
         """Full display name."""
         return f"{self.first_name} {self.last_name}"
+
+    def set_active(self, active: bool) -> None:
+        """Set active status for both is_active and is_login_active.
+
+        These should always be synchronized in iSpyFire.
+        """
+        self.is_active = active
+        self.is_login_active = active
 
     @classmethod
     def from_api(cls, data: dict) -> ISpyFirePerson:
@@ -52,6 +60,7 @@ class ISpyFirePerson:
             "cellPhone": self.cell_phone,
             "title": self.title,
             "isActive": self.is_active,
+            "isLoginActive": self.is_login_active,
             "messageEmail": self.message_email,
             "messageCell": self.message_cell,
         }

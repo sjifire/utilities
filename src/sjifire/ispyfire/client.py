@@ -197,6 +197,34 @@ class ISpyFireClient:
         logger.info(f"Logged out mobile devices for person {person_id}")
         return True
 
+    def send_invite_email(self, email: str) -> bool:
+        """Send iSpyFire invite email to a person.
+
+        This sends an email with instructions to set up their password.
+
+        Args:
+            email: Email address of the person
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.client:
+            raise RuntimeError("Client must be used as context manager")
+
+        url = f"{self.base_url}/api/login/passinvite/{email}"
+        response = self.client.put(
+            url,
+            json={"usernamePF": email},
+            headers={"Content-Type": "application/json"},
+        )
+
+        if response.status_code != 200:
+            logger.warning(f"Failed to send invite email: {response.status_code}")
+            return False
+
+        logger.info(f"Sent invite email to {email}")
+        return True
+
     def deactivate_person(self, person_id: str, logout_devices: bool = True) -> bool:
         """Deactivate a person in iSpyFire.
 
