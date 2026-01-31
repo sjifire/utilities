@@ -221,7 +221,6 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
 
         # Add new people (creates user, sets active flags, sends invite email)
         for user in comparison.to_add:
-            ispy_client._delay_for_bulk()
             person = entra_user_to_ispyfire_person(user)
             logger.info(f"Creating: {person.display_name}")
             result = ispy_client.create_and_invite(person)
@@ -232,7 +231,6 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
 
         # Update existing people
         for user, person in comparison.to_update:
-            ispy_client._delay_for_bulk()
             logger.info(f"Updating: {person.display_name}")
             # Update fields from Entra
             if user.first_name:
@@ -258,7 +256,6 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
             if not person.is_active
         ]
         for person in to_reactivate:
-            ispy_client._delay_for_bulk()
             logger.info(f"Reactivating: {person.display_name}")
             if ispy_client.reactivate_person(person.id, email=person.email):
                 logger.info("  Reactivated successfully")
@@ -267,7 +264,6 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
 
         # Deactivate removed people
         for person in comparison.to_remove:
-            ispy_client._delay_for_bulk()
             logger.info(f"Deactivating: {person.display_name}")
             if ispy_client.deactivate_person(person.id, email=person.email):
                 logger.info("  Deactivated successfully")

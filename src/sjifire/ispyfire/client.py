@@ -67,13 +67,18 @@ class ISpyFireClient:
         before_sleep=_log_retry,
         reraise=True,
     )
-    def _request_with_retry(
+    def _request(
         self,
         method: str,
         url: str,
         **kwargs,
     ) -> httpx.Response:
-        """Make an HTTP request with retry logic for rate limiting.
+        """Make an HTTP request with proactive delay and retry logic.
+
+        All API calls should go through this method to ensure consistent
+        rate limiting behavior:
+        1. Proactive delay before each request to avoid hitting limits
+        2. Exponential backoff retry on 429 responses
 
         Args:
             method: HTTP method (GET, POST, PUT, etc.)
@@ -86,16 +91,15 @@ class ISpyFireClient:
         if not self.client:
             raise RuntimeError("Client must be used as context manager")
 
+        # Proactive delay to avoid rate limiting
+        time.sleep(BULK_OPERATION_DELAY)
+
         response = self.client.request(method, url, **kwargs)
 
         if response.status_code == 429:
             logger.warning(f"Rate limited (429) on {method} {url}")
 
         return response
-
-    def _delay_for_bulk(self) -> None:
-        """Add a small delay for bulk operations to avoid rate limiting."""
-        time.sleep(BULK_OPERATION_DELAY)
 
     def _login(self) -> bool:
         """Log in to iSpyFire.
@@ -135,9 +139,6 @@ class ISpyFireClient:
         Returns:
             List of ISpyFirePerson objects
         """
-        if not self.client:
-            raise RuntimeError("Client must be used as context manager")
-
         url = f"{self.base_url}/api/ddui/people"
         params = []
         if include_inactive:
@@ -148,7 +149,11 @@ class ISpyFireClient:
             url += "?" + "&".join(params)
 
         logger.info(f"Fetching people from {url}")
-        response = self.client.get(url)
+        try:
+            response = self._request("GET", url)
+        except RetryError:
+            logger.error("Failed to fetch people after max retries")
+            return []
 
         if response.status_code != 200:
             logger.error(f"Failed to fetch people: {response.status_code}")
@@ -168,11 +173,12 @@ class ISpyFireClient:
         Returns:
             ISpyFirePerson if found, None otherwise
         """
-        if not self.client:
-            raise RuntimeError("Client must be used as context manager")
-
         url = f"{self.base_url}/api/ddui/people/email/{email}"
-        response = self.client.get(url)
+        try:
+            response = self._request("GET", url)
+        except RetryError:
+            logger.error(f"Failed to fetch person by email after max retries: {email}")
+            return None
 
         if response.status_code == 404:
             return None
@@ -194,15 +200,17 @@ class ISpyFireClient:
         Returns:
             Created person with ID, or None if failed
         """
-        if not self.client:
-            raise RuntimeError("Client must be used as context manager")
-
         url = f"{self.base_url}/api/ddui/people"
-        response = self.client.put(
-            url,
-            json=person.to_api(),
-            headers={"Content-Type": "application/json"},
-        )
+        try:
+            response = self._request(
+                "PUT",
+                url,
+                json=person.to_api(),
+                headers={"Content-Type": "application/json"},
+            )
+        except RetryError:
+            logger.error("Failed to create person after max retries")
+            return None
 
         if response.status_code not in (200, 201):
             logger.error(f"Failed to create person: {response.status_code}")
@@ -222,19 +230,21 @@ class ISpyFireClient:
         Returns:
             Updated person, or None if failed
         """
-        if not self.client:
-            raise RuntimeError("Client must be used as context manager")
-
         if not person.id:
             logger.error("Cannot update person without ID")
             return None
 
         url = f"{self.base_url}/api/ddui/people/{person.id}"
-        response = self.client.put(
-            url,
-            json=person.to_api(),
-            headers={"Content-Type": "application/json"},
-        )
+        try:
+            response = self._request(
+                "PUT",
+                url,
+                json=person.to_api(),
+                headers={"Content-Type": "application/json"},
+            )
+        except RetryError:
+            logger.error(f"Failed to update person after max retries: {person.id}")
+            return None
 
         if response.status_code != 200:
             logger.error(f"Failed to update person: {response.status_code}")
@@ -264,40 +274,51 @@ class ISpyFireClient:
         Returns:
             True if successful, False otherwise
         """
-        if not self.client:
-            raise RuntimeError("Client must be used as context manager")
-
         success = True
 
         # Deactivate iOS push registrations
         url = f"{self.base_url}/api/ddui/iosregids/user/{email}"
-        response = self.client.put(
-            url,
-            json={"isActive": False},
-            headers={"Content-Type": "application/json"},
-        )
-        if response.status_code != 200:
-            logger.warning(f"Failed to deactivate iOS push: {response.status_code}")
+        try:
+            response = self._request(
+                "PUT",
+                url,
+                json={"isActive": False},
+                headers={"Content-Type": "application/json"},
+            )
+            if response.status_code != 200:
+                logger.warning(f"Failed to deactivate iOS push: {response.status_code}")
+                success = False
+        except RetryError:
+            logger.warning("Failed to deactivate iOS push after max retries")
             success = False
 
         # Deactivate GCM push registrations
         url = f"{self.base_url}/api/ddui/gcmregids/user/{email}"
-        response = self.client.put(
-            url,
-            json={"isActive": False},
-            headers={"Content-Type": "application/json"},
-        )
-        if response.status_code != 200:
-            logger.warning(f"Failed to deactivate GCM push: {response.status_code}")
+        try:
+            response = self._request(
+                "PUT",
+                url,
+                json={"isActive": False},
+                headers={"Content-Type": "application/json"},
+            )
+            if response.status_code != 200:
+                logger.warning(f"Failed to deactivate GCM push: {response.status_code}")
+                success = False
+        except RetryError:
+            logger.warning("Failed to deactivate GCM push after max retries")
             success = False
 
         # Clear iSpyFire notifications
         ispyid = self._get_ispyid()
         if ispyid:
             url = f"{self.base_url}/api/mobile/clearallispyidnotifications/{email}/{ispyid}"
-            response = self.client.get(url)
-            if response.status_code != 200:
-                logger.warning(f"Failed to clear notifications: {response.status_code}")
+            try:
+                response = self._request("GET", url)
+                if response.status_code != 200:
+                    logger.warning(f"Failed to clear notifications: {response.status_code}")
+                    success = False
+            except RetryError:
+                logger.warning("Failed to clear notifications after max retries")
                 success = False
 
         if success:
@@ -316,11 +337,12 @@ class ISpyFireClient:
         Returns:
             True if successful, False otherwise
         """
-        if not self.client:
-            raise RuntimeError("Client must be used as context manager")
-
         url = f"{self.base_url}/api/mobile/clearalluserdevices/{email}"
-        response = self.client.get(url)
+        try:
+            response = self._request("GET", url)
+        except RetryError:
+            logger.warning("Failed to remove devices after max retries")
+            return False
 
         if response.status_code != 200:
             logger.warning(f"Failed to remove devices: {response.status_code}")
@@ -340,12 +362,13 @@ class ISpyFireClient:
         Returns:
             True if successful, False otherwise
         """
-        if not self.client:
-            raise RuntimeError("Client must be used as context manager")
-
         # This endpoint accepts both ID and email
         url = f"{self.base_url}/api/mobile/clearalluserdevices/{person_id}"
-        response = self.client.get(url)
+        try:
+            response = self._request("GET", url)
+        except RetryError:
+            logger.warning("Failed to logout mobile devices after max retries")
+            return False
 
         if response.status_code != 200:
             logger.warning(f"Failed to logout mobile devices: {response.status_code}")
@@ -358,7 +381,6 @@ class ISpyFireClient:
         """Send iSpyFire invite email to a person.
 
         This sends an email with instructions to set up their password.
-        Includes retry logic for rate limiting (429 responses).
 
         Args:
             email: Email address of the person
@@ -368,7 +390,7 @@ class ISpyFireClient:
         """
         url = f"{self.base_url}/api/login/passinvite/{email}"
         try:
-            response = self._request_with_retry(
+            response = self._request(
                 "PUT",
                 url,
                 json={"usernamePF": email},
@@ -402,9 +424,6 @@ class ISpyFireClient:
         Returns:
             True if successful, False otherwise
         """
-        if not self.client:
-            raise RuntimeError("Client must be used as context manager")
-
         # First logout devices if requested and email provided
         if logout_devices and email:
             # Step 1: Logout push notifications (deactivate iOS/GCM registrations)
@@ -414,11 +433,16 @@ class ISpyFireClient:
 
         # Then set both isActive and isLoginActive to False
         url = f"{self.base_url}/api/ddui/people/{person_id}"
-        response = self.client.put(
-            url,
-            json={"isActive": False, "isLoginActive": False},
-            headers={"Content-Type": "application/json"},
-        )
+        try:
+            response = self._request(
+                "PUT",
+                url,
+                json={"isActive": False, "isLoginActive": False},
+                headers={"Content-Type": "application/json"},
+            )
+        except RetryError:
+            logger.error(f"Failed to deactivate person after max retries: {person_id}")
+            return False
 
         if response.status_code != 200:
             logger.error(f"Failed to deactivate person: {response.status_code}")
@@ -440,16 +464,18 @@ class ISpyFireClient:
         Returns:
             True if successful, False otherwise
         """
-        if not self.client:
-            raise RuntimeError("Client must be used as context manager")
-
         # Set both isActive and isLoginActive to True
         url = f"{self.base_url}/api/ddui/people/{person_id}"
-        response = self.client.put(
-            url,
-            json={"isActive": True, "isLoginActive": True},
-            headers={"Content-Type": "application/json"},
-        )
+        try:
+            response = self._request(
+                "PUT",
+                url,
+                json={"isActive": True, "isLoginActive": True},
+                headers={"Content-Type": "application/json"},
+            )
+        except RetryError:
+            logger.error(f"Failed to reactivate person after max retries: {person_id}")
+            return False
 
         if response.status_code != 200:
             logger.error(f"Failed to reactivate person: {response.status_code}")
@@ -474,8 +500,6 @@ class ISpyFireClient:
         2. Creates the person in iSpyFire
         3. Sends an invite email so they can set their password
 
-        Includes a small delay to avoid rate limiting during bulk operations.
-
         Args:
             person: Person data to create
 
@@ -490,10 +514,7 @@ class ISpyFireClient:
         if not result:
             return None
 
-        # Small delay before sending invite to avoid rate limiting
-        self._delay_for_bulk()
-
-        # Send invite email (has retry logic for 429s)
+        # Send invite email
         if person.email:
             if self.send_invite_email(person.email):
                 logger.info(f"Sent invite email to {person.email}")

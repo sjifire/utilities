@@ -569,10 +569,11 @@ class TestRateLimitingRetry:
             httpx.Response(200),
         ]
 
-        # Patch the wait to avoid actual delays in tests
+        # Patch the wait and sleep to avoid actual delays in tests
         with (
             ISpyFireClient() as client,
             patch("sjifire.ispyfire.client.wait_exponential_jitter", return_value=lambda x: 0),
+            patch("sjifire.ispyfire.client.time.sleep"),
         ):
             result = client.send_invite_email("jdoe@sjifire.org")
 
@@ -593,6 +594,7 @@ class TestRateLimitingRetry:
         with (
             ISpyFireClient() as client,
             patch("sjifire.ispyfire.client.wait_exponential_jitter", return_value=lambda x: 0),
+            patch("sjifire.ispyfire.client.time.sleep"),
         ):
             result = client.send_invite_email("jdoe@sjifire.org")
 
@@ -609,17 +611,28 @@ class TestRateLimitingRetry:
         route = respx.put("https://test.ispyfire.com/api/login/passinvite/jdoe@sjifire.org")
         route.mock(return_value=httpx.Response(500))
 
-        with ISpyFireClient() as client:
+        with (
+            ISpyFireClient() as client,
+            patch("sjifire.ispyfire.client.time.sleep"),
+        ):
             result = client.send_invite_email("jdoe@sjifire.org")
 
         assert result is False
         assert route.call_count == 1  # Only one attempt, no retry
 
-    def test_delay_for_bulk_sleeps(self, mock_credentials):
-        """Test that _delay_for_bulk calls time.sleep."""
+    @respx.mock
+    def test_request_includes_proactive_delay(self, mock_credentials):
+        """Test that _request includes proactive delay before each request."""
         from sjifire.ispyfire.client import BULK_OPERATION_DELAY
 
-        with patch("sjifire.ispyfire.client.time.sleep") as mock_sleep:
-            client = ISpyFireClient()
-            client._delay_for_bulk()
-            mock_sleep.assert_called_once_with(BULK_OPERATION_DELAY)
+        respx.post("https://test.ispyfire.com/login").mock(return_value=httpx.Response(200))
+        respx.get("https://test.ispyfire.com/api/ddui/people").mock(
+            return_value=httpx.Response(200, json={"results": []})
+        )
+
+        with (
+            ISpyFireClient() as client,
+            patch("sjifire.ispyfire.client.time.sleep") as mock_sleep,
+        ):
+            client.get_people()
+            mock_sleep.assert_called_with(BULK_OPERATION_DELAY)
