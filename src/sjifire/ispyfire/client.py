@@ -1,6 +1,7 @@
 """iSpyFire API client."""
 
 import logging
+import re
 from typing import Self
 
 import httpx
@@ -184,8 +185,6 @@ class ISpyFireClient:
 
     def _get_ispyid(self) -> str:
         """Extract ispyid from base URL (e.g., sjf3 from https://sjf3.ispyfire.com)."""
-        import re
-
         match = re.search(r"https://([^.]+)\.ispyfire\.com", self.base_url)
         if match:
             return match.group(1).lower()

@@ -702,3 +702,25 @@ class TestCompareEntraToISpyFire:
 
         assert len(result.entra_operational) == 0
         assert len(result.to_add) == 0
+
+    def test_user_without_email_skipped(self):
+        """Users without email addresses should be skipped."""
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email=None,  # No email
+            upn="jdoe@sjifire.org",
+            employee_id="1",
+            mobile_phone="555-1234",
+            extension_attribute3="Firefighter",
+        )
+        entra_users = [user]
+        ispy_people = []
+
+        result = compare_entra_to_ispyfire(entra_users, ispy_people)
+
+        # User should be in operational list but not added (no email to match)
+        assert len(result.to_add) == 0
+        assert len(result.matched) == 0
