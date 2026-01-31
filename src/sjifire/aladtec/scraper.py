@@ -11,37 +11,9 @@ from bs4 import BeautifulSoup
 
 from sjifire.aladtec.models import Member
 from sjifire.core.config import get_aladtec_credentials
+from sjifire.core.normalize import format_phone, validate_email
 
 logger = logging.getLogger(__name__)
-
-
-def format_phone(phone: str | None) -> str | None:
-    """Format phone number to standard US format using libphonenumber.
-
-    Args:
-        phone: Raw phone number string
-
-    Returns:
-        Formatted phone number in national format, or None if invalid
-    """
-    if not phone:
-        return None
-
-    import phonenumbers
-
-    try:
-        # Parse as US number (default region)
-        parsed = phonenumbers.parse(phone, "US")
-
-        # Validate it's a possible number
-        if not phonenumbers.is_possible_number(parsed):
-            return phone.strip()
-
-        # Format in national format: (XXX) XXX-XXXX
-        return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.NATIONAL)
-    except phonenumbers.NumberParseException:
-        # Return original if parsing fails
-        return phone.strip() if phone else None
 
 
 def clean_title(title: str | None) -> str | None:
@@ -63,31 +35,6 @@ def clean_title(title: str | None) -> str | None:
             return line
 
     return None
-
-
-def validate_email(email: str | None, context: str = "") -> str | None:
-    """Validate email address format.
-
-    Args:
-        email: Email address to validate
-        context: Context for logging (e.g., member name)
-
-    Returns:
-        Valid email or None if invalid
-    """
-    if not email:
-        return None
-
-    from email_validator import EmailNotValidError
-    from email_validator import validate_email as ev
-
-    try:
-        # Validate and normalize the email
-        result = ev(email, check_deliverability=False)
-        return result.normalized
-    except EmailNotValidError as e:
-        logger.warning(f"Invalid email '{email}'{f' for {context}' if context else ''}: {e}")
-        return None
 
 
 class AladtecScraper:
