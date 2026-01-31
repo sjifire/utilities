@@ -65,11 +65,6 @@ class EntraUser:
         return bool(self.mobile_phone)
 
     @property
-    def is_utility(self) -> bool:
-        """Check if user is a utility/service account based on employee_type."""
-        return bool(self.employee_type and self.employee_type.lower() == "utility")
-
-    @property
     def positions(self) -> set[str]:
         """Get positions from extensionAttribute3 as a set."""
         if not self.extension_attribute3:

@@ -9,7 +9,6 @@ from sjifire.ispyfire.sync import (
     get_user_positions,
     is_managed_email,
     is_operational,
-    is_utility_account,
     normalize_email,
     normalize_name,
     normalize_phone,
@@ -192,37 +191,6 @@ class TestIsManagedEmail:
         assert is_managed_email("  jdoe@sjifire.org  ") is True
 
 
-class TestIsUtilityAccount:
-    """Tests for is_utility_account function."""
-
-    def test_svc_prefix(self):
-        assert is_utility_account("svc-automation@sjifire.org") is True
-
-    def test_svc_underscore_prefix(self):
-        assert is_utility_account("svc_backup@sjifire.org") is True
-
-    def test_service_prefix(self):
-        assert is_utility_account("service-account@sjifire.org") is True
-
-    def test_automation_prefix(self):
-        assert is_utility_account("automation@sjifire.org") is True
-
-    def test_bot_prefix(self):
-        assert is_utility_account("bot-notify@sjifire.org") is True
-
-    def test_regular_user(self):
-        assert is_utility_account("jdoe@sjifire.org") is False
-
-    def test_none_email(self):
-        assert is_utility_account(None) is False
-
-    def test_empty_email(self):
-        assert is_utility_account("") is False
-
-    def test_case_insensitive(self):
-        assert is_utility_account("SVC-Automation@sjifire.org") is True
-
-
 class TestGetUserPositions:
     """Tests for get_user_positions function."""
 
@@ -331,20 +299,6 @@ class TestIsOperational:
             upn="jdoe@sjifire.org",
             employee_id="1",
             extension_attribute3="Commissioner",
-        )
-        assert is_operational(user) is False
-
-    def test_utility_employee_type_excluded(self):
-        user = EntraUser(
-            id="1",
-            display_name="Svc Automation",
-            first_name="Svc",
-            last_name="Automation",
-            email="svc-automation@sjifire.org",
-            upn="svc-automation@sjifire.org",
-            employee_id="1",
-            employee_type="Utility",
-            extension_attribute3="Firefighter",
         )
         assert is_operational(user) is False
 
@@ -572,6 +526,7 @@ class TestCompareEntraToISpyFire:
         phone: str = "555-1234",
         title: str | None = None,
         is_active: bool = True,
+        is_utility: bool = False,
     ) -> ISpyFirePerson:
         """Helper to create an ISpyFirePerson."""
         return ISpyFirePerson(
@@ -582,6 +537,7 @@ class TestCompareEntraToISpyFire:
             cell_phone=phone,
             title=title,
             is_active=is_active,
+            is_utility=is_utility,
         )
 
     def test_matched_users(self):
@@ -664,9 +620,12 @@ class TestCompareEntraToISpyFire:
         assert len(result.to_remove) == 0
 
     def test_utility_account_not_removed(self):
+        """Utility accounts in iSpyFire should not be removed."""
         entra_users = []
         ispy_people = [
-            self._make_ispy_person("abc", "Svc", "Automation", "svc-automation@sjifire.org"),
+            self._make_ispy_person(
+                "abc", "Svc", "Automation", "svc-automation@sjifire.org", is_utility=True
+            ),
         ]
 
         result = compare_entra_to_ispyfire(entra_users, ispy_people)

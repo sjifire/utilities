@@ -15,6 +15,7 @@ class ISpyFirePerson:
     title: str | None = None
     is_active: bool = True
     is_login_active: bool = False
+    is_utility: bool = False
     group_set_acls: list[str] = field(default_factory=list)
     message_email: bool = False
     message_cell: bool = False
@@ -36,6 +37,7 @@ class ISpyFirePerson:
             title=data.get("title"),
             is_active=data.get("isActive", True),
             is_login_active=data.get("isLoginActive", False),
+            is_utility=data.get("isUtility", False),
             group_set_acls=data.get("groupSetACLs", []),
             message_email=data.get("messageEmail", False),
             message_cell=data.get("messageCell", False),

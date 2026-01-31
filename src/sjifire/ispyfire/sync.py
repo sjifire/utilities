@@ -50,18 +50,14 @@ def get_user_positions(user: EntraUser) -> set[str]:
 
 
 def is_operational(user: EntraUser) -> bool:
-    """Check if user has any operational positions and is not a utility account.
+    """Check if user has any operational positions.
 
     Args:
         user: Entra user object
 
     Returns:
-        True if user has at least one operational position and is not utility
+        True if user has at least one operational position
     """
-    # Exclude Utility accounts
-    if user.employee_type and user.employee_type.lower() == "utility":
-        return False
-
     positions = get_user_positions(user)
     return bool(positions & OPERATIONAL_POSITIONS)
 
@@ -143,29 +139,6 @@ def is_managed_email(email: str | None, domain: str = "sjifire.org") -> bool:
     if not email:
         return False
     return email.lower().strip().endswith(f"@{domain}")
-
-
-def is_utility_account(email: str | None) -> bool:
-    """Check if email belongs to a utility/service account.
-
-    Utility accounts include service accounts (svc-*) and should not be
-    automatically added or removed during sync.
-
-    Args:
-        email: Email address to check
-
-    Returns:
-        True if this is a utility/service account
-    """
-    if not email:
-        return False
-
-    email_lower = email.lower().strip()
-    local_part = email_lower.split("@")[0]
-
-    # Service account patterns
-    utility_prefixes = ("svc-", "svc_", "service-", "service_", "automation", "bot-")
-    return local_part.startswith(utility_prefixes)
 
 
 def normalize_name(first: str | None, last: str | None) -> str:
@@ -282,13 +255,13 @@ def compare_entra_to_ispyfire(
 
     # Find iSpyFire people not matched to any operational Entra user
     # Only consider people with managed domain emails for removal
-    # Exclude utility/service accounts from removal
+    # Exclude utility accounts (marked in iSpyFire) from removal
     for person in ispyfire_people:
         if (
             person.id not in matched_ispyfire_ids
             and person.is_active
             and is_managed_email(person.email, managed_domain)
-            and not is_utility_account(person.email)
+            and not person.is_utility
         ):
             comparison.to_remove.append(person)
 
