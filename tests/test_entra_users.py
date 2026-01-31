@@ -273,6 +273,97 @@ class TestEntraUser:
         )
         assert user.has_valid_evip is True
 
+    def test_is_operational_with_firefighter(self):
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email=None,
+            upn=None,
+            employee_id=None,
+            extension_attribute3="Firefighter",
+        )
+        assert user.is_operational is True
+
+    def test_is_operational_with_apparatus_operator(self):
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email=None,
+            upn=None,
+            employee_id=None,
+            extension_attribute3="Apparatus Operator",
+        )
+        assert user.is_operational is True
+
+    def test_is_operational_with_support(self):
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email=None,
+            upn=None,
+            employee_id=None,
+            extension_attribute3="Support",
+        )
+        assert user.is_operational is True
+
+    def test_is_operational_with_wildland(self):
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email=None,
+            upn=None,
+            employee_id=None,
+            extension_attribute3="Wildland Firefighter",
+        )
+        assert user.is_operational is True
+
+    def test_is_operational_with_multiple_positions(self):
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email=None,
+            upn=None,
+            employee_id=None,
+            extension_attribute3="Board Member, Firefighter",
+        )
+        assert user.is_operational is True
+
+    def test_is_operational_false_non_operational(self):
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email=None,
+            upn=None,
+            employee_id=None,
+            extension_attribute3="Board Member, Administrator",
+        )
+        assert user.is_operational is False
+
+    def test_is_operational_false_no_positions(self):
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email=None,
+            upn=None,
+            employee_id=None,
+            extension_attribute3=None,
+        )
+        assert user.is_operational is False
+
 
 class TestEntraUserManagerPasswordGeneration:
     """Tests for password generation."""

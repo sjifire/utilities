@@ -104,6 +104,17 @@ class EntraUser:
         except Exception:
             return False
 
+    @property
+    def is_operational(self) -> bool:
+        """Check if user has any operational positions.
+
+        Operational positions are those that respond to emergencies
+        (Firefighter, Apparatus Operator, Support, Wildland Firefighter, Marine roles).
+        """
+        from sjifire.aladtec.models import OPERATIONAL_POSITIONS
+
+        return bool(self.positions & OPERATIONAL_POSITIONS)
+
 
 class EntraUserManager:
     """Manage users in Entra ID."""
