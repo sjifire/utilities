@@ -108,6 +108,37 @@ The audit checks for:
 - Entra ID users not in Aladtec
 - Entra ID users to deactivate (matched to inactive Aladtec members)
 
+### Mail-Enabled Security Group Sync
+
+**Sync mail-enabled security groups from Aladtec (Exchange Online):**
+```bash
+uv run mail-group-sync --all              # Sync all group strategies
+uv run mail-group-sync --all --dry-run    # Preview changes without applying
+uv run mail-group-sync --strategy stations # Sync only station groups
+```
+
+Mail-enabled security groups are Exchange Online groups that provide email distribution without creating SharePoint sites (unlike M365 groups). This is useful when you need email distribution but want to avoid data sprawl.
+
+**Prerequisites:**
+1. PowerShell 7+ (`pwsh`) - see [Installing PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell)
+2. ExchangeOnlineManagement module: `pwsh -Command "Install-Module -Name ExchangeOnlineManagement -Force"`
+3. Azure AD App Registration with Exchange.ManageAsApp permission
+4. Certificate for app-only authentication (thumbprint or .pfx file)
+5. App assigned "Exchange Recipient Administrator" role
+
+**Environment variables:**
+```bash
+# Exchange Online credentials (add to .env)
+EXCHANGE_ORGANIZATION=sjifire.org
+# Option 1: Certificate thumbprint (Windows with installed cert)
+EXCHANGE_CERTIFICATE_THUMBPRINT=your-thumbprint
+# Option 2: Certificate file (cross-platform)
+EXCHANGE_CERTIFICATE_PATH=/path/to/certificate.pfx
+EXCHANGE_CERTIFICATE_PASSWORD=your-cert-password
+```
+
+The sync uses the same strategies as M365 group sync (stations, ff, wff, ao, marine, volunteers, allpersonnel).
+
 ### Entra ID Tools
 
 **Analyze group mappings:**
@@ -204,11 +235,15 @@ src/sjifire/
 │   ├── group_sync.py  # Group sync strategies and manager
 │   ├── groups.py      # Group management (create, update, members)
 │   └── users.py       # User management
+├── exchange/          # Exchange Online integration
+│   ├── client.py      # PowerShell-based Exchange client
+│   └── group_sync.py  # Mail-enabled security group sync
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
     ├── create_security_groups.py
     ├── entra_audit.py
     ├── entra_group_sync.py  # M365 group sync CLI
-    └── entra_user_sync.py   # User sync CLI
+    ├── entra_user_sync.py   # User sync CLI
+    └── mail_group_sync.py   # Mail-enabled security group sync CLI
 ```
