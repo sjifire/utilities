@@ -2,14 +2,39 @@
 
 import logging
 import re
+import time
 from typing import Self
 
 import httpx
+from tenacity import (
+    RetryError,
+    retry,
+    retry_if_result,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from sjifire.core.config import get_ispyfire_credentials
 from sjifire.ispyfire.models import ISpyFirePerson
 
 logger = logging.getLogger(__name__)
+
+# Rate limiting configuration
+MAX_RETRIES = 5
+MIN_WAIT_SECONDS = 1
+MAX_WAIT_SECONDS = 30
+BULK_OPERATION_DELAY = 0.2  # 200ms delay between bulk operations
+
+
+def _is_rate_limited(response: httpx.Response) -> bool:
+    """Check if response indicates rate limiting (429)."""
+    return response.status_code == 429
+
+
+def _log_retry(retry_state) -> None:
+    """Log retry attempts."""
+    if retry_state.attempt_number > 1:
+        logger.warning(f"Retry attempt {retry_state.attempt_number} after rate limiting")
 
 
 class ISpyFireClient:
@@ -34,6 +59,43 @@ class ISpyFireClient:
         if self.client:
             self.client.close()
             self.client = None
+
+    @retry(
+        retry=retry_if_result(_is_rate_limited),
+        stop=stop_after_attempt(MAX_RETRIES),
+        wait=wait_exponential_jitter(initial=MIN_WAIT_SECONDS, max=MAX_WAIT_SECONDS),
+        before_sleep=_log_retry,
+        reraise=True,
+    )
+    def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        **kwargs,
+    ) -> httpx.Response:
+        """Make an HTTP request with retry logic for rate limiting.
+
+        Args:
+            method: HTTP method (GET, POST, PUT, etc.)
+            url: URL to request
+            **kwargs: Additional arguments passed to httpx
+
+        Returns:
+            Response object
+        """
+        if not self.client:
+            raise RuntimeError("Client must be used as context manager")
+
+        response = self.client.request(method, url, **kwargs)
+
+        if response.status_code == 429:
+            logger.warning(f"Rate limited (429) on {method} {url}")
+
+        return response
+
+    def _delay_for_bulk(self) -> None:
+        """Add a small delay for bulk operations to avoid rate limiting."""
+        time.sleep(BULK_OPERATION_DELAY)
 
     def _login(self) -> bool:
         """Log in to iSpyFire.
@@ -296,6 +358,7 @@ class ISpyFireClient:
         """Send iSpyFire invite email to a person.
 
         This sends an email with instructions to set up their password.
+        Includes retry logic for rate limiting (429 responses).
 
         Args:
             email: Email address of the person
@@ -303,15 +366,17 @@ class ISpyFireClient:
         Returns:
             True if successful, False otherwise
         """
-        if not self.client:
-            raise RuntimeError("Client must be used as context manager")
-
         url = f"{self.base_url}/api/login/passinvite/{email}"
-        response = self.client.put(
-            url,
-            json={"usernamePF": email},
-            headers={"Content-Type": "application/json"},
-        )
+        try:
+            response = self._request_with_retry(
+                "PUT",
+                url,
+                json={"usernamePF": email},
+                headers={"Content-Type": "application/json"},
+            )
+        except RetryError:
+            logger.error(f"Failed to send invite email after max retries: {email}")
+            return False
 
         if response.status_code != 200:
             logger.warning(f"Failed to send invite email: {response.status_code}")
@@ -409,6 +474,8 @@ class ISpyFireClient:
         2. Creates the person in iSpyFire
         3. Sends an invite email so they can set their password
 
+        Includes a small delay to avoid rate limiting during bulk operations.
+
         Args:
             person: Person data to create
 
@@ -423,7 +490,10 @@ class ISpyFireClient:
         if not result:
             return None
 
-        # Send invite email
+        # Small delay before sending invite to avoid rate limiting
+        self._delay_for_bulk()
+
+        # Send invite email (has retry logic for 429s)
         if person.email:
             if self.send_invite_email(person.email):
                 logger.info(f"Sent invite email to {person.email}")

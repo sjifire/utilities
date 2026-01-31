@@ -551,3 +551,75 @@ class TestGetIspyId:
             mock.return_value = ("https://example.com", "user", "pass")
             client = ISpyFireClient()
             assert client._get_ispyid() == ""
+
+
+class TestRateLimitingRetry:
+    """Tests for rate limiting and retry behavior."""
+
+    @respx.mock
+    def test_send_invite_retries_on_429_then_succeeds(self, mock_credentials):
+        """Test that 429 responses trigger retries with eventual success."""
+        respx.post("https://test.ispyfire.com/login").mock(return_value=httpx.Response(200))
+
+        # First two calls return 429, third succeeds
+        route = respx.put("https://test.ispyfire.com/api/login/passinvite/jdoe@sjifire.org")
+        route.side_effect = [
+            httpx.Response(429),
+            httpx.Response(429),
+            httpx.Response(200),
+        ]
+
+        # Patch the wait to avoid actual delays in tests
+        with (
+            ISpyFireClient() as client,
+            patch("sjifire.ispyfire.client.wait_exponential_jitter", return_value=lambda x: 0),
+        ):
+            result = client.send_invite_email("jdoe@sjifire.org")
+
+        assert result is True
+        assert route.call_count == 3
+
+    @respx.mock
+    def test_send_invite_returns_false_after_max_retries(self, mock_credentials):
+        """Test that after max retries, the method returns False."""
+        respx.post("https://test.ispyfire.com/login").mock(return_value=httpx.Response(200))
+
+        # Always return 429
+        route = respx.put("https://test.ispyfire.com/api/login/passinvite/jdoe@sjifire.org")
+        route.mock(return_value=httpx.Response(429))
+
+        # The retry decorator will exhaust retries and raise RetryError,
+        # which send_invite_email catches and returns False
+        with (
+            ISpyFireClient() as client,
+            patch("sjifire.ispyfire.client.wait_exponential_jitter", return_value=lambda x: 0),
+        ):
+            result = client.send_invite_email("jdoe@sjifire.org")
+
+        # After MAX_RETRIES (5) attempts, RetryError is caught and False is returned
+        assert result is False
+        assert route.call_count == 5  # MAX_RETRIES
+
+    @respx.mock
+    def test_non_429_errors_not_retried(self, mock_credentials):
+        """Test that non-429 errors are not retried."""
+        respx.post("https://test.ispyfire.com/login").mock(return_value=httpx.Response(200))
+
+        # Return 500 (server error) - should not be retried
+        route = respx.put("https://test.ispyfire.com/api/login/passinvite/jdoe@sjifire.org")
+        route.mock(return_value=httpx.Response(500))
+
+        with ISpyFireClient() as client:
+            result = client.send_invite_email("jdoe@sjifire.org")
+
+        assert result is False
+        assert route.call_count == 1  # Only one attempt, no retry
+
+    def test_delay_for_bulk_sleeps(self, mock_credentials):
+        """Test that _delay_for_bulk calls time.sleep."""
+        from sjifire.ispyfire.client import BULK_OPERATION_DELAY
+
+        with patch("sjifire.ispyfire.client.time.sleep") as mock_sleep:
+            client = ISpyFireClient()
+            client._delay_for_bulk()
+            mock_sleep.assert_called_once_with(BULK_OPERATION_DELAY)
