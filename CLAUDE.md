@@ -158,10 +158,31 @@ uv run ruff format --check .
 
 - `config/entra_sync.json`: Company name, domain, skip list
 - `config/group_mappings.json`: Position-to-group assignments
-- `.env`: Credentials (not committed)
+- `.env`: Credentials (not committed) - use `./scripts/pull-secrets.sh` to populate
+
+## Azure Key Vault
+
+All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Actions use OIDC to authenticate and fetch secrets at runtime.
+
+### Pull secrets locally
+```bash
+./scripts/pull-secrets.sh           # Pull all secrets to .env
+./scripts/pull-secrets.sh --list    # List available secrets
+```
+
+### Key Vault secrets used by this repo
+- `ALADTEC-URL`, `ALADTEC-USERNAME`, `ALADTEC-PASSWORD`
+- `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
+- `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
+
+### OIDC app registration
+- App: `utilities-sync` (client ID in workflow files)
+- Federated credential: `repo:sjifire/utilities:environment:production`
 
 ## GitHub Actions
 
 - `ci.yml`: Lint + test on PR/push
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Sync every 30 minutes (Entra to iSpyFire), uploads backup artifacts
+
+All workflows authenticate via OIDC and fetch secrets from Key Vault (no GitHub secrets required).

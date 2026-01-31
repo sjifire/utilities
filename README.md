@@ -186,6 +186,8 @@ Group mappings are configured in `config/group_mappings.json`:
 
 ## GitHub Actions
 
+GitHub Actions authenticate to Azure using OIDC (OpenID Connect) and fetch secrets from Azure Key Vault at runtime. No secrets are stored in GitHub.
+
 ### CI (ci.yml)
 Runs on push/PR to main:
 - Lint with ruff
@@ -198,9 +200,9 @@ Runs weekdays at noon Pacific:
 - Uploads backup artifacts (30-day retention)
 - Can be triggered manually with dry-run option
 
-**Required secrets:**
-- `ALADTEC_URL`, `ALADTEC_USERNAME`, `ALADTEC_PASSWORD`
-- `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`
+**Secrets (from Key Vault):**
+- `ALADTEC-URL`, `ALADTEC-USERNAME`, `ALADTEC-PASSWORD`
+- `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
 
 ### iSpyFire Sync (ispyfire-sync.yml)
 Runs every 30 minutes:
@@ -210,9 +212,30 @@ Runs every 30 minutes:
 - Uploads backup artifacts (30-day retention)
 - Can be triggered manually with dry-run option
 
-**Required secrets:**
-- `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`
-- `ISPYFIRE_URL`, `ISPYFIRE_USERNAME`, `ISPYFIRE_PASSWORD`
+**Secrets (from Key Vault):**
+- `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
+- `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
+
+## Azure Key Vault
+
+All secrets are stored in Azure Key Vault `gh-website-utilities` in resource group `rg-staticweb-prod-westus2`.
+
+### Pull secrets for local development
+
+```bash
+./scripts/pull-secrets.sh           # Pull all secrets to .env
+./scripts/pull-secrets.sh --list    # List available secrets
+./scripts/pull-secrets.sh MS-GRAPH-TENANT-ID ALADTEC-URL  # Pull specific secrets
+```
+
+Requires Azure CLI login (`az login`).
+
+### OIDC Configuration
+
+GitHub Actions use the `utilities-sync` app registration with federated credentials:
+- `repo:sjifire/utilities:environment:production`
+
+The app has `get` and `list` permissions on the Key Vault secrets.
 
 ## Development
 
