@@ -165,11 +165,12 @@ def print_comparison_report(comparison) -> None:
     print(f"\n{'=' * 70}")
 
 
-async def run_sync(dry_run: bool = True) -> int:
+async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int:
     """Run the iSpyFire sync.
 
     Args:
         dry_run: If True, only show what would change without making changes
+        single_email: If provided, only sync this user
 
     Returns:
         Exit code (0 for success)
@@ -183,17 +184,30 @@ async def run_sync(dry_run: bool = True) -> int:
     entra_users = await user_manager.get_employees()
     logger.info(f"Fetched {len(entra_users)} employees from Entra ID")
 
+    # Filter to single user if specified
+    if single_email:
+        single_email_lower = single_email.lower()
+        entra_users = [u for u in entra_users if u.email and u.email.lower() == single_email_lower]
+        if not entra_users:
+            print(f"Error: User not found in Entra ID: {single_email}")
+            return 1
+        logger.info(f"Filtering to single user: {single_email}")
+
     # Get iSpyFire people
     logger.info("Fetching iSpyFire people...")
     with ISpyFireClient() as ispy_client:
         ispyfire_people = ispy_client.get_people()
 
-        # Backup current state
-        if ispyfire_people:
+        # Backup current state (only for full sync)
+        if ispyfire_people and not single_email:
             backup_ispyfire_people(ispyfire_people, backup_dir)
 
         # Compare
         comparison = compare_entra_to_ispyfire(entra_users, ispyfire_people)
+
+        # For single-user sync, don't remove anyone
+        if single_email:
+            comparison.to_remove = []
 
         # Print report
         print_comparison_report(comparison)
@@ -205,18 +219,13 @@ async def run_sync(dry_run: bool = True) -> int:
         # Apply changes
         print("\nApplying changes...")
 
-        # Add new people
+        # Add new people (creates user, sets active flags, sends invite email)
         for user in comparison.to_add:
             person = entra_user_to_ispyfire_person(user)
             logger.info(f"Creating: {person.display_name}")
-            result = ispy_client.create_person(person)
+            result = ispy_client.create_and_invite(person)
             if result:
                 logger.info(f"  Created with ID: {result.id}")
-                # Send invite email so they can set up their password
-                if person.email and ispy_client.send_invite_email(person.email):
-                    logger.info("  Invite email sent")
-                else:
-                    logger.warning("  Failed to send invite email")
             else:
                 logger.error("  Failed to create")
 
@@ -263,6 +272,11 @@ def main() -> int:
         help="Show what would change without making changes",
     )
     parser.add_argument(
+        "--email",
+        type=str,
+        help="Sync a single user by email address",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -276,7 +290,7 @@ def main() -> int:
 
     import asyncio
 
-    return asyncio.run(run_sync(dry_run=args.dry_run))
+    return asyncio.run(run_sync(dry_run=args.dry_run, single_email=args.email))
 
 
 if __name__ == "__main__":

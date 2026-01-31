@@ -60,11 +60,14 @@ class ISpyFireClient:
         logger.info("Login successful")
         return True
 
-    def get_people(self, include_deleted: bool = False) -> list[ISpyFirePerson]:
+    def get_people(
+        self, include_inactive: bool = False, include_deleted: bool = False
+    ) -> list[ISpyFirePerson]:
         """Fetch all people from iSpyFire.
 
         Args:
-            include_deleted: If True, include deleted/inactive people
+            include_inactive: If True, include inactive people
+            include_deleted: If True, include deleted people
 
         Returns:
             List of ISpyFirePerson objects
@@ -73,8 +76,13 @@ class ISpyFireClient:
             raise RuntimeError("Client must be used as context manager")
 
         url = f"{self.base_url}/api/ddui/people"
+        params = []
+        if include_inactive:
+            params.append("includeInactive=true")
         if include_deleted:
-            url += "?includeDeleted=true"
+            params.append("includeDeleted=true")
+        if params:
+            url += "?" + "&".join(params)
 
         logger.info(f"Fetching people from {url}")
         response = self.client.get(url)
@@ -174,8 +182,96 @@ class ISpyFireClient:
             return ISpyFirePerson.from_api(data["results"][0])
         return None
 
+    def _get_ispyid(self) -> str:
+        """Extract ispyid from base URL (e.g., sjf3 from https://sjf3.ispyfire.com)."""
+        import re
+
+        match = re.search(r"https://([^.]+)\.ispyfire\.com", self.base_url)
+        if match:
+            return match.group(1).lower()
+        return ""
+
+    def logout_push_notifications(self, email: str) -> bool:
+        """Logout/deactivate push notifications for a person.
+
+        This deactivates iOS and GCM push registrations but doesn't remove
+        the device registrations. Call this BEFORE remove_all_devices.
+
+        Args:
+            email: Email of person to logout push for
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.client:
+            raise RuntimeError("Client must be used as context manager")
+
+        success = True
+
+        # Deactivate iOS push registrations
+        url = f"{self.base_url}/api/ddui/iosregids/user/{email}"
+        response = self.client.put(
+            url,
+            json={"isActive": False},
+            headers={"Content-Type": "application/json"},
+        )
+        if response.status_code != 200:
+            logger.warning(f"Failed to deactivate iOS push: {response.status_code}")
+            success = False
+
+        # Deactivate GCM push registrations
+        url = f"{self.base_url}/api/ddui/gcmregids/user/{email}"
+        response = self.client.put(
+            url,
+            json={"isActive": False},
+            headers={"Content-Type": "application/json"},
+        )
+        if response.status_code != 200:
+            logger.warning(f"Failed to deactivate GCM push: {response.status_code}")
+            success = False
+
+        # Clear iSpyFire notifications
+        ispyid = self._get_ispyid()
+        if ispyid:
+            url = f"{self.base_url}/api/mobile/clearallispyidnotifications/{email}/{ispyid}"
+            response = self.client.get(url)
+            if response.status_code != 200:
+                logger.warning(f"Failed to clear notifications: {response.status_code}")
+                success = False
+
+        if success:
+            logger.info(f"Logged out push notifications for {email}")
+        return success
+
+    def remove_all_devices(self, email: str) -> bool:
+        """Remove all registered devices for a person.
+
+        This clears all device registrations. Call this AFTER
+        logout_push_notifications.
+
+        Args:
+            email: Email of person to remove devices for
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.client:
+            raise RuntimeError("Client must be used as context manager")
+
+        url = f"{self.base_url}/api/mobile/clearalluserdevices/{email}"
+        response = self.client.get(url)
+
+        if response.status_code != 200:
+            logger.warning(f"Failed to remove devices: {response.status_code}")
+            return False
+
+        logger.info(f"Removed all devices for {email}")
+        return True
+
     def logout_mobile_devices(self, person_id: str) -> bool:
         """Logout all mobile devices for a person.
+
+        DEPRECATED: Use logout_push_notifications + remove_all_devices instead.
 
         Args:
             person_id: ID of person to logout devices for
@@ -186,7 +282,7 @@ class ISpyFireClient:
         if not self.client:
             raise RuntimeError("Client must be used as context manager")
 
-        # iSpyFire uses GET for this endpoint
+        # This endpoint accepts both ID and email
         url = f"{self.base_url}/api/mobile/clearalluserdevices/{person_id}"
         response = self.client.get(url)
 
@@ -225,14 +321,19 @@ class ISpyFireClient:
         logger.info(f"Sent invite email to {email}")
         return True
 
-    def deactivate_person(self, person_id: str, logout_devices: bool = True) -> bool:
+    def deactivate_person(
+        self, person_id: str, email: str | None = None, logout_devices: bool = True
+    ) -> bool:
         """Deactivate a person in iSpyFire.
 
-        Sets both isActive and isLoginActive to False.
+        Sets both isActive and isLoginActive to False. If email is provided
+        and logout_devices is True, also logs out push notifications and
+        removes all device registrations.
 
         Args:
             person_id: ID of person to deactivate
-            logout_devices: If True, logout mobile devices first (default: True)
+            email: Email of person (required for full device logout)
+            logout_devices: If True, logout devices first (default: True)
 
         Returns:
             True if successful, False otherwise
@@ -240,9 +341,12 @@ class ISpyFireClient:
         if not self.client:
             raise RuntimeError("Client must be used as context manager")
 
-        # First logout mobile devices if requested
-        if logout_devices:
-            self.logout_mobile_devices(person_id)
+        # First logout devices if requested and email provided
+        if logout_devices and email:
+            # Step 1: Logout push notifications (deactivate iOS/GCM registrations)
+            self.logout_push_notifications(email)
+            # Step 2: Remove all device registrations
+            self.remove_all_devices(email)
 
         # Then set both isActive and isLoginActive to False
         url = f"{self.base_url}/api/ddui/people/{person_id}"
@@ -258,3 +362,73 @@ class ISpyFireClient:
 
         logger.info(f"Deactivated person {person_id}")
         return True
+
+    def reactivate_person(self, person_id: str, email: str | None = None) -> bool:
+        """Reactivate a person in iSpyFire.
+
+        Sets both isActive and isLoginActive to True, and sends a
+        password reset email so they can log in again.
+
+        Args:
+            person_id: ID of person to reactivate
+            email: Email address for password reset (required for invite)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.client:
+            raise RuntimeError("Client must be used as context manager")
+
+        # Set both isActive and isLoginActive to True
+        url = f"{self.base_url}/api/ddui/people/{person_id}"
+        response = self.client.put(
+            url,
+            json={"isActive": True, "isLoginActive": True},
+            headers={"Content-Type": "application/json"},
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to reactivate person: {response.status_code}")
+            return False
+
+        logger.info(f"Reactivated person {person_id}")
+
+        # Send password reset email if email provided
+        if email:
+            if self.send_invite_email(email):
+                logger.info(f"Sent password reset email to {email}")
+            else:
+                logger.warning(f"Failed to send password reset email to {email}")
+
+        return True
+
+    def create_and_invite(self, person: ISpyFirePerson) -> ISpyFirePerson | None:
+        """Create a new person and send them an invite email.
+
+        This is the recommended way to add new users. It:
+        1. Ensures isActive and isLoginActive are both True
+        2. Creates the person in iSpyFire
+        3. Sends an invite email so they can set their password
+
+        Args:
+            person: Person data to create
+
+        Returns:
+            Created person with ID, or None if failed
+        """
+        # Ensure both active flags are set
+        person.set_active(True)
+
+        # Create the person
+        result = self.create_person(person)
+        if not result:
+            return None
+
+        # Send invite email
+        if person.email:
+            if self.send_invite_email(person.email):
+                logger.info(f"Sent invite email to {person.email}")
+            else:
+                logger.warning(f"Failed to send invite email to {person.email}")
+
+        return result
