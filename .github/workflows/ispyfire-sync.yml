@@ -15,6 +15,15 @@ on:
 permissions:
   id-token: write
   contents: read
+  actions: none
+  checks: none
+  deployments: none
+  issues: none
+  packages: none
+  pull-requests: none
+  repository-projects: none
+  security-events: none
+  statuses: none
 
 jobs:
   sync:
@@ -86,4 +95,4 @@ jobs:
         with:
           name: ispyfire-backup-${{ github.run_id }}
           path: backups/
-          retention-days: 30
+          retention-days: 7

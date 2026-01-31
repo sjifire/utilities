@@ -11,6 +11,8 @@ import argparse
 import logging
 import sys
 
+from email_validator import EmailNotValidError, validate_email
+
 from sjifire.ispyfire.client import ISpyFireClient
 
 logging.basicConfig(
@@ -24,9 +26,21 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
+def _validate_email_arg(email: str) -> str | None:
+    """Validate email argument and return normalized email or None if invalid."""
+    try:
+        result = validate_email(email, check_deliverability=False)
+        return result.normalized
+    except EmailNotValidError as e:
+        print(f"Error: Invalid email address: {e}")
+        return None
+
+
 def cmd_activate(args) -> int:
     """Activate a user and send password reset email."""
-    email = args.email
+    email = _validate_email_arg(args.email)
+    if not email:
+        return 1
 
     with ISpyFireClient() as client:
         # Find the user
@@ -56,7 +70,9 @@ def cmd_activate(args) -> int:
 
 def cmd_deactivate(args) -> int:
     """Deactivate a user and logout all devices."""
-    email = args.email
+    email = _validate_email_arg(args.email)
+    if not email:
+        return 1
 
     with ISpyFireClient() as client:
         # Find the user
