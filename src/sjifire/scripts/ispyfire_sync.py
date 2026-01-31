@@ -220,7 +220,9 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
         print("\nApplying changes...")
 
         # Add new people (creates user, sets active flags, sends invite email)
-        for user in comparison.to_add:
+        for i, user in enumerate(comparison.to_add):
+            if i > 0:
+                ispy_client._delay_for_bulk()
             person = entra_user_to_ispyfire_person(user)
             logger.info(f"Creating: {person.display_name}")
             result = ispy_client.create_and_invite(person)
@@ -230,7 +232,9 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
                 logger.error("  Failed to create")
 
         # Update existing people
-        for user, person in comparison.to_update:
+        for i, (user, person) in enumerate(comparison.to_update):
+            if i > 0:
+                ispy_client._delay_for_bulk()
             logger.info(f"Updating: {person.display_name}")
             # Update fields from Entra
             if user.first_name:
@@ -249,9 +253,11 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
                 logger.error("  Failed to update")
 
         # Deactivate removed people
-        for person in comparison.to_remove:
+        for i, person in enumerate(comparison.to_remove):
+            if i > 0:
+                ispy_client._delay_for_bulk()
             logger.info(f"Deactivating: {person.display_name}")
-            if ispy_client.deactivate_person(person.id):
+            if ispy_client.deactivate_person(person.id, email=person.email):
                 logger.info("  Deactivated successfully")
             else:
                 logger.error("  Failed to deactivate")
