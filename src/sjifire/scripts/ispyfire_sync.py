@@ -193,10 +193,10 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
             return 1
         logger.info(f"Filtering to single user: {single_email}")
 
-    # Get iSpyFire people
+    # Get iSpyFire people (include inactive to detect manual deactivations)
     logger.info("Fetching iSpyFire people...")
     with ISpyFireClient() as ispy_client:
-        ispyfire_people = ispy_client.get_people()
+        ispyfire_people = ispy_client.get_people(include_inactive=True)
 
         # Backup current state (only for full sync)
         if ispyfire_people and not single_email:
@@ -251,6 +251,22 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
                 logger.info("  Updated successfully")
             else:
                 logger.error("  Failed to update")
+
+        # Reactivate any matched users who are inactive in iSpyFire
+        # (handles manual deactivation in iSpyFire UI)
+        to_reactivate = [
+            (user, person)
+            for user, person in comparison.matched + comparison.to_update
+            if not person.is_active
+        ]
+        for i, (_user, person) in enumerate(to_reactivate):
+            if i > 0:
+                ispy_client._delay_for_bulk()
+            logger.info(f"Reactivating: {person.display_name}")
+            if ispy_client.reactivate_person(person.id, email=person.email):
+                logger.info("  Reactivated successfully")
+            else:
+                logger.error("  Failed to reactivate")
 
         # Deactivate removed people
         for i, person in enumerate(comparison.to_remove):
