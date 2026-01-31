@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""Sync Entra ID users to iSpyFire.
+
+This script compares operational users in Entra ID with people in iSpyFire
+and can add, update, or deactivate users to keep them in sync.
+"""
+
+import argparse
+import json
+import logging
+import sys
+from datetime import datetime
+from pathlib import Path
+
+from sjifire.core.config import get_project_root
+from sjifire.entra.users import EntraUserManager
+from sjifire.ispyfire.client import ISpyFireClient
+from sjifire.ispyfire.sync import (
+    compare_entra_to_ispyfire,
+    entra_user_to_ispyfire_person,
+    fields_need_update,
+    get_user_positions,
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# Silence noisy libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("msal").setLevel(logging.WARNING)
+
+
+def backup_ispyfire_people(people: list, backup_dir: Path) -> Path:
+    """Backup current iSpyFire people to JSON file.
+
+    Args:
+        people: List of ISpyFirePerson objects
+        backup_dir: Directory to save backup
+
+    Returns:
+        Path to backup file
+    """
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_file = backup_dir / f"ispyfire_people_{timestamp}.json"
+
+    # Convert to serializable format
+    data = [
+        {
+            "id": person.id,
+            "firstName": person.first_name,
+            "lastName": person.last_name,
+            "email": person.email,
+            "cellPhone": person.cell_phone,
+            "title": person.title,
+            "isActive": person.is_active,
+            "isLoginActive": person.is_login_active,
+            "groupSetACLs": person.group_set_acls,
+        }
+        for person in people
+    ]
+
+    with backup_file.open("w") as f:
+        json.dump(data, f, indent=2)
+
+    logger.info(f"Backed up {len(people)} people to {backup_file}")
+    return backup_file
+
+
+def print_comparison_report(comparison) -> None:
+    """Print a detailed comparison report."""
+    print("\n" + "=" * 70)
+    print("ISPYFIRE SYNC COMPARISON REPORT")
+    print("=" * 70)
+
+    # Summary
+    print("\nSUMMARY:")
+    print(f"  Entra operational users: {len(comparison.entra_operational)}")
+    print(f"  iSpyFire people:         {len(comparison.ispyfire_people)}")
+    print(f"  Already matched:         {len(comparison.matched)}")
+    print(f"  To add to iSpyFire:      {len(comparison.to_add)}")
+    print(f"  To update in iSpyFire:   {len(comparison.to_update)}")
+    print(f"  To remove from iSpyFire: {len(comparison.to_remove)}")
+
+    # People currently in iSpyFire
+    print(f"\n{'=' * 70}")
+    print("CURRENT ISPYFIRE PEOPLE")
+    print("=" * 70)
+    for person in sorted(comparison.ispyfire_people, key=lambda p: p.last_name):
+        status = "ACTIVE" if person.is_active else "INACTIVE"
+        print(f"  [{status}] {person.display_name} <{person.email}> - {person.title or 'No title'}")
+
+    # Matched (in sync)
+    if comparison.matched:
+        print(f"\n{'=' * 70}")
+        print("MATCHED (no changes needed)")
+        print("=" * 70)
+        for _user, person in sorted(comparison.matched, key=lambda x: x[1].last_name):
+            print(f"  ✓ {person.display_name} <{person.email}>")
+
+    # To add
+    if comparison.to_add:
+        print(f"\n{'=' * 70}")
+        print("TO ADD TO ISPYFIRE")
+        print("=" * 70)
+        for user in sorted(comparison.to_add, key=lambda u: u.last_name or ""):
+            positions = get_user_positions(user)
+            rank = user.extension_attribute1 or ""
+            print(f"  + {user.display_name} <{user.email}>")
+            print(f"      Phone: {user.mobile_phone or 'None'}")
+            print(f"      Rank: {rank or 'None'}")
+            print(f"      Positions: {', '.join(positions) or 'None'}")
+
+    # To update
+    if comparison.to_update:
+        print(f"\n{'=' * 70}")
+        print("TO UPDATE IN ISPYFIRE")
+        print("=" * 70)
+        for user, person in sorted(comparison.to_update, key=lambda x: x[1].last_name):
+            diff_fields = fields_need_update(user, person)
+            print(f"  ~ {person.display_name} <{person.email}>")
+            print(f"      Fields to update: {', '.join(diff_fields)}")
+            for field_name in diff_fields:
+                if field_name == "firstName":
+                    print(f"        firstName: '{person.first_name}' -> '{user.first_name}'")
+                elif field_name == "lastName":
+                    print(f"        lastName: '{person.last_name}' -> '{user.last_name}'")
+                elif field_name == "cellPhone":
+                    print(f"        cellPhone: '{person.cell_phone}' -> '{user.mobile_phone}'")
+                elif field_name == "title":
+                    entra_rank = user.extension_attribute1 or ""
+                    print(f"        title: '{person.title}' -> '{entra_rank}'")
+
+    # To remove
+    if comparison.to_remove:
+        print(f"\n{'=' * 70}")
+        print("TO REMOVE FROM ISPYFIRE (deactivate)")
+        print("=" * 70)
+        for person in sorted(comparison.to_remove, key=lambda p: p.last_name):
+            print(f"  - {person.display_name} <{person.email}> - {person.title or 'No title'}")
+
+    print(f"\n{'=' * 70}")
+
+
+async def run_sync(dry_run: bool = True) -> int:
+    """Run the iSpyFire sync.
+
+    Args:
+        dry_run: If True, only show what would change without making changes
+
+    Returns:
+        Exit code (0 for success)
+    """
+    project_root = get_project_root()
+    backup_dir = project_root / "backups"
+
+    # Get Entra users
+    logger.info("Fetching Entra ID users...")
+    user_manager = EntraUserManager()
+    entra_users = await user_manager.get_users()
+    logger.info(f"Fetched {len(entra_users)} users from Entra ID")
+
+    # Get iSpyFire people
+    logger.info("Fetching iSpyFire people...")
+    with ISpyFireClient() as ispy_client:
+        ispyfire_people = ispy_client.get_people()
+
+        # Backup current state
+        if ispyfire_people:
+            backup_ispyfire_people(ispyfire_people, backup_dir)
+
+        # Compare
+        comparison = compare_entra_to_ispyfire(entra_users, ispyfire_people)
+
+        # Print report
+        print_comparison_report(comparison)
+
+        if dry_run:
+            print("\n*** DRY RUN - No changes made ***\n")
+            return 0
+
+        # Apply changes
+        print("\nApplying changes...")
+
+        # Add new people
+        for user in comparison.to_add:
+            person = entra_user_to_ispyfire_person(user)
+            logger.info(f"Creating: {person.display_name}")
+            result = ispy_client.create_person(person)
+            if result:
+                logger.info(f"  Created with ID: {result.id}")
+            else:
+                logger.error("  Failed to create")
+
+        # Update existing people
+        for user, person in comparison.to_update:
+            logger.info(f"Updating: {person.display_name}")
+            # Update fields from Entra
+            if user.first_name:
+                person.first_name = user.first_name
+            if user.last_name:
+                person.last_name = user.last_name
+            if user.mobile_phone:
+                person.cell_phone = user.mobile_phone
+            if user.extension_attribute1:
+                person.title = user.extension_attribute1
+
+            result = ispy_client.update_person(person)
+            if result:
+                logger.info("  Updated successfully")
+            else:
+                logger.error("  Failed to update")
+
+        # Deactivate removed people
+        for person in comparison.to_remove:
+            logger.info(f"Deactivating: {person.display_name}")
+            if ispy_client.deactivate_person(person.id):
+                logger.info("  Deactivated successfully")
+            else:
+                logger.error("  Failed to deactivate")
+
+        print("\nSync complete.")
+        return 0
+
+
+def main() -> int:
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="Sync Entra ID users to iSpyFire",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would change without making changes",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging",
+    )
+
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    import asyncio
+
+    return asyncio.run(run_sync(dry_run=args.dry_run))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

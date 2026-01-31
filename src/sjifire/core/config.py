@@ -114,6 +114,29 @@ def load_dispatch_config(require_mailbox: bool = True) -> DispatchConfig:
     )
 
 
+def get_ispyfire_credentials() -> tuple[str, str, str]:
+    """Get iSpyFire credentials from environment.
+
+    Returns:
+        Tuple of (base_url, username, password)
+
+    Raises:
+        ValueError: If any required credential is not set
+    """
+    load_dotenv()
+
+    url = os.getenv("ISPYFIRE_URL")
+    username = os.getenv("ISPYFIRE_USERNAME")
+    password = os.getenv("ISPYFIRE_PASSWORD")
+
+    if not url or not username or not password:
+        raise ValueError(
+            "iSpyFire credentials not set. Required: ISPYFIRE_URL, ISPYFIRE_USERNAME, ISPYFIRE_PASSWORD"
+        )
+
+    return url, username, password
+
+
 def load_entra_sync_config() -> EntraSyncConfig:
     """Load Entra sync configuration from config file.
 
