@@ -111,7 +111,7 @@ class EntraUser:
         Operational positions are those that respond to emergencies
         (Firefighter, Apparatus Operator, Support, Wildland Firefighter, Marine roles).
         """
-        from sjifire.aladtec.models import OPERATIONAL_POSITIONS
+        from sjifire.core.constants import OPERATIONAL_POSITIONS
 
         return bool(self.positions & OPERATIONAL_POSITIONS)
 

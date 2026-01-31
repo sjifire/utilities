@@ -8,8 +8,9 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from sjifire.aladtec.models import MARINE_POSITIONS, OPERATIONAL_POSITIONS, Member
+from sjifire.aladtec.models import Member
 from sjifire.core.backup import backup_entra_groups
+from sjifire.core.constants import MARINE_POSITIONS, OPERATIONAL_POSITIONS
 from sjifire.entra.groups import EntraGroup, EntraGroupManager, GroupType
 from sjifire.entra.users import EntraUser, EntraUserManager
 

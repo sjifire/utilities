@@ -2,23 +2,14 @@
 
 from dataclasses import dataclass, field
 
-# Rank hierarchy for determining employee type (highest first)
-RANK_HIERARCHY = ["Chief", "Division Chief", "Battalion Chief", "Captain", "Lieutenant"]
+from sjifire.core.constants import (
+    MARINE_POSITIONS,
+    OPERATIONAL_POSITIONS,
+    RANK_HIERARCHY,
+)
 
-# Marine positions (boat crew)
-MARINE_POSITIONS: set[str] = {
-    "Mate",
-    "Pilot",
-}
-
-# Operational positions that indicate active response/support roles
-# Used for filtering volunteers and other operational membership criteria
-OPERATIONAL_POSITIONS: set[str] = {
-    "Firefighter",
-    "Apparatus Operator",
-    "Support",
-    "Wildland Firefighter",
-} | MARINE_POSITIONS
+# Re-export for backwards compatibility
+__all__ = ["MARINE_POSITIONS", "OPERATIONAL_POSITIONS", "RANK_HIERARCHY", "Member"]
 
 
 @dataclass

@@ -3,7 +3,7 @@
 import logging
 from dataclasses import dataclass, field
 
-from sjifire.aladtec.models import OPERATIONAL_POSITIONS
+from sjifire.core.constants import OPERATIONAL_POSITIONS
 from sjifire.entra.users import EntraUser
 from sjifire.ispyfire.models import ISpyFirePerson
 
