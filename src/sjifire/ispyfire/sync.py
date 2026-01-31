@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass, field
 
 from sjifire.core.constants import OPERATIONAL_POSITIONS
+from sjifire.core.normalize import normalize_email, normalize_name, normalize_phone
 from sjifire.entra.users import EntraUser
 from sjifire.ispyfire.models import ISpyFirePerson
 
@@ -62,36 +63,6 @@ def is_operational(user: EntraUser) -> bool:
     return bool(positions & OPERATIONAL_POSITIONS)
 
 
-def normalize_phone(phone: str | None) -> str | None:
-    """Normalize phone number for comparison.
-
-    Args:
-        phone: Phone number string
-
-    Returns:
-        Normalized phone (digits only) or None
-    """
-    if not phone:
-        return None
-    # Keep only digits
-    digits = "".join(c for c in phone if c.isdigit())
-    return digits if digits else None
-
-
-def normalize_email(email: str | None) -> str | None:
-    """Normalize email for comparison.
-
-    Args:
-        email: Email address
-
-    Returns:
-        Lowercase email or None
-    """
-    if not email:
-        return None
-    return email.lower().strip()
-
-
 def fields_need_update(user: EntraUser, person: ISpyFirePerson) -> list[str]:
     """Check which fields differ between Entra user and iSpyFire person.
 
@@ -139,21 +110,6 @@ def is_managed_email(email: str | None, domain: str = "sjifire.org") -> bool:
     if not email:
         return False
     return email.lower().strip().endswith(f"@{domain}")
-
-
-def normalize_name(first: str | None, last: str | None) -> str:
-    """Normalize a name for comparison.
-
-    Args:
-        first: First name
-        last: Last name
-
-    Returns:
-        Normalized "first last" string, lowercase and stripped
-    """
-    first_clean = (first or "").lower().strip()
-    last_clean = (last or "").lower().strip()
-    return f"{first_clean} {last_clean}"
 
 
 def compare_entra_to_ispyfire(

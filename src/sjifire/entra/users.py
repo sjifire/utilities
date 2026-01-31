@@ -19,6 +19,7 @@ from msgraph.generated.users.item.assign_license.assign_license_post_request_bod
 from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
 from sjifire.core.msgraph_client import get_graph_client
+from sjifire.core.normalize import normalize_name_part
 
 logger = logging.getLogger(__name__)
 
@@ -715,6 +716,6 @@ class EntraUserManager:
         Returns:
             UPN in format firstname.lastname@domain
         """
-        first = first_name.lower().replace(" ", "").replace("'", "")
-        last = last_name.lower().replace(" ", "").replace("'", "")
+        first = normalize_name_part(first_name)
+        last = normalize_name_part(last_name)
         return f"{first}.{last}@{self.domain}"
