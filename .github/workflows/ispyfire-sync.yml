@@ -1,0 +1,56 @@
+name: iSpyFire Sync
+
+on:
+  schedule:
+    # Run at 6 PM Pacific daily (02:00 UTC = 6pm PST / 7pm PDT)
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no changes)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  sync:
+    name: Sync Entra to iSpyFire
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run iSpyFire sync
+        env:
+          MS_GRAPH_TENANT_ID: ${{ secrets.MS_GRAPH_TENANT_ID }}
+          MS_GRAPH_CLIENT_ID: ${{ secrets.MS_GRAPH_CLIENT_ID }}
+          MS_GRAPH_CLIENT_SECRET: ${{ secrets.MS_GRAPH_CLIENT_SECRET }}
+          ISPYFIRE_URL: ${{ secrets.ISPYFIRE_URL }}
+          ISPYFIRE_USERNAME: ${{ secrets.ISPYFIRE_USERNAME }}
+          ISPYFIRE_PASSWORD: ${{ secrets.ISPYFIRE_PASSWORD }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            uv run ispyfire-sync --dry-run
+          else
+            uv run ispyfire-sync
+          fi
+
+      - name: Upload backup artifacts
+        if: ${{ inputs.dry_run != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ispyfire-backup-${{ github.run_id }}
+          path: backups/
+          retention-days: 30

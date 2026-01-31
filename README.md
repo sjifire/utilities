@@ -94,6 +94,7 @@ The sync:
 ```bash
 uv run ispyfire-sync --dry-run    # Preview changes without applying
 uv run ispyfire-sync              # Apply changes
+uv run ispyfire-sync --email user@sjifire.org  # Sync single user
 uv run ispyfire-sync -v           # Verbose logging
 ```
 
@@ -102,9 +103,24 @@ The sync:
 - Only includes @sjifire.org users with cell phones
 - Positions synced: Firefighter, Apparatus Operator, Support, Wildland Firefighter, Mate, Pilot
 - Detects duplicates by name to avoid creating duplicate entries
-- Excludes utility/service accounts (svc-*) from automatic removal
-- Deactivation logs out mobile devices and disables login
+- Excludes utility/service accounts from automatic removal
+- New users receive invite email to set their password
+- Deactivation logs out push notifications, removes devices, and disables login
+- Reactivation sends password reset email
+- Rate limiting handled with tenacity retry logic
 - Automatically backs up iSpyFire people before making changes
+
+**Automated sync:** Runs daily at 6 PM Pacific via GitHub Actions. See `.github/workflows/ispyfire-sync.yml`.
+
+### iSpyFire Admin
+
+**Manage iSpyFire users:**
+```bash
+uv run ispyfire-admin list                    # List all active users
+uv run ispyfire-admin list --inactive         # Include inactive users
+uv run ispyfire-admin activate user@sjifire.org   # Reactivate and send password reset
+uv run ispyfire-admin deactivate user@sjifire.org # Logout devices and deactivate
+```
 
 ### Aladtec Tools
 
@@ -186,6 +202,18 @@ Runs weekdays at noon Pacific:
 - `ALADTEC_URL`, `ALADTEC_USERNAME`, `ALADTEC_PASSWORD`
 - `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`
 
+### iSpyFire Sync (ispyfire-sync.yml)
+Runs daily at 6 PM Pacific:
+- Syncs Entra ID users with operational positions to iSpyFire
+- Creates new users with invite emails
+- Deactivates users no longer in Entra (with device logout)
+- Uploads backup artifacts (30-day retention)
+- Can be triggered manually with dry-run option
+
+**Required secrets:**
+- `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`
+- `ISPYFIRE_URL`, `ISPYFIRE_USERNAME`, `ISPYFIRE_PASSWORD`
+
 ## Development
 
 ### Linting
@@ -238,5 +266,6 @@ src/sjifire/
     ├── entra_audit.py
     ├── entra_group_sync.py  # M365 group sync CLI
     ├── entra_user_sync.py   # User sync CLI
+    ├── ispyfire_admin.py    # iSpyFire admin CLI (activate/deactivate)
     └── ispyfire_sync.py     # iSpyFire sync CLI
 ```

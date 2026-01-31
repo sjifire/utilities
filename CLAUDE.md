@@ -4,7 +4,7 @@ This file provides context for Claude Code and other AI assistants working on th
 
 ## Project Overview
 
-SJI Fire District utilities for syncing personnel data between Aladtec (scheduling/workforce management) and Microsoft Entra ID (identity management).
+SJI Fire District utilities for syncing personnel data between Aladtec (scheduling/workforce management), Microsoft Entra ID (identity management), and iSpyFire (incident response/paging).
 
 ## Tech Stack
 
@@ -12,6 +12,7 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - **uv** for package management
 - **msgraph-sdk** for Microsoft Graph API
 - **httpx** + **beautifulsoup4** for Aladtec web scraping
+- **httpx** + **tenacity** for iSpyFire API (with rate limit retry)
 - **pytest** + **pytest-asyncio** for testing
 - **ruff** for linting/formatting
 - **ty** for type checking
@@ -35,6 +36,13 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - `extensionAttribute1`: Rank (Captain, Lieutenant, Chief, etc.)
 - `extensionAttribute2`: EVIP expiration date
 - `extensionAttribute3`: Positions (comma-delimited scheduling positions)
+
+### iSpyFire
+- Incident response and paging system
+- REST API with session-based authentication
+- Users have `isActive` and `isLoginActive` flags (both must match)
+- `isUtility` flag marks service/apparatus accounts (skip from auto-removal)
+- Device logout requires two steps: logout push notifications, then remove devices
 
 ### Rank Hierarchy
 Ranks are extracted from Title or Employee Type fields:
@@ -61,7 +69,11 @@ src/sjifire/
 │   ├── group_sync.py  # Group sync strategies and GroupSyncManager
 │   ├── groups.py      # EntraGroupManager for M365 group operations
 │   └── users.py       # EntraUserManager for Graph API calls
-└── scripts/           # CLI entry points (entra_user_sync.py, entra_group_sync.py)
+├── ispyfire/
+│   ├── client.py      # API client with tenacity retry for rate limiting
+│   ├── models.py      # ISpyFirePerson dataclass
+│   └── sync.py        # Sync logic, comparison, filtering
+└── scripts/           # CLI entry points
 ```
 
 ### Group Sync Strategy Pattern
@@ -121,6 +133,20 @@ uv run entra-group-sync --all            # Apply changes
 uv run entra-group-sync --strategy ff    # Sync specific strategy
 ```
 
+### Run iSpyFire sync manually
+```bash
+uv run ispyfire-sync --dry-run           # Preview
+uv run ispyfire-sync                     # Apply changes
+uv run ispyfire-sync --email user@sjifire.org  # Single user
+```
+
+### iSpyFire admin operations
+```bash
+uv run ispyfire-admin list               # List users
+uv run ispyfire-admin activate user@sjifire.org
+uv run ispyfire-admin deactivate user@sjifire.org
+```
+
 ### Check linting
 ```bash
 uv run ruff check .
@@ -137,3 +163,4 @@ uv run ruff format --check .
 
 - `ci.yml`: Lint + test on PR/push
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
+- `ispyfire-sync.yml`: Daily sync at 6 PM Pacific (Entra to iSpyFire), uploads backup artifacts
