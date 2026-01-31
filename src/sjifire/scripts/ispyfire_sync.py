@@ -19,7 +19,6 @@ from sjifire.ispyfire.sync import (
     compare_entra_to_ispyfire,
     entra_user_to_ispyfire_person,
     fields_need_update,
-    get_user_positions,
 )
 
 logging.basicConfig(
@@ -86,6 +85,10 @@ def print_comparison_report(comparison) -> None:
     print(f"  To add to iSpyFire:      {len(comparison.to_add)}")
     print(f"  To update in iSpyFire:   {len(comparison.to_update)}")
     print(f"  To remove from iSpyFire: {len(comparison.to_remove)}")
+    if comparison.skipped_no_phone:
+        print(f"  Skipped (no phone):      {len(comparison.skipped_no_phone)}")
+    if comparison.skipped_no_operational:
+        print(f"  Skipped (non-operational): {len(comparison.skipped_no_operational)}")
 
     # People currently in iSpyFire
     print(f"\n{'=' * 70}")
@@ -109,12 +112,10 @@ def print_comparison_report(comparison) -> None:
         print("TO ADD TO ISPYFIRE")
         print("=" * 70)
         for user in sorted(comparison.to_add, key=lambda u: u.last_name or ""):
-            positions = get_user_positions(user)
             rank = user.extension_attribute1 or ""
             print(f"  + {user.display_name} <{user.email}>")
             print(f"      Phone: {user.mobile_phone or 'None'}")
             print(f"      Rank: {rank or 'None'}")
-            print(f"      Positions: {', '.join(positions) or 'None'}")
 
     # To update
     if comparison.to_update:
@@ -144,6 +145,23 @@ def print_comparison_report(comparison) -> None:
         for person in sorted(comparison.to_remove, key=lambda p: p.last_name):
             print(f"  - {person.display_name} <{person.email}> - {person.title or 'No title'}")
 
+    # Skipped - no cell phone
+    if comparison.skipped_no_phone:
+        print(f"\n{'=' * 70}")
+        print("SKIPPED - NO CELL PHONE")
+        print("=" * 70)
+        for user in sorted(comparison.skipped_no_phone, key=lambda u: u.last_name or ""):
+            print(f"  ! {user.display_name} <{user.email}>")
+
+    # Skipped - no operational position
+    if comparison.skipped_no_operational:
+        print(f"\n{'=' * 70}")
+        print("SKIPPED - NO OPERATIONAL POSITION")
+        print("=" * 70)
+        for user in sorted(comparison.skipped_no_operational, key=lambda u: u.last_name or ""):
+            positions = user.extension_attribute3 or "None"
+            print(f"  ! {user.display_name} <{user.email}> - Positions: {positions}")
+
     print(f"\n{'=' * 70}")
 
 
@@ -159,11 +177,11 @@ async def run_sync(dry_run: bool = True) -> int:
     project_root = get_project_root()
     backup_dir = project_root / "backups"
 
-    # Get Entra users
-    logger.info("Fetching Entra ID users...")
+    # Get Entra employees (users with employee IDs - excludes shared mailboxes, resources)
+    logger.info("Fetching Entra ID employees...")
     user_manager = EntraUserManager()
-    entra_users = await user_manager.get_users()
-    logger.info(f"Fetched {len(entra_users)} users from Entra ID")
+    entra_users = await user_manager.get_employees()
+    logger.info(f"Fetched {len(entra_users)} employees from Entra ID")
 
     # Get iSpyFire people
     logger.info("Fetching iSpyFire people...")

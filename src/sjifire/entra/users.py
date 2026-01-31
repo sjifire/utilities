@@ -54,6 +54,33 @@ class EntraUser:
         """Check if user account is enabled."""
         return self.account_enabled
 
+    @property
+    def is_employee(self) -> bool:
+        """Check if user has an employee ID (is an employee vs shared mailbox/resource)."""
+        return bool(self.employee_id)
+
+    @property
+    def has_phone(self) -> bool:
+        """Check if user has a mobile phone number."""
+        return bool(self.mobile_phone)
+
+    @property
+    def is_utility(self) -> bool:
+        """Check if user is a utility/service account based on employee_type."""
+        return bool(self.employee_type and self.employee_type.lower() == "utility")
+
+    @property
+    def positions(self) -> set[str]:
+        """Get positions from extensionAttribute3 as a set."""
+        if not self.extension_attribute3:
+            return set()
+        return {p.strip() for p in self.extension_attribute3.split(",") if p.strip()}
+
+    @property
+    def rank(self) -> str | None:
+        """Get rank from extensionAttribute1."""
+        return self.extension_attribute1
+
 
 class EntraUserManager:
     """Manage users in Entra ID."""
@@ -70,11 +97,13 @@ class EntraUserManager:
     async def get_users(
         self,
         include_disabled: bool = False,
+        employees_only: bool = False,
     ) -> list[EntraUser]:
         """Fetch users from Entra ID.
 
         Args:
             include_disabled: If True, include disabled accounts
+            employees_only: If True, only return users with employee IDs
 
         Returns:
             List of EntraUser objects
@@ -111,6 +140,8 @@ class EntraUserManager:
             for user in result.value:
                 if not include_disabled and not user.account_enabled:
                     continue
+                if employees_only and not user.employee_id:
+                    continue
                 users.append(self._to_entra_user(user))
 
         # Handle pagination
@@ -120,10 +151,26 @@ class EntraUserManager:
                 for user in result.value:
                     if not include_disabled and not user.account_enabled:
                         continue
+                    if employees_only and not user.employee_id:
+                        continue
                     users.append(self._to_entra_user(user))
 
         logger.info(f"Found {len(users)} users")
         return users
+
+    async def get_employees(self, include_disabled: bool = False) -> list[EntraUser]:
+        """Fetch only employees (users with employee IDs) from Entra ID.
+
+        This is a convenience method that excludes shared mailboxes, room resources,
+        and other non-employee accounts.
+
+        Args:
+            include_disabled: If True, include disabled accounts
+
+        Returns:
+            List of EntraUser objects with employee IDs
+        """
+        return await self.get_users(include_disabled=include_disabled, employees_only=True)
 
     def _to_entra_user(self, user: User) -> EntraUser:
         """Convert MS Graph User to EntraUser.

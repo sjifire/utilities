@@ -28,6 +28,10 @@ class SyncComparison:
     )  # Need field updates
     matched: list[tuple[EntraUser, ISpyFirePerson]] = field(default_factory=list)  # Already in sync
 
+    # Skipped users
+    skipped_no_operational: list[EntraUser] = field(default_factory=list)  # No operational position
+    skipped_no_phone: list[EntraUser] = field(default_factory=list)  # No cell phone
+
 
 def get_user_positions(user: EntraUser) -> set[str]:
     """Extract positions from Entra user's extensionAttribute3.
@@ -203,13 +207,23 @@ def compare_entra_to_ispyfire(
     """
     comparison = SyncComparison(ispyfire_people=ispyfire_people)
 
+    # Filter to managed domain users first
+    managed_users = [u for u in entra_users if is_managed_email(u.email, managed_domain)]
+
+    # Track users skipped due to no operational position
+    for user in managed_users:
+        if not is_operational(user):
+            comparison.skipped_no_operational.append(user)
+
     # Filter to operational Entra users with managed domain email only
-    operational_users = [
-        u for u in entra_users if is_operational(u) and is_managed_email(u.email, managed_domain)
-    ]
+    operational_users = [u for u in managed_users if is_operational(u)]
     comparison.entra_operational = operational_users
 
     logger.info(f"Found {len(operational_users)} operational @{managed_domain} users in Entra")
+    if comparison.skipped_no_operational:
+        logger.info(
+            f"Skipped {len(comparison.skipped_no_operational)} users without operational positions"
+        )
     logger.info(f"Found {len(ispyfire_people)} people in iSpyFire")
 
     # Build lookup by email for iSpyFire people (only managed domain)
@@ -252,7 +266,7 @@ def compare_entra_to_ispyfire(
 
             # Not in iSpyFire - check if they have a cell phone before adding
             if not user.mobile_phone:
-                logger.debug(f"Skipping {user.display_name}: no cell phone")
+                comparison.skipped_no_phone.append(user)
                 continue
 
             comparison.to_add.append(user)
@@ -283,6 +297,8 @@ def compare_entra_to_ispyfire(
     logger.info(f"  - To add: {len(comparison.to_add)}")
     logger.info(f"  - To update: {len(comparison.to_update)}")
     logger.info(f"  - To remove: {len(comparison.to_remove)}")
+    if comparison.skipped_no_phone:
+        logger.info(f"  - Skipped (no phone): {len(comparison.skipped_no_phone)}")
 
     return comparison
 
