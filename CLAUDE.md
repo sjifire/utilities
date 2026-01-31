@@ -63,6 +63,7 @@ src/sjifire/
 ├── core/
 │   ├── backup.py      # JSON backup before sync operations
 │   ├── config.py      # EntraSyncConfig, credentials from .env
+│   ├── constants.py   # Shared constants (OPERATIONAL_POSITIONS, RANK_HIERARCHY)
 │   └── msgraph_client.py  # Azure credential setup
 ├── entra/
 │   ├── aladtec_import.py  # User sync logic, handles matching/create/update

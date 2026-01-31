@@ -244,11 +244,12 @@ uv run pytest --cov=sjifire --cov-report=html  # HTML coverage report
 ```
 src/sjifire/
 ├── aladtec/           # Aladtec integration
-│   ├── models.py      # Member data model with position constants
+│   ├── models.py      # Member data model
 │   └── scraper.py     # Web scraper for CSV export
 ├── core/              # Shared utilities
 │   ├── backup.py      # Backup utilities for users and groups
 │   ├── config.py      # Configuration loading
+│   ├── constants.py   # Position constants (OPERATIONAL_POSITIONS, etc.)
 │   └── msgraph_client.py  # MS Graph client
 ├── entra/             # Entra ID integration
 │   ├── aladtec_import.py  # Aladtec to Entra user sync logic
