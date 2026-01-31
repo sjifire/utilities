@@ -629,9 +629,7 @@ class TestCompareEntraToISpyFire:
 
     def test_user_to_update(self):
         entra_users = [
-            self._make_entra_user(
-                "1", "John", "Doe", "jdoe@sjifire.org", phone="555-9999"
-            ),
+            self._make_entra_user("1", "John", "Doe", "jdoe@sjifire.org", phone="555-9999"),
         ]
         ispy_people = [
             self._make_ispy_person("abc", "John", "Doe", "jdoe@sjifire.org"),
@@ -668,9 +666,7 @@ class TestCompareEntraToISpyFire:
     def test_utility_account_not_removed(self):
         entra_users = []
         ispy_people = [
-            self._make_ispy_person(
-                "abc", "Svc", "Automation", "svc-automation@sjifire.org"
-            ),
+            self._make_ispy_person("abc", "Svc", "Automation", "svc-automation@sjifire.org"),
         ]
 
         result = compare_entra_to_ispyfire(entra_users, ispy_people)
@@ -680,9 +676,7 @@ class TestCompareEntraToISpyFire:
     def test_inactive_person_not_removed(self):
         entra_users = []
         ispy_people = [
-            self._make_ispy_person(
-                "abc", "John", "Doe", "jdoe@sjifire.org", is_active=False
-            ),
+            self._make_ispy_person("abc", "John", "Doe", "jdoe@sjifire.org", is_active=False),
         ]
 
         result = compare_entra_to_ispyfire(entra_users, ispy_people)

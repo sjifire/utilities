@@ -26,9 +26,7 @@ class SyncComparison:
     to_update: list[tuple[EntraUser, ISpyFirePerson]] = field(
         default_factory=list
     )  # Need field updates
-    matched: list[tuple[EntraUser, ISpyFirePerson]] = field(
-        default_factory=list
-    )  # Already in sync
+    matched: list[tuple[EntraUser, ISpyFirePerson]] = field(default_factory=list)  # Already in sync
 
 
 def get_user_positions(user: EntraUser) -> set[str]:
@@ -207,8 +205,7 @@ def compare_entra_to_ispyfire(
 
     # Filter to operational Entra users with managed domain email only
     operational_users = [
-        u for u in entra_users
-        if is_operational(u) and is_managed_email(u.email, managed_domain)
+        u for u in entra_users if is_operational(u) and is_managed_email(u.email, managed_domain)
     ]
     comparison.entra_operational = operational_users
 
@@ -249,8 +246,7 @@ def compare_entra_to_ispyfire(
             if person_by_name is not None:
                 # Duplicate exists with different email - skip adding
                 logger.debug(
-                    f"Skipping {user.display_name}: duplicate exists as "
-                    f"{person_by_name.email}"
+                    f"Skipping {user.display_name}: duplicate exists as {person_by_name.email}"
                 )
                 continue
 
