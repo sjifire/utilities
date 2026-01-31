@@ -667,9 +667,7 @@ class TestEntraUserManagerGetUsers:
         mock_result2.odata_next_link = None
 
         manager.client.users.get = AsyncMock(return_value=mock_result1)
-        manager.client.users.with_url.return_value.get = AsyncMock(
-            return_value=mock_result2
-        )
+        manager.client.users.with_url.return_value.get = AsyncMock(return_value=mock_result2)
 
         users = await manager.get_users()
 
@@ -718,9 +716,7 @@ class TestEntraUserManagerGetUserByUpn:
         mock_user.company_name = None
         mock_user.on_premises_extension_attributes = None
 
-        manager.client.users.by_user_id.return_value.get = AsyncMock(
-            return_value=mock_user
-        )
+        manager.client.users.by_user_id.return_value.get = AsyncMock(return_value=mock_user)
 
         result = await manager.get_user_by_upn("john.doe@sjifire.org")
 
@@ -841,9 +837,7 @@ class TestEntraUserManagerUpdateUser:
         return mgr
 
     async def test_update_user_success(self, manager):
-        manager.client.users.by_user_id.return_value.patch = AsyncMock(
-            return_value=None
-        )
+        manager.client.users.by_user_id.return_value.patch = AsyncMock(return_value=None)
 
         result = await manager.update_user(
             user_id="123",
@@ -909,9 +903,7 @@ class TestEntraUserManagerEnableDisable:
         return mgr
 
     async def test_disable_user_success(self, manager):
-        manager.client.users.by_user_id.return_value.patch = AsyncMock(
-            return_value=None
-        )
+        manager.client.users.by_user_id.return_value.patch = AsyncMock(return_value=None)
 
         result = await manager.disable_user("123")
 
@@ -927,9 +919,7 @@ class TestEntraUserManagerEnableDisable:
         assert result is False
 
     async def test_enable_user_success(self, manager):
-        manager.client.users.by_user_id.return_value.patch = AsyncMock(
-            return_value=None
-        )
+        manager.client.users.by_user_id.return_value.patch = AsyncMock(return_value=None)
 
         result = await manager.enable_user("123")
 
