@@ -1,38 +1,51 @@
-"""Compare expected M365 group memberships (from Aladtec) vs actual (in Entra)."""
+"""Compare expected group memberships (from Aladtec) vs actual (in Entra/Exchange)."""
 
 import argparse
 import asyncio
-import json
 import logging
 from collections import defaultdict
-from pathlib import Path
 
 from sjifire.aladtec.scraper import AladtecScraper
+from sjifire.core.config import get_exchange_credentials
+from sjifire.entra.group_sync import (
+    ApparatusOperatorGroupStrategy,
+    FirefighterGroupStrategy,
+    GroupSyncStrategy,
+    MarineGroupStrategy,
+    StationGroupStrategy,
+    SupportGroupStrategy,
+    VolunteerGroupStrategy,
+    WildlandFirefighterGroupStrategy,
+)
 from sjifire.entra.groups import EntraGroupManager
+from sjifire.entra.users import EntraUserManager
+from sjifire.exchange.client import ExchangeOnlineClient
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG = Path(__file__).parent.parent.parent.parent / "config" / "group_mappings.json"
+# All available strategies
+STRATEGIES: dict[str, type[GroupSyncStrategy]] = {
+    "stations": StationGroupStrategy,
+    "support": SupportGroupStrategy,
+    "ff": FirefighterGroupStrategy,
+    "wff": WildlandFirefighterGroupStrategy,
+    "ao": ApparatusOperatorGroupStrategy,
+    "marine": MarineGroupStrategy,
+    "volunteers": VolunteerGroupStrategy,
+}
 
 
-async def compare_memberships(config_path: Path, verbose: bool = False) -> None:
-    """Compare expected vs actual M365 group memberships."""
+async def compare_memberships(
+    strategy_names: list[str],
+    domain: str = "sjifire.org",
+    verbose: bool = False,
+) -> None:
+    """Compare expected vs actual group memberships using sync strategies."""
     logger.info("=" * 60)
-    logger.info("M365 Group Membership Comparison")
+    logger.info("Group Membership Comparison")
     logger.info("=" * 60)
-
-    # Load config
-    with config_path.open() as f:
-        config = json.load(f)
-
-    ms_365_group_ids = config.get("ms_365_group_ids", {})
-    position_mappings = config.get("position_mappings", {})
-    work_group_mappings = config.get("work_group_mappings", {})
-    conditional_mappings = config.get("conditional_mappings", {})
-
-    # Build reverse lookup: group_name -> group_id
-    group_name_to_id = ms_365_group_ids
+    logger.info(f"Strategies: {', '.join(strategy_names)}")
 
     # Fetch Aladtec members
     logger.info("")
@@ -50,83 +63,97 @@ async def compare_memberships(config_path: Path, verbose: bool = False) -> None:
 
     logger.info(f"Found {len(members)} active members")
 
-    # Build expected memberships based on positions and work groups
-    # expected_memberships[group_name] = set of member display names
+    # Build expected memberships from strategies
+    # expected_memberships[group_email] = set of member emails
     expected_memberships: dict[str, set[str]] = defaultdict(set)
+    group_display_names: dict[str, str] = {}  # email -> display name
 
-    # Also track member email for Entra matching
-    member_email_map: dict[str, str] = {}  # display_name -> email
+    for strategy_name in strategy_names:
+        strategy = STRATEGIES[strategy_name]()
+        groups_to_sync = strategy.get_groups_to_sync(members)
 
-    for member in members:
-        if member.email:
-            member_email_map[member.display_name] = member.email.lower()
+        for group_key, group_members in groups_to_sync.items():
+            display_name, mail_nickname, _ = strategy.get_group_config(group_key)
+            email = f"{mail_nickname}@{domain}"
+            group_display_names[email] = display_name
 
-        # Check position mappings
-        if member.positions:
-            for pos in member.positions:
-                if pos in position_mappings:
-                    for group_name in position_mappings[pos].get("ms_365_groups", []):
-                        expected_memberships[group_name].add(member.display_name)
-        elif member.employee_type and member.employee_type in position_mappings:
-            for group_name in position_mappings[member.employee_type].get("ms_365_groups", []):
-                expected_memberships[group_name].add(member.display_name)
+            for member in group_members:
+                if member.email:
+                    expected_memberships[email].add(member.email.lower())
 
-        # Check work group mappings
-        if member.work_group and member.work_group in work_group_mappings:
-            for group_name in work_group_mappings[member.work_group].get("ms_365_groups", []):
-                expected_memberships[group_name].add(member.display_name)
-
-        # Check conditional mappings
-        positions = member.positions or []
-        for group_name, rules in conditional_mappings.items():
-            requires = rules.get("requires_positions", [])
-            excludes = rules.get("excludes_positions", [])
-
-            # Must have all required positions
-            has_required = all(pos in positions for pos in requires)
-            # Must not have any excluded positions
-            has_excluded = any(pos in positions for pos in excludes)
-
-            if has_required and not has_excluded:
-                expected_memberships[group_name].add(member.display_name)
-
-    # Fetch Entra group memberships
+    # Fetch Entra users for display name lookup
     logger.info("")
-    logger.info("Fetching Entra ID group memberships...")
-
-    group_manager = EntraGroupManager()
-
-    # Get all users to build ID -> name mapping
-    from sjifire.entra.users import EntraUserManager
+    logger.info("Fetching Entra ID users...")
 
     user_manager = EntraUserManager()
     entra_users = await user_manager.get_users(include_disabled=False)
 
-    # Build user ID -> display name mapping
-    user_id_to_name: dict[str, str] = {}
-    user_email_to_name: dict[str, str] = {}
+    # Build email -> display name mapping
+    email_to_name: dict[str, str] = {}
     for user in entra_users:
-        if user.id:
-            user_id_to_name[user.id] = user.display_name or ""
         if user.email:
-            user_email_to_name[user.email.lower()] = user.display_name or ""
+            email_to_name[user.email.lower()] = user.display_name or user.email
         if user.upn:
-            user_email_to_name[user.upn.lower()] = user.display_name or ""
+            email_to_name[user.upn.lower()] = user.display_name or user.upn
 
-    # Fetch actual memberships for each M365 group
+    # Also add Aladtec members to name map
+    for member in members:
+        if member.email:
+            email_to_name[member.email.lower()] = member.display_name
+
+    # Initialize clients for fetching actual memberships
+    group_manager = EntraGroupManager()
+
+    creds = get_exchange_credentials()
+    exchange_client = ExchangeOnlineClient(
+        certificate_thumbprint=creds.certificate_thumbprint,
+        certificate_path=creds.certificate_path,
+        certificate_password=creds.certificate_password,
+        organization=creds.organization,
+    )
+
+    # Fetch actual memberships
+    logger.info("")
+    logger.info("Fetching actual group memberships...")
+
     actual_memberships: dict[str, set[str]] = defaultdict(set)
+    group_types: dict[str, str] = {}  # email -> "M365" or "Exchange"
 
-    for group_name, group_id in group_name_to_id.items():
-        if group_id == "TODO":
-            continue
+    for group_email in expected_memberships:
+        mail_nickname = group_email.split("@")[0]
 
+        # Try M365 first
         try:
-            member_ids = await group_manager.get_group_members(group_id)
-            for member_id in member_ids:
-                if member_id in user_id_to_name:
-                    actual_memberships[group_name].add(user_id_to_name[member_id])
+            m365_group = await group_manager.get_group_by_mail_nickname(mail_nickname)
+            if m365_group:
+                group_types[group_email] = "M365"
+                member_ids = await group_manager.get_group_members(m365_group.id)
+                # Convert user IDs to emails
+                for user in entra_users:
+                    if user.id in member_ids:
+                        if user.email:
+                            actual_memberships[group_email].add(user.email.lower())
+                        elif user.upn:
+                            actual_memberships[group_email].add(user.upn.lower())
+                continue
         except Exception as e:
-            logger.error(f"Failed to get members for {group_name}: {e}")
+            logger.debug(f"Error checking M365 for {group_email}: {e}")
+
+        # Try Exchange
+        try:
+            exchange_group = await exchange_client.get_distribution_group(group_email)
+            if exchange_group:
+                group_types[group_email] = "Exchange"
+                member_emails = await exchange_client.get_distribution_group_members(group_email)
+                actual_memberships[group_email] = {e.lower() for e in member_emails}
+                continue
+        except Exception as e:
+            logger.debug(f"Error checking Exchange for {group_email}: {e}")
+
+        # Group doesn't exist
+        group_types[group_email] = "NOT FOUND"
+
+    await exchange_client.close()
 
     # Compare and report
     logger.info("")
@@ -134,72 +161,52 @@ async def compare_memberships(config_path: Path, verbose: bool = False) -> None:
     logger.info("COMPARISON RESULTS")
     logger.info("=" * 60)
 
-    all_groups = set(expected_memberships.keys()) | set(actual_memberships.keys())
+    total_missing = 0
+    total_extra = 0
+    groups_with_issues = 0
 
-    for group_name in sorted(all_groups):
-        expected = expected_memberships.get(group_name, set())
-        actual = actual_memberships.get(group_name, set())
+    for group_email in sorted(expected_memberships.keys()):
+        display_name = group_display_names.get(group_email, group_email)
+        group_type = group_types.get(group_email, "UNKNOWN")
+        expected = expected_memberships.get(group_email, set())
+        actual = actual_memberships.get(group_email, set())
 
-        # Match by name (case-insensitive)
-        expected_lower = {name.lower(): name for name in expected}
-        actual_lower = {name.lower(): name for name in actual}
-
-        missing = set()  # In expected but not in actual
-        extra = set()  # In actual but not in expected
-
-        for name_lower, name in expected_lower.items():
-            if name_lower not in actual_lower:
-                missing.add(name)
-
-        for name_lower, name in actual_lower.items():
-            if name_lower not in expected_lower:
-                extra.add(name)
+        missing = expected - actual
+        extra = actual - expected
 
         logger.info("")
-        logger.info(f"{group_name}:")
+        logger.info(f"{display_name} ({group_email}):")
+        logger.info(f"  Type: {group_type}")
         logger.info(f"  Expected: {len(expected)} members")
         logger.info(f"  Actual:   {len(actual)} members")
 
         if missing:
             logger.info(f"  MISSING ({len(missing)}):")
-            for name in sorted(missing):
-                logger.info(f"    - {name}")
+            for email in sorted(missing):
+                name = email_to_name.get(email, email)
+                logger.info(f"    - {name} ({email})")
+            total_missing += len(missing)
 
         if extra:
             logger.info(f"  EXTRA ({len(extra)}):")
-            for name in sorted(extra):
-                logger.info(f"    - {name}")
+            for email in sorted(extra):
+                name = email_to_name.get(email, email)
+                logger.info(f"    - {name} ({email})")
+            total_extra += len(extra)
 
-        if not missing and not extra:
+        if not missing and not extra and group_type != "NOT FOUND":
             logger.info("  OK - memberships match")
+
+        if missing or extra or group_type == "NOT FOUND":
+            groups_with_issues += 1
 
     # Summary
     logger.info("")
     logger.info("=" * 60)
     logger.info("SUMMARY")
     logger.info("=" * 60)
-
-    total_missing = 0
-    total_extra = 0
-    groups_with_issues = 0
-
-    for group_name in all_groups:
-        expected = expected_memberships.get(group_name, set())
-        actual = actual_memberships.get(group_name, set())
-
-        expected_lower = {name.lower() for name in expected}
-        actual_lower = {name.lower() for name in actual}
-
-        missing = len(expected_lower - actual_lower)
-        extra = len(actual_lower - expected_lower)
-
-        total_missing += missing
-        total_extra += extra
-        if missing or extra:
-            groups_with_issues += 1
-
     logger.info("")
-    logger.info(f"Groups analyzed: {len(all_groups)}")
+    logger.info(f"Groups analyzed: {len(expected_memberships)}")
     logger.info(f"Groups with discrepancies: {groups_with_issues}")
     logger.info(f"Total missing memberships: {total_missing}")
     logger.info(f"Total extra memberships: {total_extra}")
@@ -208,13 +215,21 @@ async def compare_memberships(config_path: Path, verbose: bool = False) -> None:
 def main():
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Compare expected M365 group memberships (from Aladtec) vs actual (in Entra)",
+        description="Compare expected group memberships (from Aladtec strategies) "
+        "vs actual (in Entra/Exchange)",
     )
     parser.add_argument(
-        "--config",
-        type=Path,
-        default=DEFAULT_CONFIG,
-        help=f"Path to group_mappings.json (default: {DEFAULT_CONFIG})",
+        "--strategy",
+        choices=list(STRATEGIES.keys()),
+        action="append",
+        dest="strategies",
+        help="Strategy to compare (can be specified multiple times). "
+        f"Available: {', '.join(STRATEGIES.keys())}",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Compare all available strategies",
     )
     parser.add_argument(
         "-v",
@@ -224,7 +239,15 @@ def main():
     )
     args = parser.parse_args()
 
-    asyncio.run(compare_memberships(config_path=args.config, verbose=args.verbose))
+    # Determine which strategies to run
+    if args.all:
+        strategies = list(STRATEGIES.keys())
+    elif args.strategies:
+        strategies = args.strategies
+    else:
+        parser.error("Specify --all or at least one --strategy")
+
+    asyncio.run(compare_memberships(strategy_names=strategies, verbose=args.verbose))
 
 
 if __name__ == "__main__":
