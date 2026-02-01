@@ -176,7 +176,10 @@ EXCHANGE_CERTIFICATE_PATH=/path/to/certificate.pfx
 EXCHANGE_CERTIFICATE_PASSWORD=your-cert-password
 ```
 
-The sync uses the same strategies as M365 group sync (stations, ff, wff, ao, marine, volunteers, allpersonnel).
+The sync:
+- Uses the same strategies as M365 group sync (stations, ff, wff, ao, marine, volunteers, allpersonnel)
+- Automatically retries transient Azure AD sync errors (up to 3 attempts with exponential backoff)
+- Backs up all groups before making changes
 
 ### Entra ID Tools
 

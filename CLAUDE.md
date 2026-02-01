@@ -104,6 +104,8 @@ For email distribution without SharePoint sprawl, use mail-enabled security grou
 
 The `exchange/` module mirrors the `entra/group_sync.py` strategies but creates mail-enabled security groups via PowerShell subprocess.
 
+**Retry logic:** Member add/remove operations use tenacity to automatically retry transient Azure AD sync errors (up to 3 attempts with exponential backoff). Groups are backed up before any sync operation.
+
 ## Important Patterns
 
 ### 403 Retry Logic
