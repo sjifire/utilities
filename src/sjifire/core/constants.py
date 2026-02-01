@@ -1,5 +1,7 @@
 """Organizational constants used across the codebase."""
 
+__all__ = ["MARINE_POSITIONS", "OPERATIONAL_POSITIONS", "RANK_HIERARCHY"]
+
 # Rank hierarchy for determining employee type (highest first)
 RANK_HIERARCHY: list[str] = [
     "Chief",
