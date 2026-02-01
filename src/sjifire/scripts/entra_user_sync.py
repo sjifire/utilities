@@ -7,6 +7,8 @@ import logging
 import sys
 from dataclasses import asdict
 
+from email_validator import EmailNotValidError, validate_email
+
 from sjifire.aladtec.scraper import AladtecScraper
 from sjifire.core.backup import backup_entra_users
 from sjifire.entra.aladtec_import import AladtecImporter
@@ -247,12 +249,22 @@ def main():
         exit_code = asyncio.run(cleanup_disabled_licenses(dry_run=args.dry_run))
         sys.exit(exit_code)
 
+    # Validate email if provided
+    individual = None
+    if args.individual:
+        try:
+            result = validate_email(args.individual, check_deliverability=False)
+            individual = result.normalized
+        except EmailNotValidError as e:
+            print(f"Error: Invalid email address: {e}")
+            sys.exit(1)
+
     exit_code = asyncio.run(
         run_import(
             dry_run=args.dry_run,
             disable_inactive=args.disable_inactive,
             output_json=args.output_json,
-            individual=args.individual,
+            individual=individual,
         )
     )
     sys.exit(exit_code)

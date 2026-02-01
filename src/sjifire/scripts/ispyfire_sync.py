@@ -12,6 +12,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from email_validator import EmailNotValidError, validate_email
+
 from sjifire.core.config import get_project_root
 from sjifire.entra.users import EntraUserManager
 from sjifire.ispyfire.client import ISpyFireClient
@@ -302,9 +304,19 @@ def main() -> int:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Validate email if provided
+    single_email = None
+    if args.email:
+        try:
+            result = validate_email(args.email, check_deliverability=False)
+            single_email = result.normalized
+        except EmailNotValidError as e:
+            print(f"Error: Invalid email address: {e}")
+            return 1
+
     import asyncio
 
-    return asyncio.run(run_sync(dry_run=args.dry_run, single_email=args.email))
+    return asyncio.run(run_sync(dry_run=args.dry_run, single_email=single_email))
 
 
 if __name__ == "__main__":
