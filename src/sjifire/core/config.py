@@ -83,6 +83,8 @@ def get_graph_credentials() -> tuple[str, str, str]:
 class ExchangeCredentials:
     """Credentials for Exchange Online PowerShell authentication."""
 
+    tenant_id: str
+    client_id: str
     organization: str
     certificate_thumbprint: str | None = None
     certificate_path: str | None = None
@@ -97,6 +99,8 @@ def get_exchange_credentials() -> ExchangeCredentials:
     (cross-platform) must be provided.
 
     Environment variables:
+        EXCHANGE_TENANT_ID: Tenant ID (falls back to MS_GRAPH_TENANT_ID)
+        EXCHANGE_CLIENT_ID: App client ID (falls back to MS_GRAPH_CLIENT_ID)
         EXCHANGE_ORGANIZATION: Organization domain (default: sjifire.org)
         EXCHANGE_CERTIFICATE_THUMBPRINT: Certificate thumbprint (Windows)
         EXCHANGE_CERTIFICATE_PATH: Path to .pfx certificate file
@@ -109,6 +113,16 @@ def get_exchange_credentials() -> ExchangeCredentials:
         ValueError: If neither certificate method is configured
     """
     load_dotenv()
+
+    # Get tenant/client, with fallback to Graph credentials
+    tenant_id = os.getenv("EXCHANGE_TENANT_ID") or os.getenv("MS_GRAPH_TENANT_ID")
+    client_id = os.getenv("EXCHANGE_CLIENT_ID") or os.getenv("MS_GRAPH_CLIENT_ID")
+
+    if not tenant_id or not client_id:
+        raise ValueError(
+            "Exchange credentials not set. Required: "
+            "EXCHANGE_TENANT_ID/MS_GRAPH_TENANT_ID and EXCHANGE_CLIENT_ID/MS_GRAPH_CLIENT_ID"
+        )
 
     organization = os.getenv("EXCHANGE_ORGANIZATION", "sjifire.org")
     thumbprint = os.getenv("EXCHANGE_CERTIFICATE_THUMBPRINT")
@@ -129,6 +143,8 @@ def get_exchange_credentials() -> ExchangeCredentials:
         )
 
     return ExchangeCredentials(
+        tenant_id=tenant_id,
+        client_id=client_id,
         organization=organization,
         certificate_thumbprint=thumbprint,
         certificate_path=cert_path,

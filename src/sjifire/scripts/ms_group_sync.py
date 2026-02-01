@@ -19,7 +19,6 @@ from enum import Enum
 
 from sjifire.aladtec.models import Member
 from sjifire.aladtec.scraper import AladtecScraper
-from sjifire.core.config import get_exchange_credentials
 from sjifire.core.group_strategies import (
     STRATEGY_NAMES,
     GroupStrategy,
@@ -132,13 +131,7 @@ class UnifiedGroupSyncManager:
     def exchange_client(self) -> ExchangeOnlineClient:
         """Lazy-load Exchange client."""
         if self._exchange_client is None:
-            creds = get_exchange_credentials()
-            self._exchange_client = ExchangeOnlineClient(
-                certificate_thumbprint=creds.certificate_thumbprint,
-                certificate_path=creds.certificate_path,
-                certificate_password=creds.certificate_password,
-                organization=creds.organization,
-            )
+            self._exchange_client = ExchangeOnlineClient()
         return self._exchange_client
 
     async def _load_entra_users(self) -> None:
@@ -417,9 +410,6 @@ class UnifiedGroupSyncManager:
         email = f"{alias}@{self.domain}"
 
         # Get or create the group
-        # Note: Exchange mail-enabled security groups don't support setting
-        # description/notes via PowerShell. Descriptions must be set manually
-        # in Exchange Admin Center if needed.
         if creating:
             if dry_run:
                 logger.info(f"Would create Exchange group: {display_name} ({email})")
@@ -434,8 +424,20 @@ class UnifiedGroupSyncManager:
                 )
                 if group:
                     logger.info(f"Created Exchange group: {display_name} ({email})")
+                    # Set the group description/notes
+                    await self.exchange_client.update_distribution_group_description(
+                        email, strategy.automation_notice
+                    )
         else:
             group = await self.exchange_client.get_distribution_group(email)
+            # Update description and owner on existing groups
+            if group and not dry_run:
+                await self.exchange_client.update_distribution_group_description(
+                    email, strategy.automation_notice
+                )
+                await self.exchange_client.update_distribution_group_managed_by(
+                    email, "svc-automations@sjifire.org"
+                )
 
         # Sync membership
         added: list[str] = []
@@ -691,6 +693,56 @@ async def run_sync(
     return 0 if total_errors == 0 else 1
 
 
+async def delete_group(email: str, dry_run: bool = False) -> int:
+    """Delete an Exchange distribution group.
+
+    Args:
+        email: Email address of the group to delete
+        dry_run: If True, just check if group exists
+
+    Returns:
+        Exit code
+    """
+    logger.info("=" * 60)
+    logger.info("Delete Distribution Group")
+    logger.info("=" * 60)
+
+    if dry_run:
+        logger.info("DRY RUN - no changes will be made")
+
+    logger.info(f"Target: {email}")
+
+    client = ExchangeOnlineClient()
+
+    try:
+        # Check if group exists
+        group = await client.get_distribution_group(email)
+
+        if not group:
+            logger.warning(f"Group not found: {email}")
+            return 1
+
+        logger.info(f"Found group: {group.display_name} ({group.primary_smtp_address})")
+
+        if dry_run:
+            logger.info(f"Would delete: {email}")
+            return 0
+
+        # Delete the group
+        if await client.delete_distribution_group(email):
+            logger.info(f"Successfully deleted: {email}")
+            return 0
+        else:
+            logger.error(f"Failed to delete: {email}")
+            return 1
+
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        return 1
+    finally:
+        await client.close()
+
+
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -723,8 +775,18 @@ def main() -> None:
         help="Type for new groups (default: exchange). "
         "Exchange groups don't create SharePoint sites.",
     )
+    parser.add_argument(
+        "--delete",
+        metavar="EMAIL",
+        help="Delete an Exchange distribution group by email address",
+    )
 
     args = parser.parse_args()
+
+    # Handle delete command
+    if args.delete:
+        exit_code = asyncio.run(delete_group(args.delete, dry_run=args.dry_run))
+        sys.exit(exit_code)
 
     # Determine which strategies to run
     strategies: list[str] = []

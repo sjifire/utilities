@@ -214,8 +214,8 @@ class WildlandFirefighterStrategy(GroupStrategy):
     def get_config(self, group_key: str) -> GroupConfig:
         """Return group configuration."""
         return GroupConfig(
-            display_name="WFF",
-            mail_nickname="wff",
+            display_name="Wildland Firefighters",
+            mail_nickname="wildlandff",
             description="Members with Wildland Firefighter position",
         )
 

@@ -29,7 +29,7 @@ from pathlib import Path
 
 from tenacity import retry, retry_if_result, stop_after_attempt, wait_exponential
 
-from sjifire.core.config import get_graph_credentials
+from sjifire.core.config import get_exchange_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class ExchangeOnlineClient:
         certificate_thumbprint: str | None = None,
         certificate_path: Path | str | None = None,
         certificate_password: str | None = None,
-        organization: str = "sjifire.org",
+        organization: str | None = None,
     ) -> None:
         """Initialize the Exchange Online client.
 
@@ -65,13 +65,16 @@ class ExchangeOnlineClient:
             certificate_thumbprint: Thumbprint of installed certificate (Windows)
             certificate_path: Path to .pfx certificate file (cross-platform)
             certificate_password: Password for the .pfx file
-            organization: The organization domain (e.g., "sjifire.org")
+            organization: The organization domain (overrides env config)
         """
-        self.tenant_id, self.client_id, _ = get_graph_credentials()
-        self.certificate_thumbprint = certificate_thumbprint
-        self.certificate_path = certificate_path
-        self.certificate_password = certificate_password
-        self.organization = organization
+        creds = get_exchange_credentials()
+        self.tenant_id = creds.tenant_id
+        self.client_id = creds.client_id
+        self.organization = organization or creds.organization
+        # Use passed params if provided, otherwise use from credentials
+        self.certificate_thumbprint = certificate_thumbprint or creds.certificate_thumbprint
+        self.certificate_path = certificate_path or creds.certificate_path
+        self.certificate_password = certificate_password or creds.certificate_password
         self._connected = False
 
     def _build_connect_command(self) -> str:
@@ -270,33 +273,92 @@ class ExchangeOnlineClient:
         logger.error(f"Failed to create mail-enabled security group: {name}")
         return None
 
-    async def update_distribution_group_notes(
+    async def update_distribution_group_description(
         self,
         identity: str,
-        notes: str,
+        description: str,
     ) -> bool:
-        """Update the notes/description of a distribution group.
+        """Update the description of a distribution group.
 
         Args:
             identity: Group name, alias, or email address
-            notes: New notes/description for the group
+            description: New description for the group
 
         Returns:
             True if successful
         """
-        # Escape single quotes in notes
-        escaped_notes = notes.replace("'", "''")
+        # Escape single quotes in description
+        escaped_description = description.replace("'", "''")
         commands = [
-            f"Set-DistributionGroup -Identity '{identity}' -Notes '{escaped_notes}'",
+            f"Set-DistributionGroup -Identity '{identity}' -Description '{escaped_description}'",
             "Write-Output 'SUCCESS'",
         ]
 
         result = self._run_powershell(commands, parse_json=False)
         if result and "SUCCESS" in str(result):
-            logger.info(f"Updated notes for {identity}")
+            logger.info(f"Updated description for {identity}")
             return True
 
-        logger.error(f"Failed to update notes for {identity}")
+        logger.error(f"Failed to update description for {identity}")
+        return False
+
+    async def update_distribution_group_managed_by(
+        self,
+        identity: str,
+        managed_by: str,
+    ) -> bool:
+        """Update the ManagedBy (owner) of a distribution group.
+
+        Args:
+            identity: Group name, alias, or email address
+            managed_by: Email address of the owner
+
+        Returns:
+            True if successful
+        """
+        commands = [
+            f"Set-DistributionGroup -Identity '{identity}' -ManagedBy '{managed_by}' "
+            "-BypassSecurityGroupManagerCheck",
+            "Write-Output 'SUCCESS'",
+        ]
+
+        result = self._run_powershell(commands, parse_json=False)
+        if result and "SUCCESS" in str(result):
+            logger.info(f"Updated ManagedBy for {identity} to {managed_by}")
+            return True
+
+        logger.error(f"Failed to update ManagedBy for {identity}")
+        return False
+
+    async def delete_distribution_group(self, identity: str) -> bool:
+        """Delete a distribution group or mail-enabled security group.
+
+        Args:
+            identity: Group name, alias, or email address
+
+        Returns:
+            True if successful (or group didn't exist)
+        """
+        commands = [
+            f"Remove-DistributionGroup -Identity '{identity}' "
+            "-BypassSecurityGroupManagerCheck -Confirm:$false -ErrorAction Stop",
+            "Write-Output 'SUCCESS'",
+        ]
+
+        result = self._run_powershell(commands, parse_json=False)
+        if result and "SUCCESS" in str(result):
+            logger.info(f"Deleted distribution group: {identity}")
+            return True
+
+        # Check if group just doesn't exist (not an error)
+        if result is None:
+            # Could be "not found" error - check if group exists
+            check = await self.get_distribution_group(identity)
+            if check is None:
+                logger.info(f"Distribution group already deleted: {identity}")
+                return True
+
+        logger.error(f"Failed to delete distribution group: {identity}")
         return False
 
     async def get_distribution_group_members(self, identity: str) -> list[str]:
