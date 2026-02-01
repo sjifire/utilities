@@ -28,7 +28,6 @@ class MailGroupSyncStrategy(ABC):
     @abstractmethod
     def name(self) -> str:
         """Return the strategy name for logging and CLI."""
-        ...
 
     @property
     def automation_notice(self) -> str:
@@ -48,7 +47,6 @@ class MailGroupSyncStrategy(ABC):
         Returns:
             Dict mapping group_key to list of members who should be in that group
         """
-        ...
 
     @abstractmethod
     def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:
@@ -60,7 +58,6 @@ class MailGroupSyncStrategy(ABC):
         Returns:
             Tuple of (display_name, email_alias, description)
         """
-        ...
 
 
 class MailStationGroupStrategy(MailGroupSyncStrategy):

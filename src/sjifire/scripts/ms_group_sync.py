@@ -729,11 +729,13 @@ def main() -> None:
     args = parser.parse_args()
 
     # Determine which strategies to run
+    strategies: list[str] = []
     if args.all:
         strategies = STRATEGIES
     elif args.strategies:
         strategies = args.strategies
-    else:
+
+    if not strategies:
         parser.error("Specify --all or at least one --strategy")
 
     # Map new-type to GroupType
