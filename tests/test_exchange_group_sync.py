@@ -153,25 +153,18 @@ class TestMailMarineGroupStrategy:
         assert self.strategy.name == "mail-marine"
 
     def test_get_groups_to_sync_mate_position(self):
-        # Debug: print values to diagnose CI failure
-        from sjifire.core import constants
-        import sjifire.exchange.group_sync as group_sync_module
-
-        print(f"\nDEBUG: MARINE_POSITIONS from constants: {constants.MARINE_POSITIONS}")
-        print(f"DEBUG: 'Mate' in MARINE_POSITIONS: {'Mate' in constants.MARINE_POSITIONS}")
-        # Check what the module sees
-        marine_pos_in_module = getattr(group_sync_module, "MARINE_POSITIONS", "NOT FOUND")
-        print(f"DEBUG: MARINE_POSITIONS in group_sync module: {marine_pos_in_module}")
-
-        member = Member(id="1", first_name="John", last_name="Doe", positions=["Mate"])
-        print(f"DEBUG: member.positions = {member.positions}")
+        member = Member(id="1", first_name="John", last_name="Doe", positions=["Marine: Mate"])
         result = self.strategy.get_groups_to_sync([member])
-        print(f"DEBUG: result = {result}")
         assert "Marine" in result
         assert len(result["Marine"]) == 1
 
     def test_get_groups_to_sync_pilot_position(self):
-        member = Member(id="1", first_name="John", last_name="Doe", positions=["Pilot"])
+        member = Member(id="1", first_name="John", last_name="Doe", positions=["Marine: Pilot"])
+        result = self.strategy.get_groups_to_sync([member])
+        assert "Marine" in result
+
+    def test_get_groups_to_sync_deckhand_position(self):
+        member = Member(id="1", first_name="John", last_name="Doe", positions=["Marine: Deckhand"])
         result = self.strategy.get_groups_to_sync([member])
         assert "Marine" in result
 
