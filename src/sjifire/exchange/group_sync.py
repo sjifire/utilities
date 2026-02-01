@@ -17,6 +17,7 @@ from sjifire.aladtec.models import (
     OPERATIONAL_POSITIONS,
     Member,
 )
+from sjifire.core.backup import backup_mail_groups
 from sjifire.core.config import get_exchange_credentials
 from sjifire.exchange.client import ExchangeGroup, ExchangeOnlineClient
 
@@ -539,6 +540,16 @@ class MailGroupSyncManager:
             f"{', '.join(sorted(groups_to_sync.keys()))}"
         )
 
+        # Build list of group emails for backup
+        group_emails = []
+        for group_key in groups_to_sync:
+            _display_name, alias, _description = strategy.get_group_config(group_key)
+            group_emails.append(f"{alias}@{self.domain}")
+
+        # Backup existing groups before making changes
+        if not dry_run:
+            await self.backup_groups_before_sync(group_emails)
+
         results: list[MailGroupSyncResult] = []
 
         for group_key in sorted(groups_to_sync.keys()):
@@ -592,6 +603,52 @@ class MailGroupSyncManager:
             group_type=strategy.name,
             groups=results,
         )
+
+    async def backup_group(self, group_email: str) -> dict | None:
+        """Backup a single group and its members.
+
+        Args:
+            group_email: Email address of the group
+
+        Returns:
+            Dict with group info and members, or None if group doesn't exist
+        """
+        group = await self.exchange_client.get_distribution_group(group_email)
+        if not group:
+            return None
+
+        members = await self.exchange_client.get_distribution_group_members(group_email)
+
+        return {
+            "identity": group.identity,
+            "display_name": group.display_name,
+            "email": group.primary_smtp_address,
+            "group_type": group.group_type,
+            "members": members,
+        }
+
+    async def backup_groups_before_sync(
+        self,
+        group_emails: list[str],
+    ) -> None:
+        """Backup all groups that will be modified before sync.
+
+        Args:
+            group_emails: List of group email addresses to backup
+        """
+        groups_to_backup = []
+
+        for email in group_emails:
+            group_data = await self.backup_group(email)
+            if group_data:
+                groups_to_backup.append(group_data)
+                logger.info(
+                    f"Backing up {group_data['display_name']} "
+                    f"({len(group_data['members'])} members)"
+                )
+
+        if groups_to_backup:
+            backup_mail_groups(groups_to_backup)
 
     async def close(self) -> None:
         """Close the Exchange client."""

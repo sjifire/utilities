@@ -189,6 +189,40 @@ def backup_entra_groups(
     return filepath
 
 
+def backup_mail_groups(
+    groups: list[dict],
+    backup_dir: Path | str | None = None,
+    prefix: str = "mail",
+) -> Path:
+    """Backup mail-enabled security groups and distribution lists to a JSON file.
+
+    Args:
+        groups: List of group dicts with keys: identity, display_name, email, group_type, members
+        backup_dir: Directory to save backup. If None, uses default.
+        prefix: Prefix for the backup filename
+
+    Returns:
+        Path to the created backup file
+    """
+    backup_dir = get_backup_dir(backup_dir)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{prefix}_groups_{timestamp}.json"
+    filepath = backup_dir / filename
+
+    data = {
+        "backup_type": "mail_groups",
+        "timestamp": datetime.now().isoformat(),
+        "count": len(groups),
+        "groups": groups,
+    }
+
+    with filepath.open("w") as f:
+        json.dump(data, f, indent=2, default=str)
+
+    logger.info(f"Backed up {len(groups)} mail groups to {filepath}")
+    return filepath
+
+
 def list_backups(backup_dir: Path | str | None = None) -> list[Path]:
     """List all backup files in the backup directory.
 

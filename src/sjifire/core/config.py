@@ -122,9 +122,10 @@ def get_exchange_credentials() -> ExchangeCredentials:
             "EXCHANGE_CERTIFICATE_PATH + EXCHANGE_CERTIFICATE_PASSWORD (cross-platform)"
         )
 
-    if cert_path and not cert_password:
+    if cert_path and cert_password is None:
         raise ValueError(
-            "EXCHANGE_CERTIFICATE_PASSWORD is required when using EXCHANGE_CERTIFICATE_PATH"
+            "EXCHANGE_CERTIFICATE_PASSWORD is required when using EXCHANGE_CERTIFICATE_PATH "
+            "(can be empty string for Key Vault generated certs)"
         )
 
     return ExchangeCredentials(

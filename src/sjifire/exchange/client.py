@@ -27,6 +27,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from tenacity import retry, retry_if_result, stop_after_attempt, wait_exponential
+
 from sjifire.core.config import get_graph_credentials
 
 logger = logging.getLogger(__name__)
@@ -74,29 +76,33 @@ class ExchangeOnlineClient:
 
     def _build_connect_command(self) -> str:
         """Build the Connect-ExchangeOnline command."""
-        if self.certificate_thumbprint:
+        # Note: -ShowBanner:$false doesn't work via subprocess, so we omit it
+        # The banner output is ignored anyway since we parse JSON from stdout
+        # Prefer certificate_path over thumbprint (thumbprint is Windows-only)
+        if self.certificate_path:
+            # Cross-platform: Use certificate file
+            # For empty password (Key Vault certs), skip the -CertificatePassword param
+            if self.certificate_password:
+                secure_str = (
+                    f"-CertificatePassword (ConvertTo-SecureString "
+                    f"-String '{self.certificate_password}' -AsPlainText -Force) "
+                )
+            else:
+                secure_str = ""
+            return (
+                f"Connect-ExchangeOnline "
+                f"-AppId '{self.client_id}' "
+                f"-CertificateFilePath '{self.certificate_path}' "
+                f"{secure_str}"
+                f"-Organization '{self.organization}'"
+            )
+        elif self.certificate_thumbprint:
             # Windows: Use installed certificate by thumbprint
             return (
                 f"Connect-ExchangeOnline "
                 f"-AppId '{self.client_id}' "
                 f"-CertificateThumbprint '{self.certificate_thumbprint}' "
-                f"-Organization '{self.organization}' "
-                f"-ShowBanner:$false"
-            )
-        elif self.certificate_path:
-            # Cross-platform: Use certificate file
-            # Note: This requires the certificate password
-            secure_str = (
-                f"(ConvertTo-SecureString -String '{self.certificate_password}' "
-                f"-AsPlainText -Force)"
-            )
-            return (
-                f"Connect-ExchangeOnline "
-                f"-AppId '{self.client_id}' "
-                f"-CertificateFilePath '{self.certificate_path}' "
-                f"-CertificatePassword {secure_str} "
-                f"-Organization '{self.organization}' "
-                f"-ShowBanner:$false"
+                f"-Organization '{self.organization}'"
             )
         else:
             raise ValueError(
@@ -147,7 +153,16 @@ class ExchangeOnlineClient:
                 try:
                     return json.loads(output)
                 except json.JSONDecodeError:
-                    logger.warning(f"Failed to parse JSON output: {output}")
+                    # Banner text may precede JSON - try to find JSON in output
+                    json_start = output.find("{")
+                    if json_start == -1:
+                        json_start = output.find("[")
+                    if json_start != -1:
+                        try:
+                            return json.loads(output[json_start:])
+                        except json.JSONDecodeError:
+                            pass
+                    logger.warning(f"Failed to parse JSON output: {output[:200]}")
                     return {"raw": output}
 
             return output
@@ -280,6 +295,46 @@ class ExchangeOnlineClient:
 
         return members
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=4, max=30),
+        retry=retry_if_result(lambda r: r == "RETRY"),
+        reraise=True,
+    )
+    def _add_member_with_retry(self, identity: str, member: str) -> str:
+        """Add member with retry logic for transient errors.
+
+        Returns:
+            "SUCCESS", "ALREADY_MEMBER", "RETRY" (for transient errors), or "FAILED"
+        """
+        commands = [
+            f"Add-DistributionGroupMember -Identity '{identity}' "
+            f"-Member '{member}' -BypassSecurityGroupManagerCheck -ErrorAction Stop",
+            "Write-Output 'SUCCESS'",
+        ]
+
+        result = self._run_powershell(commands, parse_json=False)
+        result_str = str(result) if result else ""
+
+        if "SUCCESS" in result_str:
+            return "SUCCESS"
+
+        if "already a member" in result_str.lower():
+            return "ALREADY_MEMBER"
+
+        # Check for transient Azure AD sync errors - retry these
+        transient_indicators = [
+            "transient",
+            "retry a couple of minutes",
+            "does not exist or one of its queried reference-property",
+            "DualWrite",
+        ]
+        if any(indicator in result_str for indicator in transient_indicators):
+            logger.warning(f"Transient error adding {member} to {identity}, will retry...")
+            return "RETRY"
+
+        return "FAILED"
+
     async def add_distribution_group_member(
         self,
         identity: str,
@@ -294,24 +349,56 @@ class ExchangeOnlineClient:
         Returns:
             True if successful
         """
-        commands = [
-            f"Add-DistributionGroupMember -Identity '{identity}' "
-            f"-Member '{member}' -ErrorAction Stop",
-            "Write-Output 'SUCCESS'",
-        ]
+        result = self._add_member_with_retry(identity, member)
 
-        result = self._run_powershell(commands, parse_json=False)
-        if result and "SUCCESS" in str(result):
+        if result == "SUCCESS":
             logger.info(f"Added {member} to {identity}")
             return True
 
-        # Check if already a member (not an error)
-        if result and "already a member" in str(result).lower():
+        if result == "ALREADY_MEMBER":
             logger.debug(f"{member} is already a member of {identity}")
             return True
 
         logger.error(f"Failed to add {member} to {identity}")
         return False
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=4, max=30),
+        retry=retry_if_result(lambda r: r == "RETRY"),
+        reraise=True,
+    )
+    def _remove_member_with_retry(self, identity: str, member: str) -> str:
+        """Remove member with retry logic for transient errors.
+
+        Returns:
+            "SUCCESS", "RETRY" (for transient errors), or "FAILED"
+        """
+        commands = [
+            f"Remove-DistributionGroupMember -Identity '{identity}' "
+            f"-Member '{member}' -BypassSecurityGroupManagerCheck "
+            "-Confirm:$false -ErrorAction Stop",
+            "Write-Output 'SUCCESS'",
+        ]
+
+        result = self._run_powershell(commands, parse_json=False)
+        result_str = str(result) if result else ""
+
+        if "SUCCESS" in result_str:
+            return "SUCCESS"
+
+        # Check for transient Azure AD sync errors - retry these
+        transient_indicators = [
+            "transient",
+            "retry a couple of minutes",
+            "does not exist or one of its queried reference-property",
+            "DualWrite",
+        ]
+        if any(indicator in result_str for indicator in transient_indicators):
+            logger.warning(f"Transient error removing {member} from {identity}, will retry...")
+            return "RETRY"
+
+        return "FAILED"
 
     async def remove_distribution_group_member(
         self,
@@ -327,14 +414,9 @@ class ExchangeOnlineClient:
         Returns:
             True if successful
         """
-        commands = [
-            f"Remove-DistributionGroupMember -Identity '{identity}' "
-            f"-Member '{member}' -Confirm:$false -ErrorAction Stop",
-            "Write-Output 'SUCCESS'",
-        ]
+        result = self._remove_member_with_retry(identity, member)
 
-        result = self._run_powershell(commands, parse_json=False)
-        if result and "SUCCESS" in str(result):
+        if result == "SUCCESS":
             logger.info(f"Removed {member} from {identity}")
             return True
 
