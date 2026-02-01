@@ -11,8 +11,9 @@ RANK_HIERARCHY: list[str] = [
 
 # Marine positions (boat crew)
 MARINE_POSITIONS: set[str] = {
-    "Mate",
-    "Pilot",
+    "Marine: Deckhand",
+    "Marine: Mate",
+    "Marine: Pilot",
 }
 
 # Operational positions that indicate active response/support roles
