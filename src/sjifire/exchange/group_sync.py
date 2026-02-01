@@ -12,13 +12,10 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from sjifire.aladtec.models import (
-    MARINE_POSITIONS,
-    OPERATIONAL_POSITIONS,
-    Member,
-)
+from sjifire.aladtec.models import Member
 from sjifire.core.backup import backup_mail_groups
 from sjifire.core.config import get_exchange_credentials
+from sjifire.core.constants import MARINE_POSITIONS, OPERATIONAL_POSITIONS
 from sjifire.exchange.client import ExchangeGroup, ExchangeOnlineClient
 
 logger = logging.getLogger(__name__)
