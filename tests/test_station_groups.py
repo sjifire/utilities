@@ -10,6 +10,7 @@ from sjifire.entra.group_sync import (
     GroupSyncManager,
     GroupSyncResult,
     MarineGroupStrategy,
+    MobeGroupStrategy,
     StationGroupStrategy,
     SupportGroupStrategy,
     VolunteerGroupStrategy,
@@ -560,6 +561,109 @@ class TestVolunteerGroupStrategy:
             "Wildland Firefighter",
         }
         assert expected == OPERATIONAL_POSITIONS
+
+
+class TestMobeGroupStrategy:
+    """Tests for MobeGroupStrategy."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.strategy = MobeGroupStrategy()
+
+    def test_name(self):
+        assert self.strategy.name == "mobe"
+
+    def test_automation_notice(self):
+        notice = self.strategy.automation_notice
+        assert "automatically" in notice.lower()
+        assert "Mobe" in notice
+
+    def test_get_group_config(self):
+        display_name, mail_nickname, description = self.strategy.get_group_config("mobe")
+        assert display_name == "State Mobilization"
+        assert mail_nickname == "statemobe"
+        assert "mobilization" in description.lower()
+
+    def test_get_groups_to_sync_empty(self):
+        assert self.strategy.get_groups_to_sync([]) == {}
+
+    def test_get_groups_to_sync_with_mobe_schedule(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            schedules=["State Mobe"],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert "mobe" in result
+        assert len(result["mobe"]) == 1
+
+    def test_get_groups_to_sync_without_mobe_schedule(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            schedules=["Daily Schedule", "Training"],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert result == {}
+
+    def test_get_groups_to_sync_case_insensitive(self):
+        """Test that 'mobe' matching is case-insensitive."""
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            schedules=["state mobe"],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert "mobe" in result
+        assert len(result["mobe"]) == 1
+
+    def test_get_groups_to_sync_partial_match(self):
+        """Test that 'mobe' substring match works."""
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            schedules=["WA State Mobe 2025"],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert "mobe" in result
+        assert len(result["mobe"]) == 1
+
+    def test_get_groups_to_sync_multiple_members(self):
+        members = [
+            Member(id="1", first_name="John", last_name="Doe", schedules=["State Mobe"]),
+            Member(id="2", first_name="Jane", last_name="Smith", schedules=["State Mobe", "Daily"]),
+            Member(id="3", first_name="Bob", last_name="Wilson", schedules=["Daily", "Training"]),
+        ]
+        result = self.strategy.get_groups_to_sync(members)
+        assert len(result) == 1
+        assert len(result["mobe"]) == 2
+
+    def test_get_groups_to_sync_empty_schedules(self):
+        """Test member with empty schedules list is excluded."""
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            schedules=[],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert result == {}
+
+    def test_get_groups_to_sync_none_schedules(self):
+        """Test member with None schedules is excluded."""
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+        )
+        # Default is empty list, but let's explicitly test None
+        member.schedules = None  # type: ignore
+        result = self.strategy.get_groups_to_sync([member])
+        assert result == {}
 
 
 class TestGroupSyncResult:

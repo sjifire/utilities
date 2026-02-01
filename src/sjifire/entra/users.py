@@ -45,10 +45,11 @@ class EntraUser:
     personal_email: str | None = None
     department: str | None = None
     company_name: str | None = None
-    # Extension attributes (1-15 available, we use 1-3)
+    # Extension attributes (1-15 available, we use 1-4)
     extension_attribute1: str | None = None  # Rank
     extension_attribute2: str | None = None  # EVIP
     extension_attribute3: str | None = None  # Positions (comma-delimited)
+    extension_attribute4: str | None = None  # Schedules (comma-delimited)
 
     @property
     def is_active(self) -> bool:
@@ -71,6 +72,13 @@ class EntraUser:
         if not self.extension_attribute3:
             return set()
         return {p.strip() for p in self.extension_attribute3.split(",") if p.strip()}
+
+    @property
+    def schedules(self) -> set[str]:
+        """Get schedules from extensionAttribute4 as a set."""
+        if not self.extension_attribute4:
+            return set()
+        return {s.strip() for s in self.extension_attribute4.split(",") if s.strip()}
 
     @property
     def rank(self) -> str | None:
@@ -225,11 +233,13 @@ class EntraUserManager:
         ext_attr1 = None
         ext_attr2 = None
         ext_attr3 = None
+        ext_attr4 = None
         if user.on_premises_extension_attributes:
             ext = user.on_premises_extension_attributes
             ext_attr1 = ext.extension_attribute1
             ext_attr2 = ext.extension_attribute2
             ext_attr3 = ext.extension_attribute3
+            ext_attr4 = ext.extension_attribute4
 
         return EntraUser(
             id=user.id or "",
@@ -252,6 +262,7 @@ class EntraUserManager:
             extension_attribute1=ext_attr1,
             extension_attribute2=ext_attr2,
             extension_attribute3=ext_attr3,
+            extension_attribute4=ext_attr4,
         )
 
     async def get_user_by_upn(self, upn: str) -> EntraUser | None:
@@ -292,6 +303,7 @@ class EntraUserManager:
         extension_attribute1: str | None = None,
         extension_attribute2: str | None = None,
         extension_attribute3: str | None = None,
+        extension_attribute4: str | None = None,
     ) -> EntraUser | None:
         """Create a new user in Entra ID.
 
@@ -315,6 +327,7 @@ class EntraUserManager:
             extension_attribute1: Rank (optional)
             extension_attribute2: EVIP date (optional)
             extension_attribute3: Positions comma-delimited (optional)
+            extension_attribute4: Schedules comma-delimited (optional)
 
         Returns:
             Created EntraUser or None on failure
@@ -339,11 +352,18 @@ class EntraUserManager:
 
         # Build extension attributes if any are provided
         ext_attrs = None
-        if extension_attribute1 or extension_attribute2 or extension_attribute3:
+        has_ext_attrs = (
+            extension_attribute1
+            or extension_attribute2
+            or extension_attribute3
+            or extension_attribute4
+        )
+        if has_ext_attrs:
             ext_attrs = OnPremisesExtensionAttributes(
                 extension_attribute1=extension_attribute1,
                 extension_attribute2=extension_attribute2,
                 extension_attribute3=extension_attribute3,
+                extension_attribute4=extension_attribute4,
             )
 
         user = User(
@@ -397,6 +417,7 @@ class EntraUserManager:
         extension_attribute1: str | None = None,
         extension_attribute2: str | None = None,
         extension_attribute3: str | None = None,
+        extension_attribute4: str | None = None,
     ) -> bool:
         """Update an existing user in Entra ID.
 
@@ -418,6 +439,7 @@ class EntraUserManager:
             extension_attribute1: Rank (optional)
             extension_attribute2: EVIP date (optional)
             extension_attribute3: Positions comma-delimited (optional)
+            extension_attribute4: Schedules comma-delimited (optional)
 
         Returns:
             True if successful
@@ -502,6 +524,9 @@ class EntraUserManager:
         if extension_attribute3 is not None:
             ext_attrs.extension_attribute3 = extension_attribute3
             has_ext_attrs = True
+        if extension_attribute4 is not None:
+            ext_attrs.extension_attribute4 = extension_attribute4
+            has_ext_attrs = True
         if has_ext_attrs:
             user.on_premises_extension_attributes = ext_attrs
 
@@ -561,6 +586,7 @@ class EntraUserManager:
                     extension_attribute1 is not None
                     or extension_attribute2 is not None
                     or extension_attribute3 is not None
+                    or extension_attribute4 is not None
                 )
                 if has_ext_attrs:
                     retry_ext_attrs = OnPremisesExtensionAttributes()
@@ -570,6 +596,8 @@ class EntraUserManager:
                         retry_ext_attrs.extension_attribute2 = extension_attribute2
                     if extension_attribute3 is not None:
                         retry_ext_attrs.extension_attribute3 = extension_attribute3
+                    if extension_attribute4 is not None:
+                        retry_ext_attrs.extension_attribute4 = extension_attribute4
                     user_retry.on_premises_extension_attributes = retry_ext_attrs
                 if retry_fields_to_clear:
                     user_retry.additional_data = retry_fields_to_clear

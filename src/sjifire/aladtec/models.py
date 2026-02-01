@@ -25,6 +25,7 @@ class Member:
     home_phone: str | None = None
     employee_type: str | None = None  # "Employee Type" field from Aladtec CSV
     positions: list[str] = field(default_factory=list)
+    schedules: list[str] = field(default_factory=list)
     title: str | None = None
     status: str | None = None
     work_group: str | None = None

@@ -400,6 +400,44 @@ class VolunteerGroupStrategy(GroupSyncStrategy):
         )
 
 
+class MobeGroupStrategy(GroupSyncStrategy):
+    """Sync strategy for state mobilization group.
+
+    Creates a State Mobilization M365 group containing members who
+    have access to the "State Mobe" schedule in Aladtec.
+    """
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "mobe"
+
+    @property
+    def automation_notice(self) -> str:
+        """Return automation notice for mobe group."""
+        return (
+            "⚠️ Membership is automatically managed based on State Mobe "
+            "schedule access in Aladtec. Manual changes will be overwritten."
+        )
+
+    def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
+        """Get members with State Mobe schedule access."""
+        mobe_members = [
+            m for m in members if any("mobe" in s.lower() for s in (m.schedules or []))
+        ]
+        if mobe_members:
+            return {"mobe": mobe_members}
+        return {}
+
+    def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:
+        """Get state mobilization group configuration."""
+        return (
+            "State Mobilization",
+            "statemobe",
+            "Members available for state-wide wildland fire mobilization",
+        )
+
+
 class GroupSyncManager:
     """Manages group synchronization across different strategies."""
 

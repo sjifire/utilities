@@ -163,8 +163,8 @@ class AladtecScraper:
         logger.debug(f"Got CSV export ({len(content)} bytes)")
         members = self._parse_csv(content)
 
-        # Always enrich with full position lists
-        members = self.enrich_with_positions(members)
+        # Always enrich with full position and schedule lists
+        members = self.enrich_member_details(members)
 
         # Fetch inactive members if requested
         if include_inactive:
@@ -527,17 +527,17 @@ class AladtecScraper:
         logger.info(f"Got {len(user_map)} user IDs from roster")
         return user_map
 
-    def get_member_positions(self, user_id: str) -> list[str]:
-        """Get list of position names for a member.
+    def _get_member_detail_page(self, user_id: str) -> BeautifulSoup | None:
+        """Fetch and parse the member detail page.
 
         Args:
             user_id: Aladtec user ID
 
         Returns:
-            List of position names
+            BeautifulSoup object or None if fetch failed
         """
         if not self.client:
-            return []
+            return None
 
         response = self.client.get(
             f"{self.base_url}/index.php",
@@ -548,16 +548,26 @@ class AladtecScraper:
         )
 
         if response.status_code != 200:
+            return None
+
+        return BeautifulSoup(response.text, "html.parser")
+
+    def _extract_list_items(self, soup: BeautifulSoup, header_text: str) -> list[str]:
+        """Extract list items from a section with the given header.
+
+        Args:
+            soup: BeautifulSoup object of the page
+            header_text: Text to find in the header (e.g., "Positions:", "Schedules:")
+
+        Returns:
+            List of extracted text values
+        """
+        # Find the section header
+        header = soup.find(string=lambda t: t and header_text in str(t) if t else False)
+        if not header:
             return []
 
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # Find the Positions section
-        positions_header = soup.find(string=lambda t: t and "Positions:" in str(t) if t else False)
-        if not positions_header:
-            return []
-
-        parent = positions_header.find_parent("td")
+        parent = header.find_parent("td")
         if not parent:
             return []
 
@@ -565,39 +575,69 @@ class AladtecScraper:
         if not next_td:
             return []
 
-        # Try to get positions from list items first (view mode)
-        positions = []
+        # Try to get items from list items first (view mode)
+        items = []
         for li in next_td.find_all("li"):
             text = li.get_text(strip=True)
             if text:
-                positions.append(text)
+                items.append(text)
 
         # If no list items found, try checked checkboxes (edit mode)
-        if not positions:
+        if not items:
             for cb in next_td.find_all("input", {"type": "checkbox"}):
                 if cb.has_attr("checked"):
                     cb_id = cb.get("id", "")
                     label = next_td.find("label", {"for": cb_id})
                     if label:
-                        positions.append(label.get_text(strip=True))
+                        items.append(label.get_text(strip=True))
 
-        return positions
+        return items
 
-    def enrich_with_positions(self, members: list[Member]) -> list[Member]:
-        """Enrich members with their full position lists.
+    def get_member_positions(self, user_id: str) -> list[str]:
+        """Get list of position names for a member.
 
-        Fetches position data from each member's detail page.
+        Args:
+            user_id: Aladtec user ID
+
+        Returns:
+            List of position names
+        """
+        soup = self._get_member_detail_page(user_id)
+        if not soup:
+            return []
+
+        return self._extract_list_items(soup, "Positions:")
+
+    def get_member_schedules(self, user_id: str) -> list[str]:
+        """Get list of schedule names a member can access.
+
+        Args:
+            user_id: Aladtec user ID
+
+        Returns:
+            List of schedule names
+        """
+        soup = self._get_member_detail_page(user_id)
+        if not soup:
+            return []
+
+        return self._extract_list_items(soup, "Schedules:")
+
+    def enrich_member_details(self, members: list[Member]) -> list[Member]:
+        """Enrich members with their full position and schedule lists.
+
+        Fetches position and schedule data from each member's detail page.
 
         Args:
             members: List of members from get_members()
 
         Returns:
-            Same list with positions field populated
+            Same list with positions and schedules fields populated
         """
         if not self.client:
             return members
 
-        logger.info(f"Enriching {len(members)} members with position data")
+        logger.info(f"Enriching {len(members)} members with position and schedule data")
 
         # Get user ID mapping
         user_map = self.get_user_id_map()
@@ -611,14 +651,28 @@ class AladtecScraper:
             if not user_id:
                 continue
 
-            positions = self.get_member_positions(user_id)
-            # Always set positions (even if empty) to clear any incorrect initial value
-            member.positions = positions
-            if positions:
-                logger.debug(f"{member.display_name}: {len(positions)} positions")
+            # Fetch the detail page once and extract both positions and schedules
+            soup = self._get_member_detail_page(user_id)
+            if not soup:
+                continue
 
-        logger.info("Position enrichment complete")
+            positions = self._extract_list_items(soup, "Positions:")
+            schedules = self._extract_list_items(soup, "Schedules:")
+
+            # Always set values (even if empty) to clear any incorrect initial value
+            member.positions = positions
+            member.schedules = schedules
+
+            if positions or schedules:
+                logger.debug(
+                    f"{member.display_name}: {len(positions)} positions, {len(schedules)} schedules"
+                )
+
+        logger.info("Member detail enrichment complete")
         return members
+
+    # Backwards compatibility alias
+    enrich_with_positions = enrich_member_details
 
     def _scrape_members_html(self) -> list[Member]:
         """Fallback: scrape members from HTML if CSV export not available.

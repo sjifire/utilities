@@ -319,6 +319,39 @@ class VolunteerStrategy(GroupStrategy):
         )
 
 
+class MobeScheduleStrategy(GroupStrategy):
+    """Members with State Mobe schedule access.
+
+    Members who have access to the "State Mobe" schedule in Aladtec
+    are available for state-wide wildland fire mobilization deployments.
+    """
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "mobe"
+
+    @property
+    def membership_criteria(self) -> str:
+        """Return membership criteria description."""
+        return "Members with 'State Mobe' schedule access in Aladtec"
+
+    def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
+        """Get members with State Mobe schedule access."""
+        mobe_members = [
+            m for m in members if any("mobe" in s.lower() for s in (m.schedules or []))
+        ]
+        return {"mobe": mobe_members} if mobe_members else {}
+
+    def get_config(self, group_key: str) -> GroupConfig:
+        """Return group configuration."""
+        return GroupConfig(
+            display_name="State Mobilization",
+            mail_nickname="statemobe",
+            description="Members available for state-wide wildland fire mobilization",
+        )
+
+
 # Registry of all available strategies
 STRATEGY_CLASSES: dict[str, type[GroupStrategy]] = {
     "stations": StationStrategy,
@@ -328,6 +361,7 @@ STRATEGY_CLASSES: dict[str, type[GroupStrategy]] = {
     "ao": ApparatusOperatorStrategy,
     "marine": MarineStrategy,
     "volunteers": VolunteerStrategy,
+    "mobe": MobeScheduleStrategy,
 }
 
 # List of strategy names for CLI
