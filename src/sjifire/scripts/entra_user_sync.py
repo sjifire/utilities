@@ -211,6 +211,16 @@ async def run_import(
             for error in result.errors:
                 logger.info(f"  - {error['member']}: {error['error']}")
 
+        # Show interesting skips (not "no changes needed")
+        interesting_skips = [
+            s for s in result.skipped if s.get("reason") != "no changes needed"
+        ]
+        if interesting_skips:
+            logger.info("")
+            logger.info("Skipped:")
+            for skip in interesting_skips:
+                logger.info(f"  - {skip['member']}: {skip['reason']}")
+
     return 0 if not result.errors else 1
 
 
