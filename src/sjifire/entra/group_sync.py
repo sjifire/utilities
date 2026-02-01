@@ -320,7 +320,7 @@ class WildlandFirefighterGroupStrategy(GroupSyncStrategy):
 class MarineGroupStrategy(GroupSyncStrategy):
     """Sync strategy for Marine group.
 
-    Creates a Marine M365 group containing members with Mate or Pilot positions.
+    Creates a Marine M365 group containing members with marine positions.
     """
 
     @property
@@ -332,12 +332,12 @@ class MarineGroupStrategy(GroupSyncStrategy):
     def automation_notice(self) -> str:
         """Return automation notice for marine group."""
         return (
-            "⚠️ Membership is automatically managed based on Mate/Pilot positions "
+            "⚠️ Membership is automatically managed based on Marine positions "
             "in Aladtec. Manual changes will be overwritten."
         )
 
     def get_groups_to_sync(self, members: list[Member]) -> dict[str, list[Member]]:
-        """Get members with marine positions (Mate or Pilot)."""
+        """Get members with marine positions."""
         marine_members = [m for m in members if set(m.positions or []) & MARINE_POSITIONS]
         if marine_members:
             return {"Marine": marine_members}
@@ -348,7 +348,7 @@ class MarineGroupStrategy(GroupSyncStrategy):
         return (
             "Marine",
             "marine",
-            "Members with Mate or Pilot positions",
+            "Members with Marine positions",
         )
 
 

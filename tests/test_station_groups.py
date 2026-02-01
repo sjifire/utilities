@@ -362,13 +362,13 @@ class TestMarineGroupStrategy:
     def test_automation_notice(self):
         notice = self.strategy.automation_notice
         assert "automatically" in notice.lower()
-        assert "Mate" in notice or "Pilot" in notice
+        assert "Marine" in notice
 
     def test_get_group_config(self):
         display_name, mail_nickname, description = self.strategy.get_group_config("Marine")
         assert display_name == "Marine"
         assert mail_nickname == "marine"
-        assert "Mate" in description or "Pilot" in description
+        assert "Marine" in description
 
     def test_get_groups_to_sync_empty(self):
         assert self.strategy.get_groups_to_sync([]) == {}
@@ -378,7 +378,7 @@ class TestMarineGroupStrategy:
             id="1",
             first_name="John",
             last_name="Doe",
-            positions=["Mate"],
+            positions=["Marine: Mate"],
         )
         result = self.strategy.get_groups_to_sync([member])
         assert "Marine" in result
@@ -389,18 +389,29 @@ class TestMarineGroupStrategy:
             id="1",
             first_name="John",
             last_name="Doe",
-            positions=["Pilot"],
+            positions=["Marine: Pilot"],
         )
         result = self.strategy.get_groups_to_sync([member])
         assert "Marine" in result
         assert len(result["Marine"]) == 1
 
-    def test_get_groups_to_sync_both_positions(self):
+    def test_get_groups_to_sync_deckhand_position(self):
         member = Member(
             id="1",
             first_name="John",
             last_name="Doe",
-            positions=["Mate", "Pilot"],
+            positions=["Marine: Deckhand"],
+        )
+        result = self.strategy.get_groups_to_sync([member])
+        assert "Marine" in result
+        assert len(result["Marine"]) == 1
+
+    def test_get_groups_to_sync_multiple_marine_positions(self):
+        member = Member(
+            id="1",
+            first_name="John",
+            last_name="Doe",
+            positions=["Marine: Mate", "Marine: Pilot"],
         )
         result = self.strategy.get_groups_to_sync([member])
         assert "Marine" in result
@@ -418,8 +429,8 @@ class TestMarineGroupStrategy:
 
     def test_get_groups_to_sync_multiple_members(self):
         members = [
-            Member(id="1", first_name="John", last_name="Doe", positions=["Mate"]),
-            Member(id="2", first_name="Jane", last_name="Smith", positions=["Pilot"]),
+            Member(id="1", first_name="John", last_name="Doe", positions=["Marine: Mate"]),
+            Member(id="2", first_name="Jane", last_name="Smith", positions=["Marine: Pilot"]),
             Member(id="3", first_name="Bob", last_name="Wilson", positions=["Firefighter"]),
         ]
         result = self.strategy.get_groups_to_sync(members)
@@ -428,7 +439,7 @@ class TestMarineGroupStrategy:
 
     def test_marine_positions_include_all_expected(self):
         """Verify all expected marine positions are configured."""
-        expected = {"Mate", "Pilot"}
+        expected = {"Marine: Deckhand", "Marine: Mate", "Marine: Pilot"}
         assert expected == MARINE_POSITIONS
 
 
@@ -543,8 +554,9 @@ class TestVolunteerGroupStrategy:
             "Firefighter",
             "Apparatus Operator",
             "Support",
-            "Mate",
-            "Pilot",
+            "Marine: Deckhand",
+            "Marine: Mate",
+            "Marine: Pilot",
             "Wildland Firefighter",
         }
         assert expected == OPERATIONAL_POSITIONS
