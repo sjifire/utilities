@@ -57,14 +57,15 @@ The sync:
 - Prefixes display names with rank (e.g., "Chief John Smith")
 - Automatically backs up Entra ID users before making changes
 
-### Aladtec to Entra Group Sync
+### Microsoft Group Sync
 
-**Sync M365 groups from Aladtec:**
+**Sync groups from Aladtec (unified M365 and Exchange):**
 ```bash
-uv run entra-group-sync --all              # Sync all group strategies
-uv run entra-group-sync --all --dry-run    # Preview changes without applying
-uv run entra-group-sync --strategy stations # Sync only station groups
-uv run entra-group-sync --strategy ff --strategy wff  # Sync specific strategies
+uv run ms-group-sync --all              # Sync all group strategies
+uv run ms-group-sync --all --dry-run    # Preview changes without applying
+uv run ms-group-sync --strategy stations # Sync only station groups
+uv run ms-group-sync --strategy ff --strategy wff  # Sync specific strategies
+uv run ms-group-sync --all --new-type m365  # Create new groups as M365 (default: exchange)
 ```
 
 Available strategies:
@@ -80,11 +81,12 @@ Available strategies:
 | `volunteers` | Volunteers | Work Group = "Volunteer" + operational position |
 
 The sync:
-- Creates M365 groups if they don't exist
+- **Automatically detects** if a group exists as M365 or Exchange
+- Syncs existing groups using the appropriate backend (Graph API or PowerShell)
+- **Creates new groups as Exchange** mail-enabled security groups by default (no SharePoint sprawl)
+- Use `--new-type m365` to create new groups as M365 instead
+- Flags conflicts (groups existing in both systems) and skips them
 - Adds/removes members based on Aladtec data
-- Sets group visibility to Public
-- Adds automation notice to group descriptions
-- Backs up all groups before making changes
 
 **Automated sync:** Runs weekdays at noon Pacific via GitHub Actions. See `.github/workflows/entra-sync.yml`.
 
@@ -147,23 +149,15 @@ The audit checks for:
 - Entra ID users not in Aladtec
 - Entra ID users to deactivate (matched to inactive Aladtec members)
 
-### Mail-Enabled Security Group Sync
+### Exchange Online Prerequisites
 
-**Sync mail-enabled security groups from Aladtec (Exchange Online):**
-```bash
-uv run mail-group-sync --all              # Sync all group strategies
-uv run mail-group-sync --all --dry-run    # Preview changes without applying
-uv run mail-group-sync --strategy stations # Sync only station groups
-```
+For creating new groups (which default to Exchange mail-enabled security groups), you need:
 
-Mail-enabled security groups are Exchange Online groups that provide email distribution without creating SharePoint sites (unlike M365 groups). This is useful when you need email distribution but want to avoid data sprawl.
-
-**Prerequisites:**
 1. PowerShell 7+ (`pwsh`) - see [Installing PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell)
 2. ExchangeOnlineManagement module: `pwsh -Command "Install-Module -Name ExchangeOnlineManagement -Force"`
 3. Azure AD App Registration with Exchange.ManageAsApp permission
-4. Certificate for app-only authentication (thumbprint or .pfx file)
-5. App assigned "Exchange Recipient Administrator" role
+4. Certificate for app-only authentication (stored in Key Vault or local .pfx file)
+5. App assigned "Exchange Administrator" role in Azure AD
 
 **Environment variables:**
 ```bash
@@ -173,13 +167,8 @@ EXCHANGE_ORGANIZATION=sjifire.org
 EXCHANGE_CERTIFICATE_THUMBPRINT=your-thumbprint
 # Option 2: Certificate file (cross-platform)
 EXCHANGE_CERTIFICATE_PATH=/path/to/certificate.pfx
-EXCHANGE_CERTIFICATE_PASSWORD=your-cert-password
+EXCHANGE_CERTIFICATE_PASSWORD=your-cert-password  # empty for Key Vault certs
 ```
-
-The sync:
-- Uses the same strategies as M365 group sync (stations, ff, wff, ao, marine, volunteers, allpersonnel)
-- Automatically retries transient Azure AD sync errors (up to 3 attempts with exponential backoff)
-- Backs up all groups before making changes
 
 ### Entra ID Tools
 

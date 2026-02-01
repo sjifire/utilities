@@ -160,7 +160,10 @@ class ExchangeOnlineClient:
                             return json.loads(output[json_start:])
                         except json.JSONDecodeError:
                             pass
-                    logger.warning(f"Failed to parse JSON output: {output[:200]}")
+                    # Only warn if output looks like it might contain JSON data
+                    # (not just banner text or empty results)
+                    if "{" in output or "[" in output:
+                        logger.warning(f"Failed to parse JSON output: {output[:200]}")
                     return {"raw": output}
 
             return output

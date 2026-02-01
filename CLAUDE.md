@@ -149,9 +149,10 @@ uv run entra-user-sync --individual user@sjifire.org
 
 ### Run group sync manually
 ```bash
-uv run entra-group-sync --all --dry-run  # Preview all strategies
-uv run entra-group-sync --all            # Apply changes
-uv run entra-group-sync --strategy ff    # Sync specific strategy
+uv run ms-group-sync --all --dry-run  # Preview all strategies
+uv run ms-group-sync --all            # Apply changes
+uv run ms-group-sync --strategy ff    # Sync specific strategy
+uv run ms-group-sync --all --new-type m365  # Create new groups as M365 (default: exchange)
 ```
 
 ### Run iSpyFire sync manually
@@ -168,11 +169,12 @@ uv run ispyfire-admin activate user@sjifire.org
 uv run ispyfire-admin deactivate user@sjifire.org
 ```
 
-### Run mail group sync (Exchange Online)
-```bash
-uv run mail-group-sync --all --dry-run  # Preview (requires PowerShell + cert setup)
-uv run mail-group-sync --all            # Apply changes
-```
+### Group sync details
+The `ms-group-sync` command automatically detects existing group types:
+- **M365 groups**: Synced via Graph API
+- **Exchange groups**: Synced via PowerShell
+- **Conflicts**: Groups in both systems are skipped with a warning
+- **New groups**: Created as Exchange mail-enabled security groups by default (no SharePoint sprawl)
 
 ### Check linting
 ```bash
