@@ -17,6 +17,11 @@ from sjifire.entra.users import EntraUserManager
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+# Suppress verbose library logging
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("azure.identity").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+
 
 async def cleanup_disabled_licenses(dry_run: bool = False) -> int:
     """Remove licenses from all disabled Entra users.
