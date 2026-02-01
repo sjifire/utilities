@@ -31,6 +31,30 @@ def get_aladtec_credentials() -> tuple[str, str, str]:
     return url, username, password
 
 
+def get_ispyfire_credentials() -> tuple[str, str, str]:
+    """Get iSpyFire credentials from environment.
+
+    Returns:
+        Tuple of (url, username, password)
+
+    Raises:
+        ValueError: If any required credential is not set
+    """
+    load_dotenv()
+
+    url = os.getenv("ISPYFIRE_URL")
+    username = os.getenv("ISPYFIRE_USERNAME")
+    password = os.getenv("ISPYFIRE_PASSWORD")
+
+    if not url or not username or not password:
+        raise ValueError(
+            "iSpyFire credentials not set. "
+            "Required: ISPYFIRE_URL, ISPYFIRE_USERNAME, ISPYFIRE_PASSWORD"
+        )
+
+    return url, username, password
+
+
 def get_graph_credentials() -> tuple[str, str, str]:
     """Get MS Graph API credentials from environment.
 
@@ -53,6 +77,62 @@ def get_graph_credentials() -> tuple[str, str, str]:
         )
 
     return tenant_id, client_id, client_secret
+
+
+@dataclass
+class ExchangeCredentials:
+    """Credentials for Exchange Online PowerShell authentication."""
+
+    organization: str
+    certificate_thumbprint: str | None = None
+    certificate_path: str | None = None
+    certificate_password: str | None = None
+
+
+def get_exchange_credentials() -> ExchangeCredentials:
+    """Get Exchange Online credentials from environment.
+
+    Uses certificate-based authentication for app-only access.
+    Either certificate_thumbprint (Windows) or certificate_path + password
+    (cross-platform) must be provided.
+
+    Environment variables:
+        EXCHANGE_ORGANIZATION: Organization domain (default: sjifire.org)
+        EXCHANGE_CERTIFICATE_THUMBPRINT: Certificate thumbprint (Windows)
+        EXCHANGE_CERTIFICATE_PATH: Path to .pfx certificate file
+        EXCHANGE_CERTIFICATE_PASSWORD: Password for .pfx file
+
+    Returns:
+        ExchangeCredentials with certificate configuration
+
+    Raises:
+        ValueError: If neither certificate method is configured
+    """
+    load_dotenv()
+
+    organization = os.getenv("EXCHANGE_ORGANIZATION", "sjifire.org")
+    thumbprint = os.getenv("EXCHANGE_CERTIFICATE_THUMBPRINT")
+    cert_path = os.getenv("EXCHANGE_CERTIFICATE_PATH")
+    cert_password = os.getenv("EXCHANGE_CERTIFICATE_PASSWORD")
+
+    if not thumbprint and not cert_path:
+        raise ValueError(
+            "Exchange credentials not set. Required: "
+            "EXCHANGE_CERTIFICATE_THUMBPRINT (Windows) or "
+            "EXCHANGE_CERTIFICATE_PATH + EXCHANGE_CERTIFICATE_PASSWORD (cross-platform)"
+        )
+
+    if cert_path and not cert_password:
+        raise ValueError(
+            "EXCHANGE_CERTIFICATE_PASSWORD is required when using EXCHANGE_CERTIFICATE_PATH"
+        )
+
+    return ExchangeCredentials(
+        organization=organization,
+        certificate_thumbprint=thumbprint,
+        certificate_path=cert_path,
+        certificate_password=cert_password,
+    )
 
 
 @dataclass

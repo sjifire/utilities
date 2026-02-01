@@ -70,6 +70,9 @@ src/sjifire/
 │   ├── group_sync.py  # Group sync strategies and GroupSyncManager
 │   ├── groups.py      # EntraGroupManager for M365 group operations
 │   └── users.py       # EntraUserManager for Graph API calls
+├── exchange/
+│   ├── client.py      # PowerShell-based Exchange Online client
+│   └── group_sync.py  # Mail-enabled security group sync strategies
 ├── ispyfire/
 │   ├── client.py      # API client with tenacity retry for rate limiting
 │   ├── models.py      # ISpyFirePerson dataclass
@@ -85,6 +88,21 @@ Group sync uses a strategy pattern. Each `GroupSyncStrategy` subclass defines:
 - `automation_notice`: Warning text added to group descriptions
 
 Available strategies: `StationGroupStrategy`, `SupportGroupStrategy`, `FirefighterGroupStrategy`, `WildlandFirefighterGroupStrategy`, `ApparatusOperatorGroupStrategy`, `MarineGroupStrategy`, `VolunteerGroupStrategy`
+
+### Exchange Online (Mail-Enabled Security Groups)
+For email distribution without SharePoint sprawl, use mail-enabled security groups instead of M365 groups. These are managed via Exchange Online PowerShell (not Graph API).
+
+**Prerequisites:**
+- PowerShell 7+ (`pwsh`)
+- ExchangeOnlineManagement module
+- Certificate-based app-only authentication
+
+**Environment variables:**
+- `EXCHANGE_ORGANIZATION`: Domain (default: sjifire.org)
+- `EXCHANGE_CERTIFICATE_THUMBPRINT`: Windows certificate thumbprint
+- `EXCHANGE_CERTIFICATE_PATH` + `EXCHANGE_CERTIFICATE_PASSWORD`: Cross-platform .pfx file
+
+The `exchange/` module mirrors the `entra/group_sync.py` strategies but creates mail-enabled security groups via PowerShell subprocess.
 
 ## Important Patterns
 
@@ -146,6 +164,12 @@ uv run ispyfire-sync --email user@sjifire.org  # Single user
 uv run ispyfire-admin list               # List users
 uv run ispyfire-admin activate user@sjifire.org
 uv run ispyfire-admin deactivate user@sjifire.org
+```
+
+### Run mail group sync (Exchange Online)
+```bash
+uv run mail-group-sync --all --dry-run  # Preview (requires PowerShell + cert setup)
+uv run mail-group-sync --all            # Apply changes
 ```
 
 ### Check linting
