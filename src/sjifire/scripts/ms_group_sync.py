@@ -20,29 +20,14 @@ from enum import Enum
 from sjifire.aladtec.models import Member
 from sjifire.aladtec.scraper import AladtecScraper
 from sjifire.core.config import get_exchange_credentials
-from sjifire.entra.group_sync import (
-    ApparatusOperatorGroupStrategy,
-    FirefighterGroupStrategy,
-    GroupSyncStrategy,
-    MarineGroupStrategy,
-    StationGroupStrategy,
-    SupportGroupStrategy,
-    VolunteerGroupStrategy,
-    WildlandFirefighterGroupStrategy,
+from sjifire.core.group_strategies import (
+    STRATEGY_NAMES,
+    GroupStrategy,
+    get_strategy,
 )
 from sjifire.entra.groups import EntraGroupManager
 from sjifire.entra.users import EntraUserManager
 from sjifire.exchange.client import ExchangeOnlineClient
-from sjifire.exchange.group_sync import (
-    MailApparatusOperatorGroupStrategy,
-    MailFirefighterGroupStrategy,
-    MailGroupSyncStrategy,
-    MailMarineGroupStrategy,
-    MailStationGroupStrategy,
-    MailSupportGroupStrategy,
-    MailVolunteerGroupStrategy,
-    MailWildlandFirefighterGroupStrategy,
-)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -114,29 +99,8 @@ class FullSyncResult:
         return sum(1 for g in self.groups if g.skipped)
 
 
-# Strategy mappings - M365 and Exchange versions
-M365_STRATEGIES: dict[str, type[GroupSyncStrategy]] = {
-    "stations": StationGroupStrategy,
-    "support": SupportGroupStrategy,
-    "ff": FirefighterGroupStrategy,
-    "wff": WildlandFirefighterGroupStrategy,
-    "ao": ApparatusOperatorGroupStrategy,
-    "marine": MarineGroupStrategy,
-    "volunteers": VolunteerGroupStrategy,
-}
-
-EXCHANGE_STRATEGIES: dict[str, type[MailGroupSyncStrategy]] = {
-    "stations": MailStationGroupStrategy,
-    "support": MailSupportGroupStrategy,
-    "ff": MailFirefighterGroupStrategy,
-    "wff": MailWildlandFirefighterGroupStrategy,
-    "ao": MailApparatusOperatorGroupStrategy,
-    "marine": MailMarineGroupStrategy,
-    "volunteers": MailVolunteerGroupStrategy,
-}
-
-# All available strategy names
-STRATEGIES = list(M365_STRATEGIES.keys())
+# All available strategy names (from core module)
+STRATEGIES = STRATEGY_NAMES
 
 
 class UnifiedGroupSyncManager:
@@ -205,7 +169,12 @@ class UnifiedGroupSyncManager:
     async def detect_group_type(self, email: str, mail_nickname: str) -> GroupType:
         """Detect if a group exists and what type it is.
 
-        Checks M365 first (faster), then Exchange.
+        Checks Entra ID first (faster via Graph API), then determines if it's
+        an M365 group or Exchange mail-enabled security group.
+
+        Note: Exchange mail-enabled security groups appear in both Entra ID
+        (via Graph API) and Exchange. We distinguish them by checking if the
+        group has 'Unified' in group_types (M365) vs mail+security enabled (Exchange).
 
         Args:
             email: Full email address (e.g., "station31@sjifire.org")
@@ -214,34 +183,47 @@ class UnifiedGroupSyncManager:
         Returns:
             GroupType indicating where the group exists
         """
-        # Check M365 first (faster via Graph API)
-        m365_exists = False
+        # Check Entra ID first (faster via Graph API)
+        entra_group = None
         try:
-            m365_group = await self.entra_groups.get_group_by_mail_nickname(mail_nickname)
-            m365_exists = m365_group is not None
+            entra_group = await self.entra_groups.get_group_by_mail_nickname(mail_nickname)
         except Exception as e:
-            logger.debug(f"Error checking M365 for {email}: {e}")
+            logger.debug(f"Error checking Entra for {email}: {e}")
 
-        # Check Exchange
-        exchange_exists = False
+        if entra_group:
+            # Check if it's an M365 (Unified) group or Exchange mail-enabled security group
+            is_m365 = entra_group.group_types and "Unified" in entra_group.group_types
+            is_mail_security = (
+                entra_group.mail_enabled
+                and entra_group.security_enabled
+                and not is_m365
+            )
+
+            if is_m365:
+                return GroupType.M365
+            elif is_mail_security:
+                # This is an Exchange mail-enabled security group
+                # (it shows in Entra but is managed via Exchange)
+                return GroupType.EXCHANGE
+
+            # Fallback: if mail-enabled but not security, treat as M365
+            if entra_group.mail_enabled:
+                return GroupType.M365
+
+        # If not found in Entra, check Exchange directly
+        # (shouldn't normally happen, but handles edge cases)
         try:
             exchange_group = await self.exchange_client.get_distribution_group(email)
-            exchange_exists = exchange_group is not None
+            if exchange_group:
+                return GroupType.EXCHANGE
         except Exception as e:
             logger.debug(f"Error checking Exchange for {email}: {e}")
 
-        if m365_exists and exchange_exists:
-            return GroupType.BOTH
-        elif m365_exists:
-            return GroupType.M365
-        elif exchange_exists:
-            return GroupType.EXCHANGE
-        else:
-            return GroupType.NONE
+        return GroupType.NONE
 
     async def sync_group(
         self,
-        strategy_name: str,
+        strategy: GroupStrategy,
         group_key: str,
         group_members: list[Member],
         new_group_type: GroupType,
@@ -250,7 +232,7 @@ class UnifiedGroupSyncManager:
         """Sync a single group, detecting type automatically.
 
         Args:
-            strategy_name: Name of the strategy (e.g., "ao", "stations")
+            strategy: The group strategy instance
             group_key: Key identifying the group within the strategy
             group_members: Members who should be in this group
             new_group_type: Type to create if group doesn't exist
@@ -259,9 +241,10 @@ class UnifiedGroupSyncManager:
         Returns:
             GroupSyncResult with sync details
         """
-        # Get group config from appropriate strategy
-        m365_strategy = M365_STRATEGIES[strategy_name]()
-        display_name, mail_nickname, _description = m365_strategy.get_group_config(group_key)
+        # Get group config from strategy
+        config = strategy.get_config(group_key)
+        display_name = config.display_name
+        mail_nickname = config.mail_nickname
         email = f"{mail_nickname}@{self.domain}"
 
         # Detect existing group type
@@ -289,7 +272,7 @@ class UnifiedGroupSyncManager:
         # Sync using appropriate backend
         if use_type == GroupType.M365:
             return await self._sync_m365_group(
-                strategy_name=strategy_name,
+                strategy=strategy,
                 group_key=group_key,
                 group_members=group_members,
                 dry_run=dry_run,
@@ -297,7 +280,7 @@ class UnifiedGroupSyncManager:
             )
         else:  # EXCHANGE
             return await self._sync_exchange_group(
-                strategy_name=strategy_name,
+                strategy=strategy,
                 group_key=group_key,
                 group_members=group_members,
                 dry_run=dry_run,
@@ -306,16 +289,21 @@ class UnifiedGroupSyncManager:
 
     async def _sync_m365_group(
         self,
-        strategy_name: str,
+        strategy: GroupStrategy,
         group_key: str,
         group_members: list[Member],
         dry_run: bool,
         creating: bool,
     ) -> GroupSyncResult:
         """Sync a group via M365 (Graph API)."""
-        strategy = M365_STRATEGIES[strategy_name]()
-        display_name, mail_nickname, _description = strategy.get_group_config(group_key)
-        full_description = strategy.get_full_description(group_key)
+        config = strategy.get_config(group_key)
+        display_name = config.display_name
+        mail_nickname = config.mail_nickname
+        full_description = (
+            f"{config.description}\n\n{strategy.automation_notice}"
+            if config.description
+            else strategy.automation_notice
+        )
         email = f"{mail_nickname}@{self.domain}"
 
         # Ensure Entra users are loaded
@@ -408,7 +396,7 @@ class UnifiedGroupSyncManager:
             group_name=display_name,
             group_email=email,
             group_type=GroupType.M365,
-            created=creating and not dry_run and group is not None,
+            created=creating,  # True if group was/would be created
             members_added=added,
             members_removed=removed,
             errors=errors,
@@ -416,18 +404,22 @@ class UnifiedGroupSyncManager:
 
     async def _sync_exchange_group(
         self,
-        strategy_name: str,
+        strategy: GroupStrategy,
         group_key: str,
         group_members: list[Member],
         dry_run: bool,
         creating: bool,
     ) -> GroupSyncResult:
         """Sync a group via Exchange (PowerShell)."""
-        strategy = EXCHANGE_STRATEGIES[strategy_name]()
-        display_name, alias, _description = strategy.get_group_config(group_key)
+        config = strategy.get_config(group_key)
+        display_name = config.display_name
+        alias = config.mail_nickname
         email = f"{alias}@{self.domain}"
 
         # Get or create the group
+        # Note: Exchange mail-enabled security groups don't support setting
+        # description/notes via PowerShell. Descriptions must be set manually
+        # in Exchange Admin Center if needed.
         if creating:
             if dry_run:
                 logger.info(f"Would create Exchange group: {display_name} ({email})")
@@ -438,6 +430,7 @@ class UnifiedGroupSyncManager:
                     display_name=display_name,
                     alias=alias,
                     primary_smtp_address=email,
+                    managed_by="svc-automations@sjifire.org",
                 )
                 if group:
                     logger.info(f"Created Exchange group: {display_name} ({email})")
@@ -450,13 +443,10 @@ class UnifiedGroupSyncManager:
         errors: list[str] = []
 
         if group or dry_run:
-            # Get current members
-            if not dry_run:
-                current_members = set(
-                    await self.exchange_client.get_distribution_group_members(email)
-                )
-            else:
-                current_members = set()
+            # Get current members (even in dry-run to show accurate diff)
+            current_members = set(
+                await self.exchange_client.get_distribution_group_members(email)
+            )
 
             # Determine who should be in the group
             should_be_emails: dict[str, Member] = {}
@@ -497,7 +487,7 @@ class UnifiedGroupSyncManager:
             group_name=display_name,
             group_email=email,
             group_type=GroupType.EXCHANGE,
-            created=creating and not dry_run,
+            created=creating,  # True if group was/would be created
             members_added=added,
             members_removed=removed,
             errors=errors,
@@ -522,8 +512,8 @@ class UnifiedGroupSyncManager:
             FullSyncResult with all group results
         """
         # Get groups to sync from strategy
-        strategy = M365_STRATEGIES[strategy_name]()
-        groups_to_sync = strategy.get_groups_to_sync(members)
+        strategy = get_strategy(strategy_name)
+        groups_to_sync = strategy.get_members(members)
 
         if not groups_to_sync:
             logger.warning(f"No groups to sync for strategy: {strategy_name}")
@@ -541,7 +531,7 @@ class UnifiedGroupSyncManager:
             logger.info(f"Processing {group_key} ({len(group_members)} members)")
 
             result = await self.sync_group(
-                strategy_name=strategy_name,
+                strategy=strategy,
                 group_key=group_key,
                 group_members=group_members,
                 new_group_type=new_group_type,
@@ -564,8 +554,16 @@ def print_result(result: FullSyncResult, dry_run: bool = False) -> None:
     logger.info("Sync Results")
     logger.info("=" * 60)
 
+    # Human-readable type names
+    type_display = {
+        GroupType.M365: "M365: Unified Group",
+        GroupType.EXCHANGE: "Exchange: Mail-enabled Security Group",
+        GroupType.BOTH: "CONFLICT: Exists in both M365 and Exchange",
+        GroupType.NONE: "None",
+    }
+
     for group_result in result.groups:
-        type_str = group_result.group_type.value.upper()
+        type_str = type_display.get(group_result.group_type, group_result.group_type.value)
 
         if group_result.skipped:
             logger.warning(f"\n⚠️  {group_result.group_name} ({group_result.group_email}):")

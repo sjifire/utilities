@@ -76,8 +76,7 @@ class ExchangeOnlineClient:
 
     def _build_connect_command(self) -> str:
         """Build the Connect-ExchangeOnline command."""
-        # Note: -ShowBanner:$false doesn't work via subprocess, so we omit it
-        # The banner output is ignored anyway since we parse JSON from stdout
+        # Suppress banner output with *>$null to prevent it from mixing with JSON output
         # Prefer certificate_path over thumbprint (thumbprint is Windows-only)
         if self.certificate_path:
             # Cross-platform: Use certificate file
@@ -94,7 +93,7 @@ class ExchangeOnlineClient:
                 f"-AppId '{self.client_id}' "
                 f"-CertificateFilePath '{self.certificate_path}' "
                 f"{secure_str}"
-                f"-Organization '{self.organization}'"
+                f"-Organization '{self.organization}' *>$null"
             )
         elif self.certificate_thumbprint:
             # Windows: Use installed certificate by thumbprint
@@ -102,7 +101,7 @@ class ExchangeOnlineClient:
                 f"Connect-ExchangeOnline "
                 f"-AppId '{self.client_id}' "
                 f"-CertificateThumbprint '{self.certificate_thumbprint}' "
-                f"-Organization '{self.organization}'"
+                f"-Organization '{self.organization}' *>$null"
             )
         else:
             raise ValueError("Either certificate_thumbprint or certificate_path must be provided")
@@ -125,8 +124,8 @@ class ExchangeOnlineClient:
             self._build_connect_command(),
             # Run commands
             *commands,
-            # Disconnect
-            "Disconnect-ExchangeOnline -Confirm:$false",
+            # Disconnect (suppress output)
+            "Disconnect-ExchangeOnline -Confirm:$false *>$null",
         ]
 
         script = "; ".join(full_script)
@@ -211,6 +210,7 @@ class ExchangeOnlineClient:
         primary_smtp_address: str | None = None,
         members: list[str] | None = None,
         managed_by: str | None = None,
+        notes: str | None = None,
     ) -> ExchangeGroup | None:
         """Create a new mail-enabled security group.
 
@@ -221,6 +221,7 @@ class ExchangeOnlineClient:
             primary_smtp_address: Full email address (optional)
             members: List of member email addresses to add
             managed_by: Email of the group owner/manager
+            notes: Description/notes for the group
 
         Returns:
             Created ExchangeGroup or None on failure
@@ -238,6 +239,11 @@ class ExchangeOnlineClient:
 
         if managed_by:
             cmd_parts.append(f"-ManagedBy '{managed_by}'")
+
+        if notes:
+            # Escape single quotes in notes
+            escaped_notes = notes.replace("'", "''")
+            cmd_parts.append(f"-Notes '{escaped_notes}'")
 
         if members:
             members_str = "', '".join(members)
@@ -263,6 +269,35 @@ class ExchangeOnlineClient:
 
         logger.error(f"Failed to create mail-enabled security group: {name}")
         return None
+
+    async def update_distribution_group_notes(
+        self,
+        identity: str,
+        notes: str,
+    ) -> bool:
+        """Update the notes/description of a distribution group.
+
+        Args:
+            identity: Group name, alias, or email address
+            notes: New notes/description for the group
+
+        Returns:
+            True if successful
+        """
+        # Escape single quotes in notes
+        escaped_notes = notes.replace("'", "''")
+        commands = [
+            f"Set-DistributionGroup -Identity '{identity}' -Notes '{escaped_notes}'",
+            "Write-Output 'SUCCESS'",
+        ]
+
+        result = self._run_powershell(commands, parse_json=False)
+        if result and "SUCCESS" in str(result):
+            logger.info(f"Updated notes for {identity}")
+            return True
+
+        logger.error(f"Failed to update notes for {identity}")
+        return False
 
     async def get_distribution_group_members(self, identity: str) -> list[str]:
         """Get members of a distribution group or mail-enabled security group.

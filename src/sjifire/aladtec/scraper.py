@@ -140,7 +140,7 @@ class AladtecScraper:
             logger.error(f"Failed to load member list: {response.status_code}")
             return []
 
-        logger.info(f"Loaded member list page with layout {layout}")
+        logger.debug(f"Loaded member list page with layout {layout}")
 
         # Now request the CSV export
         export_params = {
@@ -160,7 +160,7 @@ class AladtecScraper:
             logger.warning("Export response doesn't look like CSV, trying HTML scrape")
             return self._scrape_members_html()
 
-        logger.info(f"Got CSV export ({len(content)} bytes)")
+        logger.debug(f"Got CSV export ({len(content)} bytes)")
         members = self._parse_csv(content)
 
         # Always enrich with full position lists
@@ -339,7 +339,7 @@ class AladtecScraper:
 
         # Log available columns for debugging
         if reader.fieldnames:
-            logger.info(f"CSV columns: {list(reader.fieldnames)}")
+            logger.debug(f"CSV columns: {list(reader.fieldnames)}")
 
         for row in reader:
             member = self._parse_csv_row(row)
