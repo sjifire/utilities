@@ -105,9 +105,7 @@ class ExchangeOnlineClient:
                 f"-Organization '{self.organization}'"
             )
         else:
-            raise ValueError(
-                "Either certificate_thumbprint or certificate_path must be provided"
-            )
+            raise ValueError("Either certificate_thumbprint or certificate_path must be provided")
 
     def _run_powershell(self, commands: list[str], parse_json: bool = True) -> dict | str | None:
         """Run PowerShell commands and return the result.

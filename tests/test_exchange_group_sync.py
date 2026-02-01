@@ -214,17 +214,13 @@ class TestMailAllPersonnelGroupStrategy:
         assert alias == "allpersonnel"
 
     def test_get_groups_to_sync_with_sjifire_email(self):
-        member = Member(
-            id="1", first_name="John", last_name="Doe", email="john.doe@sjifire.org"
-        )
+        member = Member(id="1", first_name="John", last_name="Doe", email="john.doe@sjifire.org")
         result = self.strategy.get_groups_to_sync([member])
         assert "All Personnel" in result
         assert len(result["All Personnel"]) == 1
 
     def test_get_groups_to_sync_excludes_non_sjifire_email(self):
-        member = Member(
-            id="1", first_name="John", last_name="Doe", email="john.doe@gmail.com"
-        )
+        member = Member(id="1", first_name="John", last_name="Doe", email="john.doe@gmail.com")
         result = self.strategy.get_groups_to_sync([member])
         assert result == {}
 
