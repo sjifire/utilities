@@ -262,9 +262,7 @@ class MarineStrategy(GroupStrategy):
 
     def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
         """Get members with marine positions."""
-        marine_members = [
-            m for m in members if set(m.positions or []) & MARINE_POSITIONS
-        ]
+        marine_members = [m for m in members if set(m.positions or []) & MARINE_POSITIONS]
         return {"Marine": marine_members} if marine_members else {}
 
     def get_config(self, group_key: str) -> GroupConfig:
@@ -342,9 +340,7 @@ class MobeScheduleStrategy(GroupStrategy):
         Always returns the group even if empty, to ensure the group
         is created and maintained for future members.
         """
-        mobe_members = [
-            m for m in members if any("mobe" in s.lower() for s in (m.schedules or []))
-        ]
+        mobe_members = [m for m in members if any("mobe" in s.lower() for s in (m.schedules or []))]
         return {"mobe": mobe_members}
 
     def get_config(self, group_key: str) -> GroupConfig:

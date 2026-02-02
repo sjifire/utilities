@@ -426,9 +426,7 @@ class MobeGroupStrategy(GroupSyncStrategy):
         Always returns the group even if empty, to ensure the group
         is created and maintained for future members.
         """
-        mobe_members = [
-            m for m in members if any("mobe" in s.lower() for s in (m.schedules or []))
-        ]
+        mobe_members = [m for m in members if any("mobe" in s.lower() for s in (m.schedules or []))]
         return {"mobe": mobe_members}
 
     def get_group_config(self, group_key: str) -> tuple[str, str, str | None]:

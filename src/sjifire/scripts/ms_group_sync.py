@@ -187,9 +187,7 @@ class UnifiedGroupSyncManager:
             # Check if it's an M365 (Unified) group or Exchange mail-enabled security group
             is_m365 = entra_group.group_types and "Unified" in entra_group.group_types
             is_mail_security = (
-                entra_group.mail_enabled
-                and entra_group.security_enabled
-                and not is_m365
+                entra_group.mail_enabled and entra_group.security_enabled and not is_m365
             )
 
             if is_m365:
@@ -446,9 +444,7 @@ class UnifiedGroupSyncManager:
 
         if group or dry_run:
             # Get current members (even in dry-run to show accurate diff)
-            current_members = set(
-                await self.exchange_client.get_distribution_group_members(email)
-            )
+            current_members = set(await self.exchange_client.get_distribution_group_members(email))
 
             # Determine who should be in the group
             should_be_emails: dict[str, Member] = {}
