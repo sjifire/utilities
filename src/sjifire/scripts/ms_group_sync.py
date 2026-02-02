@@ -152,8 +152,7 @@ class UnifiedGroupSyncManager:
             all_users = await self.entra_users.get_users(include_disabled=False)
             # Filter to only sjifire.org domain (excludes guests, external accounts)
             self._entra_users_cache = [
-                u for u in all_users
-                if u.email and u.email.lower().endswith(f"@{self.domain}")
+                u for u in all_users if u.email and u.email.lower().endswith(f"@{self.domain}")
             ]
             logger.info(f"Loaded {len(self._entra_users_cache)} Entra users for group sync")
         return self._entra_users_cache
