@@ -6,16 +6,9 @@ import logging
 from collections import defaultdict
 
 from sjifire.aladtec.scraper import AladtecScraper
-from sjifire.core.config import get_exchange_credentials
-from sjifire.entra.group_sync import (
-    ApparatusOperatorGroupStrategy,
-    FirefighterGroupStrategy,
-    GroupSyncStrategy,
-    MarineGroupStrategy,
-    StationGroupStrategy,
-    SupportGroupStrategy,
-    VolunteerGroupStrategy,
-    WildlandFirefighterGroupStrategy,
+from sjifire.core.group_strategies import (
+    STRATEGY_CLASSES,
+    GroupStrategy,
 )
 from sjifire.entra.groups import EntraGroupManager
 from sjifire.entra.users import EntraUserManager
@@ -24,16 +17,8 @@ from sjifire.exchange.client import ExchangeOnlineClient
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# All available strategies
-STRATEGIES: dict[str, type[GroupSyncStrategy]] = {
-    "stations": StationGroupStrategy,
-    "support": SupportGroupStrategy,
-    "ff": FirefighterGroupStrategy,
-    "wff": WildlandFirefighterGroupStrategy,
-    "ao": ApparatusOperatorGroupStrategy,
-    "marine": MarineGroupStrategy,
-    "volunteers": VolunteerGroupStrategy,
-}
+# All available strategies (from core.group_strategies)
+STRATEGIES: dict[str, type[GroupStrategy]] = STRATEGY_CLASSES
 
 
 async def compare_memberships(
@@ -70,12 +55,12 @@ async def compare_memberships(
 
     for strategy_name in strategy_names:
         strategy = STRATEGIES[strategy_name]()
-        groups_to_sync = strategy.get_groups_to_sync(members)
+        groups_to_sync = strategy.get_members(members)
 
         for group_key, group_members in groups_to_sync.items():
-            display_name, mail_nickname, _ = strategy.get_group_config(group_key)
-            email = f"{mail_nickname}@{domain}"
-            group_display_names[email] = display_name
+            config = strategy.get_config(group_key)
+            email = f"{config.mail_nickname}@{domain}"
+            group_display_names[email] = config.display_name
 
             for member in group_members:
                 if member.email:
@@ -103,14 +88,7 @@ async def compare_memberships(
 
     # Initialize clients for fetching actual memberships
     group_manager = EntraGroupManager()
-
-    creds = get_exchange_credentials()
-    exchange_client = ExchangeOnlineClient(
-        certificate_thumbprint=creds.certificate_thumbprint,
-        certificate_path=creds.certificate_path,
-        certificate_password=creds.certificate_password,
-        organization=creds.organization,
-    )
+    exchange_client = ExchangeOnlineClient()
 
     # Fetch actual memberships
     logger.info("")
@@ -240,6 +218,7 @@ def main():
     args = parser.parse_args()
 
     # Determine which strategies to run
+    strategies: list[str] = []
     if args.all:
         strategies = list(STRATEGIES.keys())
     elif args.strategies:

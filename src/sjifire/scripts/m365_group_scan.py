@@ -3,7 +3,6 @@
 
 import asyncio
 import csv
-import io
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -30,23 +29,12 @@ class GroupUsageInfo:
     id: str
     display_name: str
     mail: str | None
-    group_type: str
     member_count: int
     created_date: datetime | None
-    renewed_date: datetime | None
-    last_activity_date: datetime | None
-    exchange_emails_received: int
-    exchange_mailbox_storage_mb: float
-    sharepoint_active_files: int
-    sharepoint_total_files: int
-    sharepoint_storage_mb: float
-    yammer_messages: int
-    is_deleted: bool
-    # Additional fields from direct queries
-    drive_storage_bytes: int = 0
-    drive_file_count: int = 0
-    conversation_count: int = 0
-    last_email_activity: datetime | None = None
+    drive_storage_bytes: int
+    drive_file_count: int
+    conversation_count: int
+    last_email_activity: datetime | None
 
     @property
     def days_since_email(self) -> int | None:
@@ -54,13 +42,6 @@ class GroupUsageInfo:
         if not self.last_email_activity:
             return None
         return (datetime.now() - self.last_email_activity).days
-
-    @property
-    def days_since_activity(self) -> int | None:
-        """Days since last activity."""
-        if not self.last_activity_date:
-            return None
-        return (datetime.now() - self.last_activity_date).days
 
     @property
     def days_since_created(self) -> int | None:
@@ -71,72 +52,8 @@ class GroupUsageInfo:
 
 
 # =============================================================================
-# Summary Report Functions (from group_usage_report.py)
+# Summary Report Functions
 # =============================================================================
-
-
-async def get_group_activity_report(client) -> dict[str, dict]:
-    """Fetch Office 365 Groups activity detail report.
-
-    Returns dict keyed by group ID with activity metrics.
-    """
-    # Get the last 180 days of activity (max period)
-    try:
-        # Use the reports endpoint directly
-        report = await client.reports.get_office365_groups_activity_detail_with_period("D180").get()
-
-        if not report:
-            logger.warning("No activity report returned")
-            return {}
-
-        # The report is returned as CSV content
-        content = report.decode("utf-8") if isinstance(report, bytes) else report
-        reader = csv.DictReader(io.StringIO(content))
-
-        activity_by_group: dict[str, dict] = {}
-        for row in reader:
-            group_id = row.get("Group Id", "")
-            if group_id:
-                activity_by_group[group_id] = {
-                    "last_activity_date": parse_date(row.get("Last Activity Date")),
-                    "exchange_emails_received": int(row.get("Exchange Emails Received", 0) or 0),
-                    "exchange_mailbox_storage_mb": float(
-                        row.get("Exchange Mailbox Storage Used (Byte)", 0) or 0
-                    )
-                    / (1024 * 1024),
-                    "sharepoint_active_files": int(row.get("SharePoint Active File Count", 0) or 0),
-                    "sharepoint_total_files": int(row.get("SharePoint Total File Count", 0) or 0),
-                    "sharepoint_storage_mb": float(
-                        row.get("SharePoint Site Storage Used (Byte)", 0) or 0
-                    )
-                    / (1024 * 1024),
-                    "yammer_messages": int(row.get("Yammer Posted Message Count", 0) or 0)
-                    + int(row.get("Yammer Read Message Count", 0) or 0)
-                    + int(row.get("Yammer Liked Message Count", 0) or 0),
-                    "is_deleted": row.get("Is Deleted", "").lower() == "true",
-                    "member_count": int(row.get("Member Count", 0) or 0),
-                }
-
-        return activity_by_group
-
-    except Exception as e:
-        # Check for 403 permission error
-        error_str = str(e)
-        if "403" in error_str or "S2SUnauthorized" in error_str:
-            logger.warning("Skipping activity report (requires Reports.Read.All permission)")
-        else:
-            logger.error(f"Failed to get activity report: {e}")
-        return {}
-
-
-def parse_date(date_str: str | None) -> datetime | None:
-    """Parse a date string from the report."""
-    if not date_str:
-        return None
-    try:
-        return datetime.fromisoformat(date_str.replace("Z", "+00:00")).replace(tzinfo=None)
-    except (ValueError, AttributeError):
-        return None
 
 
 async def get_group_member_count(client, group_id: str) -> int:
@@ -229,10 +146,10 @@ async def get_all_m365_groups(client) -> list[dict]:
             groups.extend(result.value)
 
     # Fetch member counts, drive info, and conversations for each group
-    logger.info("Fetching member counts, drive info, and conversations...")
+    logger.debug("Fetching member counts, drive info, and conversations...")
     group_list = []
     for i, g in enumerate(groups):
-        logger.info(f"  [{i + 1}/{len(groups)}] {g.display_name}")
+        logger.debug(f"  [{i + 1}/{len(groups)}] {g.display_name}")
         member_count = await get_group_member_count(client, g.id)
         drive_info = await get_group_drive_info(client, g.id)
         convo_info = await get_group_conversations_info(client, g.id)
@@ -262,40 +179,18 @@ async def build_usage_report() -> list[GroupUsageInfo]:
     """Build complete usage report for all M365 groups."""
     client = get_graph_client()
 
-    logger.info("Fetching M365 groups...")
     groups = await get_all_m365_groups(client)
-    logger.info(f"Found {len(groups)} M365 groups")
-
-    logger.info("Fetching activity report (last 180 days)...")
-    activity = await get_group_activity_report(client)
-    logger.info(f"Got activity data for {len(activity)} groups")
 
     report = []
     for g in groups:
-        group_id = g["id"]
-        act = activity.get(group_id, {})
         drive_info = g.get("drive_info", {})
-
-        # Use member count from group fetch if not in activity report
-        member_count = act.get("member_count") or g.get("member_count", 0)
-
         report.append(
             GroupUsageInfo(
-                id=group_id,
+                id=g["id"],
                 display_name=g["display_name"],
                 mail=g["mail"],
-                group_type="M365",
-                member_count=member_count,
+                member_count=g.get("member_count", 0),
                 created_date=g["created_date"],
-                renewed_date=g["renewed_date"],
-                last_activity_date=act.get("last_activity_date") or g["renewed_date"],
-                exchange_emails_received=act.get("exchange_emails_received", 0),
-                exchange_mailbox_storage_mb=act.get("exchange_mailbox_storage_mb", 0),
-                sharepoint_active_files=act.get("sharepoint_active_files", 0),
-                sharepoint_total_files=act.get("sharepoint_total_files", 0),
-                sharepoint_storage_mb=act.get("sharepoint_storage_mb", 0),
-                yammer_messages=act.get("yammer_messages", 0),
-                is_deleted=act.get("is_deleted", False),
                 drive_storage_bytes=drive_info.get("quota_used", 0),
                 drive_file_count=drive_info.get("root_child_count", 0),
                 conversation_count=g.get("conversation_count", 0),
@@ -322,17 +217,13 @@ def format_size(bytes_val: int) -> str:
 def print_summary_report(report: list[GroupUsageInfo]) -> None:
     """Print the summary usage report."""
 
-    # Sort by last activity (None = never active, then oldest first)
+    # Sort by last email activity (None/never first, then oldest)
     def sort_key(g: GroupUsageInfo):
-        if g.last_activity_date is None:
-            return (0, datetime.min)  # Never active first
-        return (1, g.last_activity_date)
+        if g.last_email_activity is None:
+            return (0, datetime.min)  # Never emailed first
+        return (1, g.last_email_activity)
 
-    sorted_report = sorted(report, key=sort_key)
-
-    print("\n" + "=" * 120)
-    print("M365 GROUP USAGE REPORT")
-    print("=" * 120)
+    sorted_by_email = sorted(report, key=sort_key)
 
     # Summary stats
     total = len(report)
@@ -344,98 +235,105 @@ def print_summary_report(report: list[GroupUsageInfo]) -> None:
     no_email_365d = sum(1 for g in report if g.days_since_email and g.days_since_email > 365)
     no_sp_storage = sum(1 for g in report if g.drive_storage_bytes == 0)
 
-    print(f"\nTotal M365 Groups: {total}")
-    print(f"Empty groups (0 members): {empty_groups}")
-    print(f"Single member groups: {single_member}")
-    print(f"Never received email: {never_emailed}")
-    print(f"No email in 90+ days: {no_email_90d}")
-    print(f"No email in 180+ days: {no_email_180d}")
-    print(f"No email in 365+ days: {no_email_365d}")
-    print(f"No SharePoint storage: {no_sp_storage}")
+    print()
+    print("M365 GROUP USAGE REPORT")
+    print()
+    print(f"  Total groups:        {total}")
+    print(f"  Empty (0 members):   {empty_groups}")
+    print(f"  Single member:       {single_member}")
+    print(f"  Never emailed:       {never_emailed}")
+    print(f"  No email 90+ days:   {no_email_90d}")
+    print(f"  No email 180+ days:  {no_email_180d}")
+    print(f"  No email 365+ days:  {no_email_365d}")
+    print(f"  No SP storage:       {no_sp_storage}")
 
-    # Detailed listing - sorted by last email activity (oldest first)
-    print("\n" + "-" * 120)
-    print("ALL GROUPS BY LAST EMAIL ACTIVITY (oldest first)")
-    print("-" * 120)
+    # Table formatting
+    baseline_bytes = 1.5 * 1024 * 1024  # ~1.5MB is baseline (empty site)
 
-    header = f"{'Group Name':<35} {'Members':<8} {'Last Email':<12} "
-    header += f"{'SP Size':<10} {'SP Files':<9} {'Convos':<8}"
+    # Column widths
+    col_name = 38
+    col_members = 7
+    col_email = 12
+    col_storage = 8
+    col_files = 5
+    col_convos = 6
+
+    # Build separator and header
+    sep = (
+        f"+{'-' * (col_name + 2)}"
+        f"+{'-' * (col_members + 2)}"
+        f"+{'-' * (col_email + 2)}"
+        f"+{'-' * (col_storage + 2)}"
+        f"+{'-' * (col_files + 2)}"
+        f"+{'-' * (col_convos + 2)}+"
+    )
+
+    header = (
+        f"| {'Group Name':<{col_name}} "
+        f"| {'Members':>{col_members}} "
+        f"| {'Last Email':<{col_email}} "
+        f"| {'Storage':>{col_storage}} "
+        f"| {'Files':>{col_files}} "
+        f"| {'Emails':>{col_convos}} |"
+    )
+
+    print()
+    print("ALL GROUPS (sorted by last email activity, oldest first)")
+    print(sep)
     print(header)
-    print("-" * 120)
-
-    # Sort by last email activity (None/never first, then oldest)
-    def email_sort_key(g: GroupUsageInfo):
-        if g.last_email_activity is None:
-            return (0, datetime.min)  # Never emailed first
-        return (1, g.last_email_activity)
-
-    sorted_by_email = sorted(sorted_report, key=email_sort_key)
-
-    # Calculate baseline (minimum storage seen)
-    baseline_bytes = 1.5 * 1024 * 1024  # Assume ~1.5MB is baseline
+    print(sep)
 
     for g in sorted_by_email:
-        if g.last_email_activity:
-            last_email = g.last_email_activity.strftime("%Y-%m-%d")
-        else:
-            last_email = "Never"
+        last_email = g.last_email_activity.strftime("%Y-%m-%d") if g.last_email_activity else "-"
 
-        # Show storage, marking baseline as "~base"
+        # Show storage, marking baseline as "-"
         if g.drive_storage_bytes <= baseline_bytes:
-            storage = "~base"
+            storage = "-"
         else:
             storage = format_size(g.drive_storage_bytes)
 
         files = str(g.drive_file_count) if g.drive_file_count > 0 else "-"
+        convos = str(g.conversation_count) if g.conversation_count > 0 else "-"
 
-        row = f"{g.display_name[:34]:<35} {g.member_count:<8} {last_email:<12} "
-        row += f"{storage:<10} {files:<9} {g.conversation_count:<8}"
+        row = (
+            f"| {g.display_name[:col_name]:<{col_name}} "
+            f"| {g.member_count:>{col_members}} "
+            f"| {last_email:<{col_email}} "
+            f"| {storage:>{col_storage}} "
+            f"| {files:>{col_files}} "
+            f"| {convos:>{col_convos}} |"
+        )
         print(row)
 
-    # Cleanup candidates - no email activity and empty
-    print("\n" + "=" * 120)
-    print("SAFE TO DELETE - No members, no SharePoint data, never emailed")
-    print("=" * 120)
+    print(sep)
 
+    # Cleanup candidates - no email activity and empty
     safe_to_delete = [
         g
         for g in sorted_by_email
         if g.member_count == 0 and g.drive_storage_bytes == 0 and g.last_email_activity is None
     ]
 
-    if not safe_to_delete:
-        print("No completely empty groups found!")
-    else:
+    if safe_to_delete:
+        print()
+        print(f"SAFE TO DELETE ({len(safe_to_delete)} groups with no members/storage/email)")
         for g in safe_to_delete:
-            print(f"\n  {g.display_name}")
-            print(f"    Email: {g.mail}")
-            created = g.created_date.strftime("%Y-%m-%d") if g.created_date else "Unknown"
-            print(f"    Created: {created}")
+            print(f"  - {g.display_name} ({g.mail})")
 
     # Review candidates - no email in over a year
-    print("\n" + "=" * 120)
-    print("REVIEW CANDIDATES - No email activity in 365+ days")
-    print("=" * 120)
-
     review_candidates = [
         g
         for g in sorted_by_email
         if (g.days_since_email and g.days_since_email > 365) and g not in safe_to_delete
     ]
 
-    if not review_candidates:
-        print("No groups with 365+ days of email inactivity!")
-    else:
+    if review_candidates:
+        print()
+        print(f"REVIEW CANDIDATES ({len(review_candidates)} groups with no email in 365+ days)")
         for g in review_candidates:
-            if g.last_email_activity:
-                last_email = g.last_email_activity.strftime("%Y-%m-%d")
-            else:
-                last_email = "Never"
-            print(f"\n  {g.display_name}")
-            print(f"    Email: {g.mail}")
-            print(f"    Last email: {last_email} ({g.days_since_email} days ago)")
+            days = g.days_since_email
             storage = format_size(g.drive_storage_bytes)
-            print(f"    Members: {g.member_count}, SP Storage: {storage}")
+            print(f"  - {g.display_name}: {days} days, {g.member_count} members, {storage}")
 
 
 def export_csv(report: list[GroupUsageInfo], filename: str) -> None:
@@ -449,13 +347,12 @@ def export_csv(report: list[GroupUsageInfo], filename: str) -> None:
                 "Group Name",
                 "Email",
                 "Created",
-                "Last Activity",
-                "Days Inactive",
+                "Last Email",
+                "Days Since Email",
                 "Members",
-                "Emails Received",
-                "SP Files",
-                "SP Storage MB",
-                "Exchange Storage MB",
+                "Storage MB",
+                "Files",
+                "Conversations",
             ]
         )
         for g in report:
@@ -464,16 +361,15 @@ def export_csv(report: list[GroupUsageInfo], filename: str) -> None:
                     g.display_name,
                     g.mail,
                     g.created_date.strftime("%Y-%m-%d") if g.created_date else "",
-                    g.last_activity_date.strftime("%Y-%m-%d") if g.last_activity_date else "",
-                    g.days_since_activity or "",
+                    g.last_email_activity.strftime("%Y-%m-%d") if g.last_email_activity else "",
+                    g.days_since_email or "",
                     g.member_count,
-                    g.exchange_emails_received,
-                    g.sharepoint_total_files,
-                    f"{g.sharepoint_storage_mb:.1f}",
-                    f"{g.exchange_mailbox_storage_mb:.1f}",
+                    f"{g.drive_storage_bytes / (1024 * 1024):.1f}",
+                    g.drive_file_count,
+                    g.conversation_count,
                 ]
             )
-    logger.info(f"Exported to {filename}")
+    print(f"Exported to {filename}")
 
 
 # =============================================================================
@@ -503,7 +399,7 @@ async def get_groups_by_names(client, names: list[str]) -> list[dict]:
                 }
             )
         else:
-            logger.warning(f"Group not found: {name}")
+            print(f"Warning: Group not found: {name}")
     return groups
 
 
@@ -716,20 +612,18 @@ async def run_deep_scan(group_names: list[str] | None, scan_all: bool) -> None:
     client = get_graph_client()
 
     if scan_all:
-        logger.info("Fetching all M365 groups for deep scan...")
         groups = await get_all_m365_groups_basic(client)
     elif group_names:
-        logger.info(f"Fetching groups: {', '.join(group_names)}...")
         groups = await get_groups_by_names(client, group_names)
     else:
         # Should not happen due to CLI validation
-        logger.error("No groups specified for deep scan")
+        print("Error: No groups specified for deep scan")
         return
 
-    logger.info(f"Found {len(groups)} groups\n")
+    print(f"Scanning {len(groups)} groups...\n")
 
     for i, group in enumerate(groups):
-        logger.info(f"[{i + 1}/{len(groups)}] Scanning {group['display_name']}...")
+        logger.debug(f"[{i + 1}/{len(groups)}] Scanning {group['display_name']}...")
         files = await get_drive_contents(client, group["id"])
         pages = await get_site_pages(client, group["id"])
         emails = await get_email_history(client, group["id"])
