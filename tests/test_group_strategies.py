@@ -13,6 +13,7 @@ from sjifire.core.group_strategies import (
     GroupStrategy,
     MarineStrategy,
     MobeScheduleStrategy,
+    StaffStrategy,
     StationStrategy,
     SupportStrategy,
     VolunteerStrategy,
@@ -97,6 +98,7 @@ class TestStrategyRegistry:
             "ao",
             "marine",
             "volunteers",
+            "staff",
             "mobe",
         }
         assert set(STRATEGY_CLASSES.keys()) == expected
@@ -697,6 +699,82 @@ class TestVolunteerStrategy:
 
 
 # =============================================================================
+# Test StaffStrategy
+# =============================================================================
+
+
+class TestStaffStrategy:
+    """Tests for StaffStrategy - non-volunteer members."""
+
+    def setup_method(self):
+        """Create strategy instance for each test."""
+        self.strategy = StaffStrategy()
+
+    def test_name(self):
+        """Strategy name should be 'staff'."""
+        assert self.strategy.name == "staff"
+
+    def test_membership_criteria(self):
+        """Membership criteria should describe non-volunteer."""
+        criteria = self.strategy.membership_criteria
+        assert "Volunteer" in criteria
+
+    def test_get_members_empty_list(self):
+        """Empty member list should return empty dict."""
+        result = self.strategy.get_members([])
+        assert result == {}
+
+    def test_get_members_volunteer_work_group_excluded(self):
+        """Members in Volunteer work group should not be included."""
+        members = [
+            make_member(member_id="1", work_group="Volunteer", positions=["Firefighter"]),
+            make_member(member_id="2", work_group="Volunteer", positions=["Support"]),
+        ]
+        result = self.strategy.get_members(members)
+        assert result == {}
+
+    def test_get_members_career(self):
+        """Career members should be included."""
+        members = [make_member(member_id="1", work_group="Career")]
+        result = self.strategy.get_members(members)
+        assert "Staff" in result
+        assert len(result["Staff"]) == 1
+
+    def test_get_members_any_non_volunteer(self):
+        """Any non-volunteer work group should be included."""
+        members = [
+            make_member(member_id="1", work_group="Career"),
+            make_member(member_id="2", work_group="Staff"),
+            make_member(member_id="3", work_group="Admin"),
+        ]
+        result = self.strategy.get_members(members)
+        assert "Staff" in result
+        assert len(result["Staff"]) == 3
+
+    def test_get_members_mixed(self):
+        """Only non-volunteers should be included from mixed list."""
+        members = [
+            make_member(member_id="1", work_group="Career"),
+            make_member(member_id="2", work_group="Volunteer"),
+            make_member(member_id="3", work_group="Staff"),
+        ]
+        result = self.strategy.get_members(members)
+        assert len(result["Staff"]) == 2
+
+    def test_get_members_null_work_group(self):
+        """Members with null work_group should not be included."""
+        members = [make_member(member_id="1", work_group=None)]
+        result = self.strategy.get_members(members)
+        assert result == {}
+
+    def test_get_config(self):
+        """get_config should return proper GroupConfig."""
+        config = self.strategy.get_config("Staff")
+        assert config.display_name == "Staff"
+        assert config.mail_nickname == "staff"
+
+
+# =============================================================================
 # Test MobeScheduleStrategy
 # =============================================================================
 
@@ -927,6 +1005,14 @@ class TestStrategiesWithEntraUser:
         result = strategy.get_members([user])
         assert "Volunteers" in result
         assert len(result["Volunteers"]) == 1
+
+    def test_staff_strategy_with_entra_user(self):
+        """StaffStrategy should work with EntraUser."""
+        strategy = StaffStrategy()
+        user = make_entra_user(employee_type="Career")
+        result = strategy.get_members([user])
+        assert "Staff" in result
+        assert len(result["Staff"]) == 1
 
     def test_mobe_strategy_with_entra_user(self):
         """MobeScheduleStrategy should work with EntraUser."""

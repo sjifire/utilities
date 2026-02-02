@@ -349,6 +349,36 @@ class VolunteerStrategy(GroupStrategy):
         )
 
 
+class StaffStrategy(GroupStrategy):
+    """Non-volunteer members.
+
+    Members whose Work Group is not "Volunteer".
+    """
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "staff"
+
+    @property
+    def membership_criteria(self) -> str:
+        """Return membership criteria description."""
+        return "Work Group != 'Volunteer'"
+
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
+        """Get non-volunteer members."""
+        staff = [m for m in members if m.work_group and m.work_group != "Volunteer"]
+        return {"Staff": staff} if staff else {}
+
+    def get_config(self, group_key: str) -> GroupConfig:
+        """Return group configuration."""
+        return GroupConfig(
+            display_name="Staff",
+            mail_nickname="staff",
+            description="Non-volunteer members",
+        )
+
+
 class MobeScheduleStrategy(GroupStrategy):
     """Members with State Mobe schedule access.
 
@@ -393,6 +423,7 @@ STRATEGY_CLASSES: dict[str, type[GroupStrategy]] = {
     "ao": ApparatusOperatorStrategy,
     "marine": MarineStrategy,
     "volunteers": VolunteerStrategy,
+    "staff": StaffStrategy,
     "mobe": MobeScheduleStrategy,
 }
 
