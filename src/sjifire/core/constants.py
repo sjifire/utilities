@@ -33,4 +33,3 @@ OPERATIONAL_POSITIONS: set[str] = {
     "Support",
     "Wildland Firefighter",
 } | MARINE_POSITIONS
-
