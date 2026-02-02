@@ -441,7 +441,7 @@ class TestWildlandFirefighterStrategy:
         """get_config should return proper GroupConfig."""
         config = self.strategy.get_config("WFF")
         assert config.display_name == "Wildland Firefighters"
-        assert config.mail_nickname == "wildlandff"
+        assert config.mail_nickname == "wildlandffs"
 
 
 # =============================================================================
@@ -502,8 +502,8 @@ class TestApparatusOperatorStrategy:
     def test_get_config(self):
         """get_config should return proper GroupConfig."""
         config = self.strategy.get_config("Apparatus Operator")
-        assert config.display_name == "Apparatus Operator"
-        assert config.mail_nickname == "apparatus-operator"
+        assert config.display_name == "Apparatus Operators"
+        assert config.mail_nickname == "apparatus-operators"
         assert "EVIP" in config.description
 
 
