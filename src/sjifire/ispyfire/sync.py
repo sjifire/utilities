@@ -46,9 +46,12 @@ def get_responder_types(user: EntraUser) -> list[str]:
             responder_types.append(responder_type)
 
     # Tender Ops: Apparatus Operator without FF or WFF
-    if "Apparatus Operator" in positions:
-        if "Firefighter" not in positions and "Wildland Firefighter" not in positions:
-            responder_types.append("Tender Ops")
+    if (
+        "Apparatus Operator" in positions
+        and "Firefighter" not in positions
+        and "Wildland Firefighter" not in positions
+    ):
+        responder_types.append("Tender Ops")
 
     return sorted(responder_types)
 
