@@ -543,6 +543,7 @@ class TestCompareEntraToISpyFire:
         title: str | None = None,
         is_active: bool = True,
         is_utility: bool = False,
+        responder_types: list[str] | None = None,
     ) -> ISpyFirePerson:
         """Helper to create an ISpyFirePerson."""
         return ISpyFirePerson(
@@ -554,14 +555,19 @@ class TestCompareEntraToISpyFire:
             title=title,
             is_active=is_active,
             is_utility=is_utility,
+            responder_types=responder_types or [],
         )
 
     def test_matched_users(self):
+        # Entra user has Firefighter position -> FF responder type
         entra_users = [
             self._make_entra_user("1", "John", "Doe", "jdoe@sjifire.org"),
         ]
+        # iSpyFire person already has matching responder types
         ispy_people = [
-            self._make_ispy_person("abc", "John", "Doe", "jdoe@sjifire.org"),
+            self._make_ispy_person(
+                "abc", "John", "Doe", "jdoe@sjifire.org", responder_types=["FF"]
+            ),
         ]
 
         result = compare_entra_to_ispyfire(entra_users, ispy_people)

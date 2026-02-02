@@ -21,6 +21,7 @@ from sjifire.ispyfire.sync import (
     compare_entra_to_ispyfire,
     entra_user_to_ispyfire_person,
     fields_need_update,
+    get_responder_types,
 )
 
 logging.basicConfig(
@@ -259,6 +260,8 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
                 person.cell_phone = user.mobile_phone
             if user.extension_attribute1:
                 person.title = user.extension_attribute1
+            # Update responder types from positions
+            person.responder_types = get_responder_types(user)
 
             result = ispy_client.update_person(person)
             if result:
