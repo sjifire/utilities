@@ -647,8 +647,8 @@ async def backup_groups(
             try:
                 config = strategy.get_config(key)
                 mail_nicknames.add(config.mail_nickname)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error getting config for {key}: {e}")
 
     # Fetch existing groups
     for nickname in mail_nicknames:
@@ -665,25 +665,27 @@ async def backup_groups(
                     try:
                         member_ids = await entra_groups.get_group_members(group.id)
                         m365_memberships[group.id] = member_ids
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as e:
+                        logger.debug(f"Error getting members for {group.id}: {e}")
+        except Exception as e:
+            logger.debug(f"Error checking M365 group {nickname}: {e}")
 
         # Check Exchange
         try:
             exch_group = await exchange_client.get_distribution_group(email)
             if exch_group:
                 members = await exchange_client.get_distribution_group_members(email)
-                exchange_groups_data.append({
-                    "identity": exch_group.identity,
-                    "display_name": exch_group.display_name,
-                    "email": exch_group.primary_smtp_address,
-                    "group_type": exch_group.group_type,
-                    "members": members,
-                })
-        except Exception:
-            pass
+                exchange_groups_data.append(
+                    {
+                        "identity": exch_group.identity,
+                        "display_name": exch_group.display_name,
+                        "email": exch_group.primary_smtp_address,
+                        "group_type": exch_group.group_type,
+                        "members": members,
+                    }
+                )
+        except Exception as e:
+            logger.debug(f"Error checking Exchange group {email}: {e}")
 
     # Save backups
     if m365_groups:
