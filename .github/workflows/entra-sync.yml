@@ -71,10 +71,17 @@ jobs:
             echo "MS_GRAPH_CLIENT_SECRET=$MS_GRAPH_CLIENT_SECRET" >> $GITHUB_ENV
 
             # Download Exchange certificate from Key Vault (stored as certificate, accessible as secret)
+            # Note: az cli runs in Docker as root, so we need to copy to runner workspace
             az keyvault secret download --vault-name gh-website-utilities --name exchange-powershell-cert --file /tmp/exchange-cert.pfx --encoding base64
-            chmod 600 /tmp/exchange-cert.pfx
-            echo "Certificate downloaded: $(ls -la /tmp/exchange-cert.pfx)"
-            echo "EXCHANGE_CERTIFICATE_PATH=/tmp/exchange-cert.pfx" >> $GITHUB_ENV
+
+      - name: Copy certificate to workspace
+        run: |
+            # Copy cert from /tmp (written by root in Docker) to workspace (accessible by runner)
+            sudo cp /tmp/exchange-cert.pfx ${{ github.workspace }}/exchange-cert.pfx
+            sudo chown $USER:$USER ${{ github.workspace }}/exchange-cert.pfx
+            chmod 600 ${{ github.workspace }}/exchange-cert.pfx
+            ls -la ${{ github.workspace }}/exchange-cert.pfx
+            echo "EXCHANGE_CERTIFICATE_PATH=${{ github.workspace }}/exchange-cert.pfx" >> $GITHUB_ENV
             echo "EXCHANGE_CERTIFICATE_PASSWORD=" >> $GITHUB_ENV
 
       - name: Install PowerShell modules
@@ -83,15 +90,8 @@ jobs:
           Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber -Scope CurrentUser
 
           # Verify certificate is readable
-          $certPath = $env:EXCHANGE_CERTIFICATE_PATH
-          if (Test-Path $certPath) {
-            Write-Host "Certificate file exists: $certPath"
-            $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certPath)
-            Write-Host "Certificate subject: $($cert.Subject)"
-            Write-Host "Certificate thumbprint: $($cert.Thumbprint)"
-          } else {
-            Write-Host "Certificate file not found: $certPath"
-          }
+          $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($env:EXCHANGE_CERTIFICATE_PATH)
+          Write-Host "Certificate thumbprint: $($cert.Thumbprint)"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
