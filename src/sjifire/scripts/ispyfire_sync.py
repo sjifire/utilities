@@ -227,7 +227,9 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
             # Double-check no existing person with this email (prevents duplicates)
             existing = ispy_client.get_person_by_email(user.email) if user.email else None
             if existing:
-                logger.info(f"Found existing person for {user.email}, reactivating instead of creating")
+                logger.info(
+                    f"Found existing person for {user.email}, reactivating instead of creating"
+                )
                 if not existing.is_active:
                     if ispy_client.reactivate_person(existing.id, email=existing.email):
                         logger.info(f"  Reactivated: {existing.display_name}")
