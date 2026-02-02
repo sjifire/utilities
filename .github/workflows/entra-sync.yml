@@ -70,6 +70,16 @@ jobs:
             echo "::add-mask::$MS_GRAPH_CLIENT_SECRET"
             echo "MS_GRAPH_CLIENT_SECRET=$MS_GRAPH_CLIENT_SECRET" >> $GITHUB_ENV
 
+            # Download Exchange certificate from Key Vault (uses same app as Graph API)
+            az keyvault secret download --vault-name gh-website-utilities --name EXCHANGE-CERTIFICATE --file /tmp/exchange-cert.pfx --encoding base64
+            echo "EXCHANGE_CERTIFICATE_PATH=/tmp/exchange-cert.pfx" >> $GITHUB_ENV
+            echo "EXCHANGE_CERTIFICATE_PASSWORD=" >> $GITHUB_ENV
+
+      - name: Install PowerShell modules
+        shell: pwsh
+        run: |
+          Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber -Scope CurrentUser
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -89,12 +99,12 @@ jobs:
             uv run entra-user-sync --disable-inactive --json
           fi
 
-      - name: Run Entra group sync
+      - name: Run group sync (M365 + Exchange)
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run entra-group-sync --all --dry-run
+            uv run ms-group-sync --all --dry-run
           else
-            uv run entra-group-sync --all
+            uv run ms-group-sync --all
           fi
 
       - name: Upload backup artifacts
