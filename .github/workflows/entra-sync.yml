@@ -70,8 +70,8 @@ jobs:
             echo "::add-mask::$MS_GRAPH_CLIENT_SECRET"
             echo "MS_GRAPH_CLIENT_SECRET=$MS_GRAPH_CLIENT_SECRET" >> $GITHUB_ENV
 
-            # Download certificate for Exchange Online (same cert as MS Graph)
-            az keyvault secret download --vault-name gh-website-utilities --name MS-GRAPH-CERTIFICATE --file /tmp/exchange-cert.pfx --encoding base64
+            # Download Exchange certificate from Key Vault (stored as certificate, accessible as secret)
+            az keyvault secret download --vault-name gh-website-utilities --name exchange-powershell-cert --file /tmp/exchange-cert.pfx --encoding base64
             echo "EXCHANGE_CERTIFICATE_PATH=/tmp/exchange-cert.pfx" >> $GITHUB_ENV
             echo "EXCHANGE_CERTIFICATE_PASSWORD=" >> $GITHUB_ENV
 
