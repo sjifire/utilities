@@ -139,6 +139,10 @@ def print_comparison_report(comparison) -> None:
                 elif field_name == "title":
                     entra_rank = user.extension_attribute1 or ""
                     print(f"        title: '{person.title}' -> '{entra_rank}'")
+                elif field_name == "responderTypes":
+                    expected = get_responder_types(user)
+                    current = person.responder_types or []
+                    print(f"        responderTypes: {current} -> {expected}")
 
     # To remove
     if comparison.to_remove:
