@@ -34,5 +34,3 @@ OPERATIONAL_POSITIONS: set[str] = {
     "Wildland Firefighter",
 } | MARINE_POSITIONS
 
-# Reference exports to satisfy static analysis (CodeQL)
-_exports = (MARINE_POSITIONS, OPERATIONAL_POSITIONS, RANK_HIERARCHY)

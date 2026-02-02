@@ -32,6 +32,9 @@ jobs:
             query-filters:
               - exclude:
                   id: py/clear-text-logging-sensitive-data
+              - exclude:
+                  # Constants are exported via __all__ and used by other modules
+                  id: py/unused-global-variable
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
