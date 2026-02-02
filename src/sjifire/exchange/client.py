@@ -45,10 +45,7 @@ RETRY_DELAYS_SECONDS = [10, 20, 30]  # Delays between retries
 
 def is_transient_error(error_msg: str) -> bool:
     """Check if an error message indicates a transient Azure AD sync error."""
-    for pattern in TRANSIENT_ERROR_PATTERNS:
-        if re.search(pattern, error_msg, re.IGNORECASE):
-            return True
-    return False
+    return any(re.search(pattern, error_msg, re.IGNORECASE) for pattern in TRANSIENT_ERROR_PATTERNS)
 
 
 def extract_member_from_error(error_msg: str) -> str | None:
@@ -824,9 +821,7 @@ class ExchangeOnlineClient:
                 permanent_errors.append(error)
 
         if transient_failures:
-            logger.info(
-                f"Retrying {len(transient_failures)} transient failures for {identity}"
-            )
+            logger.info(f"Retrying {len(transient_failures)} transient failures for {identity}")
 
             for attempt, delay in enumerate(RETRY_DELAYS_SECONDS[:MAX_RETRY_ATTEMPTS]):
                 if not transient_failures:
@@ -858,10 +853,10 @@ class ExchangeOnlineClient:
                 transient_failures = still_failing
 
             # Any remaining transient failures become permanent errors
-            for member in transient_failures:
-                permanent_errors.append(
-                    f"Add {member}: Failed after {MAX_RETRY_ATTEMPTS} retries"
-                )
+            permanent_errors.extend(
+                f"Add {member}: Failed after {MAX_RETRY_ATTEMPTS} retries"
+                for member in transient_failures
+            )
 
         result["errors"] = permanent_errors
         return result
