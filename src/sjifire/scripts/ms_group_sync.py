@@ -144,12 +144,18 @@ class UnifiedGroupSyncManager:
     async def get_entra_users(self) -> list[EntraUser]:
         """Get Entra users (cached).
 
-        Returns employees only (users with employee IDs), excluding shared
-        mailboxes and resource accounts.
+        Returns active users with @sjifire.org email addresses. This filters
+        out guest accounts and non-human accounts while including members
+        who may not have employee IDs set.
         """
         if self._entra_users_cache is None:
-            self._entra_users_cache = await self.entra_users.get_employees(include_disabled=False)
-            logger.info(f"Loaded {len(self._entra_users_cache)} Entra employees for group sync")
+            all_users = await self.entra_users.get_users(include_disabled=False)
+            # Filter to only sjifire.org domain (excludes guests, external accounts)
+            self._entra_users_cache = [
+                u for u in all_users
+                if u.email and u.email.lower().endswith(f"@{self.domain}")
+            ]
+            logger.info(f"Loaded {len(self._entra_users_cache)} Entra users for group sync")
         return self._entra_users_cache
 
     async def detect_group_type(self, email: str, mail_nickname: str) -> GroupType:
@@ -774,21 +780,21 @@ async def run_sync(
     # Initialize manager
     manager = UnifiedGroupSyncManager()
 
-    # Fetch employees from Entra ID
+    # Fetch users from Entra ID
     logger.info("")
-    logger.info("Fetching employees from Entra ID...")
+    logger.info("Fetching users from Entra ID...")
 
     try:
         members = await manager.get_entra_users()
 
         if not members:
-            logger.error("No employees found in Entra ID")
+            logger.error("No users found in Entra ID")
             return 1
 
-        logger.info(f"Found {len(members)} employees")
+        logger.info(f"Found {len(members)} users")
 
     except Exception as e:
-        logger.error(f"Failed to fetch Entra ID employees: {e}")
+        logger.error(f"Failed to fetch Entra ID users: {e}")
         return 1
 
     # Backup existing groups before making changes (skip for dry run)
