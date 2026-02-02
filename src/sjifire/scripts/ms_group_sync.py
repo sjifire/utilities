@@ -19,6 +19,7 @@ from enum import Enum
 
 from sjifire.aladtec.models import Member
 from sjifire.aladtec.scraper import AladtecScraper
+from sjifire.core.backup import backup_entra_groups, backup_mail_groups
 from sjifire.core.group_strategies import (
     STRATEGY_NAMES,
     GroupStrategy,
@@ -605,6 +606,104 @@ def print_result(result: FullSyncResult, dry_run: bool = False) -> None:
         logger.error(f"  Errors: {result.total_errors}")
 
 
+async def backup_groups(
+    strategies: list[str],
+    entra_groups: EntraGroupManager,
+    exchange_client: ExchangeOnlineClient,
+    domain: str = "sjifire.org",
+) -> None:
+    """Backup all groups that will be synced.
+
+    Args:
+        strategies: List of strategy names being synced
+        entra_groups: EntraGroupManager instance
+        exchange_client: ExchangeOnlineClient instance
+        domain: Domain for email addresses
+    """
+    logger.info("")
+    logger.info("Creating backup of existing groups...")
+
+    m365_groups = []
+    m365_memberships: dict[str, list[str]] = {}
+    exchange_groups_data = []
+
+    # Get all mail nicknames we might sync
+    mail_nicknames = set()
+    for strategy_name in strategies:
+        strategy = get_strategy(strategy_name)
+        # Use empty member list to get all possible group configs
+        # For single-group strategies, we just need any key
+        sample_keys = {
+            "stations": ["31", "32", "33", "34", "35", "36"],
+            "support": ["Support"],
+            "ff": ["FF"],
+            "wff": ["WFF"],
+            "ao": ["Apparatus Operator"],
+            "marine": ["Marine"],
+            "volunteers": ["Volunteers"],
+            "mobe": ["mobe"],
+        }
+        for key in sample_keys.get(strategy_name, [strategy_name]):
+            try:
+                config = strategy.get_config(key)
+                mail_nicknames.add(config.mail_nickname)
+            except Exception:
+                pass
+
+    # Fetch existing groups
+    for nickname in mail_nicknames:
+        email = f"{nickname}@{domain}"
+
+        # Check M365
+        try:
+            group = await entra_groups.get_group_by_mail_nickname(nickname)
+            if group:
+                is_m365 = group.group_types and "Unified" in group.group_types
+                if is_m365:
+                    m365_groups.append(group)
+                    # Get members
+                    try:
+                        member_ids = await entra_groups.get_group_members(group.id)
+                        m365_memberships[group.id] = member_ids
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Check Exchange
+        try:
+            exch_group = await exchange_client.get_distribution_group(email)
+            if exch_group:
+                members = await exchange_client.get_distribution_group_members(email)
+                exchange_groups_data.append({
+                    "identity": exch_group.identity,
+                    "display_name": exch_group.display_name,
+                    "email": exch_group.primary_smtp_address,
+                    "group_type": exch_group.group_type,
+                    "members": members,
+                })
+        except Exception:
+            pass
+
+    # Save backups
+    if m365_groups:
+        try:
+            backup_path = backup_entra_groups(m365_groups, m365_memberships)
+            logger.info(f"M365 groups backup: {backup_path}")
+        except Exception as e:
+            logger.error(f"Failed to backup M365 groups: {e}")
+
+    if exchange_groups_data:
+        try:
+            backup_path = backup_mail_groups(exchange_groups_data)
+            logger.info(f"Exchange groups backup: {backup_path}")
+        except Exception as e:
+            logger.error(f"Failed to backup Exchange groups: {e}")
+
+    if not m365_groups and not exchange_groups_data:
+        logger.info("No existing groups to backup")
+
+
 async def run_sync(
     strategies: list[str],
     new_group_type: GroupType = GroupType.EXCHANGE,
@@ -654,6 +753,18 @@ async def run_sync(
 
     # Run sync for each strategy
     manager = UnifiedGroupSyncManager()
+
+    # Backup existing groups before making changes (skip for dry run)
+    if not dry_run:
+        try:
+            await backup_groups(
+                strategies=strategies,
+                entra_groups=manager.entra_groups,
+                exchange_client=manager.exchange_client,
+            )
+        except Exception as e:
+            logger.error(f"Failed to create backup: {e}")
+            # Continue with sync even if backup fails
     total_errors = 0
     total_skipped = 0
 
