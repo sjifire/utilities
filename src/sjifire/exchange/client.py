@@ -883,7 +883,8 @@ class ExchangeOnlineClient:
                         f"'SUCCESS' }} catch {{ $_.Exception.Message }}"
                     ]
                     retry_result = self._run_powershell(add_script)
-                    if retry_result == "SUCCESS":
+                    # Check for SUCCESS in string or raw dict output
+                    if "SUCCESS" in str(retry_result):
                         logger.info(f"Retry succeeded: Added {member} to {identity}")
                         result["added"].append(member)
                     elif is_transient_error(str(retry_result)):
