@@ -54,6 +54,7 @@ The sync:
   - `extensionAttribute1`: Rank (Captain, Lieutenant, Chief, etc.)
   - `extensionAttribute2`: EVIP expiration date
   - `extensionAttribute3`: Positions (comma-delimited scheduling positions)
+  - `extensionAttribute4`: Schedules (comma-delimited schedule visibility)
 - Prefixes display names with rank (e.g., "Chief John Smith")
 - Automatically backs up Entra ID users before making changes
 
@@ -79,6 +80,7 @@ Available strategies:
 | `ao` | Apparatus Operator | Has EVIP certification |
 | `marine` | Marine | Has "Mate" or "Pilot" position |
 | `volunteers` | Volunteers | Work Group = "Volunteer" + operational position |
+| `mobe` | State Mobilization | Has schedule containing "mobe" (e.g., "State Mobe") |
 
 The sync:
 - **Automatically detects** if a group exists as M365 or Exchange

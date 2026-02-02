@@ -36,6 +36,7 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - `extensionAttribute1`: Rank (Captain, Lieutenant, Chief, etc.)
 - `extensionAttribute2`: EVIP expiration date
 - `extensionAttribute3`: Positions (comma-delimited scheduling positions)
+- `extensionAttribute4`: Schedules (comma-delimited schedule visibility from Aladtec)
 
 ### iSpyFire
 - Incident response and paging system
@@ -87,7 +88,7 @@ Group sync uses a strategy pattern. Each `GroupSyncStrategy` subclass defines:
 - `get_group_config(group_key)`: Returns (display_name, mail_nickname, description)
 - `automation_notice`: Warning text added to group descriptions
 
-Available strategies: `StationGroupStrategy`, `SupportGroupStrategy`, `FirefighterGroupStrategy`, `WildlandFirefighterGroupStrategy`, `ApparatusOperatorGroupStrategy`, `MarineGroupStrategy`, `VolunteerGroupStrategy`
+Available strategies: `StationGroupStrategy`, `SupportGroupStrategy`, `FirefighterGroupStrategy`, `WildlandFirefighterGroupStrategy`, `ApparatusOperatorGroupStrategy`, `MarineGroupStrategy`, `VolunteerGroupStrategy`, `MobeGroupStrategy`
 
 ### Exchange Online (Mail-Enabled Security Groups)
 For email distribution without SharePoint sprawl, use mail-enabled security groups instead of M365 groups. These are managed via Exchange Online PowerShell (not Graph API).
