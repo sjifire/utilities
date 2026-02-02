@@ -33,6 +33,7 @@ class GroupUsageInfo:
     created_date: datetime | None
     drive_storage_bytes: int
     drive_file_count: int
+    drive_file_count_exceeded: bool  # True if count hit the limit
     conversation_count: int
     last_email_activity: datetime | None
 
@@ -76,25 +77,56 @@ async def get_group_drive_info(client, group_id: str) -> dict:
             if drive.quota and drive.quota.used:
                 quota_used = drive.quota.used
 
-            # Get root folder to check childCount (items at top level)
-            root_child_count = 0
-            try:
-                root = await client.groups.by_group_id(group_id).drive.root.get()
-                if root and root.folder and root.folder.child_count:
-                    root_child_count = root.folder.child_count
-            except Exception:
-                logger.debug("Error getting root folder info")
-
             return {
                 "drive_id": drive.id,
                 "quota_used": quota_used,
                 "web_url": drive.web_url,
-                "root_child_count": root_child_count,
             }
     except Exception:
         # Group may not have a drive provisioned
         logger.debug("Error getting drive info (group may not have a drive)")
     return {}
+
+
+async def count_drive_files_recursive(
+    client, drive_id: str, item_id: str = "root", *, limit: int | None = None
+) -> tuple[int, bool]:
+    """Recursively count all files in a drive.
+
+    Args:
+        client: Graph client.
+        drive_id: The drive ID (not group ID).
+        item_id: The item ID to start from ("root" for root folder).
+        limit: Stop counting if this limit is exceeded. None for no limit.
+
+    Returns:
+        Tuple of (count, limit_exceeded). If limit_exceeded is True, count is the limit value.
+    """
+    count = 0
+    try:
+        result = await client.drives.by_drive_id(drive_id).items.by_drive_item_id(
+            item_id
+        ).children.get()
+
+        if result and result.value:
+            for item in result.value:
+                if item.folder:
+                    # It's a folder - recurse into it
+                    if item.folder.child_count and item.folder.child_count > 0:
+                        sub_count, exceeded = await count_drive_files_recursive(
+                            client, drive_id, item.id, limit=limit - count if limit else None
+                        )
+                        count += sub_count
+                        if exceeded:
+                            return (limit, True)
+                else:
+                    # It's a file
+                    count += 1
+                    if limit and count >= limit:
+                        return (limit, True)
+    except Exception:
+        logger.debug("Error counting drive files")
+    return (count, False)
 
 
 async def get_group_conversations_info(client, group_id: str) -> dict:
@@ -118,7 +150,9 @@ async def get_group_conversations_info(client, group_id: str) -> dict:
     return {"count": 0, "last_activity": None}
 
 
-async def get_all_m365_groups(client) -> list[dict]:
+async def get_all_m365_groups(
+    client, *, count_files: bool = False, file_count_limit: int | None = 500
+) -> list[dict]:
     """Fetch all M365 groups with basic info."""
     query_params = GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters(
         filter="groupTypes/any(c:c eq 'Unified')",  # M365 groups only
@@ -153,6 +187,15 @@ async def get_all_m365_groups(client) -> list[dict]:
         member_count = await get_group_member_count(client, g.id)
         drive_info = await get_group_drive_info(client, g.id)
         convo_info = await get_group_conversations_info(client, g.id)
+
+        # Optionally count files recursively (slow)
+        file_count = 0
+        file_count_exceeded = False
+        if count_files and drive_info.get("drive_id"):
+            file_count, file_count_exceeded = await count_drive_files_recursive(
+                client, drive_info["drive_id"], limit=file_count_limit
+            )
+
         group_list.append(
             {
                 "id": g.id,
@@ -167,6 +210,8 @@ async def get_all_m365_groups(client) -> list[dict]:
                 "description": g.description,
                 "member_count": member_count,
                 "drive_info": drive_info,
+                "file_count": file_count,
+                "file_count_exceeded": file_count_exceeded,
                 "conversation_count": convo_info["count"],
                 "last_email_activity": convo_info["last_activity"],
             }
@@ -175,11 +220,15 @@ async def get_all_m365_groups(client) -> list[dict]:
     return group_list
 
 
-async def build_usage_report() -> list[GroupUsageInfo]:
+async def build_usage_report(
+    *, count_files: bool = False, file_count_limit: int | None = 500
+) -> list[GroupUsageInfo]:
     """Build complete usage report for all M365 groups."""
     client = get_graph_client()
 
-    groups = await get_all_m365_groups(client)
+    groups = await get_all_m365_groups(
+        client, count_files=count_files, file_count_limit=file_count_limit
+    )
 
     report = []
     for g in groups:
@@ -192,7 +241,8 @@ async def build_usage_report() -> list[GroupUsageInfo]:
                 member_count=g.get("member_count", 0),
                 created_date=g["created_date"],
                 drive_storage_bytes=drive_info.get("quota_used", 0),
-                drive_file_count=drive_info.get("root_child_count", 0),
+                drive_file_count=g.get("file_count", 0),
+                drive_file_count_exceeded=g.get("file_count_exceeded", False),
                 conversation_count=g.get("conversation_count", 0),
                 last_email_activity=g.get("last_email_activity"),
             )
@@ -214,7 +264,7 @@ def format_size(bytes_val: int) -> str:
     return f"{bytes_val // (1024 * 1024 * 1024)}GB"
 
 
-def print_summary_report(report: list[GroupUsageInfo]) -> None:
+def print_summary_report(report: list[GroupUsageInfo], *, show_files: bool = False) -> None:
     """Print the summary usage report."""
 
     # Sort by last email activity (None/never first, then oldest)
@@ -252,30 +302,50 @@ def print_summary_report(report: list[GroupUsageInfo]) -> None:
 
     # Column widths
     col_name = 38
+    col_created = 10
     col_members = 7
     col_email = 12
     col_storage = 8
     col_files = 5
     col_convos = 6
 
-    # Build separator and header
-    sep = (
-        f"+{'-' * (col_name + 2)}"
-        f"+{'-' * (col_members + 2)}"
-        f"+{'-' * (col_email + 2)}"
-        f"+{'-' * (col_storage + 2)}"
-        f"+{'-' * (col_files + 2)}"
-        f"+{'-' * (col_convos + 2)}+"
-    )
-
-    header = (
-        f"| {'Group Name':<{col_name}} "
-        f"| {'Members':>{col_members}} "
-        f"| {'Last Email':<{col_email}} "
-        f"| {'Storage':>{col_storage}} "
-        f"| {'Files':>{col_files}} "
-        f"| {'Emails':>{col_convos}} |"
-    )
+    # Build separator and header (conditionally include Files column)
+    if show_files:
+        sep = (
+            f"+{'-' * (col_name + 2)}"
+            f"+{'-' * (col_created + 2)}"
+            f"+{'-' * (col_members + 2)}"
+            f"+{'-' * (col_email + 2)}"
+            f"+{'-' * (col_storage + 2)}"
+            f"+{'-' * (col_files + 2)}"
+            f"+{'-' * (col_convos + 2)}+"
+        )
+        header = (
+            f"| {'Group Name':<{col_name}} "
+            f"| {'Created':<{col_created}} "
+            f"| {'Members':>{col_members}} "
+            f"| {'Last Email':<{col_email}} "
+            f"| {'Storage':>{col_storage}} "
+            f"| {'Files':>{col_files}} "
+            f"| {'Emails':>{col_convos}} |"
+        )
+    else:
+        sep = (
+            f"+{'-' * (col_name + 2)}"
+            f"+{'-' * (col_created + 2)}"
+            f"+{'-' * (col_members + 2)}"
+            f"+{'-' * (col_email + 2)}"
+            f"+{'-' * (col_storage + 2)}"
+            f"+{'-' * (col_convos + 2)}+"
+        )
+        header = (
+            f"| {'Group Name':<{col_name}} "
+            f"| {'Created':<{col_created}} "
+            f"| {'Members':>{col_members}} "
+            f"| {'Last Email':<{col_email}} "
+            f"| {'Storage':>{col_storage}} "
+            f"| {'Emails':>{col_convos}} |"
+        )
 
     print()
     print("ALL GROUPS (sorted by last email activity, oldest first)")
@@ -284,6 +354,7 @@ def print_summary_report(report: list[GroupUsageInfo]) -> None:
     print(sep)
 
     for g in sorted_by_email:
+        created = g.created_date.strftime("%Y-%m-%d") if g.created_date else "-"
         last_email = g.last_email_activity.strftime("%Y-%m-%d") if g.last_email_activity else "-"
 
         # Show storage, marking baseline as "-"
@@ -292,17 +363,34 @@ def print_summary_report(report: list[GroupUsageInfo]) -> None:
         else:
             storage = format_size(g.drive_storage_bytes)
 
-        files = str(g.drive_file_count) if g.drive_file_count > 0 else "-"
+        if g.drive_file_count > 0:
+            if g.drive_file_count_exceeded:
+                files = f"{g.drive_file_count}+"
+            else:
+                files = str(g.drive_file_count)
+        else:
+            files = "-"
         convos = str(g.conversation_count) if g.conversation_count > 0 else "-"
 
-        row = (
-            f"| {g.display_name[:col_name]:<{col_name}} "
-            f"| {g.member_count:>{col_members}} "
-            f"| {last_email:<{col_email}} "
-            f"| {storage:>{col_storage}} "
-            f"| {files:>{col_files}} "
-            f"| {convos:>{col_convos}} |"
-        )
+        if show_files:
+            row = (
+                f"| {g.display_name[:col_name]:<{col_name}} "
+                f"| {created:<{col_created}} "
+                f"| {g.member_count:>{col_members}} "
+                f"| {last_email:<{col_email}} "
+                f"| {storage:>{col_storage}} "
+                f"| {files:>{col_files}} "
+                f"| {convos:>{col_convos}} |"
+            )
+        else:
+            row = (
+                f"| {g.display_name[:col_name]:<{col_name}} "
+                f"| {created:<{col_created}} "
+                f"| {g.member_count:>{col_members}} "
+                f"| {last_email:<{col_email}} "
+                f"| {storage:>{col_storage}} "
+                f"| {convos:>{col_convos}} |"
+            )
         print(row)
 
     print(sep)
@@ -446,15 +534,19 @@ async def get_all_m365_groups_basic(client) -> list[dict]:
     return sorted(groups, key=lambda x: x["display_name"])
 
 
-async def get_drive_contents(client, group_id: str, path: str = "root") -> list[dict]:
-    """Recursively get all items in a drive."""
+async def get_drive_contents(client, drive_id: str, item_id: str = "root") -> list[dict]:
+    """Recursively get all items in a drive.
+
+    Args:
+        client: Graph client.
+        drive_id: The drive ID (not group ID).
+        item_id: The item ID to start from ("root" for root folder).
+    """
     items = []
     try:
-        if path == "root":
-            result = await client.groups.by_group_id(group_id).drive.root.children.get()
-        else:
-            drive_item = client.groups.by_group_id(group_id).drive.items.by_drive_item_id(path)
-            result = await drive_item.children.get()
+        result = await client.drives.by_drive_id(drive_id).items.by_drive_item_id(
+            item_id
+        ).children.get()
 
         if result and result.value:
             for item in result.value:
@@ -470,7 +562,7 @@ async def get_drive_contents(client, group_id: str, path: str = "root") -> list[
 
                 # Recurse into folders
                 if item.folder and item.folder.child_count and item.folder.child_count > 0:
-                    sub_items = await get_drive_contents(client, group_id, item.id)
+                    sub_items = await get_drive_contents(client, drive_id, item.id)
                     for sub in sub_items:
                         sub["name"] = f"{item.name}/{sub['name']}"
                         items.append(sub)
@@ -624,7 +716,12 @@ async def run_deep_scan(group_names: list[str] | None, scan_all: bool) -> None:
 
     for i, group in enumerate(groups):
         logger.debug(f"[{i + 1}/{len(groups)}] Scanning {group['display_name']}...")
-        files = await get_drive_contents(client, group["id"])
+
+        # Get drive ID first
+        drive_info = await get_group_drive_info(client, group["id"])
+        drive_id = drive_info.get("drive_id")
+
+        files = await get_drive_contents(client, drive_id) if drive_id else []
         pages = await get_site_pages(client, group["id"])
         emails = await get_email_history(client, group["id"])
         print_deep_scan_group(group, files, pages, emails)
@@ -645,8 +742,9 @@ async def async_main() -> None:
 Examples:
   %(prog)s                          Summary report of all M365 groups
   %(prog)s --csv report.csv         Export summary to CSV
+  %(prog)s --file-count             Include file counts (stops at 500)
+  %(prog)s --full-file-count        Include exact file counts (slower)
   %(prog)s --deep "Station 31"      Deep scan specific group
-  %(prog)s --deep "Station 31" "Firefighters"   Deep scan multiple groups
   %(prog)s --deep --all             Deep scan all groups (slow)
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -669,6 +767,16 @@ Examples:
         metavar="FILE",
         help="Export summary report to CSV file.",
     )
+    parser.add_argument(
+        "--file-count",
+        action="store_true",
+        help="Count files in SharePoint (stops at 500, shows 500+).",
+    )
+    parser.add_argument(
+        "--full-file-count",
+        action="store_true",
+        help="Count all files in SharePoint with no limit (slow for large libraries).",
+    )
     args = parser.parse_args()
 
     # Determine mode
@@ -685,12 +793,16 @@ Examples:
             parser.error("--deep requires group names or --all flag")
     else:
         # Summary report mode (default)
-        report = await build_usage_report()
+        count_files = args.file_count or args.full_file_count
+        file_count_limit = None if args.full_file_count else 500
+        report = await build_usage_report(
+            count_files=count_files, file_count_limit=file_count_limit
+        )
 
         if args.csv:
             export_csv(report, args.csv)
         else:
-            print_summary_report(report)
+            print_summary_report(report, show_files=count_files)
 
 
 def main() -> None:
