@@ -72,6 +72,8 @@ jobs:
 
             # Download Exchange certificate from Key Vault (stored as certificate, accessible as secret)
             az keyvault secret download --vault-name gh-website-utilities --name exchange-powershell-cert --file /tmp/exchange-cert.pfx --encoding base64
+            chmod 600 /tmp/exchange-cert.pfx
+            echo "Certificate downloaded: $(ls -la /tmp/exchange-cert.pfx)"
             echo "EXCHANGE_CERTIFICATE_PATH=/tmp/exchange-cert.pfx" >> $GITHUB_ENV
             echo "EXCHANGE_CERTIFICATE_PASSWORD=" >> $GITHUB_ENV
 
@@ -79,6 +81,17 @@ jobs:
         shell: pwsh
         run: |
           Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber -Scope CurrentUser
+
+          # Verify certificate is readable
+          $certPath = $env:EXCHANGE_CERTIFICATE_PATH
+          if (Test-Path $certPath) {
+            Write-Host "Certificate file exists: $certPath"
+            $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certPath)
+            Write-Host "Certificate subject: $($cert.Subject)"
+            Write-Host "Certificate thumbprint: $($cert.Thumbprint)"
+          } else {
+            Write-Host "Certificate file not found: $certPath"
+          }
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
