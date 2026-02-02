@@ -409,6 +409,47 @@ class ExchangeOnlineClient:
         logger.error(f"Failed to update ManagedBy for {identity}")
         return False
 
+    async def set_distribution_group_aliases(
+        self,
+        identity: str,
+        aliases: list[str],
+        domain: str = "sjifire.org",
+    ) -> bool:
+        """Set email aliases for a distribution group.
+
+        This sets the secondary email addresses (aliases) for the group.
+        The primary SMTP address is preserved.
+
+        Args:
+            identity: Group name, alias, or email address
+            aliases: List of alias names without domain (e.g., ["ff", "firefighter"])
+            domain: Domain for the aliases
+
+        Returns:
+            True if successful
+        """
+        if not aliases:
+            return True
+
+        # Build the EmailAddresses array
+        # Format: @{Add="smtp:alias1@domain","smtp:alias2@domain"}
+        alias_addresses = [f"smtp:{alias}@{domain}" for alias in aliases]
+        addresses_str = '","'.join(alias_addresses)
+
+        set_cmd = (
+            f"Set-DistributionGroup -Identity '{identity}' "
+            f'-EmailAddresses @{{Add="{addresses_str}"}}'
+        )
+        commands = [set_cmd, "Write-Output 'SUCCESS'"]
+
+        result = self._run_powershell(commands, parse_json=False)
+        if result and "SUCCESS" in str(result):
+            logger.info(f"Added aliases to {identity}: {', '.join(aliases)}")
+            return True
+
+        logger.error(f"Failed to add aliases to {identity}: {result}")
+        return False
+
     async def update_group_settings(
         self,
         identity: str,

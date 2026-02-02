@@ -66,6 +66,7 @@ class GroupConfig:
     display_name: str
     mail_nickname: str  # e.g., "station31", "ff"
     description: str | None = None
+    aliases: list[str] | None = None  # Additional email aliases (without domain)
 
 
 class GroupStrategy(ABC):
@@ -219,6 +220,7 @@ class FirefighterStrategy(GroupStrategy):
             display_name="Firefighters",
             mail_nickname="firefighters",
             description="Members with Firefighter position",
+            aliases=["ff"],
         )
 
 
@@ -246,6 +248,7 @@ class WildlandFirefighterStrategy(GroupStrategy):
             display_name="Wildland Firefighters",
             mail_nickname="wildlandffs",
             description="Members with Wildland Firefighter position",
+            aliases=["wff", "wildlandff"],
         )
 
 
