@@ -44,7 +44,7 @@ jobs:
       - name: Get secrets from Key Vault
         uses: azure/cli@v2
         with:
-          azcliversion: latest
+          azcliversion: agentazcliversion
           inlineScript: |
             ALADTEC_URL=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-URL --query value -o tsv)
             echo "::add-mask::$ALADTEC_URL"
@@ -70,19 +70,15 @@ jobs:
             echo "::add-mask::$MS_GRAPH_CLIENT_SECRET"
             echo "MS_GRAPH_CLIENT_SECRET=$MS_GRAPH_CLIENT_SECRET" >> $GITHUB_ENV
 
-            # Download Exchange certificate from Key Vault (stored as certificate, accessible as secret)
-            # Note: az cli runs in Docker as root, so we need to copy to runner workspace
-            az keyvault secret download --vault-name gh-website-utilities --name exchange-powershell-cert --file /tmp/exchange-cert.pfx --encoding base64
-
-      - name: Copy certificate to workspace
-        run: |
-            # Copy cert from /tmp (written by root in Docker) to workspace (accessible by runner)
-            sudo cp /tmp/exchange-cert.pfx ${{ github.workspace }}/exchange-cert.pfx
-            sudo chown $USER:$USER ${{ github.workspace }}/exchange-cert.pfx
-            chmod 600 ${{ github.workspace }}/exchange-cert.pfx
-            ls -la ${{ github.workspace }}/exchange-cert.pfx
-            echo "EXCHANGE_CERTIFICATE_PATH=${{ github.workspace }}/exchange-cert.pfx" >> $GITHUB_ENV
+            # Download Exchange certificate from Key Vault to a mounted path
+            az keyvault secret download --vault-name gh-website-utilities --name exchange-powershell-cert --file $GITHUB_WORKSPACE/exchange-cert.pfx --encoding base64
+            echo "EXCHANGE_CERTIFICATE_PATH=$GITHUB_WORKSPACE/exchange-cert.pfx" >> $GITHUB_ENV
             echo "EXCHANGE_CERTIFICATE_PASSWORD=" >> $GITHUB_ENV
+
+      - name: Verify certificate
+        run: |
+            ls -la ${{ github.workspace }}/exchange-cert.pfx
+            file ${{ github.workspace }}/exchange-cert.pfx
 
       - name: Install PowerShell modules
         shell: pwsh
