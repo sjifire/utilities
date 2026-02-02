@@ -25,6 +25,7 @@ class Member:
     home_phone: str | None = None
     employee_type: str | None = None  # "Employee Type" field from Aladtec CSV
     positions: list[str] = field(default_factory=list)
+    schedules: list[str] = field(default_factory=list)
     title: str | None = None
     status: str | None = None
     work_group: str | None = None
@@ -127,3 +128,23 @@ class Member:
             return station
         # Otherwise return as-is
         return station
+
+    @property
+    def station_number(self) -> str | None:
+        """Extract station number from station_assignment.
+
+        Supports both 'Station 31' and plain '31' formats.
+        Used by GroupMember protocol for strategy compatibility.
+        """
+        if not self.station_assignment:
+            return None
+        station = self.station_assignment.strip()
+        # Handle plain number
+        if station.isdigit():
+            return station
+        # Handle "Station 31" format
+        if station.lower().startswith("station "):
+            num = station[8:].strip()
+            if num.isdigit():
+                return num
+        return None

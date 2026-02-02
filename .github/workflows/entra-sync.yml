@@ -44,7 +44,7 @@ jobs:
       - name: Get secrets from Key Vault
         uses: azure/cli@v2
         with:
-          azcliversion: latest
+          azcliversion: agentazcliversion
           inlineScript: |
             ALADTEC_URL=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-URL --query value -o tsv)
             echo "::add-mask::$ALADTEC_URL"
@@ -70,6 +70,25 @@ jobs:
             echo "::add-mask::$MS_GRAPH_CLIENT_SECRET"
             echo "MS_GRAPH_CLIENT_SECRET=$MS_GRAPH_CLIENT_SECRET" >> $GITHUB_ENV
 
+            # Download Exchange certificate from Key Vault to a mounted path
+            az keyvault secret download --vault-name gh-website-utilities --name exchange-powershell-cert --file $GITHUB_WORKSPACE/exchange-cert.pfx --encoding base64
+            echo "EXCHANGE_CERTIFICATE_PATH=$GITHUB_WORKSPACE/exchange-cert.pfx" >> $GITHUB_ENV
+            echo "EXCHANGE_CERTIFICATE_PASSWORD=" >> $GITHUB_ENV
+
+      - name: Verify certificate
+        run: |
+            ls -la ${{ github.workspace }}/exchange-cert.pfx
+            file ${{ github.workspace }}/exchange-cert.pfx
+
+      - name: Install PowerShell modules
+        shell: pwsh
+        run: |
+          Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber -Scope CurrentUser
+
+          # Verify certificate is readable
+          $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($env:EXCHANGE_CERTIFICATE_PATH)
+          Write-Host "Certificate thumbprint: $($cert.Thumbprint)"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -89,12 +108,12 @@ jobs:
             uv run entra-user-sync --disable-inactive --json
           fi
 
-      - name: Run Entra group sync
+      - name: Run group sync (M365 + Exchange)
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run entra-group-sync --all --dry-run
+            uv run ms-group-sync --all --dry-run
           else
-            uv run entra-group-sync --all
+            uv run ms-group-sync --all
           fi
 
       - name: Upload backup artifacts

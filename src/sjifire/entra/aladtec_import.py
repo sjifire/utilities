@@ -268,9 +268,10 @@ class AladtecImporter:
                 # Build display name with rank prefix (e.g., "Captain Kyle Dodd")
                 display_name = self._build_display_name(member)
 
-                # Build positions as comma-delimited string
-                # Use empty string (not None) to clear the field if positions is empty
+                # Build positions and schedules as comma-delimited strings
+                # Use empty string (not None) to clear the field if empty
                 positions_str = ",".join(member.positions) if member.positions else ""
+                schedules_str = ",".join(member.schedules) if member.schedules else ""
 
                 success = await self.user_manager.update_user(
                     user_id=existing.id,
@@ -290,6 +291,7 @@ class AladtecImporter:
                     extension_attribute1=member.rank or "",
                     extension_attribute2=member.evip or "",
                     extension_attribute3=positions_str,
+                    extension_attribute4=schedules_str,
                 )
                 if success:
                     result.updated.append(
@@ -357,8 +359,9 @@ class AladtecImporter:
             # Build display name with rank prefix (e.g., "Captain Kyle Dodd")
             display_name = self._build_display_name(member)
 
-            # Build positions as comma-delimited string
+            # Build positions and schedules as comma-delimited strings
             positions_str = ",".join(member.positions) if member.positions else None
+            schedules_str = ",".join(member.schedules) if member.schedules else None
 
             created_user = await self.user_manager.create_user(
                 display_name=display_name,
@@ -378,6 +381,7 @@ class AladtecImporter:
                 extension_attribute1=member.rank,
                 extension_attribute2=member.evip,
                 extension_attribute3=positions_str,
+                extension_attribute4=schedules_str,
             )
             if created_user:
                 result.created.append(
@@ -478,4 +482,8 @@ class AladtecImporter:
             return True
         # extensionAttribute3 = positions (comma-delimited)
         positions_str = ",".join(member.positions) if member.positions else ""
-        return (existing.extension_attribute3 or "") != positions_str
+        if (existing.extension_attribute3 or "") != positions_str:
+            return True
+        # extensionAttribute4 = schedules (comma-delimited)
+        schedules_str = ",".join(member.schedules) if member.schedules else ""
+        return (existing.extension_attribute4 or "") != schedules_str

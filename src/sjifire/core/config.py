@@ -31,6 +31,30 @@ def get_aladtec_credentials() -> tuple[str, str, str]:
     return url, username, password
 
 
+def get_ispyfire_credentials() -> tuple[str, str, str]:
+    """Get iSpyFire credentials from environment.
+
+    Returns:
+        Tuple of (url, username, password)
+
+    Raises:
+        ValueError: If any required credential is not set
+    """
+    load_dotenv()
+
+    url = os.getenv("ISPYFIRE_URL")
+    username = os.getenv("ISPYFIRE_USERNAME")
+    password = os.getenv("ISPYFIRE_PASSWORD")
+
+    if not url or not username or not password:
+        raise ValueError(
+            "iSpyFire credentials not set. "
+            "Required: ISPYFIRE_URL, ISPYFIRE_USERNAME, ISPYFIRE_PASSWORD"
+        )
+
+    return url, username, password
+
+
 def get_graph_credentials() -> tuple[str, str, str]:
     """Get MS Graph API credentials from environment.
 
@@ -53,6 +77,79 @@ def get_graph_credentials() -> tuple[str, str, str]:
         )
 
     return tenant_id, client_id, client_secret
+
+
+@dataclass
+class ExchangeCredentials:
+    """Credentials for Exchange Online PowerShell authentication."""
+
+    tenant_id: str
+    client_id: str
+    organization: str
+    certificate_thumbprint: str | None = None
+    certificate_path: str | None = None
+    certificate_password: str | None = None
+
+
+def get_exchange_credentials() -> ExchangeCredentials:
+    """Get Exchange Online credentials from environment.
+
+    Uses certificate-based authentication for app-only access.
+    Either certificate_thumbprint (Windows) or certificate_path + password
+    (cross-platform) must be provided.
+
+    Environment variables:
+        EXCHANGE_TENANT_ID: Tenant ID (falls back to MS_GRAPH_TENANT_ID)
+        EXCHANGE_CLIENT_ID: App client ID (falls back to MS_GRAPH_CLIENT_ID)
+        EXCHANGE_ORGANIZATION: Organization domain (default: sjifire.org)
+        EXCHANGE_CERTIFICATE_THUMBPRINT: Certificate thumbprint (Windows)
+        EXCHANGE_CERTIFICATE_PATH: Path to .pfx certificate file
+        EXCHANGE_CERTIFICATE_PASSWORD: Password for .pfx file
+
+    Returns:
+        ExchangeCredentials with certificate configuration
+
+    Raises:
+        ValueError: If neither certificate method is configured
+    """
+    load_dotenv()
+
+    # Get tenant/client, with fallback to Graph credentials
+    tenant_id = os.getenv("EXCHANGE_TENANT_ID") or os.getenv("MS_GRAPH_TENANT_ID")
+    client_id = os.getenv("EXCHANGE_CLIENT_ID") or os.getenv("MS_GRAPH_CLIENT_ID")
+
+    if not tenant_id or not client_id:
+        raise ValueError(
+            "Exchange credentials not set. Required: "
+            "EXCHANGE_TENANT_ID/MS_GRAPH_TENANT_ID and EXCHANGE_CLIENT_ID/MS_GRAPH_CLIENT_ID"
+        )
+
+    organization = os.getenv("EXCHANGE_ORGANIZATION", "sjifire.org")
+    thumbprint = os.getenv("EXCHANGE_CERTIFICATE_THUMBPRINT")
+    cert_path = os.getenv("EXCHANGE_CERTIFICATE_PATH")
+    cert_password = os.getenv("EXCHANGE_CERTIFICATE_PASSWORD")
+
+    if not thumbprint and not cert_path:
+        raise ValueError(
+            "Exchange credentials not set. Required: "
+            "EXCHANGE_CERTIFICATE_THUMBPRINT (Windows) or "
+            "EXCHANGE_CERTIFICATE_PATH + EXCHANGE_CERTIFICATE_PASSWORD (cross-platform)"
+        )
+
+    if cert_path and cert_password is None:
+        raise ValueError(
+            "EXCHANGE_CERTIFICATE_PASSWORD is required when using EXCHANGE_CERTIFICATE_PATH "
+            "(can be empty string for Key Vault generated certs)"
+        )
+
+    return ExchangeCredentials(
+        tenant_id=tenant_id,
+        client_id=client_id,
+        organization=organization,
+        certificate_thumbprint=thumbprint,
+        certificate_path=cert_path,
+        certificate_password=cert_password,
+    )
 
 
 @dataclass
@@ -112,30 +209,6 @@ def load_dispatch_config(require_mailbox: bool = True) -> DispatchConfig:
         retention_days=config_data["retention_days"],
         mailbox_user_id=mailbox_user_id or "",
     )
-
-
-def get_ispyfire_credentials() -> tuple[str, str, str]:
-    """Get iSpyFire credentials from environment.
-
-    Returns:
-        Tuple of (base_url, username, password)
-
-    Raises:
-        ValueError: If any required credential is not set
-    """
-    load_dotenv()
-
-    url = os.getenv("ISPYFIRE_URL")
-    username = os.getenv("ISPYFIRE_USERNAME")
-    password = os.getenv("ISPYFIRE_PASSWORD")
-
-    if not url or not username or not password:
-        raise ValueError(
-            "iSpyFire credentials not set. "
-            "Required: ISPYFIRE_URL, ISPYFIRE_USERNAME, ISPYFIRE_PASSWORD"
-        )
-
-    return url, username, password
 
 
 def load_entra_sync_config() -> EntraSyncConfig:

@@ -54,37 +54,41 @@ The sync:
   - `extensionAttribute1`: Rank (Captain, Lieutenant, Chief, etc.)
   - `extensionAttribute2`: EVIP expiration date
   - `extensionAttribute3`: Positions (comma-delimited scheduling positions)
+  - `extensionAttribute4`: Schedules (comma-delimited schedule visibility)
 - Prefixes display names with rank (e.g., "Chief John Smith")
 - Automatically backs up Entra ID users before making changes
 
-### Aladtec to Entra Group Sync
+### Microsoft Group Sync
 
-**Sync M365 groups from Aladtec:**
+**Sync groups from Entra ID user data (unified M365 and Exchange):**
 ```bash
-uv run entra-group-sync --all              # Sync all group strategies
-uv run entra-group-sync --all --dry-run    # Preview changes without applying
-uv run entra-group-sync --strategy stations # Sync only station groups
-uv run entra-group-sync --strategy ff --strategy wff  # Sync specific strategies
+uv run ms-group-sync --all              # Sync all group strategies
+uv run ms-group-sync --all --dry-run    # Preview changes without applying
+uv run ms-group-sync --strategy stations # Sync only station groups
+uv run ms-group-sync --strategy ff --strategy wff  # Sync specific strategies
+uv run ms-group-sync --all --new-type m365  # Create new groups as M365 (default: exchange)
 ```
 
 Available strategies:
 
 | Strategy | Group | Membership Criteria |
 |----------|-------|---------------------|
-| `stations` | Station 31, 32, etc. | Aladtec station assignment |
+| `stations` | Station 31, 32, etc. | Station assignment (office location) |
 | `support` | Support | Has "Support" position |
 | `ff` | FF | Has "Firefighter" position |
 | `wff` | WFF | Has "Wildland Firefighter" position |
 | `ao` | Apparatus Operator | Has EVIP certification |
 | `marine` | Marine | Has "Mate" or "Pilot" position |
 | `volunteers` | Volunteers | Work Group = "Volunteer" + operational position |
+| `mobe` | State Mobilization | Has schedule containing "mobe" (e.g., "State Mobe") |
 
 The sync:
-- Creates M365 groups if they don't exist
+- **Automatically detects** if a group exists as M365 or Exchange
+- Syncs existing groups using the appropriate backend (Graph API or PowerShell)
+- **Creates new groups as Exchange** mail-enabled security groups by default (no SharePoint sprawl)
+- Use `--new-type m365` to create new groups as M365 instead
+- Flags conflicts (groups existing in both systems) and skips them
 - Adds/removes members based on Aladtec data
-- Sets group visibility to Public
-- Adds automation notice to group descriptions
-- Backs up all groups before making changes
 
 **Automated sync:** Runs weekdays at noon Pacific via GitHub Actions. See `.github/workflows/entra-sync.yml`.
 
@@ -146,6 +150,27 @@ The audit checks for:
 - Aladtec members not in Entra ID
 - Entra ID users not in Aladtec
 - Entra ID users to deactivate (matched to inactive Aladtec members)
+
+### Exchange Online Prerequisites
+
+For creating new groups (which default to Exchange mail-enabled security groups), you need:
+
+1. PowerShell 7+ (`pwsh`) - see [Installing PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell)
+2. ExchangeOnlineManagement module: `pwsh -Command "Install-Module -Name ExchangeOnlineManagement -Force"`
+3. Azure AD App Registration with Exchange.ManageAsApp permission
+4. Certificate for app-only authentication (stored in Key Vault or local .pfx file)
+5. App assigned "Exchange Administrator" role in Azure AD
+
+**Environment variables:**
+```bash
+# Exchange Online credentials (add to .env)
+EXCHANGE_ORGANIZATION=sjifire.org
+# Option 1: Certificate thumbprint (Windows with installed cert)
+EXCHANGE_CERTIFICATE_THUMBPRINT=your-thumbprint
+# Option 2: Certificate file (cross-platform)
+EXCHANGE_CERTIFICATE_PATH=/path/to/certificate.pfx
+EXCHANGE_CERTIFICATE_PASSWORD=your-cert-password  # empty for Key Vault certs
+```
 
 ### Entra ID Tools
 
@@ -279,6 +304,9 @@ src/sjifire/
 │   ├── group_sync.py  # Group sync strategies and manager
 │   ├── groups.py      # Group management (create, update, members)
 │   └── users.py       # User management
+├── exchange/          # Exchange Online integration
+│   ├── client.py      # PowerShell-based Exchange client
+│   └── group_sync.py  # Mail-enabled security group sync
 ├── ispyfire/          # iSpyFire integration
 │   ├── client.py      # API client for iSpyFire
 │   ├── models.py      # ISpyFirePerson data model
@@ -291,5 +319,6 @@ src/sjifire/
     ├── entra_group_sync.py  # M365 group sync CLI
     ├── entra_user_sync.py   # User sync CLI
     ├── ispyfire_admin.py    # iSpyFire admin CLI (activate/deactivate)
-    └── ispyfire_sync.py     # iSpyFire sync CLI
+    ├── ispyfire_sync.py     # iSpyFire sync CLI
+    └── mail_group_sync.py   # Mail-enabled security group sync CLI
 ```

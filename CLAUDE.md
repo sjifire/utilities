@@ -36,6 +36,7 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - `extensionAttribute1`: Rank (Captain, Lieutenant, Chief, etc.)
 - `extensionAttribute2`: EVIP expiration date
 - `extensionAttribute3`: Positions (comma-delimited scheduling positions)
+- `extensionAttribute4`: Schedules (comma-delimited schedule visibility from Aladtec)
 
 ### iSpyFire
 - Incident response and paging system
@@ -70,6 +71,9 @@ src/sjifire/
 │   ├── group_sync.py  # Group sync strategies and GroupSyncManager
 │   ├── groups.py      # EntraGroupManager for M365 group operations
 │   └── users.py       # EntraUserManager for Graph API calls
+├── exchange/
+│   ├── client.py      # PowerShell-based Exchange Online client
+│   └── group_sync.py  # Mail-enabled security group sync strategies
 ├── ispyfire/
 │   ├── client.py      # API client with tenacity retry for rate limiting
 │   ├── models.py      # ISpyFirePerson dataclass
@@ -78,13 +82,34 @@ src/sjifire/
 ```
 
 ### Group Sync Strategy Pattern
-Group sync uses a strategy pattern. Each `GroupSyncStrategy` subclass defines:
+Group sync uses a strategy pattern with a `GroupMember` protocol that works with both Aladtec `Member` and `EntraUser` objects. The sync pulls membership data directly from Entra ID (which is synced from Aladtec via user sync).
+
+Each `GroupStrategy` subclass defines:
 - `name`: Strategy identifier (e.g., "stations", "ff", "ao")
-- `get_groups_to_sync(members)`: Returns dict of group_key -> list of members
-- `get_group_config(group_key)`: Returns (display_name, mail_nickname, description)
+- `get_members(members)`: Returns dict of group_key -> list of members
+- `get_config(group_key)`: Returns GroupConfig (display_name, mail_nickname, description)
 - `automation_notice`: Warning text added to group descriptions
 
-Available strategies: `StationGroupStrategy`, `SupportGroupStrategy`, `FirefighterGroupStrategy`, `WildlandFirefighterGroupStrategy`, `ApparatusOperatorGroupStrategy`, `MarineGroupStrategy`, `VolunteerGroupStrategy`
+Available strategies: `StationStrategy`, `SupportStrategy`, `FirefighterStrategy`, `WildlandFirefighterStrategy`, `ApparatusOperatorStrategy`, `MarineStrategy`, `VolunteerStrategy`, `MobeScheduleStrategy`
+
+**Data flow:** Entra ID users → Strategy determines membership → Sync to M365/Exchange groups
+
+### Exchange Online (Mail-Enabled Security Groups)
+For email distribution without SharePoint sprawl, use mail-enabled security groups instead of M365 groups. These are managed via Exchange Online PowerShell (not Graph API).
+
+**Prerequisites:**
+- PowerShell 7+ (`pwsh`)
+- ExchangeOnlineManagement module
+- Certificate-based app-only authentication
+
+**Environment variables:**
+- `EXCHANGE_ORGANIZATION`: Domain (default: sjifire.org)
+- `EXCHANGE_CERTIFICATE_THUMBPRINT`: Windows certificate thumbprint
+- `EXCHANGE_CERTIFICATE_PATH` + `EXCHANGE_CERTIFICATE_PASSWORD`: Cross-platform .pfx file
+
+The `exchange/` module mirrors the `entra/group_sync.py` strategies but creates mail-enabled security groups via PowerShell subprocess.
+
+**Retry logic:** Member add/remove operations use tenacity to automatically retry transient Azure AD sync errors (up to 3 attempts with exponential backoff). Groups are backed up before any sync operation.
 
 ## Important Patterns
 
@@ -129,9 +154,10 @@ uv run entra-user-sync --individual user@sjifire.org
 
 ### Run group sync manually
 ```bash
-uv run entra-group-sync --all --dry-run  # Preview all strategies
-uv run entra-group-sync --all            # Apply changes
-uv run entra-group-sync --strategy ff    # Sync specific strategy
+uv run ms-group-sync --all --dry-run  # Preview all strategies
+uv run ms-group-sync --all            # Apply changes
+uv run ms-group-sync --strategy ff    # Sync specific strategy
+uv run ms-group-sync --all --new-type m365  # Create new groups as M365 (default: exchange)
 ```
 
 ### Run iSpyFire sync manually
@@ -147,6 +173,16 @@ uv run ispyfire-admin list               # List users
 uv run ispyfire-admin activate user@sjifire.org
 uv run ispyfire-admin deactivate user@sjifire.org
 ```
+
+### Group sync details
+The `ms-group-sync` command uses Entra ID as the source of truth for membership data:
+- **Data source**: Entra ID users (synced from Aladtec via `entra-user-sync`)
+- **M365 groups**: Synced via Graph API (uses user IDs directly)
+- **Exchange groups**: Synced via PowerShell (uses email addresses)
+- **Conflicts**: Groups in both systems are skipped with a warning
+- **New groups**: Created as Exchange mail-enabled security groups by default (no SharePoint sprawl)
+
+Note: Run `entra-user-sync` before `ms-group-sync` to ensure Entra ID has current data.
 
 ### Check linting
 ```bash

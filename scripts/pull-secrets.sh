@@ -58,5 +58,34 @@ for name in $SECRETS; do
     fi
 done
 
+# Download certificates from Key Vault
+CERT_DIR="$HOME/.certs"
+mkdir -p "$CERT_DIR"
+chmod 700 "$CERT_DIR"
+
+echo -e "\n${YELLOW}Downloading certificates...${NC}"
+
+# Exchange PowerShell certificate
+EXCHANGE_CERT="exchange-powershell-cert"
+EXCHANGE_CERT_PATH="$CERT_DIR/$EXCHANGE_CERT.pfx"
+echo -n "  $EXCHANGE_CERT... "
+# Check if certificate exists in Key Vault
+if az keyvault certificate show --vault-name "$VAULT" --name "$EXCHANGE_CERT" &>/dev/null; then
+    # Download the certificate (stored as secret with same name)
+    rm -f "$EXCHANGE_CERT_PATH"
+    az keyvault secret download \
+        --vault-name "$VAULT" \
+        --name "$EXCHANGE_CERT" \
+        --file "$EXCHANGE_CERT_PATH" \
+        --encoding base64 -o none
+    chmod 600 "$EXCHANGE_CERT_PATH"
+    echo "EXCHANGE_CERTIFICATE_PATH=$EXCHANGE_CERT_PATH" >> "$OUTPUT_FILE"
+    # Key Vault generated certs have no password
+    echo "EXCHANGE_CERTIFICATE_PASSWORD=" >> "$OUTPUT_FILE"
+    echo -e "${GREEN}OK${NC}"
+else
+    echo -e "${YELLOW}SKIPPED (not found)${NC}"
+fi
+
 echo -e "\n${GREEN}Secrets written to $OUTPUT_FILE${NC}"
 echo -e "${YELLOW}Remember: Don't commit .env to git!${NC}"
