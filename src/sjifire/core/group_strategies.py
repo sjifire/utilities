@@ -1,16 +1,62 @@
 """Backend-agnostic group membership strategies.
 
-Defines strategies for determining group membership based on Aladtec member data.
+Defines strategies for determining group membership based on member data.
 These strategies are used by both M365 (Graph API) and Exchange (PowerShell) backends.
 The strategy has no knowledge of which backend will be used - it only defines
 WHO should be in each group.
+
+Supports both Aladtec Member and EntraUser objects via the GroupMember protocol.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
-from sjifire.aladtec.models import Member
 from sjifire.core.constants import MARINE_POSITIONS, OPERATIONAL_POSITIONS
+
+
+@runtime_checkable
+class GroupMember(Protocol):
+    """Protocol for group membership determination.
+
+    Both Member (from Aladtec) and EntraUser (from Entra ID) implement this protocol,
+    allowing strategies to work with either data source.
+    """
+
+    @property
+    def email(self) -> str | None:
+        """Email address for matching/sync."""
+        ...
+
+    @property
+    def display_name(self) -> str | None:
+        """Display name for logging."""
+        ...
+
+    @property
+    def positions(self) -> set[str] | list[str]:
+        """Scheduling positions (Firefighter, Support, etc.)."""
+        ...
+
+    @property
+    def schedules(self) -> set[str] | list[str]:
+        """Schedule visibility (State Mobe, etc.)."""
+        ...
+
+    @property
+    def evip(self) -> str | None:
+        """EVIP expiration date (indicates Apparatus Operator certification)."""
+        ...
+
+    @property
+    def work_group(self) -> str | None:
+        """Work group (Volunteer, Career, etc.)."""
+        ...
+
+    @property
+    def station_number(self) -> str | None:
+        """Station number extracted from station assignment/office location."""
+        ...
 
 
 @dataclass
@@ -31,6 +77,7 @@ class GroupStrategy(ABC):
     - Configuration for each group (name, email alias, description)
 
     Strategies are backend-agnostic - they know nothing about M365 vs Exchange.
+    They work with any object implementing the GroupMember protocol.
     """
 
     @property
@@ -44,9 +91,9 @@ class GroupStrategy(ABC):
         """Human-readable description of how membership is determined.
 
         Examples:
-            - "Station Assignment field in Aladtec"
-            - "Firefighter position in Aladtec"
-            - "Work Group = Volunteer AND has operational position in Aladtec"
+            - "Station Assignment field"
+            - "Firefighter position"
+            - "Work Group = Volunteer AND has operational position"
         """
 
     @property
@@ -59,11 +106,12 @@ class GroupStrategy(ABC):
         )
 
     @abstractmethod
-    def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Determine which members belong in which groups.
 
         Args:
-            members: List of Aladtec members
+            members: List of objects implementing GroupMember protocol
+                     (either Aladtec Member or EntraUser)
 
         Returns:
             Dict mapping group_key to list of members for that group.
@@ -85,7 +133,7 @@ class GroupStrategy(ABC):
 class StationStrategy(GroupStrategy):
     """Members grouped by station assignment.
 
-    Creates groups like "Station 31" based on the Station Assignment field.
+    Creates groups like "Station 31" based on the station_number property.
     """
 
     @property
@@ -96,14 +144,14 @@ class StationStrategy(GroupStrategy):
     @property
     def membership_criteria(self) -> str:
         """Return membership criteria description."""
-        return "Station Assignment field in Aladtec"
+        return "Station Assignment field"
 
-    def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Group members by station assignment."""
-        by_station: dict[str, list[Member]] = {}
+        by_station: dict[str, list[GroupMember]] = {}
 
         for member in members:
-            station = self._parse_station(member.station_assignment)
+            station = member.station_number
             if station:
                 if station not in by_station:
                     by_station[station] = []
@@ -119,25 +167,6 @@ class StationStrategy(GroupStrategy):
             description=f"Members assigned to Station {group_key}",
         )
 
-    def _parse_station(self, station_assignment: str | None) -> str | None:
-        """Extract station number from assignment field."""
-        if not station_assignment:
-            return None
-
-        station = station_assignment.strip()
-
-        # Handle plain number
-        if station.isdigit():
-            return station
-
-        # Handle "Station 31" format
-        if station.lower().startswith("station "):
-            num = station[8:].strip()
-            if num.isdigit():
-                return num
-
-        return None
-
 
 class SupportStrategy(GroupStrategy):
     """Members with the Support position."""
@@ -150,11 +179,11 @@ class SupportStrategy(GroupStrategy):
     @property
     def membership_criteria(self) -> str:
         """Return membership criteria description."""
-        return "Support position in Aladtec"
+        return "Support position"
 
-    def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Get members with Support position."""
-        support_members = [m for m in members if "Support" in (m.positions or [])]
+        support_members = [m for m in members if "Support" in set(m.positions or [])]
         return {"Support": support_members} if support_members else {}
 
     def get_config(self, group_key: str) -> GroupConfig:
@@ -177,11 +206,11 @@ class FirefighterStrategy(GroupStrategy):
     @property
     def membership_criteria(self) -> str:
         """Return membership criteria description."""
-        return "Firefighter position in Aladtec"
+        return "Firefighter position"
 
-    def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Get members with Firefighter position."""
-        ff_members = [m for m in members if "Firefighter" in (m.positions or [])]
+        ff_members = [m for m in members if "Firefighter" in set(m.positions or [])]
         return {"FF": ff_members} if ff_members else {}
 
     def get_config(self, group_key: str) -> GroupConfig:
@@ -204,11 +233,11 @@ class WildlandFirefighterStrategy(GroupStrategy):
     @property
     def membership_criteria(self) -> str:
         """Return membership criteria description."""
-        return "Wildland Firefighter position in Aladtec"
+        return "Wildland Firefighter position"
 
-    def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Get members with Wildland Firefighter position."""
-        wff_members = [m for m in members if "Wildland Firefighter" in (m.positions or [])]
+        wff_members = [m for m in members if "Wildland Firefighter" in set(m.positions or [])]
         return {"WFF": wff_members} if wff_members else {}
 
     def get_config(self, group_key: str) -> GroupConfig:
@@ -231,9 +260,9 @@ class ApparatusOperatorStrategy(GroupStrategy):
     @property
     def membership_criteria(self) -> str:
         """Return membership criteria description."""
-        return "EVIP certification in Aladtec"
+        return "EVIP certification"
 
-    def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Get members with EVIP certification."""
         ao_members = [m for m in members if m.evip]
         return {"Apparatus Operator": ao_members} if ao_members else {}
@@ -258,9 +287,9 @@ class MarineStrategy(GroupStrategy):
     @property
     def membership_criteria(self) -> str:
         """Return membership criteria description."""
-        return "Marine positions (Mate, Pilot, Deckhand) in Aladtec"
+        return "Marine positions (Mate, Pilot, Deckhand)"
 
-    def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Get members with marine positions."""
         marine_members = [m for m in members if set(m.positions or []) & MARINE_POSITIONS]
         return {"Marine": marine_members} if marine_members else {}
@@ -290,11 +319,11 @@ class VolunteerStrategy(GroupStrategy):
     @property
     def membership_criteria(self) -> str:
         """Return membership criteria description."""
-        return "Work Group = 'Volunteer' AND has operational position in Aladtec"
+        return "Work Group = 'Volunteer' AND has operational position"
 
-    def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Get volunteers with operational positions."""
-        volunteers: list[Member] = []
+        volunteers: list[GroupMember] = []
 
         for member in members:
             # Must be in Volunteer work group
@@ -320,7 +349,7 @@ class VolunteerStrategy(GroupStrategy):
 class MobeScheduleStrategy(GroupStrategy):
     """Members with State Mobe schedule access.
 
-    Members who have access to the "State Mobe" schedule in Aladtec
+    Members who have access to the "State Mobe" schedule
     are available for state-wide wildland fire mobilization deployments.
     """
 
@@ -332,9 +361,9 @@ class MobeScheduleStrategy(GroupStrategy):
     @property
     def membership_criteria(self) -> str:
         """Return membership criteria description."""
-        return "Members with 'State Mobe' schedule access in Aladtec"
+        return "Members with 'State Mobe' schedule access"
 
-    def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Get members with State Mobe schedule access.
 
         Always returns the group even if empty, to ensure the group

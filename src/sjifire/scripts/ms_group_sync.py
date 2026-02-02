@@ -1,8 +1,12 @@
-"""Unified CLI script to sync groups from Aladtec data.
+"""Unified CLI script to sync groups from Entra ID user data.
 
 Supports both M365 groups (via Graph API) and mail-enabled security groups
 (via Exchange Online PowerShell). Automatically detects existing group type
 and syncs accordingly. New groups default to Exchange (no SharePoint sprawl).
+
+Uses Entra ID as the source of truth for membership data (positions, schedules,
+station assignment, etc.), which is synced from Aladtec via the entra-user-sync
+process.
 
 Prerequisites for Exchange groups:
 1. PowerShell 7+ with ExchangeOnlineManagement module
@@ -17,16 +21,15 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 
-from sjifire.aladtec.models import Member
-from sjifire.aladtec.scraper import AladtecScraper
 from sjifire.core.backup import backup_entra_groups, backup_mail_groups
 from sjifire.core.group_strategies import (
     STRATEGY_NAMES,
+    GroupMember,
     GroupStrategy,
     get_strategy,
 )
 from sjifire.entra.groups import EntraGroupManager
-from sjifire.entra.users import EntraUserManager
+from sjifire.entra.users import EntraUser, EntraUserManager
 from sjifire.exchange.client import ExchangeOnlineClient
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -104,7 +107,10 @@ STRATEGIES = STRATEGY_NAMES
 
 
 class UnifiedGroupSyncManager:
-    """Unified manager for syncing groups via M365 or Exchange."""
+    """Unified manager for syncing groups via M365 or Exchange.
+
+    Uses Entra ID users as the source of truth for membership data.
+    """
 
     def __init__(self, domain: str = "sjifire.org") -> None:
         """Initialize the sync manager."""
@@ -112,7 +118,7 @@ class UnifiedGroupSyncManager:
         self._entra_groups: EntraGroupManager | None = None
         self._entra_users: EntraUserManager | None = None
         self._exchange_client: ExchangeOnlineClient | None = None
-        self._entra_users_cache: list | None = None
+        self._entra_users_cache: list[EntraUser] | None = None
 
     @property
     def entra_groups(self) -> EntraGroupManager:
@@ -135,30 +141,16 @@ class UnifiedGroupSyncManager:
             self._exchange_client = ExchangeOnlineClient()
         return self._exchange_client
 
-    async def _load_entra_users(self) -> None:
-        """Load Entra users for member matching."""
-        if self._entra_users_cache is None:
-            self._entra_users_cache = await self.entra_users.get_users(include_disabled=False)
-            logger.info(f"Loaded {len(self._entra_users_cache)} Entra users")
+    async def get_entra_users(self) -> list[EntraUser]:
+        """Get Entra users (cached).
 
-    def _find_entra_user(self, member: Member) -> tuple | None:
-        """Find an Entra user matching an Aladtec member.
-
-        Returns:
-            Tuple of (EntraUser, user_id) if found, None otherwise
+        Returns employees only (users with employee IDs), excluding shared
+        mailboxes and resource accounts.
         """
-        if not self._entra_users_cache or not member.email:
-            return None
-
-        email_lower = member.email.lower()
-        for user in self._entra_users_cache:
-            # Match by email
-            if user.email and user.email.lower() == email_lower:
-                return (user, user.id)
-            # Match by UPN
-            if user.upn and user.upn.lower() == email_lower:
-                return (user, user.id)
-        return None
+        if self._entra_users_cache is None:
+            self._entra_users_cache = await self.entra_users.get_employees(include_disabled=False)
+            logger.info(f"Loaded {len(self._entra_users_cache)} Entra employees for group sync")
+        return self._entra_users_cache
 
     async def detect_group_type(self, email: str, mail_nickname: str) -> GroupType:
         """Detect if a group exists and what type it is.
@@ -217,7 +209,7 @@ class UnifiedGroupSyncManager:
         self,
         strategy: GroupStrategy,
         group_key: str,
-        group_members: list[Member],
+        group_members: list[GroupMember],
         new_group_type: GroupType,
         dry_run: bool = False,
     ) -> GroupSyncResult:
@@ -226,7 +218,7 @@ class UnifiedGroupSyncManager:
         Args:
             strategy: The group strategy instance
             group_key: Key identifying the group within the strategy
-            group_members: Members who should be in this group
+            group_members: Members who should be in this group (EntraUser or Member)
             new_group_type: Type to create if group doesn't exist
             dry_run: If True, don't make changes
 
@@ -283,11 +275,14 @@ class UnifiedGroupSyncManager:
         self,
         strategy: GroupStrategy,
         group_key: str,
-        group_members: list[Member],
+        group_members: list[GroupMember],
         dry_run: bool,
         creating: bool,
     ) -> GroupSyncResult:
-        """Sync a group via M365 (Graph API)."""
+        """Sync a group via M365 (Graph API).
+
+        When group_members are EntraUser objects, we already have their IDs.
+        """
         config = strategy.get_config(group_key)
         display_name = config.display_name
         mail_nickname = config.mail_nickname
@@ -297,9 +292,6 @@ class UnifiedGroupSyncManager:
             else strategy.automation_notice
         )
         email = f"{mail_nickname}@{self.domain}"
-
-        # Ensure Entra users are loaded
-        await self._load_entra_users()
 
         added: list[str] = []
         removed: list[str] = []
@@ -336,25 +328,31 @@ class UnifiedGroupSyncManager:
             else:
                 current_member_ids = set()
 
-            # Build map of who should be members (user_id -> (EntraUser, Member))
-            should_be: dict[str, tuple] = {}
+            # Build map of who should be members (user_id -> EntraUser)
+            # EntraUser objects already have .id, no matching needed
+            should_be: dict[str, GroupMember] = {}
             for member in group_members:
-                match = self._find_entra_user(member)
-                if match:
-                    entra_user, user_id = match
-                    should_be[user_id] = (entra_user, member)
+                # EntraUser has .id attribute directly
+                if isinstance(member, EntraUser):
+                    if member.id:
+                        should_be[member.id] = member
+                    else:
+                        errors.append(
+                            f"EntraUser missing ID: {member.display_name} (email: {member.email})"
+                        )
                 else:
+                    # Legacy support for Member objects - should not happen
+                    # in new flow but keeps backward compatibility
                     errors.append(
-                        f"Could not find Entra user for: {member.display_name} "
-                        f"(email: {member.email})"
+                        f"Unexpected member type: {type(member).__name__} for {member.display_name}"
                     )
 
             should_be_ids = set(should_be.keys())
 
             # Add missing members
             for user_id in should_be_ids - current_member_ids:
-                entra_user, _ = should_be[user_id]
-                name = entra_user.display_name or user_id
+                user = should_be[user_id]
+                name = user.display_name or user_id
 
                 if dry_run:
                     logger.info(f"Would add {name} to {display_name}")
@@ -369,11 +367,11 @@ class UnifiedGroupSyncManager:
             for user_id in current_member_ids - should_be_ids:
                 # Find user name for logging
                 name = user_id
-                if self._entra_users_cache:
-                    for user in self._entra_users_cache:
-                        if user.id == user_id:
-                            name = user.display_name or user_id
-                            break
+                users = await self.get_entra_users()
+                for user in users:
+                    if user.id == user_id:
+                        name = user.display_name or user_id
+                        break
 
                 if dry_run:
                     logger.info(f"Would remove {name} from {display_name}")
@@ -398,7 +396,7 @@ class UnifiedGroupSyncManager:
         self,
         strategy: GroupStrategy,
         group_key: str,
-        group_members: list[Member],
+        group_members: list[GroupMember],
         dry_run: bool,
         creating: bool,
     ) -> GroupSyncResult:
@@ -414,7 +412,7 @@ class UnifiedGroupSyncManager:
         alias = config.mail_nickname
         email = f"{alias}@{self.domain}"
 
-        # Build target member list
+        # Build target member list (works with both EntraUser and Member)
         target_emails = [m.email.lower() for m in group_members if m.email]
         email_to_member = {m.email.lower(): m for m in group_members if m.email}
 
@@ -536,7 +534,7 @@ class UnifiedGroupSyncManager:
     async def sync(
         self,
         strategy_name: str,
-        members: list[Member],
+        members: list[GroupMember],
         new_group_type: GroupType = GroupType.EXCHANGE,
         dry_run: bool = False,
     ) -> FullSyncResult:
@@ -544,7 +542,7 @@ class UnifiedGroupSyncManager:
 
         Args:
             strategy_name: Name of the strategy to run
-            members: List of Aladtec members
+            members: List of members (EntraUser or Aladtec Member)
             new_group_type: Type to use for new groups (default: Exchange)
             dry_run: If True, don't make changes
 
@@ -753,6 +751,8 @@ async def run_sync(
 ) -> int:
     """Run group sync for specified strategies.
 
+    Uses Entra ID as the source of truth for membership data.
+
     Args:
         strategies: List of strategy names to run
         new_group_type: Type to use for new groups
@@ -771,30 +771,25 @@ async def run_sync(
     logger.info(f"Strategies: {', '.join(strategies)}")
     logger.info(f"New group type: {new_group_type.value}")
 
-    # Fetch members from Aladtec
+    # Initialize manager
+    manager = UnifiedGroupSyncManager()
+
+    # Fetch employees from Entra ID
     logger.info("")
-    logger.info("Fetching members from Aladtec...")
+    logger.info("Fetching employees from Entra ID...")
 
     try:
-        with AladtecScraper() as scraper:
-            if not scraper.login():
-                logger.error("Failed to log in to Aladtec")
-                return 1
-
-            members = scraper.get_members()
+        members = await manager.get_entra_users()
 
         if not members:
-            logger.error("No members found in Aladtec")
+            logger.error("No employees found in Entra ID")
             return 1
 
-        logger.info(f"Found {len(members)} members")
+        logger.info(f"Found {len(members)} employees")
 
     except Exception as e:
-        logger.error(f"Failed to fetch Aladtec members: {e}")
+        logger.error(f"Failed to fetch Entra ID employees: {e}")
         return 1
-
-    # Run sync for each strategy
-    manager = UnifiedGroupSyncManager()
 
     # Backup existing groups before making changes (skip for dry run)
     if not dry_run:
@@ -895,7 +890,8 @@ async def delete_group(email: str, dry_run: bool = False) -> int:
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Sync Microsoft groups (M365 or Exchange) from Aladtec data. "
+        description="Sync Microsoft groups (M365 or Exchange) from Entra ID user data. "
+        "Uses Entra ID as the source of truth (synced from Aladtec via entra-user-sync). "
         "Automatically detects existing group type and syncs accordingly. "
         "New groups are created as Exchange mail-enabled security groups by default.",
     )

@@ -82,13 +82,17 @@ src/sjifire/
 ```
 
 ### Group Sync Strategy Pattern
-Group sync uses a strategy pattern. Each `GroupSyncStrategy` subclass defines:
+Group sync uses a strategy pattern with a `GroupMember` protocol that works with both Aladtec `Member` and `EntraUser` objects. The sync pulls membership data directly from Entra ID (which is synced from Aladtec via user sync).
+
+Each `GroupStrategy` subclass defines:
 - `name`: Strategy identifier (e.g., "stations", "ff", "ao")
-- `get_groups_to_sync(members)`: Returns dict of group_key -> list of members
-- `get_group_config(group_key)`: Returns (display_name, mail_nickname, description)
+- `get_members(members)`: Returns dict of group_key -> list of members
+- `get_config(group_key)`: Returns GroupConfig (display_name, mail_nickname, description)
 - `automation_notice`: Warning text added to group descriptions
 
-Available strategies: `StationGroupStrategy`, `SupportGroupStrategy`, `FirefighterGroupStrategy`, `WildlandFirefighterGroupStrategy`, `ApparatusOperatorGroupStrategy`, `MarineGroupStrategy`, `VolunteerGroupStrategy`, `MobeGroupStrategy`
+Available strategies: `StationStrategy`, `SupportStrategy`, `FirefighterStrategy`, `WildlandFirefighterStrategy`, `ApparatusOperatorStrategy`, `MarineStrategy`, `VolunteerStrategy`, `MobeScheduleStrategy`
+
+**Data flow:** Entra ID users → Strategy determines membership → Sync to M365/Exchange groups
 
 ### Exchange Online (Mail-Enabled Security Groups)
 For email distribution without SharePoint sprawl, use mail-enabled security groups instead of M365 groups. These are managed via Exchange Online PowerShell (not Graph API).
@@ -171,11 +175,14 @@ uv run ispyfire-admin deactivate user@sjifire.org
 ```
 
 ### Group sync details
-The `ms-group-sync` command automatically detects existing group types:
-- **M365 groups**: Synced via Graph API
-- **Exchange groups**: Synced via PowerShell
+The `ms-group-sync` command uses Entra ID as the source of truth for membership data:
+- **Data source**: Entra ID users (synced from Aladtec via `entra-user-sync`)
+- **M365 groups**: Synced via Graph API (uses user IDs directly)
+- **Exchange groups**: Synced via PowerShell (uses email addresses)
 - **Conflicts**: Groups in both systems are skipped with a warning
 - **New groups**: Created as Exchange mail-enabled security groups by default (no SharePoint sprawl)
+
+Note: Run `entra-user-sync` before `ms-group-sync` to ensure Entra ID has current data.
 
 ### Check linting
 ```bash

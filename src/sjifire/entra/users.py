@@ -124,6 +124,30 @@ class EntraUser:
 
         return bool(self.positions & OPERATIONAL_POSITIONS)
 
+    @property
+    def station_number(self) -> str | None:
+        """Extract station number from office_location ('Station XX' → 'XX').
+
+        Supports both 'Station 31' and plain '31' formats.
+        """
+        if not self.office_location:
+            return None
+        loc = self.office_location.strip()
+        # Handle plain number
+        if loc.isdigit():
+            return loc
+        # Handle "Station 31" format
+        if loc.lower().startswith("station "):
+            num = loc[8:].strip()
+            if num.isdigit():
+                return num
+        return None
+
+    @property
+    def work_group(self) -> str | None:
+        """Alias for employee_type (protocol compatibility with GroupMember)."""
+        return self.employee_type
+
 
 class EntraUserManager:
     """Manage users in Entra ID."""

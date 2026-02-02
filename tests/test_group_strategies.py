@@ -9,6 +9,7 @@ from sjifire.core.group_strategies import (
     ApparatusOperatorStrategy,
     FirefighterStrategy,
     GroupConfig,
+    GroupMember,
     GroupStrategy,
     MarineStrategy,
     MobeScheduleStrategy,
@@ -18,6 +19,7 @@ from sjifire.core.group_strategies import (
     WildlandFirefighterStrategy,
     get_strategy,
 )
+from sjifire.entra.users import EntraUser
 
 # =============================================================================
 # Test Fixtures
@@ -46,6 +48,34 @@ def make_member(
         station_assignment=station_assignment,
         work_group=work_group,
         evip=evip,
+    )
+
+
+def make_entra_user(
+    user_id: str = "user-id-1",
+    display_name: str = "John Doe",
+    email: str | None = "john.doe@sjifire.org",
+    positions: str | None = None,  # Comma-delimited string for extension_attribute3
+    schedules: str | None = None,  # Comma-delimited string for extension_attribute4
+    office_location: str | None = None,  # "Station XX" format
+    employee_type: str | None = None,  # work_group
+    evip: str | None = None,  # extension_attribute2
+) -> EntraUser:
+    """Helper to create test EntraUser objects with defaults."""
+    return EntraUser(
+        id=user_id,
+        display_name=display_name,
+        first_name=display_name.split()[0] if display_name else None,
+        last_name=display_name.split()[-1] if display_name else None,
+        email=email,
+        upn=email,
+        employee_id="EMP001",
+        account_enabled=True,
+        office_location=office_location,
+        employee_type=employee_type,
+        extension_attribute2=evip,
+        extension_attribute3=positions,
+        extension_attribute4=schedules,
     )
 
 
@@ -770,6 +800,153 @@ class TestMobeScheduleStrategy:
 
 
 # =============================================================================
+# Test GroupMember Protocol and EntraUser Compatibility
+# =============================================================================
+
+
+class TestGroupMemberProtocol:
+    """Tests for GroupMember protocol implementation."""
+
+    def test_member_implements_protocol(self):
+        """Member should implement GroupMember protocol."""
+        member = make_member(station_assignment="31")
+        assert isinstance(member, GroupMember)
+
+    def test_entra_user_implements_protocol(self):
+        """EntraUser should implement GroupMember protocol."""
+        user = make_entra_user(office_location="Station 31")
+        assert isinstance(user, GroupMember)
+
+    def test_member_station_number_plain(self):
+        """Member.station_number should parse plain number."""
+        member = make_member(station_assignment="31")
+        assert member.station_number == "31"
+
+    def test_member_station_number_prefixed(self):
+        """Member.station_number should parse 'Station XX' format."""
+        member = make_member(station_assignment="Station 32")
+        assert member.station_number == "32"
+
+    def test_member_station_number_none(self):
+        """Member.station_number should return None when not set."""
+        member = make_member(station_assignment=None)
+        assert member.station_number is None
+
+    def test_entra_user_station_number_plain(self):
+        """EntraUser.station_number should parse plain number."""
+        user = make_entra_user(office_location="31")
+        assert user.station_number == "31"
+
+    def test_entra_user_station_number_prefixed(self):
+        """EntraUser.station_number should parse 'Station XX' format."""
+        user = make_entra_user(office_location="Station 32")
+        assert user.station_number == "32"
+
+    def test_entra_user_station_number_none(self):
+        """EntraUser.station_number should return None when not set."""
+        user = make_entra_user(office_location=None)
+        assert user.station_number is None
+
+    def test_entra_user_work_group(self):
+        """EntraUser.work_group should return employee_type."""
+        user = make_entra_user(employee_type="Volunteer")
+        assert user.work_group == "Volunteer"
+
+    def test_entra_user_positions_as_set(self):
+        """EntraUser.positions should parse comma-delimited string to set."""
+        user = make_entra_user(positions="Firefighter, Support, EMT")
+        assert user.positions == {"Firefighter", "Support", "EMT"}
+
+    def test_entra_user_schedules_as_set(self):
+        """EntraUser.schedules should parse comma-delimited string to set."""
+        user = make_entra_user(schedules="State Mobe, Daily")
+        assert user.schedules == {"State Mobe", "Daily"}
+
+
+# =============================================================================
+# Test Strategies with EntraUser Objects
+# =============================================================================
+
+
+class TestStrategiesWithEntraUser:
+    """Tests verifying strategies work with EntraUser objects."""
+
+    def test_station_strategy_with_entra_user(self):
+        """StationStrategy should work with EntraUser."""
+        strategy = StationStrategy()
+        user = make_entra_user(office_location="Station 31")
+        result = strategy.get_members([user])
+        assert "31" in result
+        assert len(result["31"]) == 1
+        assert result["31"][0].email == "john.doe@sjifire.org"
+
+    def test_firefighter_strategy_with_entra_user(self):
+        """FirefighterStrategy should work with EntraUser."""
+        strategy = FirefighterStrategy()
+        user = make_entra_user(positions="Firefighter, EMT")
+        result = strategy.get_members([user])
+        assert "FF" in result
+        assert len(result["FF"]) == 1
+
+    def test_support_strategy_with_entra_user(self):
+        """SupportStrategy should work with EntraUser."""
+        strategy = SupportStrategy()
+        user = make_entra_user(positions="Support")
+        result = strategy.get_members([user])
+        assert "Support" in result
+        assert len(result["Support"]) == 1
+
+    def test_wildland_strategy_with_entra_user(self):
+        """WildlandFirefighterStrategy should work with EntraUser."""
+        strategy = WildlandFirefighterStrategy()
+        user = make_entra_user(positions="Wildland Firefighter")
+        result = strategy.get_members([user])
+        assert "WFF" in result
+        assert len(result["WFF"]) == 1
+
+    def test_apparatus_operator_strategy_with_entra_user(self):
+        """ApparatusOperatorStrategy should work with EntraUser."""
+        strategy = ApparatusOperatorStrategy()
+        user = make_entra_user(evip="2025-12-31")
+        result = strategy.get_members([user])
+        assert "Apparatus Operator" in result
+        assert len(result["Apparatus Operator"]) == 1
+
+    def test_marine_strategy_with_entra_user(self):
+        """MarineStrategy should work with EntraUser."""
+        strategy = MarineStrategy()
+        user = make_entra_user(positions="Marine: Pilot, Firefighter")
+        result = strategy.get_members([user])
+        assert "Marine" in result
+        assert len(result["Marine"]) == 1
+
+    def test_volunteer_strategy_with_entra_user(self):
+        """VolunteerStrategy should work with EntraUser."""
+        strategy = VolunteerStrategy()
+        user = make_entra_user(employee_type="Volunteer", positions="Firefighter")
+        result = strategy.get_members([user])
+        assert "Volunteers" in result
+        assert len(result["Volunteers"]) == 1
+
+    def test_mobe_strategy_with_entra_user(self):
+        """MobeScheduleStrategy should work with EntraUser."""
+        strategy = MobeScheduleStrategy()
+        user = make_entra_user(schedules="State Mobe, Daily")
+        result = strategy.get_members([user])
+        assert "mobe" in result
+        assert len(result["mobe"]) == 1
+
+    def test_mixed_member_types(self):
+        """Strategies should work with mixed Member and EntraUser lists."""
+        strategy = FirefighterStrategy()
+        member = make_member(positions=["Firefighter"])
+        user = make_entra_user(positions="Firefighter")
+        result = strategy.get_members([member, user])
+        assert "FF" in result
+        assert len(result["FF"]) == 2
+
+
+# =============================================================================
 # Test Base Class Contract
 # =============================================================================
 
@@ -807,7 +984,7 @@ class TestGroupStrategyContract:
 
     @pytest.mark.parametrize("strategy_name", STRATEGY_NAMES)
     def test_strategy_get_members_values_are_lists(self, strategy_name):
-        """get_members dict values should be lists of Members."""
+        """get_members dict values should be lists of GroupMember objects."""
         strategy = get_strategy(strategy_name)
         # Create a member that might match any strategy
         member = make_member(
@@ -822,4 +999,23 @@ class TestGroupStrategyContract:
         for value in result.values():
             assert isinstance(value, list)
             for item in value:
-                assert isinstance(item, Member)
+                assert isinstance(item, GroupMember)
+
+    @pytest.mark.parametrize("strategy_name", STRATEGY_NAMES)
+    def test_strategy_works_with_entra_user(self, strategy_name):
+        """All strategies should work with EntraUser objects."""
+        strategy = get_strategy(strategy_name)
+        # Create an EntraUser that might match any strategy
+        user = make_entra_user(
+            positions="Firefighter, Support, Wildland Firefighter, Marine: Pilot",
+            schedules="State Mobe",
+            office_location="Station 31",
+            employee_type="Volunteer",
+            evip="2025-12-31",
+        )
+        result = strategy.get_members([user])
+        assert isinstance(result, dict)
+        for value in result.values():
+            assert isinstance(value, list)
+            for item in value:
+                assert isinstance(item, GroupMember)
