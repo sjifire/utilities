@@ -10,6 +10,10 @@ from sjifire.ispyfire.models import ISpyFirePerson
 
 logger = logging.getLogger(__name__)
 
+# Schedules that qualify a user for iSpyFire access, independent of operational positions.
+# This allows administrative staff on operational schedules to receive incident notifications.
+ISPYFIRE_QUALIFYING_SCHEDULES: set[str] = {"Operations"}
+
 
 @dataclass
 class SyncComparison:
@@ -51,16 +55,25 @@ def get_user_positions(user: EntraUser) -> set[str]:
 
 
 def is_operational(user: EntraUser) -> bool:
-    """Check if user has any operational positions.
+    """Check if user qualifies for iSpyFire access.
+
+    A user qualifies if they have:
+    - At least one operational position (Firefighter, Apparatus Operator, etc.), OR
+    - At least one qualifying schedule (Operations)
 
     Args:
         user: Entra user object
 
     Returns:
-        True if user has at least one operational position
+        True if user qualifies for iSpyFire access
     """
     positions = get_user_positions(user)
-    return bool(positions & OPERATIONAL_POSITIONS)
+    if positions & OPERATIONAL_POSITIONS:
+        return True
+
+    # Also check qualifying schedules for non-operational staff
+    schedules = user.schedules
+    return bool(schedules & ISPYFIRE_QUALIFYING_SCHEDULES)
 
 
 def fields_need_update(user: EntraUser, person: ISpyFirePerson) -> list[str]:
