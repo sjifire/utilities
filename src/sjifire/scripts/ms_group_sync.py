@@ -455,6 +455,14 @@ class UnifiedGroupSyncManager:
                     )
                 logger.info(f"Created Exchange group: {display_name} ({email})")
 
+                # Set aliases if configured
+                if config.aliases:
+                    await self.exchange_client.set_distribution_group_aliases(
+                        identity=email,
+                        aliases=config.aliases,
+                        domain=self.domain,
+                    )
+
         # For dry-run on existing groups, we need to fetch current state first
         if dry_run:
             group, current_members = await self.exchange_client.get_group_with_members(email)
@@ -525,6 +533,14 @@ class UnifiedGroupSyncManager:
             logger.info(f"Removed {member_email} from {email}")
         for error in result.get("errors", []):
             logger.error(f"Error syncing {email}: {error}")
+
+        # Set aliases if configured (idempotent - won't duplicate existing aliases)
+        if config.aliases:
+            await self.exchange_client.set_distribution_group_aliases(
+                identity=email,
+                aliases=config.aliases,
+                domain=self.domain,
+            )
 
         return GroupSyncResult(
             group_name=display_name,
