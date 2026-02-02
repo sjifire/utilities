@@ -402,6 +402,27 @@ class TestGetResponderTypes:
         user = self._make_user("Lieutenant,Captain")
         assert get_responder_types(user) == []
 
+    def test_marine_deckhand_returns_marine(self):
+        """Marine: Deckhand position should get Marine responder type."""
+        user = self._make_user("Marine: Deckhand")
+        assert get_responder_types(user) == ["Marine"]
+
+    def test_marine_mate_returns_marine(self):
+        """Marine: Mate position should get Marine responder type."""
+        user = self._make_user("Marine: Mate")
+        assert get_responder_types(user) == ["Marine"]
+
+    def test_marine_pilot_returns_marine(self):
+        """Marine: Pilot position should get Marine responder type."""
+        user = self._make_user("Marine: Pilot")
+        assert get_responder_types(user) == ["Marine"]
+
+    def test_marine_with_firefighter(self):
+        """User with FF and Marine positions should get both types."""
+        user = self._make_user("Firefighter,Marine: Mate")
+        result = get_responder_types(user)
+        assert result == ["FF", "Marine"]
+
     def test_results_are_sorted(self):
         """Responder types should be returned in sorted order."""
         user = self._make_user("Wildland Firefighter,Firefighter,Support")

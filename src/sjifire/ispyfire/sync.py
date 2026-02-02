@@ -3,7 +3,7 @@
 import logging
 from dataclasses import dataclass, field
 
-from sjifire.core.constants import OPERATIONAL_POSITIONS
+from sjifire.core.constants import MARINE_POSITIONS, OPERATIONAL_POSITIONS
 from sjifire.core.normalize import normalize_email, normalize_name, normalize_phone
 from sjifire.entra.users import EntraUser
 from sjifire.ispyfire.models import ISpyFirePerson
@@ -30,6 +30,7 @@ def get_responder_types(user: EntraUser) -> list[str]:
     - Wildland Firefighter → WFF
     - Support → Support
     - Apparatus Operator (without FF or WFF) → Tender Ops
+    - Any Marine position (Mate, Pilot, Deckhand) → Marine
 
     Args:
         user: Entra user object
@@ -52,6 +53,10 @@ def get_responder_types(user: EntraUser) -> list[str]:
         and "Wildland Firefighter" not in positions
     ):
         responder_types.append("Tender Ops")
+
+    # Marine: any marine position
+    if positions & MARINE_POSITIONS:
+        responder_types.append("Marine")
 
     return sorted(responder_types)
 
