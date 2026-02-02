@@ -27,8 +27,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from tenacity import retry, retry_if_result, stop_after_attempt, wait_exponential
-
 from sjifire.core.config import get_exchange_credentials
 
 logger = logging.getLogger(__name__)
@@ -75,7 +73,6 @@ class ExchangeOnlineClient:
         self.certificate_thumbprint = certificate_thumbprint or creds.certificate_thumbprint
         self.certificate_path = certificate_path or creds.certificate_path
         self.certificate_password = certificate_password or creds.certificate_password
-        self._connected = False
 
     def _build_connect_command(self) -> str:
         """Build the Connect-ExchangeOnline command."""
@@ -205,6 +202,64 @@ class ExchangeOnlineClient:
             )
         return None
 
+    async def get_group_with_members(self, identity: str) -> tuple[ExchangeGroup | None, list[str]]:
+        """Get a distribution group and its members in a single call.
+
+        This is more efficient than calling get_distribution_group and
+        get_distribution_group_members separately (one connection instead of two).
+
+        Args:
+            identity: Group name, alias, or email address
+
+        Returns:
+            Tuple of (ExchangeGroup or None, list of member emails)
+        """
+        # Build a script that outputs both group info and members as JSON
+        # Note: Commands are joined with "; " so each must be a complete statement
+        commands = [
+            f"$group = Get-DistributionGroup -Identity '{identity}' -ErrorAction SilentlyContinue",
+            (
+                "if ($group) { "
+                "$members = Get-DistributionGroupMember -Identity $group.Identity "
+                "| Select-Object PrimarySmtpAddress; "
+                "@{ Group = $group | Select-Object Identity, DisplayName, PrimarySmtpAddress, "
+                "RecipientTypeDetails; Members = $members } | ConvertTo-Json -Depth 3 "
+                "}"
+            ),
+        ]
+
+        result = self._run_powershell(commands)
+        if not result or not isinstance(result, dict):
+            return None, []
+
+        # Parse group info
+        group_data = result.get("Group")
+        group = None
+        if group_data and isinstance(group_data, dict) and "Identity" in group_data:
+            group = ExchangeGroup(
+                identity=group_data.get("Identity", identity),
+                display_name=group_data.get("DisplayName", ""),
+                primary_smtp_address=group_data.get("PrimarySmtpAddress", ""),
+                group_type=group_data.get("RecipientTypeDetails", ""),
+            )
+
+        # Parse members
+        members: list[str] = []
+        members_data = result.get("Members")
+        if members_data:
+            if isinstance(members_data, dict):
+                # Single member
+                if "PrimarySmtpAddress" in members_data:
+                    members.append(members_data["PrimarySmtpAddress"].lower())
+            elif isinstance(members_data, list):
+                members.extend(
+                    m["PrimarySmtpAddress"].lower()
+                    for m in members_data
+                    if isinstance(m, dict) and "PrimarySmtpAddress" in m
+                )
+
+        return group, members
+
     async def create_mail_enabled_security_group(
         self,
         name: str,
@@ -330,6 +385,55 @@ class ExchangeOnlineClient:
         logger.error(f"Failed to update ManagedBy for {identity}")
         return False
 
+    async def update_group_settings(
+        self,
+        identity: str,
+        description: str | None = None,
+        managed_by: str | None = None,
+    ) -> bool:
+        """Update group description and/or managed_by in a single call.
+
+        This is more efficient than calling update_distribution_group_description
+        and update_distribution_group_managed_by separately.
+
+        Args:
+            identity: Group name, alias, or email address
+            description: New description (optional)
+            managed_by: New owner email (optional)
+
+        Returns:
+            True if all updates successful
+        """
+        if not description and not managed_by:
+            return True
+
+        commands = []
+
+        if description:
+            escaped_description = description.replace("'", "''")
+            commands.append(
+                f"Set-DistributionGroup -Identity '{identity}' -Description '{escaped_description}'"
+            )
+
+        if managed_by:
+            commands.append(
+                f"Set-DistributionGroup -Identity '{identity}' "
+                f"-ManagedBy '{managed_by}' -BypassSecurityGroupManagerCheck"
+            )
+
+        commands.append("Write-Output 'SUCCESS'")
+
+        result = self._run_powershell(commands, parse_json=False)
+        if result and "SUCCESS" in str(result):
+            if description:
+                logger.info(f"Updated description for {identity}")
+            if managed_by:
+                logger.info(f"Updated ManagedBy for {identity} to {managed_by}")
+            return True
+
+        logger.error(f"Failed to update settings for {identity}")
+        return False
+
     async def delete_distribution_group(self, identity: str) -> bool:
         """Delete a distribution group or mail-enabled security group.
 
@@ -393,46 +497,6 @@ class ExchangeOnlineClient:
 
         return members
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=2, min=4, max=30),
-        retry=retry_if_result(lambda r: r == "RETRY"),
-        reraise=True,
-    )
-    def _add_member_with_retry(self, identity: str, member: str) -> str:
-        """Add member with retry logic for transient errors.
-
-        Returns:
-            "SUCCESS", "ALREADY_MEMBER", "RETRY" (for transient errors), or "FAILED"
-        """
-        commands = [
-            f"Add-DistributionGroupMember -Identity '{identity}' "
-            f"-Member '{member}' -BypassSecurityGroupManagerCheck -ErrorAction Stop",
-            "Write-Output 'SUCCESS'",
-        ]
-
-        result = self._run_powershell(commands, parse_json=False)
-        result_str = str(result) if result else ""
-
-        if "SUCCESS" in result_str:
-            return "SUCCESS"
-
-        if "already a member" in result_str.lower():
-            return "ALREADY_MEMBER"
-
-        # Check for transient Azure AD sync errors - retry these
-        transient_indicators = [
-            "transient",
-            "retry a couple of minutes",
-            "does not exist or one of its queried reference-property",
-            "DualWrite",
-        ]
-        if any(indicator in result_str for indicator in transient_indicators):
-            logger.warning(f"Transient error adding {member} to {identity}, will retry...")
-            return "RETRY"
-
-        return "FAILED"
-
     async def add_distribution_group_member(
         self,
         identity: str,
@@ -447,35 +511,9 @@ class ExchangeOnlineClient:
         Returns:
             True if successful
         """
-        result = self._add_member_with_retry(identity, member)
-
-        if result == "SUCCESS":
-            logger.info(f"Added {member} to {identity}")
-            return True
-
-        if result == "ALREADY_MEMBER":
-            logger.debug(f"{member} is already a member of {identity}")
-            return True
-
-        logger.error(f"Failed to add {member} to {identity}")
-        return False
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=2, min=4, max=30),
-        retry=retry_if_result(lambda r: r == "RETRY"),
-        reraise=True,
-    )
-    def _remove_member_with_retry(self, identity: str, member: str) -> str:
-        """Remove member with retry logic for transient errors.
-
-        Returns:
-            "SUCCESS", "RETRY" (for transient errors), or "FAILED"
-        """
         commands = [
-            f"Remove-DistributionGroupMember -Identity '{identity}' "
-            f"-Member '{member}' -BypassSecurityGroupManagerCheck "
-            "-Confirm:$false -ErrorAction Stop",
+            f"Add-DistributionGroupMember -Identity '{identity}' "
+            f"-Member '{member}' -BypassSecurityGroupManagerCheck -ErrorAction Stop",
             "Write-Output 'SUCCESS'",
         ]
 
@@ -483,20 +521,15 @@ class ExchangeOnlineClient:
         result_str = str(result) if result else ""
 
         if "SUCCESS" in result_str:
-            return "SUCCESS"
+            logger.info(f"Added {member} to {identity}")
+            return True
 
-        # Check for transient Azure AD sync errors - retry these
-        transient_indicators = [
-            "transient",
-            "retry a couple of minutes",
-            "does not exist or one of its queried reference-property",
-            "DualWrite",
-        ]
-        if any(indicator in result_str for indicator in transient_indicators):
-            logger.warning(f"Transient error removing {member} from {identity}, will retry...")
-            return "RETRY"
+        if "already a member" in result_str.lower():
+            logger.debug(f"{member} is already a member of {identity}")
+            return True
 
-        return "FAILED"
+        logger.error(f"Failed to add {member} to {identity}")
+        return False
 
     async def remove_distribution_group_member(
         self,
@@ -512,14 +545,243 @@ class ExchangeOnlineClient:
         Returns:
             True if successful
         """
-        result = self._remove_member_with_retry(identity, member)
+        commands = [
+            f"Remove-DistributionGroupMember -Identity '{identity}' "
+            f"-Member '{member}' -BypassSecurityGroupManagerCheck "
+            "-Confirm:$false -ErrorAction Stop",
+            "Write-Output 'SUCCESS'",
+        ]
 
-        if result == "SUCCESS":
+        result = self._run_powershell(commands, parse_json=False)
+        if result and "SUCCESS" in str(result):
             logger.info(f"Removed {member} from {identity}")
             return True
 
         logger.error(f"Failed to remove {member} from {identity}")
         return False
+
+    async def sync_group_members(
+        self,
+        identity: str,
+        members_to_add: list[str],
+        members_to_remove: list[str],
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Add and remove multiple members in a single call.
+
+        This batches all member changes into one PowerShell connection,
+        significantly faster than individual add/remove calls.
+
+        Args:
+            identity: Group name, alias, or email address
+            members_to_add: List of member emails to add
+            members_to_remove: List of member emails to remove
+
+        Returns:
+            Tuple of (added, removed, errors) - lists of emails
+        """
+        if not members_to_add and not members_to_remove:
+            return [], [], []
+
+        # Build PowerShell script that tracks results
+        commands = [
+            "$added = @()",
+            "$removed = @()",
+            "$errors = @()",
+        ]
+
+        # Add members
+        commands.extend(
+            f"try {{ "
+            f"Add-DistributionGroupMember -Identity '{identity}' "
+            f"-Member '{member}' -BypassSecurityGroupManagerCheck -ErrorAction Stop; "
+            f"$added += '{member}' "
+            f"}} catch {{ "
+            f"if ($_.Exception.Message -like '*already a member*') {{ $added += '{member}' }} "
+            f"else {{ $errors += '{member}: ' + $_.Exception.Message }} "
+            f"}}"
+            for member in members_to_add
+        )
+
+        # Remove members
+        commands.extend(
+            f"try {{ "
+            f"Remove-DistributionGroupMember -Identity '{identity}' "
+            f"-Member '{member}' -BypassSecurityGroupManagerCheck "
+            f"-Confirm:$false -ErrorAction Stop; "
+            f"$removed += '{member}' "
+            f"}} catch {{ "
+            f"$errors += '{member}: ' + $_.Exception.Message "
+            f"}}"
+            for member in members_to_remove
+        )
+
+        # Output results as JSON
+        commands.append(
+            "@{ Added = $added; Removed = $removed; Errors = $errors } | ConvertTo-Json"
+        )
+
+        result = self._run_powershell(commands)
+
+        added: list[str] = []
+        removed: list[str] = []
+        errors: list[str] = []
+
+        if result and isinstance(result, dict):
+            added_data = result.get("Added", [])
+            if isinstance(added_data, str):
+                added = [added_data] if added_data else []
+            elif isinstance(added_data, list):
+                added = [str(m) for m in added_data if m]
+
+            removed_data = result.get("Removed", [])
+            if isinstance(removed_data, str):
+                removed = [removed_data] if removed_data else []
+            elif isinstance(removed_data, list):
+                removed = [str(m) for m in removed_data if m]
+
+            errors_data = result.get("Errors", [])
+            if isinstance(errors_data, str):
+                errors = [errors_data] if errors_data else []
+            elif isinstance(errors_data, list):
+                errors = [str(e) for e in errors_data if e]
+
+        # Log results
+        for member in added:
+            logger.info(f"Added {member} to {identity}")
+        for member in removed:
+            logger.info(f"Removed {member} from {identity}")
+        for error in errors:
+            logger.error(f"Member sync error for {identity}: {error}")
+
+        return added, removed, errors
+
+    async def sync_group(
+        self,
+        identity: str,
+        description: str | None = None,
+        managed_by: str | None = None,
+        target_members: list[str] | None = None,
+    ) -> dict:
+        """Sync an entire group in a single PowerShell connection.
+
+        This is the most efficient way to sync a group - ONE connection that:
+        1. Gets current group info and members
+        2. Updates description and managed_by
+        3. Adds/removes members to match target
+
+        Args:
+            identity: Group email address
+            description: Description to set (optional)
+            managed_by: Owner email to set (optional)
+            target_members: List of member emails that should be in the group
+
+        Returns:
+            Dict with keys: group, current_members, added, removed, errors
+        """
+        target_members = target_members or []
+
+        # Build a comprehensive PowerShell script
+        script_parts = [
+            # Initialize result tracking
+            (
+                "$result = @{ group = $null; current_members = @(); "
+                "added = @(); removed = @(); errors = @() }"
+            ),
+            # Get group
+            f"$group = Get-DistributionGroup -Identity '{identity}' -ErrorAction SilentlyContinue",
+            "if (-not $group) { $result | ConvertTo-Json -Depth 3; return }",
+            # Store group info
+            (
+                "$result.group = $group | Select-Object Identity, DisplayName, "
+                "PrimarySmtpAddress, RecipientTypeDetails"
+            ),
+            # Get current members
+            (
+                "$members = Get-DistributionGroupMember -Identity $group.Identity "
+                "| Select-Object PrimarySmtpAddress"
+            ),
+            (
+                "$result.current_members = @($members "
+                "| ForEach-Object { $_.PrimarySmtpAddress.ToLower() })"
+            ),
+        ]
+
+        # Update description if provided
+        if description:
+            escaped_desc = description.replace("'", "''")
+            script_parts.append(
+                f"try {{ Set-DistributionGroup -Identity '{identity}' "
+                f"-Description '{escaped_desc}' }} "
+                f"catch {{ $result.errors += 'Description: ' + $_.Exception.Message }}"
+            )
+
+        # Update managed_by if provided
+        if managed_by:
+            script_parts.append(
+                f"try {{ Set-DistributionGroup -Identity '{identity}' "
+                f"-ManagedBy '{managed_by}' -BypassSecurityGroupManagerCheck }} "
+                f"catch {{ $result.errors += 'ManagedBy: ' + $_.Exception.Message }}"
+            )
+
+        # Build target members array in PowerShell
+        if target_members:
+            members_ps_array = "@('" + "', '".join(m.lower() for m in target_members) + "')"
+            script_parts.append(f"$targetMembers = {members_ps_array}")
+        else:
+            script_parts.append("$targetMembers = @()")
+
+        # Calculate and perform member changes
+        script_parts.extend(
+            [
+                # Find members to add/remove
+                "$toAdd = $targetMembers | Where-Object { $_ -notin $result.current_members }",
+                "$toRemove = $result.current_members | Where-Object { $_ -notin $targetMembers }",
+                # Add members loop
+                (
+                    "foreach ($member in $toAdd) { "
+                    f"try {{ Add-DistributionGroupMember -Identity '{identity}' -Member $member "
+                    "-BypassSecurityGroupManagerCheck -ErrorAction Stop; "
+                    "$result.added += $member } "
+                    "catch { if ($_.Exception.Message -like '*already a member*') "
+                    "{ $result.added += $member } "
+                    'else { $result.errors += "Add $member`: " + $_.Exception.Message } } }'
+                ),
+                # Remove members loop
+                (
+                    "foreach ($member in $toRemove) { "
+                    f"try {{ Remove-DistributionGroupMember -Identity '{identity}' -Member $member "
+                    "-BypassSecurityGroupManagerCheck -Confirm:$false -ErrorAction Stop; "
+                    "$result.removed += $member } "
+                    'catch { $result.errors += "Remove $member`: " + $_.Exception.Message } }'
+                ),
+                # Output result
+                "$result | ConvertTo-Json -Depth 3",
+            ]
+        )
+
+        result = self._run_powershell(script_parts)
+
+        # Parse result
+        if not result or not isinstance(result, dict):
+            return {
+                "group": None,
+                "current_members": [],
+                "added": [],
+                "removed": [],
+                "errors": ["Failed to execute sync script"],
+            }
+
+        # Normalize arrays (PowerShell returns single items as scalars)
+        for key in ["current_members", "added", "removed", "errors"]:
+            val = result.get(key, [])
+            if val is None:
+                result[key] = []
+            elif isinstance(val, str):
+                result[key] = [val] if val else []
+            elif not isinstance(val, list):
+                result[key] = [val]
+
+        return result
 
     async def close(self) -> None:
         """Close the client (no-op for subprocess approach)."""

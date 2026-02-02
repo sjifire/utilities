@@ -759,85 +759,6 @@ class TestGetDistributionGroupMembers:
 
 
 # =============================================================================
-# Test _add_member_with_retry
-# =============================================================================
-
-
-class TestAddMemberWithRetry:
-    """Tests for _add_member_with_retry method."""
-
-    @patch("sjifire.exchange.client.get_exchange_credentials")
-    @patch.object(ExchangeOnlineClient, "_run_powershell")
-    def test_add_success(self, mock_run_ps, mock_get_creds):
-        """Should return SUCCESS on successful add."""
-        mock_get_creds.return_value = MockExchangeCredentials(
-            certificate_thumbprint="ABC123",
-        )
-        mock_run_ps.return_value = "SUCCESS"
-
-        client = ExchangeOnlineClient()
-        result = client._add_member_with_retry("test-group", "user@example.com")
-
-        assert result == "SUCCESS"
-
-    @patch("sjifire.exchange.client.get_exchange_credentials")
-    @patch.object(ExchangeOnlineClient, "_run_powershell")
-    def test_add_already_member(self, mock_run_ps, mock_get_creds):
-        """Should return ALREADY_MEMBER when user is already in group."""
-        mock_get_creds.return_value = MockExchangeCredentials(
-            certificate_thumbprint="ABC123",
-        )
-        mock_run_ps.return_value = "Error: user@example.com is already a member of test-group"
-
-        client = ExchangeOnlineClient()
-        result = client._add_member_with_retry("test-group", "user@example.com")
-
-        assert result == "ALREADY_MEMBER"
-
-    @patch("sjifire.exchange.client.get_exchange_credentials")
-    @patch.object(ExchangeOnlineClient, "_run_powershell")
-    def test_add_transient_error_retry(self, mock_run_ps, mock_get_creds):
-        """Should return RETRY on transient Azure AD errors."""
-        mock_get_creds.return_value = MockExchangeCredentials(
-            certificate_thumbprint="ABC123",
-        )
-        mock_run_ps.return_value = "Error: transient error occurred, retry a couple of minutes"
-
-        client = ExchangeOnlineClient()
-        result = client._add_member_with_retry.__wrapped__(client, "test-group", "user@example.com")
-
-        assert result == "RETRY"
-
-    @patch("sjifire.exchange.client.get_exchange_credentials")
-    @patch.object(ExchangeOnlineClient, "_run_powershell")
-    def test_add_dualwrite_error_retry(self, mock_run_ps, mock_get_creds):
-        """Should return RETRY on DualWrite sync errors."""
-        mock_get_creds.return_value = MockExchangeCredentials(
-            certificate_thumbprint="ABC123",
-        )
-        mock_run_ps.return_value = "Error: DualWrite operation failed"
-
-        client = ExchangeOnlineClient()
-        result = client._add_member_with_retry.__wrapped__(client, "test-group", "user@example.com")
-
-        assert result == "RETRY"
-
-    @patch("sjifire.exchange.client.get_exchange_credentials")
-    @patch.object(ExchangeOnlineClient, "_run_powershell")
-    def test_add_failure(self, mock_run_ps, mock_get_creds):
-        """Should return FAILED on non-transient errors."""
-        mock_get_creds.return_value = MockExchangeCredentials(
-            certificate_thumbprint="ABC123",
-        )
-        mock_run_ps.return_value = "Error: Group not found"
-
-        client = ExchangeOnlineClient()
-        result = client._add_member_with_retry.__wrapped__(client, "test-group", "user@example.com")
-
-        assert result == "FAILED"
-
-
-# =============================================================================
 # Test add_distribution_group_member
 # =============================================================================
 
@@ -846,90 +767,49 @@ class TestAddDistributionGroupMember:
     """Tests for add_distribution_group_member method."""
 
     @patch("sjifire.exchange.client.get_exchange_credentials")
-    @patch.object(ExchangeOnlineClient, "_add_member_with_retry")
-    @pytest.mark.asyncio
-    async def test_add_member_success(self, mock_add_retry, mock_get_creds):
-        """Should return True on successful add."""
-        mock_get_creds.return_value = MockExchangeCredentials(
-            certificate_thumbprint="ABC123",
-        )
-        mock_add_retry.return_value = "SUCCESS"
-
-        client = ExchangeOnlineClient()
-        result = await client.add_distribution_group_member("test-group", "user@example.com")
-
-        assert result is True
-
-    @patch("sjifire.exchange.client.get_exchange_credentials")
-    @patch.object(ExchangeOnlineClient, "_add_member_with_retry")
-    @pytest.mark.asyncio
-    async def test_add_member_already_member(self, mock_add_retry, mock_get_creds):
-        """Should return True when already a member (idempotent)."""
-        mock_get_creds.return_value = MockExchangeCredentials(
-            certificate_thumbprint="ABC123",
-        )
-        mock_add_retry.return_value = "ALREADY_MEMBER"
-
-        client = ExchangeOnlineClient()
-        result = await client.add_distribution_group_member("test-group", "user@example.com")
-
-        assert result is True
-
-    @patch("sjifire.exchange.client.get_exchange_credentials")
-    @patch.object(ExchangeOnlineClient, "_add_member_with_retry")
-    @pytest.mark.asyncio
-    async def test_add_member_failure(self, mock_add_retry, mock_get_creds):
-        """Should return False on failure."""
-        mock_get_creds.return_value = MockExchangeCredentials(
-            certificate_thumbprint="ABC123",
-        )
-        mock_add_retry.return_value = "FAILED"
-
-        client = ExchangeOnlineClient()
-        result = await client.add_distribution_group_member("test-group", "user@example.com")
-
-        assert result is False
-
-
-# =============================================================================
-# Test _remove_member_with_retry
-# =============================================================================
-
-
-class TestRemoveMemberWithRetry:
-    """Tests for _remove_member_with_retry method."""
-
-    @patch("sjifire.exchange.client.get_exchange_credentials")
     @patch.object(ExchangeOnlineClient, "_run_powershell")
-    def test_remove_success(self, mock_run_ps, mock_get_creds):
-        """Should return SUCCESS on successful remove."""
+    @pytest.mark.asyncio
+    async def test_add_member_success(self, mock_run_ps, mock_get_creds):
+        """Should return True on successful add."""
         mock_get_creds.return_value = MockExchangeCredentials(
             certificate_thumbprint="ABC123",
         )
         mock_run_ps.return_value = "SUCCESS"
 
         client = ExchangeOnlineClient()
-        result = client._remove_member_with_retry.__wrapped__(
-            client, "test-group", "user@example.com"
-        )
+        result = await client.add_distribution_group_member("test-group", "user@example.com")
 
-        assert result == "SUCCESS"
+        assert result is True
 
     @patch("sjifire.exchange.client.get_exchange_credentials")
     @patch.object(ExchangeOnlineClient, "_run_powershell")
-    def test_remove_transient_error(self, mock_run_ps, mock_get_creds):
-        """Should return RETRY on transient errors."""
+    @pytest.mark.asyncio
+    async def test_add_member_already_member(self, mock_run_ps, mock_get_creds):
+        """Should return True when already a member (idempotent)."""
         mock_get_creds.return_value = MockExchangeCredentials(
             certificate_thumbprint="ABC123",
         )
-        mock_run_ps.return_value = "Error: does not exist or one of its queried reference-property"
+        mock_run_ps.return_value = "user@example.com is already a member of test-group"
 
         client = ExchangeOnlineClient()
-        result = client._remove_member_with_retry.__wrapped__(
-            client, "test-group", "user@example.com"
-        )
+        result = await client.add_distribution_group_member("test-group", "user@example.com")
 
-        assert result == "RETRY"
+        assert result is True
+
+    @patch("sjifire.exchange.client.get_exchange_credentials")
+    @patch.object(ExchangeOnlineClient, "_run_powershell")
+    @pytest.mark.asyncio
+    async def test_add_member_failure(self, mock_run_ps, mock_get_creds):
+        """Should return False on failure."""
+        mock_get_creds.return_value = MockExchangeCredentials(
+            certificate_thumbprint="ABC123",
+        )
+        mock_run_ps.return_value = "Error: Group not found"
+
+        client = ExchangeOnlineClient()
+        result = await client.add_distribution_group_member("test-group", "user@example.com")
+
+        assert result is False
 
 
 # =============================================================================
@@ -941,14 +821,14 @@ class TestRemoveDistributionGroupMember:
     """Tests for remove_distribution_group_member method."""
 
     @patch("sjifire.exchange.client.get_exchange_credentials")
-    @patch.object(ExchangeOnlineClient, "_remove_member_with_retry")
+    @patch.object(ExchangeOnlineClient, "_run_powershell")
     @pytest.mark.asyncio
-    async def test_remove_member_success(self, mock_remove_retry, mock_get_creds):
+    async def test_remove_member_success(self, mock_run_ps, mock_get_creds):
         """Should return True on successful remove."""
         mock_get_creds.return_value = MockExchangeCredentials(
             certificate_thumbprint="ABC123",
         )
-        mock_remove_retry.return_value = "SUCCESS"
+        mock_run_ps.return_value = "SUCCESS"
 
         client = ExchangeOnlineClient()
         result = await client.remove_distribution_group_member("test-group", "user@example.com")
@@ -956,14 +836,14 @@ class TestRemoveDistributionGroupMember:
         assert result is True
 
     @patch("sjifire.exchange.client.get_exchange_credentials")
-    @patch.object(ExchangeOnlineClient, "_remove_member_with_retry")
+    @patch.object(ExchangeOnlineClient, "_run_powershell")
     @pytest.mark.asyncio
-    async def test_remove_member_failure(self, mock_remove_retry, mock_get_creds):
+    async def test_remove_member_failure(self, mock_run_ps, mock_get_creds):
         """Should return False on failure."""
         mock_get_creds.return_value = MockExchangeCredentials(
             certificate_thumbprint="ABC123",
         )
-        mock_remove_retry.return_value = "FAILED"
+        mock_run_ps.return_value = "Error: Group not found"
 
         client = ExchangeOnlineClient()
         result = await client.remove_distribution_group_member("test-group", "user@example.com")

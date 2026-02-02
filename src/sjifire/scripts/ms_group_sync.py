@@ -402,17 +402,39 @@ class UnifiedGroupSyncManager:
         dry_run: bool,
         creating: bool,
     ) -> GroupSyncResult:
-        """Sync a group via Exchange (PowerShell)."""
+        """Sync a group via Exchange (PowerShell).
+
+        Uses a SINGLE PowerShell connection per group that does everything:
+        - Gets group info and current members
+        - Updates description and managed_by
+        - Adds/removes members to match target
+        """
         config = strategy.get_config(group_key)
         display_name = config.display_name
         alias = config.mail_nickname
         email = f"{alias}@{self.domain}"
 
-        # Get or create the group
+        # Build target member list
+        target_emails = [m.email.lower() for m in group_members if m.email]
+        email_to_member = {m.email.lower(): m for m in group_members if m.email}
+
+        # Handle group creation separately (can't batch with sync)
         if creating:
             if dry_run:
                 logger.info(f"Would create Exchange group: {display_name} ({email})")
-                group = None
+                # For dry-run of new group, all members would be added
+                added = [email_to_member[e].display_name for e in target_emails]
+                for name in added:
+                    logger.info(f"Would add {name} to {email}")
+                return GroupSyncResult(
+                    group_name=display_name,
+                    group_email=email,
+                    group_type=GroupType.EXCHANGE,
+                    created=True,
+                    members_added=added,
+                    members_removed=[],
+                    errors=[],
+                )
             else:
                 group = await self.exchange_client.create_mail_enabled_security_group(
                     name=display_name,
@@ -421,75 +443,94 @@ class UnifiedGroupSyncManager:
                     primary_smtp_address=email,
                     managed_by="svc-automations@sjifire.org",
                 )
-                if group:
-                    logger.info(f"Created Exchange group: {display_name} ({email})")
-                    # Set the group description/notes
-                    await self.exchange_client.update_distribution_group_description(
-                        email, strategy.automation_notice
+                if not group:
+                    return GroupSyncResult(
+                        group_name=display_name,
+                        group_email=email,
+                        group_type=GroupType.EXCHANGE,
+                        errors=[f"Failed to create group: {display_name}"],
                     )
-        else:
-            group = await self.exchange_client.get_distribution_group(email)
-            # Update description and owner on existing groups
-            if group and not dry_run:
-                await self.exchange_client.update_distribution_group_description(
-                    email, strategy.automation_notice
+                logger.info(f"Created Exchange group: {display_name} ({email})")
+
+        # For dry-run on existing groups, we need to fetch current state first
+        if dry_run:
+            group, current_members = await self.exchange_client.get_group_with_members(email)
+            if not group:
+                return GroupSyncResult(
+                    group_name=display_name,
+                    group_email=email,
+                    group_type=GroupType.EXCHANGE,
+                    errors=[f"Group not found: {email}"],
                 )
-                await self.exchange_client.update_distribution_group_managed_by(
-                    email, "svc-automations@sjifire.org"
-                )
 
-        # Sync membership
-        added: list[str] = []
-        removed: list[str] = []
-        errors: list[str] = []
+            current_set = set(current_members)
+            target_set = set(target_emails)
+            to_add = target_set - current_set
+            to_remove = current_set - target_set
 
-        if group or dry_run:
-            # Get current members (even in dry-run to show accurate diff)
-            current_members = set(await self.exchange_client.get_distribution_group_members(email))
+            added = []
+            for member_email in to_add:
+                member = email_to_member.get(member_email)
+                name = member.display_name if member else member_email
+                logger.info(f"Would add {name} to {email}")
+                added.append(name)
 
-            # Determine who should be in the group
-            should_be_emails: dict[str, Member] = {}
-            for member in group_members:
-                if member.email:
-                    should_be_emails[member.email.lower()] = member
+            removed = []
+            for member_email in to_remove:
+                logger.info(f"Would remove {member_email} from {email}")
+                removed.append(member_email)
 
-            should_be_set = set(should_be_emails.keys())
+            return GroupSyncResult(
+                group_name=display_name,
+                group_email=email,
+                group_type=GroupType.EXCHANGE,
+                created=False,
+                members_added=added,
+                members_removed=removed,
+                errors=[],
+            )
 
-            # Add missing members
-            for member_email in should_be_set - current_members:
-                member = should_be_emails[member_email]
-                if dry_run:
-                    logger.info(f"Would add {member.display_name} to {email}")
-                    added.append(member.display_name)
-                else:
-                    if await self.exchange_client.add_distribution_group_member(
-                        email, member_email
-                    ):
-                        added.append(member.display_name)
-                    else:
-                        errors.append(f"Failed to add {member.display_name}")
+        # SINGLE CONNECTION: Do everything in one PowerShell call
+        result = await self.exchange_client.sync_group(
+            identity=email,
+            description=strategy.automation_notice,
+            managed_by="svc-automations@sjifire.org",
+            target_members=target_emails,
+        )
 
-            # Remove extra members
-            for member_email in current_members - should_be_set:
-                if dry_run:
-                    logger.info(f"Would remove {member_email} from {email}")
-                    removed.append(member_email)
-                else:
-                    if await self.exchange_client.remove_distribution_group_member(
-                        email, member_email
-                    ):
-                        removed.append(member_email)
-                    else:
-                        errors.append(f"Failed to remove {member_email}")
+        if not result.get("group"):
+            return GroupSyncResult(
+                group_name=display_name,
+                group_email=email,
+                group_type=GroupType.EXCHANGE,
+                errors=result.get("errors", [f"Group not found: {email}"]),
+            )
+
+        # Convert added emails to display names
+        added = []
+        for member_email in result.get("added", []):
+            member = email_to_member.get(member_email.lower())
+            added.append(member.display_name if member else member_email)
+
+        # Log changes
+        if result.get("added"):
+            logger.info(f"Updated description for {email}")
+            logger.info(f"Updated ManagedBy for {email}")
+        for name in added:
+            logger.info(f"Added {name} to {email}")
+        for member_email in result.get("removed", []):
+            logger.info(f"Removed {member_email} from {email}")
+        for error in result.get("errors", []):
+            logger.error(f"Error syncing {email}: {error}")
 
         return GroupSyncResult(
             group_name=display_name,
             group_email=email,
             group_type=GroupType.EXCHANGE,
-            created=creating,  # True if group was/would be created
+            created=creating,
             members_added=added,
-            members_removed=removed,
-            errors=errors,
+            members_removed=result.get("removed", []),
+            errors=result.get("errors", []),
         )
 
     async def sync(
@@ -670,11 +711,10 @@ async def backup_groups(
         except Exception as e:
             logger.debug(f"Error checking M365 group {nickname}: {e}")
 
-        # Check Exchange
+        # Check Exchange (batched: get group + members in one call)
         try:
-            exch_group = await exchange_client.get_distribution_group(email)
+            exch_group, members = await exchange_client.get_group_with_members(email)
             if exch_group:
-                members = await exchange_client.get_distribution_group_members(email)
                 exchange_groups_data.append(
                     {
                         "identity": exch_group.identity,

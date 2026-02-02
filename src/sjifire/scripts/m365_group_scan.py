@@ -104,9 +104,9 @@ async def count_drive_files_recursive(
     """
     count = 0
     try:
-        result = await client.drives.by_drive_id(drive_id).items.by_drive_item_id(
-            item_id
-        ).children.get()
+        result = (
+            await client.drives.by_drive_id(drive_id).items.by_drive_item_id(item_id).children.get()
+        )
 
         if result and result.value:
             for item in result.value:
@@ -544,9 +544,9 @@ async def get_drive_contents(client, drive_id: str, item_id: str = "root") -> li
     """
     items = []
     try:
-        result = await client.drives.by_drive_id(drive_id).items.by_drive_item_id(
-            item_id
-        ).children.get()
+        result = (
+            await client.drives.by_drive_id(drive_id).items.by_drive_item_id(item_id).children.get()
+        )
 
         if result and result.value:
             for item in result.value:
