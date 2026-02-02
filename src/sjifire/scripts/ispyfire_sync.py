@@ -222,7 +222,23 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
         print("\nApplying changes...")
 
         # Add new people (creates user, sets active flags, sends invite email)
+        # Safeguard: check by email first to prevent duplicates
         for user in comparison.to_add:
+            # Double-check no existing person with this email (prevents duplicates)
+            existing = ispy_client.get_person_by_email(user.email) if user.email else None
+            if existing:
+                logger.info(
+                    f"Found existing person for {user.email}, reactivating instead of creating"
+                )
+                if not existing.is_active:
+                    if ispy_client.reactivate_person(existing.id, email=existing.email):
+                        logger.info(f"  Reactivated: {existing.display_name}")
+                    else:
+                        logger.error(f"  Failed to reactivate: {existing.display_name}")
+                else:
+                    logger.info(f"  Already active: {existing.display_name}")
+                continue
+
             person = entra_user_to_ispyfire_person(user)
             logger.info(f"Creating: {person.display_name}")
             result = ispy_client.create_and_invite(person)

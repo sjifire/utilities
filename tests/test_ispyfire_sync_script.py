@@ -417,6 +417,7 @@ class TestRunSync:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=None)
         mock_client.get_people.return_value = []
+        mock_client.get_person_by_email.return_value = None  # No existing person (safeguard check)
         mock_client.create_and_invite.return_value = MockISpyFirePerson(
             id="new-1", first_name="John", last_name="Doe", email="john@example.com"
         )
