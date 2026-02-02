@@ -21,8 +21,10 @@ References:
 - https://learn.microsoft.com/en-us/powershell/exchange/exchange-online-powershell-v2
 """
 
+import asyncio
 import json
 import logging
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +32,31 @@ from pathlib import Path
 from sjifire.core.config import get_exchange_credentials
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for transient Azure AD sync errors
+TRANSIENT_ERROR_PATTERNS = [
+    r"Resource .* does not exist",
+    r"object in sync between Azure Active Directory and Exchange Online",
+    r"transient",
+]
+MAX_RETRY_ATTEMPTS = 3
+RETRY_DELAYS_SECONDS = [10, 20, 30]  # Delays between retries
+
+
+def is_transient_error(error_msg: str) -> bool:
+    """Check if an error message indicates a transient Azure AD sync error."""
+    for pattern in TRANSIENT_ERROR_PATTERNS:
+        if re.search(pattern, error_msg, re.IGNORECASE):
+            return True
+    return False
+
+
+def extract_member_from_error(error_msg: str) -> str | None:
+    """Extract member email from an error message like 'Add user@domain.com: error...'."""
+    match = re.match(r"Add ([^:]+):", error_msg)
+    if match:
+        return match.group(1).strip()
+    return None
 
 
 @dataclass
@@ -781,6 +808,62 @@ class ExchangeOnlineClient:
             elif not isinstance(val, list):
                 result[key] = [val]
 
+        # Retry transient errors with exponential backoff
+        errors = result.get("errors", [])
+        transient_failures = []
+        permanent_errors = []
+
+        for error in errors:
+            if is_transient_error(error):
+                member = extract_member_from_error(error)
+                if member:
+                    transient_failures.append(member)
+                else:
+                    permanent_errors.append(error)
+            else:
+                permanent_errors.append(error)
+
+        if transient_failures:
+            logger.info(
+                f"Retrying {len(transient_failures)} transient failures for {identity}"
+            )
+
+            for attempt, delay in enumerate(RETRY_DELAYS_SECONDS[:MAX_RETRY_ATTEMPTS]):
+                if not transient_failures:
+                    break
+
+                logger.info(
+                    f"Retry attempt {attempt + 1}/{MAX_RETRY_ATTEMPTS} "
+                    f"after {delay}s delay for {len(transient_failures)} members"
+                )
+                await asyncio.sleep(delay)
+
+                # Retry adding failed members
+                still_failing = []
+                for member in transient_failures:
+                    add_script = [
+                        f"try {{ Add-DistributionGroupMember -Identity '{identity}' "
+                        f"-Member '{member}' -BypassSecurityGroupManagerCheck -ErrorAction Stop; "
+                        f"'SUCCESS' }} catch {{ $_.Exception.Message }}"
+                    ]
+                    retry_result = self._run_powershell(add_script)
+                    if retry_result == "SUCCESS":
+                        logger.info(f"Retry succeeded: Added {member} to {identity}")
+                        result["added"].append(member)
+                    elif is_transient_error(str(retry_result)):
+                        still_failing.append(member)
+                    else:
+                        permanent_errors.append(f"Add {member}: {retry_result}")
+
+                transient_failures = still_failing
+
+            # Any remaining transient failures become permanent errors
+            for member in transient_failures:
+                permanent_errors.append(
+                    f"Add {member}: Failed after {MAX_RETRY_ATTEMPTS} retries"
+                )
+
+        result["errors"] = permanent_errors
         return result
 
     async def close(self) -> None:
