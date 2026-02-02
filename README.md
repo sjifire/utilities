@@ -60,7 +60,7 @@ The sync:
 
 ### Microsoft Group Sync
 
-**Sync groups from Aladtec (unified M365 and Exchange):**
+**Sync groups from Entra ID user data (unified M365 and Exchange):**
 ```bash
 uv run ms-group-sync --all              # Sync all group strategies
 uv run ms-group-sync --all --dry-run    # Preview changes without applying
@@ -73,7 +73,7 @@ Available strategies:
 
 | Strategy | Group | Membership Criteria |
 |----------|-------|---------------------|
-| `stations` | Station 31, 32, etc. | Aladtec station assignment |
+| `stations` | Station 31, 32, etc. | Station assignment (office location) |
 | `support` | Support | Has "Support" position |
 | `ff` | FF | Has "Firefighter" position |
 | `wff` | WFF | Has "Wildland Firefighter" position |
