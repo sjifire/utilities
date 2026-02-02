@@ -585,7 +585,10 @@ class TestMobeGroupStrategy:
         assert "mobilization" in description.lower()
 
     def test_get_groups_to_sync_empty(self):
-        assert self.strategy.get_groups_to_sync([]) == {}
+        """Empty member list still returns group for creation/maintenance."""
+        result = self.strategy.get_groups_to_sync([])
+        assert "mobe" in result
+        assert result["mobe"] == []
 
     def test_get_groups_to_sync_with_mobe_schedule(self):
         member = Member(
@@ -599,6 +602,7 @@ class TestMobeGroupStrategy:
         assert len(result["mobe"]) == 1
 
     def test_get_groups_to_sync_without_mobe_schedule(self):
+        """Members without mobe schedule results in empty group."""
         member = Member(
             id="1",
             first_name="John",
@@ -606,7 +610,8 @@ class TestMobeGroupStrategy:
             schedules=["Daily Schedule", "Training"],
         )
         result = self.strategy.get_groups_to_sync([member])
-        assert result == {}
+        assert "mobe" in result
+        assert result["mobe"] == []
 
     def test_get_groups_to_sync_case_insensitive(self):
         """Test that 'mobe' matching is case-insensitive."""
@@ -643,7 +648,7 @@ class TestMobeGroupStrategy:
         assert len(result["mobe"]) == 2
 
     def test_get_groups_to_sync_empty_schedules(self):
-        """Test member with empty schedules list is excluded."""
+        """Test member with empty schedules list is excluded from group."""
         member = Member(
             id="1",
             first_name="John",
@@ -651,10 +656,11 @@ class TestMobeGroupStrategy:
             schedules=[],
         )
         result = self.strategy.get_groups_to_sync([member])
-        assert result == {}
+        assert "mobe" in result
+        assert result["mobe"] == []
 
     def test_get_groups_to_sync_none_schedules(self):
-        """Test member with None schedules is excluded."""
+        """Test member with None schedules is excluded from group."""
         member = Member(
             id="1",
             first_name="John",
@@ -663,7 +669,8 @@ class TestMobeGroupStrategy:
         # Default is empty list, but let's explicitly test None
         member.schedules = None  # type: ignore
         result = self.strategy.get_groups_to_sync([member])
-        assert result == {}
+        assert "mobe" in result
+        assert result["mobe"] == []
 
 
 class TestGroupSyncResult:

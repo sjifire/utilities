@@ -337,11 +337,15 @@ class MobeScheduleStrategy(GroupStrategy):
         return "Members with 'State Mobe' schedule access in Aladtec"
 
     def get_members(self, members: list[Member]) -> dict[str, list[Member]]:
-        """Get members with State Mobe schedule access."""
+        """Get members with State Mobe schedule access.
+
+        Always returns the group even if empty, to ensure the group
+        is created and maintained for future members.
+        """
         mobe_members = [
             m for m in members if any("mobe" in s.lower() for s in (m.schedules or []))
         ]
-        return {"mobe": mobe_members} if mobe_members else {}
+        return {"mobe": mobe_members}
 
     def get_config(self, group_key: str) -> GroupConfig:
         """Return group configuration."""
