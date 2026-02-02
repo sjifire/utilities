@@ -244,7 +244,7 @@ class WildlandFirefighterStrategy(GroupStrategy):
         """Return group configuration."""
         return GroupConfig(
             display_name="Wildland Firefighters",
-            mail_nickname="wildlandff",
+            mail_nickname="wildlandffs",
             description="Members with Wildland Firefighter position",
         )
 
@@ -270,8 +270,8 @@ class ApparatusOperatorStrategy(GroupStrategy):
     def get_config(self, group_key: str) -> GroupConfig:
         """Return group configuration."""
         return GroupConfig(
-            display_name="Apparatus Operator",
-            mail_nickname="apparatus-operator",
+            display_name="Apparatus Operators",
+            mail_nickname="apparatus-operators",
             description="Members with EVIP certification (Apparatus Operators)",
         )
 

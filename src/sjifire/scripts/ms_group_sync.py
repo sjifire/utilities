@@ -864,18 +864,31 @@ async def delete_group(email: str, dry_run: bool = False) -> int:
     client = ExchangeOnlineClient()
 
     try:
-        # Check if group exists
-        group = await client.get_distribution_group(email)
+        # Check if group exists and get members for backup
+        group, members = await client.get_group_with_members(email)
 
         if not group:
             logger.warning(f"Group not found: {email}")
             return 1
 
         logger.info(f"Found group: {group.display_name} ({group.primary_smtp_address})")
+        logger.info(f"Group has {len(members)} members")
 
         if dry_run:
             logger.info(f"Would delete: {email}")
             return 0
+
+        # Backup the group before deleting
+        logger.info("Creating backup before delete...")
+        group_data = {
+            "identity": group.identity,
+            "display_name": group.display_name,
+            "email": group.primary_smtp_address,
+            "group_type": group.group_type,
+            "members": members,
+        }
+        backup_path = backup_mail_groups([group_data])
+        logger.info(f"Backup saved: {backup_path}")
 
         # Delete the group
         if await client.delete_distribution_group(email):

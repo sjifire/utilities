@@ -3,7 +3,7 @@
 import logging
 from dataclasses import dataclass, field
 
-from sjifire.core.constants import OPERATIONAL_POSITIONS
+from sjifire.core.constants import MARINE_POSITIONS, OPERATIONAL_POSITIONS
 from sjifire.core.normalize import normalize_email, normalize_name, normalize_phone
 from sjifire.entra.users import EntraUser
 from sjifire.ispyfire.models import ISpyFirePerson
@@ -13,6 +13,52 @@ logger = logging.getLogger(__name__)
 # Schedules that qualify a user for iSpyFire access, independent of operational positions.
 # This allows administrative staff on operational schedules to receive incident notifications.
 ISPYFIRE_QUALIFYING_SCHEDULES: set[str] = {"Operations"}
+
+# Mapping from Entra positions to iSpyFire responder types
+POSITION_TO_RESPONDER_TYPE: dict[str, str] = {
+    "Firefighter": "FF",
+    "Wildland Firefighter": "WFF",
+    "Support": "Support",
+}
+
+
+def get_responder_types(user: EntraUser) -> list[str]:
+    """Compute iSpyFire responder types from Entra positions.
+
+    Mapping:
+    - Firefighter → FF
+    - Wildland Firefighter → WFF
+    - Support → Support
+    - Apparatus Operator (without FF or WFF) → Tender Ops
+    - Any Marine position (Mate, Pilot, Deckhand) → Marine
+
+    Args:
+        user: Entra user object
+
+    Returns:
+        List of responder type strings (e.g., ["FF", "WFF"])
+    """
+    positions = get_user_positions(user)
+    responder_types: list[str] = []
+
+    # Map direct positions
+    for position, responder_type in POSITION_TO_RESPONDER_TYPE.items():
+        if position in positions:
+            responder_types.append(responder_type)
+
+    # Tender Ops: Apparatus Operator without FF or WFF
+    if (
+        "Apparatus Operator" in positions
+        and "Firefighter" not in positions
+        and "Wildland Firefighter" not in positions
+    ):
+        responder_types.append("Tender Ops")
+
+    # Marine: any marine position
+    if positions & MARINE_POSITIONS:
+        responder_types.append("Marine")
+
+    return sorted(responder_types)
 
 
 @dataclass
@@ -106,6 +152,12 @@ def fields_need_update(user: EntraUser, person: ISpyFirePerson) -> list[str]:
     entra_rank = user.extension_attribute1
     if entra_rank and entra_rank != person.title:
         differences.append("title")
+
+    # Responder types (computed from positions)
+    expected_types = get_responder_types(user)
+    current_types = sorted(person.responder_types) if person.responder_types else []
+    if expected_types != current_types:
+        differences.append("responderTypes")
 
     return differences
 
@@ -263,6 +315,7 @@ def entra_user_to_ispyfire_person(user: EntraUser) -> ISpyFirePerson:
         title=user.extension_attribute1,
         is_active=True,
         is_login_active=True,  # Allow login immediately
+        responder_types=get_responder_types(user),
         message_email=True,  # Default to email notifications
         message_cell=True,  # Default to SMS notifications
     )

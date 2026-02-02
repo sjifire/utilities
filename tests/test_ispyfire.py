@@ -6,6 +6,7 @@ from sjifire.ispyfire.sync import (
     compare_entra_to_ispyfire,
     entra_user_to_ispyfire_person,
     fields_need_update,
+    get_responder_types,
     get_user_positions,
     is_managed_email,
     is_operational,
@@ -332,6 +333,103 @@ class TestIsOperational:
         assert is_operational(user) is False
 
 
+class TestGetResponderTypes:
+    """Tests for get_responder_types function."""
+
+    def _make_user(self, positions: str | None) -> EntraUser:
+        """Helper to create an EntraUser with positions."""
+        return EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email="jdoe@sjifire.org",
+            upn="jdoe@sjifire.org",
+            employee_id="1",
+            extension_attribute3=positions,
+        )
+
+    def test_firefighter_returns_ff(self):
+        user = self._make_user("Firefighter")
+        assert get_responder_types(user) == ["FF"]
+
+    def test_wildland_firefighter_returns_wff(self):
+        user = self._make_user("Wildland Firefighter")
+        assert get_responder_types(user) == ["WFF"]
+
+    def test_support_returns_support(self):
+        user = self._make_user("Support")
+        assert get_responder_types(user) == ["Support"]
+
+    def test_apparatus_operator_only_returns_tender_ops(self):
+        """AO without FF or WFF should get Tender Ops."""
+        user = self._make_user("Apparatus Operator")
+        assert get_responder_types(user) == ["Tender Ops"]
+
+    def test_apparatus_operator_with_ff_no_tender_ops(self):
+        """AO with FF should NOT get Tender Ops."""
+        user = self._make_user("Apparatus Operator,Firefighter")
+        result = get_responder_types(user)
+        assert "Tender Ops" not in result
+        assert "FF" in result
+
+    def test_apparatus_operator_with_wff_no_tender_ops(self):
+        """AO with WFF should NOT get Tender Ops."""
+        user = self._make_user("Apparatus Operator,Wildland Firefighter")
+        result = get_responder_types(user)
+        assert "Tender Ops" not in result
+        assert "WFF" in result
+
+    def test_multiple_positions_multiple_types(self):
+        """User with FF, WFF, and Support should get all three."""
+        user = self._make_user("Firefighter,Wildland Firefighter,Support")
+        result = get_responder_types(user)
+        assert result == ["FF", "Support", "WFF"]  # Sorted alphabetically
+
+    def test_full_firefighter_with_ao(self):
+        """Typical firefighter with AO, FF, WFF should get FF and WFF only."""
+        user = self._make_user("Apparatus Operator,Firefighter,Wildland Firefighter")
+        result = get_responder_types(user)
+        assert result == ["FF", "WFF"]
+        assert "Tender Ops" not in result
+
+    def test_no_positions_returns_empty(self):
+        user = self._make_user(None)
+        assert get_responder_types(user) == []
+
+    def test_non_mapped_position_returns_empty(self):
+        """Positions that don't map to responder types."""
+        user = self._make_user("Lieutenant,Captain")
+        assert get_responder_types(user) == []
+
+    def test_marine_deckhand_returns_marine(self):
+        """Marine: Deckhand position should get Marine responder type."""
+        user = self._make_user("Marine: Deckhand")
+        assert get_responder_types(user) == ["Marine"]
+
+    def test_marine_mate_returns_marine(self):
+        """Marine: Mate position should get Marine responder type."""
+        user = self._make_user("Marine: Mate")
+        assert get_responder_types(user) == ["Marine"]
+
+    def test_marine_pilot_returns_marine(self):
+        """Marine: Pilot position should get Marine responder type."""
+        user = self._make_user("Marine: Pilot")
+        assert get_responder_types(user) == ["Marine"]
+
+    def test_marine_with_firefighter(self):
+        """User with FF and Marine positions should get both types."""
+        user = self._make_user("Firefighter,Marine: Mate")
+        result = get_responder_types(user)
+        assert result == ["FF", "Marine"]
+
+    def test_results_are_sorted(self):
+        """Responder types should be returned in sorted order."""
+        user = self._make_user("Wildland Firefighter,Firefighter,Support")
+        result = get_responder_types(user)
+        assert result == sorted(result)
+
+
 class TestFieldsNeedUpdate:
     """Tests for fields_need_update function."""
 
@@ -459,6 +557,69 @@ class TestFieldsNeedUpdate:
         assert "cellPhone" in diff
         assert "title" in diff
 
+    def test_responder_types_differ(self):
+        """Detect when responder types need updating."""
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email="jdoe@sjifire.org",
+            upn="jdoe@sjifire.org",
+            employee_id="1",
+            extension_attribute3="Firefighter,Wildland Firefighter",
+        )
+        person = ISpyFirePerson(
+            id="abc",
+            first_name="John",
+            last_name="Doe",
+            email="jdoe@sjifire.org",
+            responder_types=["FF"],  # Missing WFF
+        )
+        assert fields_need_update(user, person) == ["responderTypes"]
+
+    def test_responder_types_match(self):
+        """No update when responder types already match."""
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email="jdoe@sjifire.org",
+            upn="jdoe@sjifire.org",
+            employee_id="1",
+            extension_attribute3="Firefighter,Wildland Firefighter",
+        )
+        person = ISpyFirePerson(
+            id="abc",
+            first_name="John",
+            last_name="Doe",
+            email="jdoe@sjifire.org",
+            responder_types=["FF", "WFF"],
+        )
+        assert fields_need_update(user, person) == []
+
+    def test_responder_types_empty_to_populated(self):
+        """Detect when responder types need to be added."""
+        user = EntraUser(
+            id="1",
+            display_name="John Doe",
+            first_name="John",
+            last_name="Doe",
+            email="jdoe@sjifire.org",
+            upn="jdoe@sjifire.org",
+            employee_id="1",
+            extension_attribute3="Support",
+        )
+        person = ISpyFirePerson(
+            id="abc",
+            first_name="John",
+            last_name="Doe",
+            email="jdoe@sjifire.org",
+            responder_types=[],
+        )
+        assert fields_need_update(user, person) == ["responderTypes"]
+
 
 class TestEntraUserToISpyFirePerson:
     """Tests for entra_user_to_ispyfire_person function."""
@@ -474,6 +635,7 @@ class TestEntraUserToISpyFirePerson:
             employee_id="1",
             mobile_phone="555-123-4567",
             extension_attribute1="Captain",
+            extension_attribute3="Firefighter,Wildland Firefighter",
         )
         person = entra_user_to_ispyfire_person(user)
 
@@ -486,6 +648,7 @@ class TestEntraUserToISpyFirePerson:
         assert person.is_active is True
         assert person.message_email is True
         assert person.message_cell is True
+        assert person.responder_types == ["FF", "WFF"]
 
     def test_handles_none_fields(self):
         user = EntraUser(
@@ -543,6 +706,7 @@ class TestCompareEntraToISpyFire:
         title: str | None = None,
         is_active: bool = True,
         is_utility: bool = False,
+        responder_types: list[str] | None = None,
     ) -> ISpyFirePerson:
         """Helper to create an ISpyFirePerson."""
         return ISpyFirePerson(
@@ -554,14 +718,19 @@ class TestCompareEntraToISpyFire:
             title=title,
             is_active=is_active,
             is_utility=is_utility,
+            responder_types=responder_types or [],
         )
 
     def test_matched_users(self):
+        # Entra user has Firefighter position -> FF responder type
         entra_users = [
             self._make_entra_user("1", "John", "Doe", "jdoe@sjifire.org"),
         ]
+        # iSpyFire person already has matching responder types
         ispy_people = [
-            self._make_ispy_person("abc", "John", "Doe", "jdoe@sjifire.org"),
+            self._make_ispy_person(
+                "abc", "John", "Doe", "jdoe@sjifire.org", responder_types=["FF"]
+            ),
         ]
 
         result = compare_entra_to_ispyfire(entra_users, ispy_people)
