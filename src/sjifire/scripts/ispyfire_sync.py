@@ -195,10 +195,10 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
             return 1
         logger.info(f"Filtering to single user: {single_email}")
 
-    # Get iSpyFire people (include inactive to detect manual deactivations)
+    # Get iSpyFire people (include inactive and deleted to prevent duplicates)
     logger.info("Fetching iSpyFire people...")
     with ISpyFireClient() as ispy_client:
-        ispyfire_people = ispy_client.get_people(include_inactive=True)
+        ispyfire_people = ispy_client.get_people(include_inactive=True, include_deleted=True)
 
         # Backup current state (only for full sync)
         if ispyfire_people and not single_email:
