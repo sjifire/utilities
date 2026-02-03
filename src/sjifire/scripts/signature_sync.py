@@ -416,7 +416,7 @@ async def run_sync(
     dry_run: bool = False,
     email: str | None = None,
     preview: bool = False,
-    remove_signatures: bool = False,
+    remove: bool = False,
 ) -> int:
     """Run signature sync.
 
@@ -424,14 +424,14 @@ async def run_sync(
         dry_run: If True, don't make changes
         email: If provided, only sync this user
         preview: If True, show signature preview for the user
-        remove_signatures: If True, remove signatures instead of setting them
+        remove: If True, remove all signatures and footer rule
 
     Returns:
         Exit code
     """
     logger.info("=" * 60)
-    if remove_signatures:
-        logger.info("Email Signature Removal")
+    if remove:
+        logger.info("Email Signature & Footer Removal")
     else:
         logger.info("Email Signature Sync")
     logger.info("=" * 60)
@@ -487,12 +487,12 @@ async def run_sync(
 
     # Sync or remove signatures
     logger.info("")
-    if remove_signatures:
+    if remove:
         logger.info("Removing signatures...")
     else:
         logger.info("Syncing signatures...")
 
-    success, failure, errors = await sync_signatures(users, dry_run, remove_signatures)
+    success, failure, errors = await sync_signatures(users, dry_run, remove)
 
     # Print summary
     logger.info("")
@@ -510,14 +510,18 @@ async def run_sync(
         if len(errors) > 10:
             logger.error(f"  ... and {len(errors) - 10} more")
 
-    # Sync footer mail flow rule (only when adding signatures, not removing)
-    if not remove_signatures:
-        logger.info("")
+    # Sync or remove footer mail flow rule
+    logger.info("")
+    if remove:
+        logger.info("Removing email footer mail flow rule...")
+        footer_ok, footer_error = remove_footer(dry_run)
+    else:
         logger.info("Syncing email footer mail flow rule...")
         footer_ok, footer_error = sync_footer(dry_run)
-        if not footer_ok:
-            logger.error(f"Footer sync failed: {footer_error}")
-            return 1
+
+    if not footer_ok:
+        logger.error(f"Footer operation failed: {footer_error}")
+        return 1
 
     return 0 if failure == 0 else 1
 
@@ -544,34 +548,19 @@ def main() -> None:
         help="Show signature preview for the user (requires --email)",
     )
     parser.add_argument(
-        "--remove-signatures",
+        "--remove",
         action="store_true",
-        help="Remove signatures from all users (or specific user with --email)",
-    )
-    parser.add_argument(
-        "--remove-footer",
-        action="store_true",
-        help="Remove the organization footer mail flow rule",
+        help="Remove all signatures and the footer mail flow rule",
     )
 
     args = parser.parse_args()
-
-    # Handle remove-footer separately
-    if args.remove_footer:
-        logger.info("=" * 60)
-        logger.info("Remove Email Footer Rule")
-        logger.info("=" * 60)
-        if args.dry_run:
-            logger.info("DRY RUN - no changes will be made")
-        success, _error = remove_footer(args.dry_run)
-        sys.exit(0 if success else 1)
 
     exit_code = asyncio.run(
         run_sync(
             dry_run=args.dry_run,
             email=args.email,
             preview=args.preview,
-            remove_signatures=args.remove_signatures,
+            remove=args.remove,
         )
     )
     sys.exit(exit_code)
