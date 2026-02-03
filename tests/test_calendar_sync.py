@@ -1,12 +1,12 @@
 """Tests for sjifire.calendar.sync module."""
 
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from sjifire.aladtec.schedule import DaySchedule, ScheduleEntry
-from sjifire.calendar.models import CrewMember
+from sjifire.calendar.models import AllDayDutyEvent, CrewMember
 from sjifire.calendar.sync import (
     EXCLUDED_SECTIONS,
     CalendarSync,
@@ -496,3 +496,435 @@ class TestCalendarSyncConvertSchedules:
         events = calendar_sync.convert_schedules_to_events(reversed_schedules, {})
 
         assert events[0].event_date < events[1].event_date
+
+
+class TestCalendarSyncGraphAPI:
+    """Tests for CalendarSync Graph API methods."""
+
+    @pytest.fixture
+    def calendar_sync(self, mock_env_vars):
+        """Create CalendarSync with mocked Graph client."""
+        with (
+            patch("sjifire.calendar.sync.ClientSecretCredential"),
+            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+        ):
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            sync = CalendarSync()
+            sync.client = mock_client
+            return sync
+
+    @pytest.fixture
+    def sample_event(self):
+        """Create sample AllDayDutyEvent."""
+        return AllDayDutyEvent(
+            event_date=date(2026, 2, 1),
+            until_1800_platoon="A",
+            until_1800_crew={"S31": [CrewMember(name="John Doe", position="Captain")]},
+            from_1800_platoon="B",
+            from_1800_crew={"S31": [CrewMember(name="Jane Smith", position="Captain")]},
+        )
+
+    @pytest.mark.asyncio
+    async def test_load_user_contacts_caches_results(self, calendar_sync):
+        """User contacts are cached after first load."""
+        # Setup mock
+        mock_user = MagicMock()
+        mock_user.display_name = "John Doe"
+        mock_user.mail = "john@test.com"
+        mock_user.mobile_phone = "555-1234"
+
+        mock_result = MagicMock()
+        mock_result.value = [mock_user]
+
+        calendar_sync.client.users.get = AsyncMock(return_value=mock_result)
+
+        # First call loads from API
+        result1 = await calendar_sync._load_user_contacts()
+        assert "John Doe" in result1
+
+        # Second call uses cache (no additional API call)
+        result2 = await calendar_sync._load_user_contacts()
+        assert result2 is result1
+        assert calendar_sync.client.users.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_load_user_contacts_handles_error(self, calendar_sync):
+        """User contacts returns empty dict on error."""
+        calendar_sync.client.users.get = AsyncMock(side_effect=Exception("API Error"))
+
+        result = await calendar_sync._load_user_contacts()
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_load_user_contacts_extracts_plain_name(self, calendar_sync):
+        """User contacts stores both display name and plain name."""
+        mock_user = MagicMock()
+        mock_user.display_name = "Capt John Doe"
+        mock_user.mail = "john@test.com"
+        mock_user.mobile_phone = "555-1234"
+
+        mock_result = MagicMock()
+        mock_result.value = [mock_user]
+
+        calendar_sync.client.users.get = AsyncMock(return_value=mock_result)
+
+        result = await calendar_sync._load_user_contacts()
+
+        # Both full name and plain name should be cached
+        assert "Capt John Doe" in result
+        assert "John Doe" in result
+
+    @pytest.mark.asyncio
+    async def test_get_existing_events_returns_dict(self, calendar_sync):
+        """Get existing events returns date to ID mapping."""
+        mock_event = MagicMock()
+        mock_event.id = "event-123"
+        mock_event.start = MagicMock()
+        mock_event.start.date_time = "2026-02-01T00:00:00"
+
+        mock_result = MagicMock()
+        mock_result.value = [mock_event]
+
+        calendar_sync.client.users.by_user_id.return_value.calendar_view.get = AsyncMock(
+            return_value=mock_result
+        )
+
+        result = await calendar_sync.get_existing_events(date(2026, 2, 1), date(2026, 2, 28))
+
+        assert date(2026, 2, 1) in result
+        assert result[date(2026, 2, 1)] == "event-123"
+
+    @pytest.mark.asyncio
+    async def test_get_existing_events_handles_error(self, calendar_sync):
+        """Get existing events returns empty dict on error."""
+        calendar_sync.client.users.by_user_id.return_value.calendar_view.get = AsyncMock(
+            side_effect=Exception("API Error")
+        )
+
+        result = await calendar_sync.get_existing_events(date(2026, 2, 1), date(2026, 2, 28))
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_create_event_returns_id(self, calendar_sync, sample_event):
+        """Create event returns event ID on success."""
+        mock_result = MagicMock()
+        mock_result.id = "new-event-123"
+
+        calendar_sync.client.users.by_user_id.return_value.events.post = AsyncMock(
+            return_value=mock_result
+        )
+
+        result = await calendar_sync.create_event(sample_event)
+        assert result == "new-event-123"
+
+    @pytest.mark.asyncio
+    async def test_create_event_returns_none_on_error(self, calendar_sync, sample_event):
+        """Create event returns None on error."""
+        calendar_sync.client.users.by_user_id.return_value.events.post = AsyncMock(
+            side_effect=Exception("API Error")
+        )
+
+        result = await calendar_sync.create_event(sample_event)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_update_event_returns_true(self, calendar_sync, sample_event):
+        """Update event returns True on success."""
+        sample_event.event_id = "existing-123"
+
+        calendar_sync.client.users.by_user_id.return_value.events.by_event_id.return_value.patch = (
+            AsyncMock()
+        )
+
+        result = await calendar_sync.update_event(sample_event)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_update_event_returns_false_without_id(self, calendar_sync, sample_event):
+        """Update event returns False without event_id."""
+        sample_event.event_id = None
+
+        result = await calendar_sync.update_event(sample_event)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_update_event_returns_false_on_error(self, calendar_sync, sample_event):
+        """Update event returns False on error."""
+        sample_event.event_id = "existing-123"
+
+        calendar_sync.client.users.by_user_id.return_value.events.by_event_id.return_value.patch = (
+            AsyncMock(side_effect=Exception("API Error"))
+        )
+
+        result = await calendar_sync.update_event(sample_event)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_delete_event_returns_true(self, calendar_sync):
+        """Delete event returns True on success."""
+        calendar_sync.client.users.by_user_id.return_value.events.by_event_id.return_value.delete = AsyncMock()
+
+        result = await calendar_sync.delete_event("event-123")
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_delete_event_returns_false_on_error(self, calendar_sync):
+        """Delete event returns False on error."""
+        calendar_sync.client.users.by_user_id.return_value.events.by_event_id.return_value.delete = AsyncMock(
+            side_effect=Exception("API Error")
+        )
+
+        result = await calendar_sync.delete_event("event-123")
+        assert result is False
+
+
+class TestCalendarSyncBatchOperations:
+    """Tests for CalendarSync batch operations."""
+
+    @pytest.fixture
+    def calendar_sync(self, mock_env_vars):
+        """Create CalendarSync with mocked Graph client."""
+        with (
+            patch("sjifire.calendar.sync.ClientSecretCredential"),
+            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+        ):
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            sync = CalendarSync()
+            sync.client = mock_client
+            return sync
+
+    @pytest.fixture
+    def sample_events(self):
+        """Create multiple sample events."""
+        return [
+            AllDayDutyEvent(
+                event_date=date(2026, 2, i),
+                until_1800_platoon="A",
+                until_1800_crew={},
+                from_1800_platoon="B",
+                from_1800_crew={},
+            )
+            for i in range(1, 6)  # 5 events
+        ]
+
+    @pytest.mark.asyncio
+    async def test_create_events_batch_success(self, calendar_sync, sample_events):
+        """Batch create returns success count."""
+        mock_result = MagicMock()
+        mock_result.id = "new-id"
+
+        calendar_sync.client.users.by_user_id.return_value.events.post = AsyncMock(
+            return_value=mock_result
+        )
+
+        count, errors = await calendar_sync.create_events_batch(sample_events)
+
+        assert count == 5
+        assert errors == []
+
+    @pytest.mark.asyncio
+    async def test_create_events_batch_partial_failure(self, calendar_sync, sample_events):
+        """Batch create handles partial failures."""
+        call_count = 0
+
+        async def mock_post(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 3:
+                raise Exception("API Error")
+            mock_result = MagicMock()
+            mock_result.id = f"id-{call_count}"
+            return mock_result
+
+        calendar_sync.client.users.by_user_id.return_value.events.post = mock_post
+
+        count, errors = await calendar_sync.create_events_batch(sample_events)
+
+        assert count == 4
+        assert len(errors) == 1
+
+    @pytest.mark.asyncio
+    async def test_create_events_batch_empty_list(self, calendar_sync):
+        """Batch create handles empty list."""
+        count, errors = await calendar_sync.create_events_batch([])
+
+        assert count == 0
+        assert errors == []
+
+    @pytest.mark.asyncio
+    async def test_delete_events_batch_success(self, calendar_sync):
+        """Batch delete returns success count."""
+        calendar_sync.client.users.by_user_id.return_value.events.by_event_id.return_value.delete = AsyncMock()
+
+        events_to_delete = {
+            date(2026, 2, 1): "id-1",
+            date(2026, 2, 2): "id-2",
+            date(2026, 2, 3): "id-3",
+        }
+
+        count, errors = await calendar_sync.delete_events_batch(events_to_delete)
+
+        assert count == 3
+        assert errors == []
+
+    @pytest.mark.asyncio
+    async def test_delete_events_batch_empty(self, calendar_sync):
+        """Batch delete handles empty dict."""
+        count, errors = await calendar_sync.delete_events_batch({})
+
+        assert count == 0
+        assert errors == []
+
+
+class TestCalendarSyncSyncEvents:
+    """Tests for sync_events orchestration."""
+
+    @pytest.fixture
+    def calendar_sync(self, mock_env_vars):
+        """Create CalendarSync with mocked methods."""
+        with (
+            patch("sjifire.calendar.sync.ClientSecretCredential"),
+            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+        ):
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            sync = CalendarSync()
+            sync.client = mock_client
+            return sync
+
+    @pytest.fixture
+    def sample_events(self):
+        """Create sample events for syncing."""
+        return [
+            AllDayDutyEvent(
+                event_date=date(2026, 2, 1),
+                until_1800_platoon="A",
+                until_1800_crew={},
+                from_1800_platoon="B",
+                from_1800_crew={},
+            ),
+            AllDayDutyEvent(
+                event_date=date(2026, 2, 2),
+                until_1800_platoon="B",
+                until_1800_crew={},
+                from_1800_platoon="A",
+                from_1800_crew={},
+            ),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_sync_events_creates_new(self, calendar_sync, sample_events):
+        """Sync creates events that don't exist."""
+        # No existing events
+        calendar_sync.get_existing_events = AsyncMock(return_value={})
+        calendar_sync.create_events_batch = AsyncMock(return_value=(2, []))
+        calendar_sync.update_events_batch = AsyncMock(return_value=(0, []))
+
+        result = await calendar_sync.sync_events(sample_events, date(2026, 2, 1), date(2026, 2, 28))
+
+        assert result.events_created == 2
+        assert result.events_updated == 0
+        calendar_sync.create_events_batch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_sync_events_updates_existing(self, calendar_sync, sample_events):
+        """Sync updates events that exist."""
+        # All events exist
+        calendar_sync.get_existing_events = AsyncMock(
+            return_value={
+                date(2026, 2, 1): "id-1",
+                date(2026, 2, 2): "id-2",
+            }
+        )
+        calendar_sync.create_events_batch = AsyncMock(return_value=(0, []))
+        calendar_sync.update_events_batch = AsyncMock(return_value=(2, []))
+
+        result = await calendar_sync.sync_events(sample_events, date(2026, 2, 1), date(2026, 2, 28))
+
+        assert result.events_created == 0
+        assert result.events_updated == 2
+        calendar_sync.update_events_batch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_sync_events_dry_run(self, calendar_sync, sample_events):
+        """Dry run doesn't call batch methods."""
+        calendar_sync.get_existing_events = AsyncMock(return_value={})
+        calendar_sync.create_events_batch = AsyncMock()
+        calendar_sync.update_events_batch = AsyncMock()
+
+        result = await calendar_sync.sync_events(
+            sample_events, date(2026, 2, 1), date(2026, 2, 28), dry_run=True
+        )
+
+        assert result.events_created == 2
+        calendar_sync.create_events_batch.assert_not_called()
+        calendar_sync.update_events_batch.assert_not_called()
+
+
+class TestCalendarSyncDeleteDateRange:
+    """Tests for delete_date_range method."""
+
+    @pytest.fixture
+    def calendar_sync(self, mock_env_vars):
+        """Create CalendarSync with mocked methods."""
+        with (
+            patch("sjifire.calendar.sync.ClientSecretCredential"),
+            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+        ):
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            sync = CalendarSync()
+            sync.client = mock_client
+            return sync
+
+    def test_delete_date_range_no_events(self, calendar_sync):
+        """Delete with no events returns empty result."""
+        with patch.object(calendar_sync, "get_existing_events", new=AsyncMock(return_value={})):
+            result = calendar_sync.delete_date_range(date(2026, 2, 1), date(2026, 2, 28))
+
+        assert result.events_deleted == 0
+        assert result.errors == []
+
+    def test_delete_date_range_dry_run(self, calendar_sync):
+        """Dry run counts events without deleting."""
+        with patch.object(
+            calendar_sync,
+            "get_existing_events",
+            new=AsyncMock(
+                return_value={
+                    date(2026, 2, 1): "id-1",
+                    date(2026, 2, 2): "id-2",
+                }
+            ),
+        ):
+            result = calendar_sync.delete_date_range(
+                date(2026, 2, 1), date(2026, 2, 28), dry_run=True
+            )
+
+        assert result.events_deleted == 2
+
+    def test_delete_date_range_success(self, calendar_sync):
+        """Delete calls batch delete and returns count."""
+        with (
+            patch.object(
+                calendar_sync,
+                "get_existing_events",
+                new=AsyncMock(
+                    return_value={
+                        date(2026, 2, 1): "id-1",
+                        date(2026, 2, 2): "id-2",
+                    }
+                ),
+            ),
+            patch.object(
+                calendar_sync,
+                "delete_events_batch",
+                new=AsyncMock(return_value=(2, [])),
+            ),
+        ):
+            result = calendar_sync.delete_date_range(date(2026, 2, 1), date(2026, 2, 28))
+
+        assert result.events_deleted == 2
+        assert result.errors == []

@@ -42,6 +42,7 @@ def get_ispyfire_credentials() -> tuple[str, str, str]:
 
     return url, username, password
 
+
 logger = logging.getLogger(__name__)
 
 # Rate limiting configuration
