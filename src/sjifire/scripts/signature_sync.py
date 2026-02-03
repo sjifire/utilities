@@ -82,20 +82,20 @@ DISCLAIMER = (
 )
 
 FOOTER_HTML = f"""\
-<div style="margin-top: 35px; padding-top: 15px; border-top: 2px solid #cc0000;">
+<div style="margin-top: 35px; padding-top: 15px; border-top: 2px solid #72150c;">
 <table cellpadding="0" cellspacing="0" style="font-size: 11px; width: 100%;">
 <tr>
 <td style="padding-right: 15px; vertical-align: top; width: 70px;">
 <img src="{LOGO_URL}" alt="SJIFR" width="60" style="border-radius: 4px;">
 </td>
 <td style="vertical-align: top; line-height: 1.5; color: #666;">
-<strong style="color: #cc0000; font-size: 12px;">{COMPANY_NAME}</strong><br>
+<strong style="color: #72150c; font-size: 12px;">{COMPANY_NAME}</strong><br>
 {ADDRESS}<br>
 <a href="{WEBSITE_URL}">{WEBSITE_URL}</a>
 </td>
 <td style="text-align: right; vertical-align: top; padding-left: 20px;">
 <strong style="color: #333; font-size: 13px;">{OFFICE_PHONE}</strong><br>
-<span style="font-size: 11px; color: #cc0000; font-weight: bold;">Emergency: 911</span>
+<span style="font-size: 11px; color: #72150c; font-weight: bold;">Emergency: 911</span>
 </td>
 </tr>
 </table>
