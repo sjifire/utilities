@@ -36,16 +36,16 @@ class TestGenerateSignatureHtml:
     """Tests for generate_signature_html function."""
 
     def test_user_with_rank(self):
-        user = make_user(display_name="Captain Karl Kuetzing", rank="Captain")
+        user = make_user(first_name="Karl", last_name="Kuetzing", rank="Captain")
         html = generate_signature_html(user)
 
-        assert "Captain Karl Kuetzing" in html
+        assert "Karl Kuetzing" in html
         assert "Captain" in html
         assert COMPANY_NAME in html
         assert "<strong" in html
 
     def test_user_with_job_title_no_rank(self):
-        user = make_user(display_name="Robin Garcia", job_title="Executive Assistant, Finance")
+        user = make_user(first_name="Robin", last_name="Garcia", job_title="Executive Assistant, Finance")
         html = generate_signature_html(user)
 
         assert "Robin Garcia" in html
@@ -53,15 +53,15 @@ class TestGenerateSignatureHtml:
         assert COMPANY_NAME in html
 
     def test_user_with_rank_and_job_title_shows_both(self):
-        user = make_user(display_name="Captain John Doe", rank="Captain", job_title="Training Officer")
+        user = make_user(first_name="John", last_name="Doe", rank="Captain", job_title="Training Officer")
         html = generate_signature_html(user)
 
-        assert "Captain John Doe" in html
+        assert "John Doe" in html
         assert "Captain - Training Officer" in html
         assert COMPANY_NAME in html
 
     def test_user_with_no_rank_or_title(self):
-        user = make_user(display_name="Adam Greene")
+        user = make_user(first_name="Adam", last_name="Greene")
         html = generate_signature_html(user)
 
         assert "Adam Greene" in html
@@ -69,7 +69,7 @@ class TestGenerateSignatureHtml:
         # Should not have an extra line for title
         assert "<br>\n<span" in html or "<br>\n" in html
 
-    def test_uses_display_name(self):
+    def test_uses_first_last_name_not_display_name(self):
         user = make_user(
             display_name="Chief Jane Smith",
             first_name="Jane",
@@ -78,7 +78,9 @@ class TestGenerateSignatureHtml:
         )
         html = generate_signature_html(user)
 
-        assert "Chief Jane Smith" in html
+        # Should use first/last name, not display_name with rank prefix
+        assert "Jane Smith" in html
+        assert "Chief Jane Smith" not in html
 
     def test_fallback_to_first_last_name(self):
         user = make_user(
@@ -105,25 +107,25 @@ class TestGenerateSignatureText:
     """Tests for generate_signature_text function."""
 
     def test_user_with_rank(self):
-        user = make_user(display_name="Captain Karl Kuetzing", rank="Captain")
+        user = make_user(first_name="Karl", last_name="Kuetzing", rank="Captain")
         text = generate_signature_text(user)
 
-        assert text == f"Captain Karl Kuetzing\nCaptain\n{COMPANY_NAME}"
+        assert text == f"Karl Kuetzing\nCaptain\n{COMPANY_NAME}"
 
     def test_user_with_job_title_no_rank(self):
-        user = make_user(display_name="Robin Garcia", job_title="Executive Assistant")
+        user = make_user(first_name="Robin", last_name="Garcia", job_title="Executive Assistant")
         text = generate_signature_text(user)
 
         assert text == f"Robin Garcia\nExecutive Assistant\n{COMPANY_NAME}"
 
     def test_user_with_rank_and_job_title_shows_both(self):
-        user = make_user(display_name="John Doe", rank="Captain", job_title="Training Officer")
+        user = make_user(first_name="John", last_name="Doe", rank="Captain", job_title="Training Officer")
         text = generate_signature_text(user)
 
         assert text == f"John Doe\nCaptain - Training Officer\n{COMPANY_NAME}"
 
     def test_user_with_no_rank_or_title(self):
-        user = make_user(display_name="Adam Greene")
+        user = make_user(first_name="Adam", last_name="Greene")
         text = generate_signature_text(user)
 
         assert text == f"Adam Greene\n{COMPANY_NAME}"

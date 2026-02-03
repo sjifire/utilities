@@ -93,7 +93,8 @@ def generate_signature_html(user: EntraUser) -> str:
     Returns:
         HTML signature string
     """
-    name = user.display_name or f"{user.first_name} {user.last_name}"
+    # Use first/last name, not display_name (which may include rank prefix)
+    name = f"{user.first_name} {user.last_name}".strip() or user.display_name
     title = _get_title_line(user)
 
     if title:
@@ -111,7 +112,8 @@ def generate_signature_text(user: EntraUser) -> str:
     Returns:
         Plain text signature string
     """
-    name = user.display_name or f"{user.first_name} {user.last_name}"
+    # Use first/last name, not display_name (which may include rank prefix)
+    name = f"{user.first_name} {user.last_name}".strip() or user.display_name
     title = _get_title_line(user)
 
     if title:
