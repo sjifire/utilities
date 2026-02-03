@@ -69,6 +69,52 @@ TEXT_TEMPLATE_NO_TITLE = """\
 {phones}"""
 
 # =============================================================================
+# FOOTER TEMPLATE (added via mail flow rule to all outgoing emails)
+# =============================================================================
+
+FOOTER_RULE_NAME = "SJIFR Email Footer"
+LOGO_URL = "https://www.sjifire.org/assets/sjifire-logo-clear.png"
+WEBSITE_URL = "https://www.sjifire.org"
+ADDRESS = "1011 Mullis St, Friday Harbor, WA 98250"
+DISCLAIMER = (
+    "This email may contain confidential information intended only for the recipient. "
+    "If you received this in error, please notify the sender and delete this message."
+)
+
+FOOTER_HTML = f"""\
+<div style="margin-top: 35px; padding-top: 15px; border-top: 2px solid #cc0000;">
+<table cellpadding="0" cellspacing="0" style="font-size: 11px; width: 100%;">
+<tr>
+<td style="padding-right: 15px; vertical-align: top; width: 70px;">
+<img src="{LOGO_URL}" alt="SJIFR" width="60" style="border-radius: 4px;">
+</td>
+<td style="vertical-align: top; line-height: 1.5; color: #666;">
+<strong style="color: #cc0000; font-size: 12px;">{COMPANY_NAME}</strong><br>
+{ADDRESS}<br>
+<a href="{WEBSITE_URL}">{WEBSITE_URL}</a>
+</td>
+<td style="text-align: right; vertical-align: top; padding-left: 20px;">
+<strong style="color: #333; font-size: 13px;">{OFFICE_PHONE}</strong><br>
+<span style="font-size: 11px; color: #cc0000; font-weight: bold;">Emergency: 911</span>
+</td>
+</tr>
+</table>
+<p style="font-size: 10px; color: #999; line-height: 1.4; margin-top: 12px; margin-bottom: 0;">
+{DISCLAIMER}
+</p>
+</div>"""
+
+FOOTER_TEXT = f"""
+---
+{COMPANY_NAME}
+{ADDRESS}
+{WEBSITE_URL}
+{OFFICE_PHONE} | Emergency: 911
+
+{DISCLAIMER}
+"""
+
+# =============================================================================
 
 
 def _get_title_line(user: EntraUser) -> str | None:
@@ -234,10 +280,72 @@ async def sync_signatures(
     return success, failure, errors
 
 
+def sync_footer(dry_run: bool = False) -> tuple[bool, str | None]:
+    """Sync the organization email footer via mail flow rule.
+
+    Creates or updates a transport rule that appends the footer HTML
+    to all outgoing emails from @sjifire.org.
+
+    Args:
+        dry_run: If True, don't make changes
+
+    Returns:
+        Tuple of (success, error_message)
+    """
+    if dry_run:
+        logger.info(f"Would create/update mail flow rule: {FOOTER_RULE_NAME}")
+        logger.info("Footer HTML:")
+        print(FOOTER_HTML)
+        return True, None
+
+    client = ExchangeOnlineClient()
+
+    # Escape single quotes in HTML for PowerShell
+    escaped_html = FOOTER_HTML.replace("'", "''")
+
+    script = f"""
+$ruleName = '{FOOTER_RULE_NAME}'
+$rule = Get-TransportRule -Identity $ruleName -ErrorAction SilentlyContinue
+
+if ($rule) {{
+    Write-Output "Updating existing rule: $ruleName"
+    Set-TransportRule -Identity $ruleName `
+        -ApplyHtmlDisclaimerText @'
+{escaped_html}
+'@ `
+        -ApplyHtmlDisclaimerLocation Append `
+        -ApplyHtmlDisclaimerFallbackAction Wrap `
+        -ErrorAction Stop
+}} else {{
+    Write-Output "Creating new rule: $ruleName"
+    New-TransportRule -Name $ruleName `
+        -FromScope InOrganization `
+        -ApplyHtmlDisclaimerText @'
+{escaped_html}
+'@ `
+        -ApplyHtmlDisclaimerLocation Append `
+        -ApplyHtmlDisclaimerFallbackAction Wrap `
+        -ErrorAction Stop
+}}
+Write-Output 'SUCCESS'
+"""
+
+    result = client._run_powershell([script], parse_json=False)
+
+    if result and "SUCCESS" in str(result):
+        logger.info(f"Mail flow rule '{FOOTER_RULE_NAME}' synced successfully")
+        return True, None
+    else:
+        error = f"Failed to sync mail flow rule: {result}"
+        logger.error(error)
+        return False, error
+
+
 async def run_sync(
     dry_run: bool = False,
     email: str | None = None,
     preview: bool = False,
+    footer_only: bool = False,
 ) -> int:
     """Run signature sync.
 
@@ -245,6 +353,7 @@ async def run_sync(
         dry_run: If True, don't make changes
         email: If provided, only sync this user
         preview: If True, show signature preview for the user
+        footer_only: If True, only sync the footer mail flow rule
 
     Returns:
         Exit code
@@ -252,6 +361,15 @@ async def run_sync(
     logger.info("=" * 60)
     logger.info("Email Signature Sync")
     logger.info("=" * 60)
+
+    # Handle footer-only mode
+    if footer_only:
+        if dry_run:
+            logger.info("DRY RUN - no changes will be made")
+        logger.info("")
+        logger.info("Syncing email footer mail flow rule...")
+        success, error = sync_footer(dry_run)
+        return 0 if success else 1
 
     if preview and not email:
         logger.error("--preview requires --email")
@@ -348,6 +466,11 @@ def main() -> None:
         action="store_true",
         help="Show signature preview for the user (requires --email)",
     )
+    parser.add_argument(
+        "--sync-footer",
+        action="store_true",
+        help="Only sync the organization footer mail flow rule (skip user signatures)",
+    )
 
     args = parser.parse_args()
 
@@ -356,6 +479,7 @@ def main() -> None:
             dry_run=args.dry_run,
             email=args.email,
             preview=args.preview,
+            footer_only=args.sync_footer,
         )
     )
     sys.exit(exit_code)

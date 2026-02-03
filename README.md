@@ -123,6 +123,8 @@ The sync:
 uv run signature-sync                      # Sync all employees
 uv run signature-sync --dry-run            # Preview changes without applying
 uv run signature-sync --email user@sjifire.org --preview  # Preview signature for user
+uv run signature-sync --sync-footer        # Sync organization footer mail flow rule
+uv run signature-sync --sync-footer --dry-run  # Preview footer rule
 ```
 
 The sync:
@@ -133,6 +135,7 @@ The sync:
   - Users with neither: Name / San Juan Island Fire & Rescue / Office + Cell
 - Phone line shows office number, plus cell if user has mobile phone in Entra ID
 - Enables auto-add signature for new messages and replies
+- Footer sync creates/updates a mail flow rule that appends organization footer (logo, address, website, disclaimer) to all outgoing emails
 
 **Automated sync:** Runs weekdays at noon Pacific as part of the Entra sync workflow. See `.github/workflows/entra-sync.yml`.
 
