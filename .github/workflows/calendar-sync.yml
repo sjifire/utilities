@@ -2,8 +2,8 @@ name: Calendar Sync
 
 on:
   schedule:
-    # Run daily at 6 AM Pacific (14:00 UTC = 6am PST / 7am PDT)
-    - cron: '0 14 * * *'
+    # Run daily at 5 PM Pacific (01:00 UTC = 5pm PST / 6pm PDT)
+    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
