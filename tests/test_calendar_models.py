@@ -17,35 +17,25 @@ from sjifire.calendar.models import (
 class TestSectionSortKey:
     """Tests for section_sort_key function."""
 
-    def test_s31_first(self):
-        """S31 should sort first."""
+    def test_stations_sorted_numerically(self):
+        """Stations should sort numerically by number."""
         assert section_sort_key("S31") < section_sort_key("S32")
-        assert section_sort_key("S31") < section_sort_key("S33")
+        assert section_sort_key("S32") < section_sort_key("S33")
+
+    def test_stations_before_other_sections(self):
+        """Stations should sort before non-station sections."""
         assert section_sort_key("S31") < section_sort_key("Chief Officer")
+        assert section_sort_key("S32") < section_sort_key("Backup Duty")
+        assert section_sort_key("S33") < section_sort_key("Support")
 
-    def test_stations_before_chief(self):
-        """Stations should sort before Chief Officer."""
-        assert section_sort_key("S32") < section_sort_key("Chief Officer")
-        assert section_sort_key("S33") < section_sort_key("Chief Officer")
+    def test_non_stations_sorted_alphabetically(self):
+        """Non-station sections should sort alphabetically."""
+        assert section_sort_key("Backup Duty") < section_sort_key("Chief Officer")
+        assert section_sort_key("Chief Officer") < section_sort_key("Support")
 
-    def test_chief_before_backup(self):
-        """Chief Officer should sort before Backup Duty."""
-        assert section_sort_key("Chief Officer") < section_sort_key("Backup Duty")
-
-    def test_backup_before_standby(self):
-        """Backup Duty should sort before Standby."""
-        assert section_sort_key("Backup Duty") < section_sort_key("S31 Standby")
-
-    def test_standby_before_marine(self):
-        """Standby should sort before Marine."""
-        assert section_sort_key("S31 Standby") < section_sort_key("FB31 Marine")
-
-    def test_marine_before_support(self):
-        """Marine should sort before Support."""
-        assert section_sort_key("FB31 Marine") < section_sort_key("Support")
-
-    def test_station_standby_not_with_stations(self):
-        """Station Standby should sort with Standby, not stations."""
+    def test_station_variants_not_treated_as_stations(self):
+        """Station variants (like Standby) should sort with other sections."""
+        # "S31 Standby" is not a pure station, so it goes after stations
         assert section_sort_key("S31 Standby") > section_sort_key("S32")
         assert section_sort_key("S32 Standby") > section_sort_key("S33")
 
@@ -215,7 +205,7 @@ class TestAllDayDutyEvent:
         assert event.subject == "On Duty"
 
     def test_body_html_has_until_section(self, sample_crew):
-        """Body HTML has 'Until 6 PM' section."""
+        """Body HTML has 'Until 1800' section."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
             until_1800_platoon="A",
@@ -225,11 +215,11 @@ class TestAllDayDutyEvent:
         )
         html = event.body_html
 
-        assert "Until 6 PM" in html
+        assert "Until 1800" in html
         assert "(A)" in html
 
     def test_body_html_has_from_section(self, sample_crew):
-        """Body HTML has 'From 6 PM' section."""
+        """Body HTML has 'From 1800' section."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
             until_1800_platoon="",
@@ -239,7 +229,7 @@ class TestAllDayDutyEvent:
         )
         html = event.body_html
 
-        assert "From 6 PM" in html
+        assert "From 1800" in html
         assert "(B)" in html
 
     def test_body_html_has_both_sections(self, sample_crew):
@@ -253,8 +243,8 @@ class TestAllDayDutyEvent:
         )
         html = event.body_html
 
-        assert "Until 6 PM" in html
-        assert "From 6 PM" in html
+        assert "Until 1800" in html
+        assert "From 1800" in html
 
     def test_body_html_has_aladtec_link(self, sample_crew):
         """Body HTML has Aladtec link."""
@@ -340,8 +330,8 @@ class TestAllDayDutyEvent:
         )
         text = event.body_text
 
-        assert "Until 6 PM" in text
-        assert "From 6 PM" in text
+        assert "Until 1800" in text
+        assert "From 1800" in text
 
     def test_body_text_includes_crew(self, sample_crew):
         """Body text includes crew."""
@@ -369,7 +359,7 @@ class TestAllDayDutyEvent:
         html = event.body_html
 
         assert "()" not in html
-        assert "Until 6 PM</h3>" in html or "Until 6 PM<" in html
+        assert "Until 1800</h3>" in html or "Until 1800<" in html
 
 
 class TestSyncResult:

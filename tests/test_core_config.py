@@ -13,12 +13,16 @@ from sjifire.core.config import (
 
 
 class TestGetAladtecCredentials:
-    """Tests for get_aladtec_credentials function."""
+    """Tests for get_aladtec_credentials function.
+
+    Note: This function is defined in sjifire.aladtec.client and re-exported
+    from sjifire.core.config for backwards compatibility.
+    """
 
     def test_returns_credentials_when_set(self, mock_env_vars):
         # mock_env_vars sets env vars, but load_dotenv may override them
         # Patch load_dotenv to do nothing so our env vars are used
-        with patch("sjifire.core.config.load_dotenv"):
+        with patch("sjifire.aladtec.client.load_dotenv"):
             url, username, password = get_aladtec_credentials()
 
         assert url == "https://test.aladtec.com"
@@ -31,7 +35,7 @@ class TestGetAladtecCredentials:
         monkeypatch.setenv("ALADTEC_PASSWORD", "pass")
 
         with (
-            patch("sjifire.core.config.load_dotenv"),
+            patch("sjifire.aladtec.client.load_dotenv"),
             pytest.raises(ValueError, match="ALADTEC_URL"),
         ):
             get_aladtec_credentials()
@@ -42,7 +46,7 @@ class TestGetAladtecCredentials:
         monkeypatch.setenv("ALADTEC_PASSWORD", "pass")
 
         with (
-            patch("sjifire.core.config.load_dotenv"),
+            patch("sjifire.aladtec.client.load_dotenv"),
             pytest.raises(ValueError, match="ALADTEC_USERNAME"),
         ):
             get_aladtec_credentials()
@@ -53,7 +57,7 @@ class TestGetAladtecCredentials:
         monkeypatch.delenv("ALADTEC_PASSWORD", raising=False)
 
         with (
-            patch("sjifire.core.config.load_dotenv"),
+            patch("sjifire.aladtec.client.load_dotenv"),
             pytest.raises(ValueError, match="ALADTEC_PASSWORD"),
         ):
             get_aladtec_credentials()
@@ -63,7 +67,7 @@ class TestGetAladtecCredentials:
         monkeypatch.delenv("ALADTEC_USERNAME", raising=False)
         monkeypatch.delenv("ALADTEC_PASSWORD", raising=False)
 
-        with patch("sjifire.core.config.load_dotenv"), pytest.raises(ValueError):
+        with patch("sjifire.aladtec.client.load_dotenv"), pytest.raises(ValueError):
             get_aladtec_credentials()
 
 

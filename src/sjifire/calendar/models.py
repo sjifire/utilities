@@ -1,5 +1,7 @@
 """Data models for calendar events."""
 
+import os
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from html import escape
@@ -18,27 +20,27 @@ POSITION_ORDER = {
     "Backup Duty Officer": 9,
 }
 
-# Aladtec link for calendar events
-ALADTEC_URL = "https://secure17.aladtec.com/sjifire/"
+
+def get_aladtec_url() -> str:
+    """Get Aladtec URL from environment or use default."""
+    return os.getenv("ALADTEC_URL", "https://secure17.aladtec.com/sjifire/")
 
 
 def section_sort_key(section: str) -> tuple[int, str]:
-    """Sort key for sections - S31 first, then stations, then others."""
-    if section == "S31":
-        return (0, section)
-    if section.startswith("S3") and "Standby" not in section:
-        return (1, section)
-    if section == "Chief Officer":
-        return (2, section)
-    if section == "Backup Duty":
-        return (3, section)
-    if "Standby" in section:
-        return (4, section)
-    if "FB31" in section or "Marine" in section.lower():
-        return (5, section)
-    if "Support" in section:
-        return (6, section)
-    return (7, section)
+    """Sort key for sections - stations first (numerically), then others alphabetically.
+
+    Sorting priority:
+    1. Station sections (S31, S32, S33, etc.) - sorted by number
+    2. All other sections - sorted alphabetically
+    """
+    # Check if it's a station section (S followed by numbers)
+    station_match = re.match(r"^S(\d+)$", section)
+    if station_match:
+        # Stations get priority 0, sorted by station number
+        return (0, int(station_match.group(1)), section)
+
+    # Everything else gets priority 1, sorted alphabetically
+    return (1, 0, section)
 
 
 def position_sort_key(position: str) -> int:
@@ -159,7 +161,7 @@ class OnDutyEvent:
         lines.append('<hr style="margin-top: 24px;">')
         lines.append(
             f'<p style="font-size: 0.9em; color: #666; margin-top: 12px;">'
-            f'Schedule data from <a href="{ALADTEC_URL}">Aladtec</a>. '
+            f'Schedule data from <a href="{get_aladtec_url()}">Aladtec</a>. '
             f"View your personal schedule and make changes there.</p>"
         )
 
@@ -274,8 +276,8 @@ class AllDayDutyEvent:
     """An all-day calendar event showing crew for two time periods.
 
     For any calendar day, shows:
-    - Until 6 PM: Crew from previous day's shift (ending at 1800)
-    - From 6 PM: Crew starting today's shift (begins at 1800)
+    - Until 1800: Crew from previous day's shift (ending at 1800)
+    - From 1800: Crew starting today's shift (begins at 1800)
     """
 
     event_date: date
@@ -295,23 +297,23 @@ class AllDayDutyEvent:
         """Generate event body as HTML with two time period sections."""
         lines = []
 
-        # Until 6 PM section
+        # Until 1800 section
         if self.until_1800_crew:
             platoon_note = f" ({self.until_1800_platoon})" if self.until_1800_platoon else ""
-            lines.append(f'<h3 style="color: #1a5276;">Until 6 PM{platoon_note}</h3>')
+            lines.append(f'<h3 style="color: #1a5276;">Until 1800{platoon_note}</h3>')
             lines.extend(_format_crew_section_html(self.until_1800_crew))
 
-        # From 6 PM section
+        # From 1800 section
         if self.from_1800_crew:
             platoon_note = f" ({self.from_1800_platoon})" if self.from_1800_platoon else ""
-            lines.append(f'<h3 style="color: #1a5276;">From 6 PM{platoon_note}</h3>')
+            lines.append(f'<h3 style="color: #1a5276;">From 1800{platoon_note}</h3>')
             lines.extend(_format_crew_section_html(self.from_1800_crew))
 
         # Add Aladtec link at the bottom with spacing
         lines.append('<hr style="margin-top: 24px;">')
         lines.append(
             f'<p style="font-size: 0.9em; color: #666; margin-top: 12px;">'
-            f'Schedule data from <a href="{ALADTEC_URL}">Aladtec</a>. '
+            f'Schedule data from <a href="{get_aladtec_url()}">Aladtec</a>. '
             f"View your personal schedule and make changes there.</p>"
         )
 
@@ -322,17 +324,17 @@ class AllDayDutyEvent:
         """Generate event body as plain text (for comparison)."""
         lines = []
 
-        # Until 6 PM section
+        # Until 1800 section
         if self.until_1800_crew:
             platoon_note = f" ({self.until_1800_platoon})" if self.until_1800_platoon else ""
-            lines.append(f"Until 6 PM{platoon_note}")
+            lines.append(f"Until 1800{platoon_note}")
             lines.append("-" * 20)
             lines.extend(_format_crew_section_text(self.until_1800_crew))
 
-        # From 6 PM section
+        # From 1800 section
         if self.from_1800_crew:
             platoon_note = f" ({self.from_1800_platoon})" if self.from_1800_platoon else ""
-            lines.append(f"From 6 PM{platoon_note}")
+            lines.append(f"From 1800{platoon_note}")
             lines.append("-" * 20)
             lines.extend(_format_crew_section_text(self.from_1800_crew))
 

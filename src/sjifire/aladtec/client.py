@@ -1,13 +1,36 @@
 """Base Aladtec HTTP client with authentication."""
 
 import logging
+import os
 from typing import Self
 
 import httpx
-
-from sjifire.core.config import get_aladtec_credentials
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+
+def get_aladtec_credentials() -> tuple[str, str, str]:
+    """Get Aladtec credentials from environment.
+
+    Returns:
+        Tuple of (url, username, password)
+
+    Raises:
+        ValueError: If any required credential is not set
+    """
+    load_dotenv()
+
+    url = os.getenv("ALADTEC_URL")
+    username = os.getenv("ALADTEC_USERNAME")
+    password = os.getenv("ALADTEC_PASSWORD")
+
+    if not url or not username or not password:
+        raise ValueError(
+            "Aladtec credentials not set. Required: ALADTEC_URL, ALADTEC_USERNAME, ALADTEC_PASSWORD"
+        )
+
+    return url, username, password
 
 
 class AladtecClient:
@@ -19,8 +42,8 @@ class AladtecClient:
     Example:
         with AladtecClient() as client:
             if client.login():
-                # Make authenticated requests via client.http
-                response = client.http.get(...)
+                # Make authenticated requests via client.client
+                response = client.client.get(...)
     """
 
     def __init__(self, timeout: float = 60.0) -> None:
@@ -31,11 +54,11 @@ class AladtecClient:
         """
         self.base_url, self.username, self.password = get_aladtec_credentials()
         self._timeout = timeout
-        self.http: httpx.Client | None = None
+        self.client: httpx.Client | None = None
 
     def __enter__(self) -> Self:
         """Enter context manager - create HTTP client."""
-        self.http = httpx.Client(
+        self.client = httpx.Client(
             follow_redirects=True,
             timeout=self._timeout,
         )
@@ -43,9 +66,9 @@ class AladtecClient:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit context manager - close HTTP client."""
-        if self.http:
-            self.http.close()
-            self.http = None
+        if self.client:
+            self.client.close()
+            self.client = None
 
     def _require_client(self) -> httpx.Client:
         """Get HTTP client or raise if not in context manager.
@@ -56,9 +79,9 @@ class AladtecClient:
         Raises:
             RuntimeError: If not used as context manager
         """
-        if not self.http:
+        if not self.client:
             raise RuntimeError("Client must be used as context manager")
-        return self.http
+        return self.client
 
     def login(self) -> bool:
         """Log in to Aladtec.

@@ -11,14 +11,14 @@ class TestAladtecClient:
     def test_context_manager_creates_http_client(self, mock_env_vars):
         """Context manager creates HTTP client."""
         with AladtecClient() as client:
-            assert client.http is not None
+            assert client.client is not None
 
     def test_context_manager_closes_http_client(self, mock_env_vars):
         """Context manager closes HTTP client."""
         client = AladtecClient()
         with client:
             pass
-        assert client.http is None
+        assert client.client is None
 
     def test_require_client_raises_outside_context(self, mock_env_vars):
         """_require_client raises outside context manager."""
@@ -30,7 +30,7 @@ class TestAladtecClient:
         """_require_client returns HTTP client inside context manager."""
         with AladtecClient() as client:
             http = client._require_client()
-            assert http is client.http
+            assert http is client.client
 
     def test_login_requires_context_manager(self, mock_env_vars):
         """login() requires context manager."""

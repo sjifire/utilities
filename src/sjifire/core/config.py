@@ -7,28 +7,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# Re-export for backwards compatibility
+from sjifire.aladtec.client import get_aladtec_credentials
 
-def get_aladtec_credentials() -> tuple[str, str, str]:
-    """Get Aladtec credentials from environment.
-
-    Returns:
-        Tuple of (url, username, password)
-
-    Raises:
-        ValueError: If any required credential is not set
-    """
-    load_dotenv()
-
-    url = os.getenv("ALADTEC_URL")
-    username = os.getenv("ALADTEC_USERNAME")
-    password = os.getenv("ALADTEC_PASSWORD")
-
-    if not url or not username or not password:
-        raise ValueError(
-            "Aladtec credentials not set. Required: ALADTEC_URL, ALADTEC_USERNAME, ALADTEC_PASSWORD"
-        )
-
-    return url, username, password
+__all__ = ["get_aladtec_credentials"]
 
 
 def get_ispyfire_credentials() -> tuple[str, str, str]:

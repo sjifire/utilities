@@ -35,25 +35,12 @@ def clean_title(title: str | None) -> str | None:
     return None
 
 
-class AladtecScraper(AladtecClient):
+class AladtecMemberScraper(AladtecClient):
     """Scraper for Aladtec member database using CSV export."""
 
     def __init__(self) -> None:
         """Initialize the scraper with credentials from environment."""
         super().__init__(timeout=30.0)
-        # Alias for backwards compatibility
-        self.client = self.http
-
-    def __enter__(self):
-        """Enter context manager."""
-        result = super().__enter__()
-        self.client = self.http  # Keep alias in sync
-        return result
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context manager."""
-        super().__exit__(exc_type, exc_val, exc_tb)
-        self.client = None
 
     def get_members(self, layout: str = "g_all", include_inactive: bool = False) -> list[Member]:
         """Fetch all members via CSV export.

@@ -2,14 +2,14 @@
 
 import pytest
 
-from sjifire.aladtec.scraper import AladtecScraper
+from sjifire.aladtec.scraper import AladtecMemberScraper
 
 
-class TestAladtecScraperCSVParsing:
+class TestAladtecMemberScraperCSVParsing:
     """Tests for CSV parsing methods."""
 
     def test_parse_csv_basic(self, sample_csv_content, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         members = scraper._parse_csv(sample_csv_content)
 
         assert len(members) == 3
@@ -26,28 +26,28 @@ class TestAladtecScraperCSVParsing:
         assert john.employee_id == "EMP001"
 
     def test_parse_csv_multiple_positions(self, sample_csv_content, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         members = scraper._parse_csv(sample_csv_content)
 
         john = members[0]
         assert john.positions == ["Firefighter", "EMT"]
 
     def test_parse_csv_single_position(self, sample_csv_content, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         members = scraper._parse_csv(sample_csv_content)
 
         jane = members[1]
         assert jane.positions == ["Apparatus Operator"]
 
     def test_parse_csv_missing_email(self, sample_csv_content, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         members = scraper._parse_csv(sample_csv_content)
 
         bob = members[2]
         assert bob.email is None
 
     def test_parse_csv_missing_optional_fields(self, sample_csv_content, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         members = scraper._parse_csv(sample_csv_content)
 
         jane = members[1]
@@ -55,17 +55,17 @@ class TestAladtecScraperCSVParsing:
         assert jane.evip is None
 
 
-class TestAladtecScraperInactiveCSVParsing:
+class TestAladtecMemberScraperInactiveCSVParsing:
     """Tests for inactive members CSV parsing."""
 
     def test_parse_inactive_csv(self, sample_inactive_csv_content, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         members = scraper._parse_inactive_csv(sample_inactive_csv_content)
 
         assert len(members) == 2
 
     def test_parse_inactive_csv_name_format(self, sample_inactive_csv_content, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         members = scraper._parse_inactive_csv(sample_inactive_csv_content)
 
         # Name is "Doe, John" in CSV
@@ -75,7 +75,7 @@ class TestAladtecScraperInactiveCSVParsing:
         assert john.email == "john.doe@sjifire.org"
 
     def test_parse_inactive_csv_status(self, sample_inactive_csv_content, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         members = scraper._parse_inactive_csv(sample_inactive_csv_content)
 
         for member in members:
@@ -83,18 +83,18 @@ class TestAladtecScraperInactiveCSVParsing:
             assert member.is_active is False
 
     def test_parse_inactive_csv_missing_email(self, sample_inactive_csv_content, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         members = scraper._parse_inactive_csv(sample_inactive_csv_content)
 
         former = members[1]
         assert former.email is None
 
 
-class TestAladtecScraperCSVRowParsing:
+class TestAladtecMemberScraperCSVRowParsing:
     """Tests for individual CSV row parsing."""
 
     def test_parse_csv_row_basic(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {
             "first name": "John",
             "last name": "Doe",
@@ -108,7 +108,7 @@ class TestAladtecScraperCSVRowParsing:
         assert member.email == "john.doe@sjifire.org"
 
     def test_parse_csv_row_normalized_keys(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {
             "First Name": "John",
             "Last Name": "Doe",
@@ -121,14 +121,14 @@ class TestAladtecScraperCSVRowParsing:
         assert member.last_name == "Doe"
 
     def test_parse_csv_row_missing_name(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {"email": "john@example.com"}
         member = scraper._parse_csv_row(row)
 
         assert member is None
 
     def test_parse_csv_row_multiple_emails(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {
             "first name": "John",
             "last name": "Doe",
@@ -141,7 +141,7 @@ class TestAladtecScraperCSVRowParsing:
         assert member.personal_email == "john.personal@gmail.com"
 
     def test_parse_csv_row_name_column_with_comma(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {"name": "Doe, John"}
         member = scraper._parse_csv_row(row)
 
@@ -150,7 +150,7 @@ class TestAladtecScraperCSVRowParsing:
         assert member.last_name == "Doe"
 
     def test_parse_csv_row_name_column_without_comma(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {"name": "John Doe"}
         member = scraper._parse_csv_row(row)
 
@@ -159,7 +159,7 @@ class TestAladtecScraperCSVRowParsing:
         assert member.last_name == "Doe"
 
     def test_parse_csv_row_generates_id(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {
             "first name": "John",
             "last name": "Doe",
@@ -170,7 +170,7 @@ class TestAladtecScraperCSVRowParsing:
         assert member.id == "john.doe"
 
     def test_parse_csv_row_uses_employee_id(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {
             "first name": "John",
             "last name": "Doe",
@@ -183,26 +183,26 @@ class TestAladtecScraperCSVRowParsing:
         assert member.employee_id == "EMP001"
 
 
-class TestAladtecScraperContextManager:
+class TestAladtecMemberScraperContextManager:
     """Tests for context manager functionality."""
 
     def test_context_manager_creates_client(self, mock_env_vars):
-        with AladtecScraper() as scraper:
+        with AladtecMemberScraper() as scraper:
             assert scraper.client is not None
 
     def test_context_manager_closes_client(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         with scraper:
             pass
         assert scraper.client is None
 
     def test_requires_context_manager_for_login(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         with pytest.raises(RuntimeError, match="must be used as context manager"):
             scraper.login()
 
     def test_requires_context_manager_for_get_members(self, mock_env_vars):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         with pytest.raises(RuntimeError, match="must be used as context manager"):
             scraper.get_members()
 
@@ -214,7 +214,7 @@ class TestGetMemberPositions:
         """Should parse positions from <li> elements in view mode."""
         from unittest.mock import MagicMock
 
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         scraper.client = MagicMock()
 
         # Simulate HTML response with positions as list items
@@ -245,7 +245,7 @@ class TestGetMemberPositions:
         """Should parse positions from checked checkboxes in edit mode."""
         from unittest.mock import MagicMock
 
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         scraper.client = MagicMock()
 
         # Simulate HTML response with positions as checkboxes
@@ -277,7 +277,7 @@ class TestGetMemberPositions:
         """Should return empty list if Positions section not found."""
         from unittest.mock import MagicMock
 
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         scraper.client = MagicMock()
 
         html = "<html><body>No positions here</body></html>"
@@ -294,7 +294,7 @@ class TestGetMemberPositions:
         """Should use list items when both formats present."""
         from unittest.mock import MagicMock
 
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         scraper.client = MagicMock()
 
         # HTML with both list items and checkboxes

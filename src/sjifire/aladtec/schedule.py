@@ -97,19 +97,6 @@ class AladtecScheduleScraper(AladtecClient):
     def __init__(self) -> None:
         """Initialize the scraper with credentials from environment."""
         super().__init__(timeout=60.0)
-        # Alias for backwards compatibility
-        self.client = self.http
-
-    def __enter__(self):
-        """Enter context manager."""
-        result = super().__enter__()
-        self.client = self.http  # Keep alias in sync
-        return result
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context manager."""
-        super().__exit__(exc_type, exc_val, exc_tb)
-        self.client = None
 
     def _fetch_ajax_schedule(self, start_date: date) -> dict[str, str]:
         """Fetch schedule via AJAX for a specific start date.

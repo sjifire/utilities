@@ -9,7 +9,7 @@ from dataclasses import asdict
 
 from email_validator import EmailNotValidError, validate_email
 
-from sjifire.aladtec.scraper import AladtecScraper
+from sjifire.aladtec.scraper import AladtecMemberScraper
 from sjifire.core.backup import backup_entra_users
 from sjifire.entra.aladtec_import import AladtecImporter
 from sjifire.entra.users import EntraUserManager
@@ -126,7 +126,7 @@ async def run_import(
     logger.info("Fetching members from Aladtec...")
 
     try:
-        with AladtecScraper() as scraper:
+        with AladtecMemberScraper() as scraper:
             if not scraper.login():
                 logger.error("Failed to log in to Aladtec")
                 return 1
