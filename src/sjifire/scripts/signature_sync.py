@@ -1,0 +1,308 @@
+"""Sync email signatures for all users.
+
+Sets OWA (Outlook on the web) signatures for all users based on their
+Entra ID profile data (name, rank/title, job title).
+
+Signature format:
+- Users with rank: Name / Rank / San Juan Island Fire & Rescue
+- Users with job title (no rank): Name / Job Title / San Juan Island Fire & Rescue
+- Users with neither: Name / San Juan Island Fire & Rescue
+
+The footer (logo, address, phone, disclaimer) is added via a separate
+mail flow rule and is not part of the signature.
+"""
+
+import argparse
+import asyncio
+import logging
+import sys
+
+from sjifire.entra.users import EntraUser, EntraUserManager
+from sjifire.exchange.client import ExchangeOnlineClient
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+# Silence verbose HTTP logging
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("azure.identity").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+
+# Company name for signatures
+COMPANY_NAME = "San Juan Island Fire & Rescue"
+
+
+def generate_signature_html(user: EntraUser) -> str:
+    """Generate HTML signature for a user.
+
+    Args:
+        user: EntraUser with profile data
+
+    Returns:
+        HTML signature string
+    """
+    name = user.display_name or f"{user.first_name} {user.last_name}"
+
+    # Determine title line: rank takes priority, then job title, then nothing
+    title_line = ""
+    if user.rank:
+        title_line = user.rank
+    elif user.job_title:
+        title_line = user.job_title
+
+    # Build signature HTML
+    if title_line:
+        signature = f"""<p style="margin: 0; font-size: 14px;">
+<strong style="color: #333;">{name}</strong><br>
+<span style="color: #666;">{title_line}<br>
+{COMPANY_NAME}</span>
+</p>"""
+    else:
+        signature = f"""<p style="margin: 0; font-size: 14px;">
+<strong style="color: #333;">{name}</strong><br>
+<span style="color: #666;">{COMPANY_NAME}</span>
+</p>"""
+
+    return signature
+
+
+def generate_signature_text(user: EntraUser) -> str:
+    """Generate plain text signature for a user.
+
+    Args:
+        user: EntraUser with profile data
+
+    Returns:
+        Plain text signature string
+    """
+    name = user.display_name or f"{user.first_name} {user.last_name}"
+
+    # Determine title line
+    title_line = ""
+    if user.rank:
+        title_line = user.rank
+    elif user.job_title:
+        title_line = user.job_title
+
+    # Build signature text
+    if title_line:
+        return f"{name}\n{title_line}\n{COMPANY_NAME}"
+    else:
+        return f"{name}\n{COMPANY_NAME}"
+
+
+async def sync_user_signature(
+    client: ExchangeOnlineClient,
+    user: EntraUser,
+    dry_run: bool = False,
+) -> tuple[bool, str | None]:
+    """Sync signature for a single user.
+
+    Args:
+        client: Exchange Online client
+        user: EntraUser to sync signature for
+        dry_run: If True, don't make changes
+
+    Returns:
+        Tuple of (success, error_message)
+    """
+    if not user.email:
+        return False, "No email address"
+
+    html_sig = generate_signature_html(user)
+    text_sig = generate_signature_text(user)
+
+    if dry_run:
+        logger.info(f"Would set signature for {user.display_name} ({user.email})")
+        return True, None
+
+    # Set signature via PowerShell
+    script = f"""
+$config = Get-MailboxMessageConfiguration -Identity '{user.email}' -ErrorAction Stop
+Set-MailboxMessageConfiguration -Identity '{user.email}' `
+    -SignatureHtml @'
+{html_sig}
+'@ `
+    -SignatureText @'
+{text_sig}
+'@ `
+    -AutoAddSignature $true `
+    -AutoAddSignatureOnReply $true `
+    -ErrorAction Stop
+Write-Output 'SUCCESS'
+"""
+
+    result = client._run_powershell([script], parse_json=False)
+
+    if result and "SUCCESS" in str(result):
+        logger.info(f"Set signature for {user.display_name} ({user.email})")
+        return True, None
+    else:
+        error = f"Failed to set signature: {result}"
+        logger.error(f"{user.email}: {error}")
+        return False, error
+
+
+async def sync_signatures(
+    users: list[EntraUser],
+    dry_run: bool = False,
+) -> tuple[int, int, list[str]]:
+    """Sync signatures for all users.
+
+    Args:
+        users: List of EntraUser objects
+        dry_run: If True, don't make changes
+
+    Returns:
+        Tuple of (success_count, failure_count, error_messages)
+    """
+    client = ExchangeOnlineClient()
+
+    success = 0
+    failure = 0
+    errors: list[str] = []
+
+    # Process users in batches to avoid overwhelming Exchange
+    # Each user requires a separate PowerShell connection currently
+    for user in users:
+        ok, error = await sync_user_signature(client, user, dry_run)
+        if ok:
+            success += 1
+        else:
+            failure += 1
+            if error:
+                errors.append(f"{user.email}: {error}")
+
+    await client.close()
+    return success, failure, errors
+
+
+async def run_sync(
+    dry_run: bool = False,
+    email: str | None = None,
+    preview: bool = False,
+) -> int:
+    """Run signature sync.
+
+    Args:
+        dry_run: If True, don't make changes
+        email: If provided, only sync this user
+        preview: If True, show signature preview for the user
+
+    Returns:
+        Exit code
+    """
+    logger.info("=" * 60)
+    logger.info("Email Signature Sync")
+    logger.info("=" * 60)
+
+    if preview and not email:
+        logger.error("--preview requires --email")
+        return 1
+
+    if dry_run:
+        logger.info("DRY RUN - no changes will be made")
+
+    # Get users from Entra ID
+    logger.info("")
+    logger.info("Fetching users from Entra ID...")
+
+    user_manager = EntraUserManager()
+
+    try:
+        # Get only employees (excludes room/resource mailboxes)
+        all_users = await user_manager.get_employees(include_disabled=False)
+
+        # Filter to sjifire.org domain
+        users = [u for u in all_users if u.email and u.email.lower().endswith("@sjifire.org")]
+
+        if email:
+            # Filter to specific user
+            users = [u for u in users if u.email and u.email.lower() == email.lower()]
+            if not users:
+                logger.error(f"User not found: {email}")
+                return 1
+
+        logger.info(f"Found {len(users)} employees")
+
+    except Exception as e:
+        logger.error(f"Failed to fetch users: {e}")
+        return 1
+
+    # Handle preview mode
+    if preview:
+        user = users[0]
+        logger.info("")
+        logger.info(f"Signature preview for {user.display_name} ({user.email}):")
+        logger.info("-" * 40)
+        logger.info(f"Rank: {user.rank or '(none)'}")
+        logger.info(f"Job Title: {user.job_title or '(none)'}")
+        logger.info("-" * 40)
+        logger.info("HTML Signature:")
+        print(generate_signature_html(user))
+        logger.info("-" * 40)
+        logger.info("Text Signature:")
+        print(generate_signature_text(user))
+        return 0
+
+    # Sync signatures
+    logger.info("")
+    logger.info("Syncing signatures...")
+
+    success, failure, errors = await sync_signatures(users, dry_run)
+
+    # Print summary
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("Summary")
+    logger.info("=" * 60)
+    logger.info(f"  Successful: {success}")
+    logger.info(f"  Failed: {failure}")
+
+    if errors:
+        logger.info("")
+        logger.info("Errors:")
+        for error in errors[:10]:  # Limit to first 10
+            logger.error(f"  {error}")
+        if len(errors) > 10:
+            logger.error(f"  ... and {len(errors) - 10} more")
+
+    return 0 if failure == 0 else 1
+
+
+def main() -> None:
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(
+        description="Sync email signatures for all users. "
+        "Sets OWA signatures based on Entra ID profile data."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be done without making changes",
+    )
+    parser.add_argument(
+        "--email",
+        metavar="EMAIL",
+        help="Only sync signature for this user",
+    )
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Show signature preview for the user (requires --email)",
+    )
+
+    args = parser.parse_args()
+
+    exit_code = asyncio.run(
+        run_sync(
+            dry_run=args.dry_run,
+            email=args.email,
+            preview=args.preview,
+        )
+    )
+    sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()
