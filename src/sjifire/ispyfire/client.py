@@ -1,11 +1,13 @@
 """iSpyFire API client."""
 
 import logging
+import os
 import re
 import time
 from typing import Self
 
 import httpx
+from dotenv import load_dotenv
 from tenacity import (
     RetryError,
     retry,
@@ -14,8 +16,31 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from sjifire.core.config import get_ispyfire_credentials
 from sjifire.ispyfire.models import ISpyFirePerson
+
+
+def get_ispyfire_credentials() -> tuple[str, str, str]:
+    """Get iSpyFire credentials from environment.
+
+    Returns:
+        Tuple of (url, username, password)
+
+    Raises:
+        ValueError: If any required credential is not set
+    """
+    load_dotenv()
+
+    url = os.getenv("ISPYFIRE_URL")
+    username = os.getenv("ISPYFIRE_USERNAME")
+    password = os.getenv("ISPYFIRE_PASSWORD")
+
+    if not url or not username or not password:
+        raise ValueError(
+            "iSpyFire credentials not set. "
+            "Required: ISPYFIRE_URL, ISPYFIRE_USERNAME, ISPYFIRE_PASSWORD"
+        )
+
+    return url, username, password
 
 logger = logging.getLogger(__name__)
 

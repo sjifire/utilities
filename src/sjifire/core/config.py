@@ -8,30 +8,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-def get_ispyfire_credentials() -> tuple[str, str, str]:
-    """Get iSpyFire credentials from environment.
-
-    Returns:
-        Tuple of (url, username, password)
-
-    Raises:
-        ValueError: If any required credential is not set
-    """
-    load_dotenv()
-
-    url = os.getenv("ISPYFIRE_URL")
-    username = os.getenv("ISPYFIRE_USERNAME")
-    password = os.getenv("ISPYFIRE_PASSWORD")
-
-    if not url or not username or not password:
-        raise ValueError(
-            "iSpyFire credentials not set. "
-            "Required: ISPYFIRE_URL, ISPYFIRE_USERNAME, ISPYFIRE_PASSWORD"
-        )
-
-    return url, username, password
-
-
 def get_graph_credentials() -> tuple[str, str, str]:
     """Get MS Graph API credentials from environment.
 
