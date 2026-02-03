@@ -30,6 +30,9 @@ SHIFT_END_HOUR = 18  # 6 PM next day
 TIMEZONE = ZoneInfo("America/Los_Angeles")
 TIMEZONE_NAME = "America/Los_Angeles"
 
+# Concurrency limit for parallel API calls (avoid rate limiting)
+MAX_CONCURRENT_REQUESTS = 10
+
 # Sections to exclude entirely from calendar events
 EXCLUDED_SECTIONS = [
     "Administration",
@@ -431,6 +434,124 @@ class CalendarSync:
             logger.error(f"Failed to delete event {event_id}: {e}")
             return False
 
+    async def _create_event_with_semaphore(
+        self,
+        event: AllDayDutyEvent,
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[date, str | None]:
+        """Create event with concurrency limit."""
+        async with semaphore:
+            event_id = await self.create_event(event)
+            return event.event_date, event_id
+
+    async def _update_event_with_semaphore(
+        self,
+        event: AllDayDutyEvent,
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[date, bool]:
+        """Update event with concurrency limit."""
+        async with semaphore:
+            success = await self.update_event(event)
+            return event.event_date, success
+
+    async def _delete_event_with_semaphore(
+        self,
+        event_date: date,
+        event_id: str,
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[date, bool]:
+        """Delete event with concurrency limit."""
+        async with semaphore:
+            success = await self.delete_event(event_id)
+            return event_date, success
+
+    async def create_events_batch(
+        self,
+        events: list[AllDayDutyEvent],
+    ) -> tuple[int, list[str]]:
+        """Create multiple events concurrently.
+
+        Returns:
+            Tuple of (success_count, list of error messages)
+        """
+        if not events:
+            return 0, []
+
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+        tasks = [self._create_event_with_semaphore(e, semaphore) for e in events]
+
+        results = await asyncio.gather(*tasks)
+
+        success_count = 0
+        errors = []
+        for event_date, event_id in results:
+            if event_id:
+                success_count += 1
+            else:
+                errors.append(f"Failed to create {event_date}")
+
+        return success_count, errors
+
+    async def update_events_batch(
+        self,
+        events: list[AllDayDutyEvent],
+    ) -> tuple[int, list[str]]:
+        """Update multiple events concurrently.
+
+        Returns:
+            Tuple of (success_count, list of error messages)
+        """
+        if not events:
+            return 0, []
+
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+        tasks = [self._update_event_with_semaphore(e, semaphore) for e in events]
+
+        results = await asyncio.gather(*tasks)
+
+        success_count = 0
+        errors = []
+        for event_date, success in results:
+            if success:
+                success_count += 1
+            else:
+                errors.append(f"Failed to update {event_date}")
+
+        return success_count, errors
+
+    async def delete_events_batch(
+        self,
+        events_to_delete: dict[date, str],
+    ) -> tuple[int, list[str]]:
+        """Delete multiple events concurrently.
+
+        Args:
+            events_to_delete: Dict mapping event_date to event_id
+
+        Returns:
+            Tuple of (success_count, list of error messages)
+        """
+        if not events_to_delete:
+            return 0, []
+
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+        tasks = [
+            self._delete_event_with_semaphore(event_date, event_id, semaphore)
+            for event_date, event_id in events_to_delete.items()
+        ]
+
+        results = await asyncio.gather(*tasks)
+
+        success_count = 0
+        errors = []
+        for event_date, success in results:
+            if success:
+                success_count += 1
+            else:
+                errors.append(f"Failed to delete {event_date}")
+
+        return success_count, errors
+
     async def sync_events(
         self,
         new_events: list[AllDayDutyEvent],
@@ -444,36 +565,43 @@ class CalendarSync:
         # Get existing events (date -> event_id mapping)
         existing_by_date = await self.get_existing_events(start_date, end_date)
 
-        # Track which existing events we've matched
-        matched_dates: set[date] = set()
+        # Separate events into create vs update lists
+        events_to_create: list[AllDayDutyEvent] = []
+        events_to_update: list[AllDayDutyEvent] = []
 
         for new_event in new_events:
             event_date = new_event.event_date
             existing_id = existing_by_date.get(event_date)
 
             if existing_id:
-                matched_dates.add(event_date)
-                # Always update to refresh content with contact info
-                logger.info(f"Updating event: {new_event.subject} on {event_date}")
-                if not dry_run:
-                    new_event.event_id = existing_id
-                    if await self.update_event(new_event):
-                        result.events_updated += 1
-                    else:
-                        result.errors.append(f"Failed to update {event_date}")
-                else:
-                    result.events_updated += 1
+                # Update existing event
+                new_event.event_id = existing_id
+                events_to_update.append(new_event)
             else:
                 # Create new event
-                logger.info(f"Creating event: {new_event.subject} on {event_date}")
-                if not dry_run:
-                    event_id = await self.create_event(new_event)
-                    if event_id:
-                        result.events_created += 1
-                    else:
-                        result.errors.append(f"Failed to create {event_date}")
-                else:
-                    result.events_created += 1
+                events_to_create.append(new_event)
+
+        # Log what we're doing
+        if events_to_create:
+            logger.info(f"Creating {len(events_to_create)} events...")
+        if events_to_update:
+            logger.info(f"Updating {len(events_to_update)} events...")
+
+        if dry_run:
+            result.events_created = len(events_to_create)
+            result.events_updated = len(events_to_update)
+        else:
+            # Create events in parallel
+            if events_to_create:
+                created, create_errors = await self.create_events_batch(events_to_create)
+                result.events_created = created
+                result.errors.extend(create_errors)
+
+            # Update events in parallel
+            if events_to_update:
+                updated, update_errors = await self.update_events_batch(events_to_update)
+                result.events_updated = updated
+                result.errors.extend(update_errors)
 
         # Note: We intentionally do NOT delete orphaned events.
         # If Aladtec returns incomplete data, we don't want to lose valid events.
@@ -538,15 +666,15 @@ class CalendarSync:
 
             logger.info(f"Found {len(existing_by_date)} On Duty events to delete")
 
-            for event_date, event_id in sorted(existing_by_date.items()):
-                logger.info(f"Deleting event for {event_date}")
-                if not dry_run:
-                    if await self.delete_event(event_id):
-                        result.events_deleted += 1
-                    else:
-                        result.errors.append(f"Failed to delete {event_date}")
-                else:
-                    result.events_deleted += 1
+            if dry_run:
+                for event_date in sorted(existing_by_date.keys()):
+                    logger.info(f"Would delete event for {event_date}")
+                result.events_deleted = len(existing_by_date)
+            else:
+                logger.info(f"Deleting {len(existing_by_date)} events...")
+                deleted, errors = await self.delete_events_batch(existing_by_date)
+                result.events_deleted = deleted
+                result.errors.extend(errors)
 
             return result
 
