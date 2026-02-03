@@ -1,10 +1,11 @@
 """Data models for calendar events."""
 
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from html import escape
+
+from sjifire.aladtec.client import get_aladtec_credentials
 
 # Position ordering: officers first, then AO, then firefighters
 POSITION_ORDER = {
@@ -22,8 +23,9 @@ POSITION_ORDER = {
 
 
 def get_aladtec_url() -> str:
-    """Get Aladtec URL from environment or use default."""
-    return os.getenv("ALADTEC_URL", "https://secure17.aladtec.com/sjifire/")
+    """Get Aladtec URL from credentials."""
+    url, _, _ = get_aladtec_credentials()
+    return url
 
 
 def section_sort_key(section: str) -> tuple[int, str]:

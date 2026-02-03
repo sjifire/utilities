@@ -246,7 +246,7 @@ class TestAllDayDutyEvent:
         assert "Until 1800" in html
         assert "From 1800" in html
 
-    def test_body_html_has_aladtec_link(self, sample_crew):
+    def test_body_html_has_aladtec_link(self, sample_crew, mock_env_vars):
         """Body HTML has Aladtec link."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
@@ -258,7 +258,7 @@ class TestAllDayDutyEvent:
         html = event.body_html
 
         assert "Aladtec" in html
-        assert "https://secure17.aladtec.com/sjifire/" in html
+        assert "https://test.aladtec.com" in html
 
     def test_body_html_uses_table_format(self, sample_crew):
         """Body HTML uses table format."""
