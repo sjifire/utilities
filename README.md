@@ -128,9 +128,10 @@ uv run signature-sync --email user@sjifire.org --preview  # Preview signature fo
 The sync:
 - Sets OWA (Outlook on the web) signatures based on Entra ID profile data
 - Signature format varies by user role:
-  - Users with rank: Name / Rank / San Juan Island Fire & Rescue
-  - Users with job title (no rank): Name / Job Title / San Juan Island Fire & Rescue
-  - Users with neither: Name / San Juan Island Fire & Rescue
+  - Users with rank: Name / Rank / San Juan Island Fire & Rescue / Office + Cell
+  - Users with job title (no rank): Name / Job Title / San Juan Island Fire & Rescue / Office + Cell
+  - Users with neither: Name / San Juan Island Fire & Rescue / Office + Cell
+- Phone line shows office number, plus cell if user has mobile phone in Entra ID
 - Enables auto-add signature for new messages and replies
 
 **Automated sync:** Runs weekdays at noon Pacific as part of the Entra sync workflow. See `.github/workflows/entra-sync.yml`.
