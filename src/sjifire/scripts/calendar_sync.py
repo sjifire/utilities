@@ -4,6 +4,7 @@
 Usage:
     uv run calendar-sync --month "Jan 2026"   # Sync specific month
     uv run calendar-sync --months 4           # Sync next 4 months
+    uv run calendar-sync --delete "Jan 2026"  # Delete all events for a month
 """
 
 import argparse
@@ -86,6 +87,12 @@ def main() -> int:
         help="Sync the next N months starting from today",
     )
     parser.add_argument(
+        "--delete",
+        type=str,
+        metavar="MONTH",
+        help="Delete all On Duty events for a month (e.g., 'Jan 2026')",
+    )
+    parser.add_argument(
         "--mailbox",
         default="svc-automations@sjifire.org",
         help="Shared mailbox email address (default: svc-automations@sjifire.org)",
@@ -102,15 +109,38 @@ def main() -> int:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Require either --month or --months
-    if not args.month and not args.months:
-        parser.error("Either --month or --months is required")
-
-    if args.month and args.months:
-        parser.error("Cannot use both --month and --months")
+    # Require exactly one of --month, --months, or --delete
+    options_set = sum(bool(x) for x in [args.month, args.months, args.delete])
+    if options_set == 0:
+        parser.error("One of --month, --months, or --delete is required")
+    if options_set > 1:
+        parser.error("Cannot combine --month, --months, and --delete")
 
     if args.dry_run:
         logger.info("DRY RUN - no changes will be made")
+
+    # Handle delete mode
+    if args.delete:
+        try:
+            year, month = parse_month(args.delete)
+            start_date, end_date = get_month_date_range(year, month)
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
+
+        logger.info(f"Deleting On Duty events for {start_date} to {end_date}")
+
+        calendar_sync = CalendarSync(mailbox=args.mailbox)
+        result = calendar_sync.delete_date_range(start_date, end_date, dry_run=args.dry_run)
+
+        logger.info(f"Delete complete: {result}")
+
+        if result.errors:
+            for error in result.errors:
+                logger.error(f"  Error: {error}")
+            return 1
+
+        return 0
 
     # Calculate date range
     if args.month:

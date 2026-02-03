@@ -508,3 +508,46 @@ class CalendarSync:
             return await self.sync_events(events, start_date, end_date, dry_run)
 
         return asyncio.run(_async_sync())
+
+    def delete_date_range(
+        self,
+        start_date: date,
+        end_date: date,
+        dry_run: bool = False,
+    ) -> SyncResult:
+        """Delete all On Duty events in a date range.
+
+        Args:
+            start_date: First date to delete
+            end_date: Last date to delete
+            dry_run: If True, preview without deleting
+
+        Returns:
+            SyncResult with deletion count
+        """
+
+        async def _async_delete() -> SyncResult:
+            result = SyncResult()
+
+            # Get existing events in range
+            existing_by_date = await self.get_existing_events(start_date, end_date)
+
+            if not existing_by_date:
+                logger.info("No On Duty events found in date range")
+                return result
+
+            logger.info(f"Found {len(existing_by_date)} On Duty events to delete")
+
+            for event_date, event_id in sorted(existing_by_date.items()):
+                logger.info(f"Deleting event for {event_date}")
+                if not dry_run:
+                    if await self.delete_event(event_id):
+                        result.events_deleted += 1
+                    else:
+                        result.errors.append(f"Failed to delete {event_date}")
+                else:
+                    result.events_deleted += 1
+
+            return result
+
+        return asyncio.run(_async_delete())
