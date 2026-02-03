@@ -33,35 +33,40 @@ logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(l
 # SIGNATURE TEMPLATES
 # =============================================================================
 # Edit these templates to change the signature format for all users.
-# Available placeholders: {name}, {title}, {company}
+# Available placeholders: {name}, {title}, {company}, {phones}
 
 COMPANY_NAME = "San Juan Island Fire & Rescue"
+OFFICE_PHONE = "(360) 378-5334"
 
 # HTML signature for users WITH a title (rank or job title)
 HTML_TEMPLATE_WITH_TITLE = """\
 <p style="margin: 0; font-size: 14px;">
 <strong style="color: #333;">{name}</strong><br>
 <span style="color: #666;">{title}<br>
-{company}</span>
+{company}<br>
+{phones}</span>
 </p>"""
 
 # HTML signature for users WITHOUT a title
 HTML_TEMPLATE_NO_TITLE = """\
 <p style="margin: 0; font-size: 14px;">
 <strong style="color: #333;">{name}</strong><br>
-<span style="color: #666;">{company}</span>
+<span style="color: #666;">{company}<br>
+{phones}</span>
 </p>"""
 
 # Plain text signature for users WITH a title
 TEXT_TEMPLATE_WITH_TITLE = """\
 {name}
 {title}
-{company}"""
+{company}
+{phones}"""
 
 # Plain text signature for users WITHOUT a title
 TEXT_TEMPLATE_NO_TITLE = """\
 {name}
-{company}"""
+{company}
+{phones}"""
 
 # =============================================================================
 
@@ -84,6 +89,21 @@ def _get_title_line(user: EntraUser) -> str | None:
     return None
 
 
+def _get_phone_line(user: EntraUser) -> str:
+    """Build the phone line for a user's signature.
+
+    Args:
+        user: EntraUser with profile data
+
+    Returns:
+        Phone string with office and optionally cell
+    """
+    phones = f"Office: {OFFICE_PHONE}"
+    if user.mobile_phone:
+        phones += f" | Cell: {user.mobile_phone}"
+    return phones
+
+
 def generate_signature_html(user: EntraUser) -> str:
     """Generate HTML signature for a user.
 
@@ -96,11 +116,14 @@ def generate_signature_html(user: EntraUser) -> str:
     # Use first/last name, not display_name (which may include rank prefix)
     name = f"{user.first_name} {user.last_name}".strip() or user.display_name
     title = _get_title_line(user)
+    phones = _get_phone_line(user)
 
     if title:
-        return HTML_TEMPLATE_WITH_TITLE.format(name=name, title=title, company=COMPANY_NAME)
+        return HTML_TEMPLATE_WITH_TITLE.format(
+            name=name, title=title, company=COMPANY_NAME, phones=phones
+        )
     else:
-        return HTML_TEMPLATE_NO_TITLE.format(name=name, company=COMPANY_NAME)
+        return HTML_TEMPLATE_NO_TITLE.format(name=name, company=COMPANY_NAME, phones=phones)
 
 
 def generate_signature_text(user: EntraUser) -> str:
@@ -115,11 +138,14 @@ def generate_signature_text(user: EntraUser) -> str:
     # Use first/last name, not display_name (which may include rank prefix)
     name = f"{user.first_name} {user.last_name}".strip() or user.display_name
     title = _get_title_line(user)
+    phones = _get_phone_line(user)
 
     if title:
-        return TEXT_TEMPLATE_WITH_TITLE.format(name=name, title=title, company=COMPANY_NAME)
+        return TEXT_TEMPLATE_WITH_TITLE.format(
+            name=name, title=title, company=COMPANY_NAME, phones=phones
+        )
     else:
-        return TEXT_TEMPLATE_NO_TITLE.format(name=name, company=COMPANY_NAME)
+        return TEXT_TEMPLATE_NO_TITLE.format(name=name, company=COMPANY_NAME, phones=phones)
 
 
 async def sync_user_signature(

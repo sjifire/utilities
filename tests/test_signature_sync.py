@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from sjifire.entra.users import EntraUser
 from sjifire.scripts.signature_sync import (
     COMPANY_NAME,
+    OFFICE_PHONE,
     generate_signature_html,
     generate_signature_text,
 )
@@ -17,6 +18,7 @@ def make_user(
     email="john@sjifire.org",
     rank=None,
     job_title=None,
+    mobile_phone=None,
 ) -> EntraUser:
     """Create a test EntraUser."""
     return EntraUser(
@@ -29,6 +31,7 @@ def make_user(
         employee_id="EMP001",
         extension_attribute1=rank,
         job_title=job_title,
+        mobile_phone=mobile_phone,
     )
 
 
@@ -110,25 +113,31 @@ class TestGenerateSignatureText:
         user = make_user(first_name="Karl", last_name="Kuetzing", rank="Captain")
         text = generate_signature_text(user)
 
-        assert text == f"Karl Kuetzing\nCaptain\n{COMPANY_NAME}"
+        assert text == f"Karl Kuetzing\nCaptain\n{COMPANY_NAME}\nOffice: {OFFICE_PHONE}"
 
     def test_user_with_job_title_no_rank(self):
         user = make_user(first_name="Robin", last_name="Garcia", job_title="Executive Assistant")
         text = generate_signature_text(user)
 
-        assert text == f"Robin Garcia\nExecutive Assistant\n{COMPANY_NAME}"
+        assert text == f"Robin Garcia\nExecutive Assistant\n{COMPANY_NAME}\nOffice: {OFFICE_PHONE}"
 
     def test_user_with_rank_and_job_title_shows_both(self):
         user = make_user(first_name="John", last_name="Doe", rank="Captain", job_title="Training Officer")
         text = generate_signature_text(user)
 
-        assert text == f"John Doe\nCaptain - Training Officer\n{COMPANY_NAME}"
+        assert text == f"John Doe\nCaptain - Training Officer\n{COMPANY_NAME}\nOffice: {OFFICE_PHONE}"
 
     def test_user_with_no_rank_or_title(self):
         user = make_user(first_name="Adam", last_name="Greene")
         text = generate_signature_text(user)
 
-        assert text == f"Adam Greene\n{COMPANY_NAME}"
+        assert text == f"Adam Greene\n{COMPANY_NAME}\nOffice: {OFFICE_PHONE}"
+
+    def test_user_with_cell_phone(self):
+        user = make_user(first_name="Karl", last_name="Kuetzing", rank="Captain", mobile_phone="(360) 555-1234")
+        text = generate_signature_text(user)
+
+        assert text == f"Karl Kuetzing\nCaptain\n{COMPANY_NAME}\nOffice: {OFFICE_PHONE} | Cell: (360) 555-1234"
 
     def test_fallback_to_first_last_name(self):
         user = make_user(
