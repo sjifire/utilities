@@ -4,9 +4,10 @@ Sets OWA (Outlook on the web) signatures for all users based on their
 Entra ID profile data (name, rank/title, job title).
 
 Signature format:
-- Users with rank: Name / Rank / San Juan Island Fire & Rescue
-- Users with job title (no rank): Name / Job Title / San Juan Island Fire & Rescue
-- Users with neither: Name / San Juan Island Fire & Rescue
+- Users with rank AND job title: Name / Rank - Job Title / Company
+- Users with rank only: Name / Rank / Company
+- Users with job title only: Name / Job Title / Company
+- Users with neither: Name / Company
 
 The footer (logo, address, phone, disclaimer) is added via a separate
 mail flow rule and is not part of the signature.
@@ -65,6 +66,24 @@ TEXT_TEMPLATE_NO_TITLE = """\
 # =============================================================================
 
 
+def _get_title_line(user: EntraUser) -> str | None:
+    """Build the title line for a user's signature.
+
+    Args:
+        user: EntraUser with profile data
+
+    Returns:
+        Title string or None if no rank/title
+    """
+    if user.rank and user.job_title:
+        return f"{user.rank} - {user.job_title}"
+    elif user.rank:
+        return user.rank
+    elif user.job_title:
+        return user.job_title
+    return None
+
+
 def generate_signature_html(user: EntraUser) -> str:
     """Generate HTML signature for a user.
 
@@ -75,9 +94,7 @@ def generate_signature_html(user: EntraUser) -> str:
         HTML signature string
     """
     name = user.display_name or f"{user.first_name} {user.last_name}"
-
-    # Determine title line: rank takes priority, then job title, then nothing
-    title = user.rank or user.job_title
+    title = _get_title_line(user)
 
     if title:
         return HTML_TEMPLATE_WITH_TITLE.format(name=name, title=title, company=COMPANY_NAME)
@@ -95,9 +112,7 @@ def generate_signature_text(user: EntraUser) -> str:
         Plain text signature string
     """
     name = user.display_name or f"{user.first_name} {user.last_name}"
-
-    # Determine title line: rank takes priority, then job title, then nothing
-    title = user.rank or user.job_title
+    title = _get_title_line(user)
 
     if title:
         return TEXT_TEMPLATE_WITH_TITLE.format(name=name, title=title, company=COMPANY_NAME)

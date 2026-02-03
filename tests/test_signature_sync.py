@@ -52,13 +52,12 @@ class TestGenerateSignatureHtml:
         assert "Executive Assistant, Finance" in html
         assert COMPANY_NAME in html
 
-    def test_user_with_rank_and_job_title_prefers_rank(self):
-        user = make_user(display_name="Captain John Doe", rank="Captain", job_title="Firefighter")
+    def test_user_with_rank_and_job_title_shows_both(self):
+        user = make_user(display_name="Captain John Doe", rank="Captain", job_title="Training Officer")
         html = generate_signature_html(user)
 
-        assert "Captain" in html
-        # Job title should not appear since rank takes priority
-        assert html.count("Captain") >= 1
+        assert "Captain John Doe" in html
+        assert "Captain - Training Officer" in html
         assert COMPANY_NAME in html
 
     def test_user_with_no_rank_or_title(self):
@@ -117,11 +116,11 @@ class TestGenerateSignatureText:
 
         assert text == f"Robin Garcia\nExecutive Assistant\n{COMPANY_NAME}"
 
-    def test_user_with_rank_and_job_title_prefers_rank(self):
-        user = make_user(display_name="John Doe", rank="Captain", job_title="Firefighter")
+    def test_user_with_rank_and_job_title_shows_both(self):
+        user = make_user(display_name="John Doe", rank="Captain", job_title="Training Officer")
         text = generate_signature_text(user)
 
-        assert text == f"John Doe\nCaptain\n{COMPANY_NAME}"
+        assert text == f"John Doe\nCaptain - Training Officer\n{COMPANY_NAME}"
 
     def test_user_with_no_rank_or_title(self):
         user = make_user(display_name="Adam Greene")
