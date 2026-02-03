@@ -177,8 +177,9 @@ uv run ispyfire-admin deactivate user@sjifire.org
 ### Email signature sync
 ```bash
 uv run signature-sync --dry-run                    # Preview changes
-uv run signature-sync                              # Sync all employees
+uv run signature-sync                              # Sync all employees + footer rule
 uv run signature-sync --email user@sjifire.org --preview  # Preview one user's signature
+uv run signature-sync --remove                     # Remove all signatures + footer rule
 ```
 
 ### Group sync details
