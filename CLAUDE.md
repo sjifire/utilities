@@ -174,6 +174,13 @@ uv run ispyfire-admin activate user@sjifire.org
 uv run ispyfire-admin deactivate user@sjifire.org
 ```
 
+### Email signature sync
+```bash
+uv run signature-sync --dry-run                    # Preview changes
+uv run signature-sync                              # Sync all employees
+uv run signature-sync --email user@sjifire.org --preview  # Preview one user's signature
+```
+
 ### Group sync details
 The `ms-group-sync` command uses Entra ID as the source of truth for membership data:
 - **Data source**: Entra ID users (synced from Aladtec via `entra-user-sync`)
@@ -218,7 +225,7 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 ## GitHub Actions
 
 - `ci.yml`: Lint + test on PR/push
-- `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
+- `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync + signature sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Sync every 30 minutes (Entra to iSpyFire), uploads backup artifacts
 
 All workflows authenticate via OIDC and fetch secrets from Key Vault (no GitHub secrets required).

@@ -116,6 +116,25 @@ The sync:
 
 **Automated sync:** Runs every 30 minutes via GitHub Actions. See `.github/workflows/ispyfire-sync.yml`.
 
+### Email Signature Sync
+
+**Sync OWA signatures for all employees:**
+```bash
+uv run signature-sync                      # Sync all employees
+uv run signature-sync --dry-run            # Preview changes without applying
+uv run signature-sync --email user@sjifire.org --preview  # Preview signature for user
+```
+
+The sync:
+- Sets OWA (Outlook on the web) signatures based on Entra ID profile data
+- Signature format varies by user role:
+  - Users with rank: Name / Rank / San Juan Island Fire & Rescue
+  - Users with job title (no rank): Name / Job Title / San Juan Island Fire & Rescue
+  - Users with neither: Name / San Juan Island Fire & Rescue
+- Enables auto-add signature for new messages and replies
+
+**Automated sync:** Runs weekdays at noon Pacific as part of the Entra sync workflow. See `.github/workflows/entra-sync.yml`.
+
 ### iSpyFire Admin
 
 **Manage iSpyFire users:**
@@ -221,7 +240,8 @@ Runs on push/PR to main:
 ### Entra Sync (entra-sync.yml)
 Runs weekdays at noon Pacific:
 - Syncs Aladtec members to Entra ID users
-- Syncs Aladtec data to M365 groups (all strategies)
+- Syncs Entra ID users to M365/Exchange groups (all strategies)
+- Syncs OWA email signatures for all employees
 - Uploads backup artifacts (30-day retention)
 - Can be triggered manually with dry-run option
 
@@ -320,5 +340,6 @@ src/sjifire/
     ├── entra_user_sync.py   # User sync CLI
     ├── ispyfire_admin.py    # iSpyFire admin CLI (activate/deactivate)
     ├── ispyfire_sync.py     # iSpyFire sync CLI
-    └── mail_group_sync.py   # Mail-enabled security group sync CLI
+    ├── mail_group_sync.py   # Mail-enabled security group sync CLI
+    └── signature_sync.py    # OWA email signature sync CLI
 ```
