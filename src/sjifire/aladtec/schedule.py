@@ -5,14 +5,24 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Self
 
-import httpx
 from bs4 import BeautifulSoup
 
-from sjifire.core.config import get_aladtec_credentials
+from sjifire.aladtec.client import AladtecClient
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_time(time_str: str) -> datetime:
+    """Parse a time string (HH:MM) into a datetime.time object.
+
+    Args:
+        time_str: Time in HH:MM format
+
+    Returns:
+        datetime with time set (date is 1900-01-01)
+    """
+    return datetime.strptime(time_str, "%H:%M")
 
 
 @dataclass
@@ -35,14 +45,14 @@ class ScheduleEntry:
     @property
     def start_datetime(self) -> datetime:
         """Get full datetime for shift start."""
-        hour, minute = map(int, self.start_time.split(":"))
-        return datetime.combine(self.date, datetime.min.time().replace(hour=hour, minute=minute))
+        time_obj = _parse_time(self.start_time)
+        return datetime.combine(self.date, time_obj.time())
 
     @property
     def end_datetime(self) -> datetime:
         """Get full datetime for shift end."""
-        hour, minute = map(int, self.end_time.split(":"))
-        end_dt = datetime.combine(self.date, datetime.min.time().replace(hour=hour, minute=minute))
+        time_obj = _parse_time(self.end_time)
+        end_dt = datetime.combine(self.date, time_obj.time())
         # If end time is <= start time, it's the next day
         if self.end_time <= self.start_time:
             end_dt += timedelta(days=1)
@@ -78,75 +88,28 @@ class DaySchedule:
             List of entries with names assigned
         """
         exclude = set(exclude_sections or [])
-        return [
-            e for e in self.entries
-            if e.name and e.section not in exclude
-        ]
+        return [e for e in self.entries if e.name and e.section not in exclude]
 
 
-class AladtecScheduleScraper:
+class AladtecScheduleScraper(AladtecClient):
     """Scraper for Aladtec schedule data using AJAX endpoints."""
 
     def __init__(self) -> None:
         """Initialize the scraper with credentials from environment."""
-        self.base_url, self.username, self.password = get_aladtec_credentials()
-        self.client: httpx.Client | None = None
+        super().__init__(timeout=60.0)
+        # Alias for backwards compatibility
+        self.client = self.http
 
-    def __enter__(self) -> Self:
-        """Enter context manager - create HTTP client."""
-        self.client = httpx.Client(
-            follow_redirects=True,
-            timeout=60.0,
-        )
-        return self
+    def __enter__(self):
+        """Enter context manager."""
+        result = super().__enter__()
+        self.client = self.http  # Keep alias in sync
+        return result
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context manager - close HTTP client."""
-        if self.client:
-            self.client.close()
-            self.client = None
-
-    def login(self) -> bool:
-        """Log in to Aladtec.
-
-        Returns:
-            True if login successful, False otherwise
-        """
-        if not self.client:
-            raise RuntimeError("Scraper must be used as context manager")
-
-        logger.info(f"Logging in to {self.base_url}")
-
-        # Get the login page first to establish session
-        response = self.client.get(f"{self.base_url}/")
-
-        if response.status_code != 200:
-            logger.error(f"Failed to load login page: {response.status_code}")
-            return False
-
-        form_data = {
-            "username": self.username,
-            "password": self.password,
-        }
-
-        login_url = f"{self.base_url}/index.php?action=login"
-        response = self.client.post(login_url, data=form_data)
-
-        # Check if login succeeded
-        if "schedule" in response.text.lower() or "dashboard" in response.text.lower():
-            logger.info("Login successful")
-            return True
-
-        if "invalid" in response.text.lower() or "incorrect" in response.text.lower():
-            logger.error("Login failed - invalid credentials")
-            return False
-
-        if "action=login" not in str(response.url):
-            logger.info("Login successful")
-            return True
-
-        logger.error("Login failed - still on login page")
-        return False
+        """Exit context manager."""
+        super().__exit__(exc_type, exc_val, exc_tb)
+        self.client = None
 
     def _fetch_ajax_schedule(self, start_date: date) -> dict[str, str]:
         """Fetch schedule via AJAX for a specific start date.
@@ -243,9 +206,13 @@ class AladtecScheduleScraper:
             data = self._fetch_ajax_schedule(fetch_date)
             if data:
                 # Only keep dates for this month
-                for date_str, html in data.items():
-                    if date_str.startswith(month_str):
-                        all_data[date_str] = html
+                all_data.update(
+                    {
+                        date_str: html
+                        for date_str, html in data.items()
+                        if date_str.startswith(month_str)
+                    }
+                )
 
         logger.debug(f"Fetched {len(all_data)} days for {month_str}")
         return all_data
@@ -302,15 +269,17 @@ class AladtecScheduleScraper:
                 start_time = time_match.group(1) if time_match else "18:00"
                 end_time = time_match.group(2) if time_match else "18:00"
 
-                entries.append(ScheduleEntry(
-                    date=day_date,
-                    section=current_section,
-                    position=position,
-                    name=name,
-                    start_time=start_time,
-                    end_time=end_time,
-                    platoon=platoon,
-                ))
+                entries.append(
+                    ScheduleEntry(
+                        date=day_date,
+                        section=current_section,
+                        position=position,
+                        name=name,
+                        start_time=start_time,
+                        end_time=end_time,
+                        platoon=platoon,
+                    )
+                )
 
         return DaySchedule(date=day_date, platoon=platoon, entries=entries)
 

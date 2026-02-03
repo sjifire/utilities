@@ -4,13 +4,11 @@ import csv
 import io
 import logging
 import re
-from typing import Self
 
-import httpx
 from bs4 import BeautifulSoup
 
+from sjifire.aladtec.client import AladtecClient
 from sjifire.aladtec.models import Member
-from sjifire.core.config import get_aladtec_credentials
 from sjifire.core.normalize import format_phone, validate_email
 
 logger = logging.getLogger(__name__)
@@ -37,72 +35,25 @@ def clean_title(title: str | None) -> str | None:
     return None
 
 
-class AladtecScraper:
+class AladtecScraper(AladtecClient):
     """Scraper for Aladtec member database using CSV export."""
 
     def __init__(self) -> None:
         """Initialize the scraper with credentials from environment."""
-        self.base_url, self.username, self.password = get_aladtec_credentials()
-        self.client: httpx.Client | None = None
+        super().__init__(timeout=30.0)
+        # Alias for backwards compatibility
+        self.client = self.http
 
-    def __enter__(self) -> Self:
-        """Enter context manager - create HTTP client."""
-        self.client = httpx.Client(
-            follow_redirects=True,
-            timeout=30.0,
-        )
-        return self
+    def __enter__(self):
+        """Enter context manager."""
+        result = super().__enter__()
+        self.client = self.http  # Keep alias in sync
+        return result
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context manager - close HTTP client."""
-        if self.client:
-            self.client.close()
-            self.client = None
-
-    def login(self) -> bool:
-        """Log in to Aladtec.
-
-        Returns:
-            True if login successful, False otherwise
-        """
-        if not self.client:
-            raise RuntimeError("Scraper must be used as context manager")
-
-        logger.info(f"Logging in to {self.base_url}")
-
-        # Get the login page first to establish session
-        response = self.client.get(f"{self.base_url}/")
-
-        if response.status_code != 200:
-            logger.error(f"Failed to load login page: {response.status_code}")
-            return False
-
-        form_data = {
-            "username": self.username,
-            "password": self.password,
-        }
-
-        # Submit login to the correct endpoint
-        login_url = f"{self.base_url}/index.php?action=login"
-        response = self.client.post(login_url, data=form_data)
-
-        # Check if login succeeded - look for dashboard elements or schedule
-        if "schedule" in response.text.lower() or "dashboard" in response.text.lower():
-            logger.info("Login successful")
-            return True
-
-        # Check for error messages
-        if "invalid" in response.text.lower() or "incorrect" in response.text.lower():
-            logger.error("Login failed - invalid credentials")
-            return False
-
-        # Check URL - successful login usually goes to schedule or home
-        if "action=login" not in str(response.url):
-            logger.info("Login successful")
-            return True
-
-        logger.error("Login failed - still on login page")
-        return False
+        """Exit context manager."""
+        super().__exit__(exc_type, exc_val, exc_tb)
+        self.client = None
 
     def get_members(self, layout: str = "g_all", include_inactive: bool = False) -> list[Member]:
         """Fetch all members via CSV export.

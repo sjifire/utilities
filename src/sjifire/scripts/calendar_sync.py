@@ -9,9 +9,10 @@ Usage:
 import argparse
 import calendar
 import logging
-import re
 import sys
-from datetime import date, timedelta
+from datetime import date
+
+from dateutil import parser as dateparser
 
 from sjifire.aladtec.schedule import AladtecScheduleScraper
 from sjifire.calendar import CalendarSync
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 def parse_month(month_str: str) -> tuple[int, int]:
     """Parse a month string into (year, month).
 
-    Accepts formats like:
+    Uses python-dateutil for robust parsing. Accepts formats like:
     - "Jan 2026", "January 2026"
     - "2026-01", "2026-1"
     - "01/2026", "1/2026"
@@ -39,44 +40,16 @@ def parse_month(month_str: str) -> tuple[int, int]:
     """
     month_str = month_str.strip()
 
-    # Try "YYYY-MM" or "YYYY-M" format
-    match = re.match(r"^(\d{4})-(\d{1,2})$", month_str)
-    if match:
-        return int(match.group(1)), int(match.group(2))
-
-    # Try "MM/YYYY" or "M/YYYY" format
-    match = re.match(r"^(\d{1,2})/(\d{4})$", month_str)
-    if match:
-        return int(match.group(2)), int(match.group(1))
-
-    # Try "Month YYYY" or "Mon YYYY" format
-    match = re.match(r"^([A-Za-z]+)\s+(\d{4})$", month_str)
-    if match:
-        month_name = match.group(1).lower()
-        year = int(match.group(2))
-
-        # Map month names to numbers
-        month_names = {
-            "jan": 1, "january": 1,
-            "feb": 2, "february": 2,
-            "mar": 3, "march": 3,
-            "apr": 4, "april": 4,
-            "may": 5,
-            "jun": 6, "june": 6,
-            "jul": 7, "july": 7,
-            "aug": 8, "august": 8,
-            "sep": 9, "sept": 9, "september": 9,
-            "oct": 10, "october": 10,
-            "nov": 11, "november": 11,
-            "dec": 12, "december": 12,
-        }
-
-        if month_name in month_names:
-            return year, month_names[month_name]
+    try:
+        # dateutil.parser handles most date formats automatically
+        parsed = dateparser.parse(month_str, dayfirst=False)
+        if parsed:
+            return parsed.year, parsed.month
+    except (ValueError, TypeError):
+        pass
 
     raise ValueError(
-        f"Cannot parse month: '{month_str}'. "
-        "Use formats like 'Jan 2026', '2026-01', or '01/2026'"
+        f"Cannot parse month: '{month_str}'. Use formats like 'Jan 2026', '2026-01', or '01/2026'"
     )
 
 
@@ -118,7 +91,8 @@ def main() -> int:
         help="Shared mailbox email address (default: svc-automations@sjifire.org)",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable verbose logging",
     )

@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from html import escape
 
-
 # Position ordering: officers first, then AO, then firefighters
 POSITION_ORDER = {
     "Chief": 0,
@@ -115,8 +114,7 @@ class ShiftPeriod:
 
             lines.append(f"{section}:")
             sorted_members = sorted(members, key=lambda m: position_sort_key(m.position))
-            for member in sorted_members:
-                lines.append(f"  • {member.format_text()}")
+            lines.extend(f"  • {m.format_text()}" for m in sorted_members)
             lines.append("")
 
         return "\n".join(lines).strip()
@@ -154,8 +152,7 @@ class OnDutyEvent:
             lines.append(f"<p><b>{escape(section)}</b></p>")
             lines.append("<ul>")
             sorted_members = sorted(members, key=lambda m: position_sort_key(m.position))
-            for member in sorted_members:
-                lines.append(f"<li>{member.format_html()}</li>")
+            lines.extend(f"<li>{m.format_html()}</li>" for m in sorted_members)
             lines.append("</ul>")
 
         # Add Aladtec link at the bottom with spacing
@@ -182,17 +179,16 @@ class OnDutyEvent:
 
             lines.append(f"{section}:")
             sorted_members = sorted(members, key=lambda m: position_sort_key(m.position))
-            for member in sorted_members:
-                lines.append(f"  • {member.format_text()}")
+            lines.extend(f"  • {m.format_text()}" for m in sorted_members)
             lines.append("")
 
         return "\n".join(lines).strip()
 
-    def matches(self, other: "OnDutyEvent") -> bool:
+    def matches(self, other: OnDutyEvent) -> bool:
         """Check if two events represent the same shift (for update detection)."""
         return self.start == other.start and self.end == other.end
 
-    def content_matches(self, other: "OnDutyEvent") -> bool:
+    def content_matches(self, other: OnDutyEvent) -> bool:
         """Check if two events have the same content."""
         # Compare using plain text representation for simplicity
         return self.subject == other.subject and self.body_text == other.body_text
@@ -207,11 +203,11 @@ def _format_crew_section_html(
 
     # Single table for all sections with consistent column widths
     lines.append('<table style="border-collapse: collapse; width: 100%;">')
-    lines.append('<colgroup>')
+    lines.append("<colgroup>")
     lines.append('<col style="width: 30%;">')
     lines.append('<col style="width: 25%;">')
     lines.append('<col style="width: 45%;">')
-    lines.append('</colgroup>')
+    lines.append("</colgroup>")
 
     for section in sorted_sections:
         members = crew[section]
@@ -238,17 +234,17 @@ def _format_crew_section_html(
                     phone_digits = "1" + phone_digits
                 contact_parts.append(
                     f'<a href="tel:+{phone_digits}" style="white-space: nowrap;">'
-                    f'{escape(member.phone)}</a>'
+                    f"{escape(member.phone)}</a>"
                 )
             contact = " | ".join(contact_parts) if contact_parts else ""
 
-            lines.append('<tr>')
+            lines.append("<tr>")
             lines.append(f'<td style="padding: 4px 8px 4px 10px;">{escape(member.name)}</td>')
             lines.append(f'<td style="padding: 4px 8px;">{escape(pos)}</td>')
             lines.append(f'<td style="padding: 4px 8px;">{contact}</td>')
-            lines.append('</tr>')
+            lines.append("</tr>")
 
-    lines.append('</table>')
+    lines.append("</table>")
 
     return lines
 
@@ -267,8 +263,7 @@ def _format_crew_section_text(
 
         lines.append(f"{section}:")
         sorted_members = sorted(members, key=lambda m: position_sort_key(m.position))
-        for member in sorted_members:
-            lines.append(f"  • {member.format_text()}")
+        lines.extend(f"  • {m.format_text()}" for m in sorted_members)
         lines.append("")
 
     return lines
@@ -358,8 +353,7 @@ class SyncResult:
     def total_processed(self) -> int:
         """Total events processed."""
         return (
-            self.events_created + self.events_updated +
-            self.events_deleted + self.events_unchanged
+            self.events_created + self.events_updated + self.events_deleted + self.events_unchanged
         )
 
     def __str__(self) -> str:

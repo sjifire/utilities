@@ -17,7 +17,7 @@ from msgraph.generated.users.item.calendar_view.calendar_view_request_builder im
 from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
 from sjifire.aladtec.schedule import DaySchedule, ScheduleEntry
-from sjifire.calendar.models import AllDayDutyEvent, CrewMember, OnDutyEvent, SyncResult
+from sjifire.calendar.models import AllDayDutyEvent, CrewMember, SyncResult
 from sjifire.core.config import get_graph_credentials
 
 logger = logging.getLogger(__name__)
@@ -60,9 +60,7 @@ def is_filled_entry(entry: ScheduleEntry) -> bool:
     """Check if this entry represents a real person."""
     if not entry.name:
         return False
-    if is_unfilled_position(entry):
-        return False
-    return True
+    return not is_unfilled_position(entry)
 
 
 class CalendarSync:
@@ -182,9 +180,7 @@ class CalendarSync:
             List of AllDayDutyEvent objects ready for calendar sync
         """
         # Build a lookup by date for quick access
-        schedules_by_date: dict[date, DaySchedule] = {
-            ds.date: ds for ds in schedules
-        }
+        schedules_by_date: dict[date, DaySchedule] = {ds.date: ds for ds in schedules}
 
         # Determine the full date range we need to cover
         if not schedules:
@@ -226,13 +222,15 @@ class CalendarSync:
 
             # Only create event if we have at least some crew data
             if until_1800_crew or from_1800_crew:
-                events.append(AllDayDutyEvent(
-                    event_date=event_date,
-                    until_1800_platoon=until_1800_platoon,
-                    until_1800_crew=until_1800_crew,
-                    from_1800_platoon=from_1800_platoon,
-                    from_1800_crew=from_1800_crew,
-                ))
+                events.append(
+                    AllDayDutyEvent(
+                        event_date=event_date,
+                        until_1800_platoon=until_1800_platoon,
+                        until_1800_crew=until_1800_crew,
+                        from_1800_platoon=from_1800_platoon,
+                        from_1800_crew=from_1800_crew,
+                    )
+                )
 
         # Sort by date
         events.sort(key=lambda e: e.event_date)
@@ -285,12 +283,14 @@ class CalendarSync:
 
             email, phone = self._lookup_contact(entry.name, user_cache)
 
-            crew[entry.section].append(CrewMember(
-                name=entry.name,
-                position=entry.position,
-                email=email,
-                phone=phone,
-            ))
+            crew[entry.section].append(
+                CrewMember(
+                    name=entry.name,
+                    position=entry.position,
+                    email=email,
+                    phone=phone,
+                )
+            )
 
         return crew
 
@@ -412,9 +412,11 @@ class CalendarSync:
         )
 
         try:
-            await self.client.users.by_user_id(self.mailbox).events.by_event_id(
-                event.event_id
-            ).patch(graph_event)
+            await (
+                self.client.users.by_user_id(self.mailbox)
+                .events.by_event_id(event.event_id)
+                .patch(graph_event)
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to update event {event.event_id}: {e}")
@@ -423,9 +425,7 @@ class CalendarSync:
     async def delete_event(self, event_id: str) -> bool:
         """Delete a calendar event."""
         try:
-            await self.client.users.by_user_id(self.mailbox).events.by_event_id(
-                event_id
-            ).delete()
+            await self.client.users.by_user_id(self.mailbox).events.by_event_id(event_id).delete()
             return True
         except Exception as e:
             logger.error(f"Failed to delete event {event_id}: {e}")
