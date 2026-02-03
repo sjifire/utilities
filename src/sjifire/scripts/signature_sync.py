@@ -28,8 +28,41 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("azure.identity").setLevel(logging.WARNING)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
-# Company name for signatures
+# =============================================================================
+# SIGNATURE TEMPLATES
+# =============================================================================
+# Edit these templates to change the signature format for all users.
+# Available placeholders: {name}, {title}, {company}
+
 COMPANY_NAME = "San Juan Island Fire & Rescue"
+
+# HTML signature for users WITH a title (rank or job title)
+HTML_TEMPLATE_WITH_TITLE = """\
+<p style="margin: 0; font-size: 14px;">
+<strong style="color: #333;">{name}</strong><br>
+<span style="color: #666;">{title}<br>
+{company}</span>
+</p>"""
+
+# HTML signature for users WITHOUT a title
+HTML_TEMPLATE_NO_TITLE = """\
+<p style="margin: 0; font-size: 14px;">
+<strong style="color: #333;">{name}</strong><br>
+<span style="color: #666;">{company}</span>
+</p>"""
+
+# Plain text signature for users WITH a title
+TEXT_TEMPLATE_WITH_TITLE = """\
+{name}
+{title}
+{company}"""
+
+# Plain text signature for users WITHOUT a title
+TEXT_TEMPLATE_NO_TITLE = """\
+{name}
+{company}"""
+
+# =============================================================================
 
 
 def generate_signature_html(user: EntraUser) -> str:
@@ -44,26 +77,12 @@ def generate_signature_html(user: EntraUser) -> str:
     name = user.display_name or f"{user.first_name} {user.last_name}"
 
     # Determine title line: rank takes priority, then job title, then nothing
-    title_line = ""
-    if user.rank:
-        title_line = user.rank
-    elif user.job_title:
-        title_line = user.job_title
+    title = user.rank or user.job_title
 
-    # Build signature HTML
-    if title_line:
-        signature = f"""<p style="margin: 0; font-size: 14px;">
-<strong style="color: #333;">{name}</strong><br>
-<span style="color: #666;">{title_line}<br>
-{COMPANY_NAME}</span>
-</p>"""
+    if title:
+        return HTML_TEMPLATE_WITH_TITLE.format(name=name, title=title, company=COMPANY_NAME)
     else:
-        signature = f"""<p style="margin: 0; font-size: 14px;">
-<strong style="color: #333;">{name}</strong><br>
-<span style="color: #666;">{COMPANY_NAME}</span>
-</p>"""
-
-    return signature
+        return HTML_TEMPLATE_NO_TITLE.format(name=name, company=COMPANY_NAME)
 
 
 def generate_signature_text(user: EntraUser) -> str:
@@ -77,18 +96,13 @@ def generate_signature_text(user: EntraUser) -> str:
     """
     name = user.display_name or f"{user.first_name} {user.last_name}"
 
-    # Determine title line
-    title_line = ""
-    if user.rank:
-        title_line = user.rank
-    elif user.job_title:
-        title_line = user.job_title
+    # Determine title line: rank takes priority, then job title, then nothing
+    title = user.rank or user.job_title
 
-    # Build signature text
-    if title_line:
-        return f"{name}\n{title_line}\n{COMPANY_NAME}"
+    if title:
+        return TEXT_TEMPLATE_WITH_TITLE.format(name=name, title=title, company=COMPANY_NAME)
     else:
-        return f"{name}\n{COMPANY_NAME}"
+        return TEXT_TEMPLATE_NO_TITLE.format(name=name, company=COMPANY_NAME)
 
 
 async def sync_user_signature(
