@@ -24,6 +24,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Suppress verbose Azure/HTTP logging unless in verbose mode
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 def parse_month(month_str: str) -> tuple[int, int]:
     """Parse a month string into (year, month).
@@ -108,6 +112,9 @@ def main() -> int:
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+        # Also enable verbose Azure/HTTP logging in verbose mode
+        logging.getLogger("azure").setLevel(logging.DEBUG)
+        logging.getLogger("httpx").setLevel(logging.DEBUG)
 
     # Require exactly one of --month, --months, or --delete
     options_set = sum(bool(x) for x in [args.month, args.months, args.delete])
@@ -128,7 +135,7 @@ def main() -> int:
             logger.error(str(e))
             return 1
 
-        logger.info(f"Deleting On Duty events for {start_date} to {end_date}")
+        logger.info(f"Deleting On Duty events from {args.mailbox} for {start_date} to {end_date}")
 
         calendar_sync = CalendarSync(mailbox=args.mailbox)
         result = calendar_sync.delete_date_range(start_date, end_date, dry_run=args.dry_run)
