@@ -341,11 +341,51 @@ Write-Output 'SUCCESS'
         return False, error
 
 
+def remove_footer(dry_run: bool = False) -> tuple[bool, str | None]:
+    """Remove the organization email footer mail flow rule.
+
+    Args:
+        dry_run: If True, don't make changes
+
+    Returns:
+        Tuple of (success, error_message)
+    """
+    if dry_run:
+        logger.info(f"Would remove mail flow rule: {FOOTER_RULE_NAME}")
+        return True, None
+
+    client = ExchangeOnlineClient()
+
+    script = f"""
+$ruleName = '{FOOTER_RULE_NAME}'
+$rule = Get-TransportRule -Identity $ruleName -ErrorAction SilentlyContinue
+
+if ($rule) {{
+    Remove-TransportRule -Identity $ruleName -Confirm:$false -ErrorAction Stop
+    Write-Output 'REMOVED'
+}} else {{
+    Write-Output 'NOT_FOUND'
+}}
+"""
+
+    result = client._run_powershell([script], parse_json=False)
+
+    if result and "REMOVED" in str(result):
+        logger.info(f"Mail flow rule '{FOOTER_RULE_NAME}' removed successfully")
+        return True, None
+    elif result and "NOT_FOUND" in str(result):
+        logger.info(f"Mail flow rule '{FOOTER_RULE_NAME}' not found (already removed)")
+        return True, None
+    else:
+        error = f"Failed to remove mail flow rule: {result}"
+        logger.error(error)
+        return False, error
+
+
 async def run_sync(
     dry_run: bool = False,
     email: str | None = None,
     preview: bool = False,
-    footer_only: bool = False,
 ) -> int:
     """Run signature sync.
 
@@ -353,7 +393,6 @@ async def run_sync(
         dry_run: If True, don't make changes
         email: If provided, only sync this user
         preview: If True, show signature preview for the user
-        footer_only: If True, only sync the footer mail flow rule
 
     Returns:
         Exit code
@@ -361,15 +400,6 @@ async def run_sync(
     logger.info("=" * 60)
     logger.info("Email Signature Sync")
     logger.info("=" * 60)
-
-    # Handle footer-only mode
-    if footer_only:
-        if dry_run:
-            logger.info("DRY RUN - no changes will be made")
-        logger.info("")
-        logger.info("Syncing email footer mail flow rule...")
-        success, error = sync_footer(dry_run)
-        return 0 if success else 1
 
     if preview and not email:
         logger.error("--preview requires --email")
@@ -442,6 +472,14 @@ async def run_sync(
         if len(errors) > 10:
             logger.error(f"  ... and {len(errors) - 10} more")
 
+    # Sync footer mail flow rule
+    logger.info("")
+    logger.info("Syncing email footer mail flow rule...")
+    footer_ok, footer_error = sync_footer(dry_run)
+    if not footer_ok:
+        logger.error(f"Footer sync failed: {footer_error}")
+        return 1
+
     return 0 if failure == 0 else 1
 
 
@@ -467,19 +505,28 @@ def main() -> None:
         help="Show signature preview for the user (requires --email)",
     )
     parser.add_argument(
-        "--sync-footer",
+        "--remove-footer",
         action="store_true",
-        help="Only sync the organization footer mail flow rule (skip user signatures)",
+        help="Remove the organization footer mail flow rule",
     )
 
     args = parser.parse_args()
+
+    # Handle remove-footer separately
+    if args.remove_footer:
+        logger.info("=" * 60)
+        logger.info("Remove Email Footer Rule")
+        logger.info("=" * 60)
+        if args.dry_run:
+            logger.info("DRY RUN - no changes will be made")
+        success, _error = remove_footer(args.dry_run)
+        sys.exit(0 if success else 1)
 
     exit_code = asyncio.run(
         run_sync(
             dry_run=args.dry_run,
             email=args.email,
             preview=args.preview,
-            footer_only=args.sync_footer,
         )
     )
     sys.exit(exit_code)
