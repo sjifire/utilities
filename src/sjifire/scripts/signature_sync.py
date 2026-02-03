@@ -198,13 +198,15 @@ async def sync_user_signature(
     client: ExchangeOnlineClient,
     user: EntraUser,
     dry_run: bool = False,
+    remove: bool = False,
 ) -> tuple[bool, str | None]:
-    """Sync signature for a single user.
+    """Sync or remove signature for a single user.
 
     Args:
         client: Exchange Online client
         user: EntraUser to sync signature for
         dry_run: If True, don't make changes
+        remove: If True, remove the signature instead of setting it
 
     Returns:
         Tuple of (success, error_message)
@@ -212,6 +214,32 @@ async def sync_user_signature(
     if not user.email:
         return False, "No email address"
 
+    if remove:
+        if dry_run:
+            logger.info(f"Would remove signature for {user.display_name} ({user.email})")
+            return True, None
+
+        # Remove signature via PowerShell
+        script = f"""
+Set-MailboxMessageConfiguration -Identity '{user.email}' `
+    -SignatureHtml '' `
+    -SignatureText '' `
+    -AutoAddSignature $false `
+    -AutoAddSignatureOnReply $false `
+    -ErrorAction Stop
+Write-Output 'SUCCESS'
+"""
+        result = client._run_powershell([script], parse_json=False)
+
+        if result and "SUCCESS" in str(result):
+            logger.info(f"Removed signature for {user.display_name} ({user.email})")
+            return True, None
+        else:
+            error = f"Failed to remove signature: {result}"
+            logger.error(f"{user.email}: {error}")
+            return False, error
+
+    # Set signature
     html_sig = generate_signature_html(user)
     text_sig = generate_signature_text(user)
 
@@ -249,12 +277,14 @@ Write-Output 'SUCCESS'
 async def sync_signatures(
     users: list[EntraUser],
     dry_run: bool = False,
+    remove: bool = False,
 ) -> tuple[int, int, list[str]]:
-    """Sync signatures for all users.
+    """Sync or remove signatures for all users.
 
     Args:
         users: List of EntraUser objects
         dry_run: If True, don't make changes
+        remove: If True, remove signatures instead of setting them
 
     Returns:
         Tuple of (success_count, failure_count, error_messages)
@@ -268,7 +298,7 @@ async def sync_signatures(
     # Process users in batches to avoid overwhelming Exchange
     # Each user requires a separate PowerShell connection currently
     for user in users:
-        ok, error = await sync_user_signature(client, user, dry_run)
+        ok, error = await sync_user_signature(client, user, dry_run, remove)
         if ok:
             success += 1
         else:
@@ -386,6 +416,7 @@ async def run_sync(
     dry_run: bool = False,
     email: str | None = None,
     preview: bool = False,
+    remove_signatures: bool = False,
 ) -> int:
     """Run signature sync.
 
@@ -393,12 +424,16 @@ async def run_sync(
         dry_run: If True, don't make changes
         email: If provided, only sync this user
         preview: If True, show signature preview for the user
+        remove_signatures: If True, remove signatures instead of setting them
 
     Returns:
         Exit code
     """
     logger.info("=" * 60)
-    logger.info("Email Signature Sync")
+    if remove_signatures:
+        logger.info("Email Signature Removal")
+    else:
+        logger.info("Email Signature Sync")
     logger.info("=" * 60)
 
     if preview and not email:
@@ -450,11 +485,14 @@ async def run_sync(
         print(generate_signature_text(user))
         return 0
 
-    # Sync signatures
+    # Sync or remove signatures
     logger.info("")
-    logger.info("Syncing signatures...")
+    if remove_signatures:
+        logger.info("Removing signatures...")
+    else:
+        logger.info("Syncing signatures...")
 
-    success, failure, errors = await sync_signatures(users, dry_run)
+    success, failure, errors = await sync_signatures(users, dry_run, remove_signatures)
 
     # Print summary
     logger.info("")
@@ -472,13 +510,14 @@ async def run_sync(
         if len(errors) > 10:
             logger.error(f"  ... and {len(errors) - 10} more")
 
-    # Sync footer mail flow rule
-    logger.info("")
-    logger.info("Syncing email footer mail flow rule...")
-    footer_ok, footer_error = sync_footer(dry_run)
-    if not footer_ok:
-        logger.error(f"Footer sync failed: {footer_error}")
-        return 1
+    # Sync footer mail flow rule (only when adding signatures, not removing)
+    if not remove_signatures:
+        logger.info("")
+        logger.info("Syncing email footer mail flow rule...")
+        footer_ok, footer_error = sync_footer(dry_run)
+        if not footer_ok:
+            logger.error(f"Footer sync failed: {footer_error}")
+            return 1
 
     return 0 if failure == 0 else 1
 
@@ -505,6 +544,11 @@ def main() -> None:
         help="Show signature preview for the user (requires --email)",
     )
     parser.add_argument(
+        "--remove-signatures",
+        action="store_true",
+        help="Remove signatures from all users (or specific user with --email)",
+    )
+    parser.add_argument(
         "--remove-footer",
         action="store_true",
         help="Remove the organization footer mail flow rule",
@@ -527,6 +571,7 @@ def main() -> None:
             dry_run=args.dry_run,
             email=args.email,
             preview=args.preview,
+            remove_signatures=args.remove_signatures,
         )
     )
     sys.exit(exit_code)

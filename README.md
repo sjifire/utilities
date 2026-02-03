@@ -123,6 +123,7 @@ The sync:
 uv run signature-sync                      # Sync all signatures + footer rule
 uv run signature-sync --dry-run            # Preview changes without applying
 uv run signature-sync --email user@sjifire.org --preview  # Preview signature for user
+uv run signature-sync --remove-signatures  # Remove all signatures
 uv run signature-sync --remove-footer      # Remove the footer mail flow rule
 ```
 
