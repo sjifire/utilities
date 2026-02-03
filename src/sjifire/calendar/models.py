@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from html import escape
 
 from sjifire.aladtec.client import get_aladtec_credentials
@@ -92,110 +92,6 @@ class CrewMember:
         """Format as plain text."""
         pos = clean_position(self.position)
         return f"{pos}: {self.name}"
-
-
-@dataclass
-class ShiftPeriod:
-    """A time period within a shift where crew is constant."""
-
-    start: datetime
-    end: datetime
-    crew: dict[str, list[CrewMember]]  # section -> list of CrewMember
-
-    def format_crew_text(self, exclude_sections: list[str] | None = None) -> str:
-        """Format crew list as text for calendar body."""
-        exclude = set(exclude_sections or [])
-        lines = []
-
-        sorted_sections = sorted(self.crew.keys(), key=section_sort_key)
-
-        for section in sorted_sections:
-            if section in exclude:
-                continue
-            members = self.crew[section]
-            if not members:
-                continue
-
-            lines.append(f"{section}:")
-            sorted_members = sorted(members, key=lambda m: position_sort_key(m.position))
-            lines.extend(f"  • {m.format_text()}" for m in sorted_members)
-            lines.append("")
-
-        return "\n".join(lines).strip()
-
-
-@dataclass
-class OnDutyEvent:
-    """A calendar event representing on-duty crew for a shift period."""
-
-    start: datetime
-    end: datetime
-    platoon: str
-    crew: dict[str, list[CrewMember]]  # section -> list of CrewMember
-    event_id: str | None = None  # M365 event ID if already created
-
-    @property
-    def subject(self) -> str:
-        """Generate event subject/title."""
-        if self.platoon:
-            return f"On Duty: {self.platoon}"
-        return "On Duty Crew"
-
-    @property
-    def body_html(self) -> str:
-        """Generate event body as HTML with contact links."""
-        lines = []
-
-        sorted_sections = sorted(self.crew.keys(), key=section_sort_key)
-
-        for section in sorted_sections:
-            members = self.crew[section]
-            if not members:
-                continue
-
-            lines.append(f"<p><b>{escape(section)}</b></p>")
-            lines.append("<ul>")
-            sorted_members = sorted(members, key=lambda m: position_sort_key(m.position))
-            lines.extend(f"<li>{m.format_html()}</li>" for m in sorted_members)
-            lines.append("</ul>")
-
-        # Add Aladtec link at the bottom with spacing
-        lines.append('<hr style="margin-top: 24px;">')
-        lines.append(
-            f'<p style="font-size: 0.9em; color: #666; margin-top: 12px;">'
-            f'Schedule data from <a href="{get_aladtec_url()}">Aladtec</a>. '
-            f"View your personal schedule and make changes there.</p>"
-        )
-
-        return "\n".join(lines)
-
-    @property
-    def body_text(self) -> str:
-        """Generate event body as plain text (for comparison)."""
-        lines = []
-
-        sorted_sections = sorted(self.crew.keys(), key=section_sort_key)
-
-        for section in sorted_sections:
-            members = self.crew[section]
-            if not members:
-                continue
-
-            lines.append(f"{section}:")
-            sorted_members = sorted(members, key=lambda m: position_sort_key(m.position))
-            lines.extend(f"  • {m.format_text()}" for m in sorted_members)
-            lines.append("")
-
-        return "\n".join(lines).strip()
-
-    def matches(self, other: OnDutyEvent) -> bool:
-        """Check if two events represent the same shift (for update detection)."""
-        return self.start == other.start and self.end == other.end
-
-    def content_matches(self, other: OnDutyEvent) -> bool:
-        """Check if two events have the same content."""
-        # Compare using plain text representation for simplicity
-        return self.subject == other.subject and self.body_text == other.body_text
 
 
 def _format_crew_section_html(

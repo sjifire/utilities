@@ -928,3 +928,159 @@ class TestCalendarSyncDeleteDateRange:
 
         assert result.events_deleted == 2
         assert result.errors == []
+
+
+class TestCalendarSyncUpdateEventsBatch:
+    """Tests for update_events_batch method."""
+
+    @pytest.fixture
+    def calendar_sync(self, mock_env_vars):
+        """Create CalendarSync with mocked client."""
+        with (
+            patch("sjifire.calendar.sync.ClientSecretCredential"),
+            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+        ):
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            sync = CalendarSync()
+            sync.client = mock_client
+            return sync
+
+    @pytest.fixture
+    def sample_events(self):
+        """Create sample events with event_ids for updating."""
+        events = [
+            AllDayDutyEvent(
+                event_date=date(2026, 2, 1),
+                until_1800_platoon="A",
+                until_1800_crew={},
+                from_1800_platoon="B",
+                from_1800_crew={},
+            ),
+            AllDayDutyEvent(
+                event_date=date(2026, 2, 2),
+                until_1800_platoon="B",
+                until_1800_crew={},
+                from_1800_platoon="A",
+                from_1800_crew={},
+            ),
+        ]
+        events[0].event_id = "id-1"
+        events[1].event_id = "id-2"
+        return events
+
+    @pytest.mark.asyncio
+    async def test_update_events_batch_success(self, calendar_sync, sample_events):
+        """Batch update returns success count."""
+        calendar_sync.client.users.by_user_id.return_value.events.by_event_id.return_value.patch = (
+            AsyncMock()
+        )
+
+        count, errors = await calendar_sync.update_events_batch(sample_events)
+
+        assert count == 2
+        assert errors == []
+
+    @pytest.mark.asyncio
+    async def test_update_events_batch_empty(self, calendar_sync):
+        """Batch update handles empty list."""
+        count, errors = await calendar_sync.update_events_batch([])
+
+        assert count == 0
+        assert errors == []
+
+    @pytest.mark.asyncio
+    async def test_update_events_batch_with_failures(self, calendar_sync, sample_events):
+        """Batch update reports errors on failures."""
+        # Make first call succeed, second fail
+        call_count = [0]
+
+        async def mock_patch(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise Exception("API Error")
+
+        calendar_sync.client.users.by_user_id.return_value.events.by_event_id.return_value.patch = (
+            mock_patch
+        )
+
+        count, errors = await calendar_sync.update_events_batch(sample_events)
+
+        assert count == 1
+        assert len(errors) == 1
+        assert "Failed to update" in errors[0]
+
+
+class TestCalendarSyncSyncWrapper:
+    """Tests for the synchronous sync() wrapper method."""
+
+    @pytest.fixture
+    def calendar_sync(self, mock_env_vars):
+        """Create CalendarSync with mocked methods."""
+        with (
+            patch("sjifire.calendar.sync.ClientSecretCredential"),
+            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+        ):
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            sync = CalendarSync()
+            sync.client = mock_client
+            return sync
+
+    @pytest.fixture
+    def sample_schedules(self):
+        """Create sample DaySchedule objects."""
+        return [
+            DaySchedule(
+                date=date(2026, 2, 1),
+                platoon="A",
+                entries=[
+                    ScheduleEntry(
+                        date=date(2026, 2, 1),
+                        section="S31",
+                        position="Captain",
+                        name="John Doe",
+                        start_time="18:00",
+                        end_time="18:00",
+                    )
+                ],
+            ),
+        ]
+
+    def test_sync_empty_schedules(self, calendar_sync):
+        """Sync with empty schedules returns empty result."""
+        result = calendar_sync.sync([], dry_run=False)
+
+        assert result.events_created == 0
+        assert result.events_updated == 0
+
+    def test_sync_calls_sync_events(self, calendar_sync, sample_schedules):
+        """Sync converts schedules and calls sync_events."""
+        with (
+            patch.object(calendar_sync, "_load_user_contacts", new=AsyncMock(return_value={})),
+            patch.object(
+                calendar_sync,
+                "sync_events",
+                new=AsyncMock(return_value=MagicMock(events_created=1, events_updated=0)),
+            ) as mock_sync_events,
+        ):
+            result = calendar_sync.sync(sample_schedules, dry_run=False)
+
+        mock_sync_events.assert_called_once()
+        assert result.events_created == 1
+
+    def test_sync_dry_run_passed_through(self, calendar_sync, sample_schedules):
+        """Dry run flag is passed to sync_events."""
+        with (
+            patch.object(calendar_sync, "_load_user_contacts", new=AsyncMock(return_value={})),
+            patch.object(
+                calendar_sync,
+                "sync_events",
+                new=AsyncMock(return_value=MagicMock(events_created=0, events_updated=0)),
+            ) as mock_sync_events,
+        ):
+            calendar_sync.sync(sample_schedules, dry_run=True)
+
+        # Check dry_run was passed (4th positional arg)
+        call_args = mock_sync_events.call_args
+        assert call_args[0][3] is True
