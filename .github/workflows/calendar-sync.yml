@@ -1,0 +1,96 @@
+name: Calendar Sync
+
+on:
+  schedule:
+    # Run daily at 6 AM Pacific (14:00 UTC = 6am PST / 7am PDT)
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no changes)'
+        required: false
+        default: false
+        type: boolean
+      months:
+        description: 'Number of months to sync (default: 4)'
+        required: false
+        default: '4'
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+  actions: none
+  checks: none
+  deployments: none
+  issues: none
+  packages: none
+  pull-requests: none
+  repository-projects: none
+  security-events: none
+  statuses: none
+
+jobs:
+  sync:
+    name: Sync Aladtec to M365 Calendar
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: bb2cb591-58ff-4687-bf14-502049dee01b
+          tenant-id: 4122848f-c317-4267-9c07-7c504150d1bd
+          allow-no-subscriptions: true
+
+      - name: Get secrets from Key Vault
+        uses: azure/cli@v2
+        with:
+          azcliversion: agentazcliversion
+          inlineScript: |
+            ALADTEC_URL=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-URL --query value -o tsv)
+            echo "::add-mask::$ALADTEC_URL"
+            echo "ALADTEC_URL=$ALADTEC_URL" >> $GITHUB_ENV
+
+            ALADTEC_USERNAME=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-USERNAME --query value -o tsv)
+            echo "::add-mask::$ALADTEC_USERNAME"
+            echo "ALADTEC_USERNAME=$ALADTEC_USERNAME" >> $GITHUB_ENV
+
+            ALADTEC_PASSWORD=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-PASSWORD --query value -o tsv)
+            echo "::add-mask::$ALADTEC_PASSWORD"
+            echo "ALADTEC_PASSWORD=$ALADTEC_PASSWORD" >> $GITHUB_ENV
+
+            MS_GRAPH_TENANT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-TENANT-ID --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_TENANT_ID"
+            echo "MS_GRAPH_TENANT_ID=$MS_GRAPH_TENANT_ID" >> $GITHUB_ENV
+
+            MS_GRAPH_CLIENT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-ID --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_CLIENT_ID"
+            echo "MS_GRAPH_CLIENT_ID=$MS_GRAPH_CLIENT_ID" >> $GITHUB_ENV
+
+            MS_GRAPH_CLIENT_SECRET=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-SECRET --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_CLIENT_SECRET"
+            echo "MS_GRAPH_CLIENT_SECRET=$MS_GRAPH_CLIENT_SECRET" >> $GITHUB_ENV
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run calendar sync
+        run: |
+          MONTHS="${{ inputs.months || '4' }}"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            uv run calendar-sync --months "$MONTHS" --dry-run
+          else
+            uv run calendar-sync --months "$MONTHS"
+          fi

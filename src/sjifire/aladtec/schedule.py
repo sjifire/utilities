@@ -1,0 +1,392 @@
+"""Aladtec schedule scraper for on-duty crew data."""
+
+import json
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from typing import Self
+
+import httpx
+from bs4 import BeautifulSoup
+
+from sjifire.core.config import get_aladtec_credentials
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ScheduleEntry:
+    """A scheduled person for a specific time period."""
+
+    date: date
+    section: str
+    position: str
+    name: str
+    start_time: str  # HH:MM format
+    end_time: str  # HH:MM format
+    platoon: str = ""
+
+    @property
+    def is_full_shift(self) -> bool:
+        """Check if this is a full 24-hour shift (1800-1800)."""
+        return self.start_time == "18:00" and self.end_time == "18:00"
+
+    @property
+    def start_datetime(self) -> datetime:
+        """Get full datetime for shift start."""
+        hour, minute = map(int, self.start_time.split(":"))
+        return datetime.combine(self.date, datetime.min.time().replace(hour=hour, minute=minute))
+
+    @property
+    def end_datetime(self) -> datetime:
+        """Get full datetime for shift end."""
+        hour, minute = map(int, self.end_time.split(":"))
+        end_dt = datetime.combine(self.date, datetime.min.time().replace(hour=hour, minute=minute))
+        # If end time is <= start time, it's the next day
+        if self.end_time <= self.start_time:
+            end_dt += timedelta(days=1)
+        return end_dt
+
+
+@dataclass
+class DaySchedule:
+    """All schedule entries for a single day."""
+
+    date: date
+    platoon: str
+    entries: list[ScheduleEntry] = field(default_factory=list)
+
+    def get_entries_by_section(self) -> dict[str, list[ScheduleEntry]]:
+        """Group entries by section."""
+        sections: dict[str, list[ScheduleEntry]] = {}
+        for entry in self.entries:
+            if entry.section not in sections:
+                sections[entry.section] = []
+            sections[entry.section].append(entry)
+        return sections
+
+    def get_filled_positions(
+        self, exclude_sections: list[str] | None = None
+    ) -> list[ScheduleEntry]:
+        """Get all filled positions, optionally excluding certain sections.
+
+        Args:
+            exclude_sections: Section names to exclude (e.g., ["Administration"])
+
+        Returns:
+            List of entries with names assigned
+        """
+        exclude = set(exclude_sections or [])
+        return [
+            e for e in self.entries
+            if e.name and e.section not in exclude
+        ]
+
+
+class AladtecScheduleScraper:
+    """Scraper for Aladtec schedule data using AJAX endpoints."""
+
+    def __init__(self) -> None:
+        """Initialize the scraper with credentials from environment."""
+        self.base_url, self.username, self.password = get_aladtec_credentials()
+        self.client: httpx.Client | None = None
+
+    def __enter__(self) -> Self:
+        """Enter context manager - create HTTP client."""
+        self.client = httpx.Client(
+            follow_redirects=True,
+            timeout=60.0,
+        )
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit context manager - close HTTP client."""
+        if self.client:
+            self.client.close()
+            self.client = None
+
+    def login(self) -> bool:
+        """Log in to Aladtec.
+
+        Returns:
+            True if login successful, False otherwise
+        """
+        if not self.client:
+            raise RuntimeError("Scraper must be used as context manager")
+
+        logger.info(f"Logging in to {self.base_url}")
+
+        # Get the login page first to establish session
+        response = self.client.get(f"{self.base_url}/")
+
+        if response.status_code != 200:
+            logger.error(f"Failed to load login page: {response.status_code}")
+            return False
+
+        form_data = {
+            "username": self.username,
+            "password": self.password,
+        }
+
+        login_url = f"{self.base_url}/index.php?action=login"
+        response = self.client.post(login_url, data=form_data)
+
+        # Check if login succeeded
+        if "schedule" in response.text.lower() or "dashboard" in response.text.lower():
+            logger.info("Login successful")
+            return True
+
+        if "invalid" in response.text.lower() or "incorrect" in response.text.lower():
+            logger.error("Login failed - invalid credentials")
+            return False
+
+        if "action=login" not in str(response.url):
+            logger.info("Login successful")
+            return True
+
+        logger.error("Login failed - still on login page")
+        return False
+
+    def _fetch_ajax_schedule(self, start_date: date) -> dict[str, str]:
+        """Fetch schedule via AJAX for a specific start date.
+
+        Args:
+            start_date: Date to use as AJAX start date
+
+        Returns:
+            Dict mapping date strings (YYYY-MM-DD) to HTML content
+        """
+        if not self.client:
+            raise RuntimeError("Scraper must be used as context manager")
+
+        date_str = start_date.strftime("%Y-%m-%d")
+        nav_date = start_date.strftime("%b %Y")  # e.g., "Feb 2026"
+
+        # POST to navigate to the month (required before each fetch for consistency)
+        self.client.post(
+            f"{self.base_url}/index.php",
+            params={"action": "manage_work_view_ajax"},
+            data={
+                "nav_date": nav_date,
+                "schedule_view": "monthly_calendar",
+                "qnav": "1",
+                "version": "1.1",
+            },
+        )
+
+        # Now fetch the AJAX data
+        response = self.client.get(
+            f"{self.base_url}/index.php",
+            params={
+                "action": "manage_work_view_ajax",
+                "schedule_view": "monthly_calendar",
+                "ajax_start_date": date_str,
+                "mode": "ajax",
+                "version": "1.1",
+            },
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to fetch schedule: {response.status_code}")
+            return {}
+
+        try:
+            data = json.loads(response.text)
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON response: {e}")
+            return {}
+
+        return_data = data.get("return_data", "")
+
+        if return_data.startswith("{"):
+            try:
+                return json.loads(return_data)
+            except json.JSONDecodeError:
+                pass
+
+        return {}
+
+    def fetch_month_schedule(self, month_start: date) -> dict[str, str]:
+        """Fetch a full month's schedule via multiple AJAX requests.
+
+        The AJAX endpoint returns partial data, so we make multiple requests
+        with different start dates to accumulate the full month.
+
+        Args:
+            month_start: First day of the month to fetch (day is ignored, uses 1st)
+
+        Returns:
+            Dict mapping date strings (YYYY-MM-DD) to HTML content for each day
+        """
+        if not self.client:
+            raise RuntimeError("Scraper must be used as context manager")
+
+        # Normalize to first of month
+        first_of_month = month_start.replace(day=1)
+        month_str = first_of_month.strftime("%Y-%m")
+
+        all_data: dict[str, str] = {}
+
+        # Fetch with multiple start dates - every 5 days to ensure complete coverage
+        # Each fetch does its own POST navigation for consistency
+        fetch_days = [1, 5, 10, 15, 20, 25, 28, 31]
+
+        for day in fetch_days:
+            # Handle months with fewer than 31 days
+            try:
+                fetch_date = first_of_month.replace(day=day)
+            except ValueError:
+                # Day doesn't exist in this month, skip
+                continue
+
+            data = self._fetch_ajax_schedule(fetch_date)
+            if data:
+                # Only keep dates for this month
+                for date_str, html in data.items():
+                    if date_str.startswith(month_str):
+                        all_data[date_str] = html
+
+        logger.debug(f"Fetched {len(all_data)} days for {month_str}")
+        return all_data
+
+    def parse_day_html(self, date_str: str, html: str) -> DaySchedule:
+        """Parse a single day's HTML to extract schedule entries.
+
+        Args:
+            date_str: Date in YYYY-MM-DD format
+            html: HTML content for the day
+
+        Returns:
+            DaySchedule with all entries for that day
+        """
+        day_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        soup = BeautifulSoup(html, "html.parser")
+        entries: list[ScheduleEntry] = []
+
+        # Get platoon from the shift-label
+        platoon = ""
+        platoon_elem = soup.find(class_="shift-label-display")
+        if platoon_elem:
+            platoon = platoon_elem.get_text(strip=True)
+
+        # Find all schedule sections
+        current_section = ""
+
+        for div in soup.find_all("div", class_="sch_entry"):
+            # Get section header
+            header = div.find(class_="calendar-event-header")
+            if header:
+                current_section = header.get_text(strip=True)
+
+            # Find all scheduled entries (rows with title containing schedule info)
+            for row in div.find_all("tr", class_="calendar-event"):
+                title = row.get("title", "")
+                if not title:
+                    continue
+
+                # Parse the title format:
+                # "Name<br/><p>Section / Position<br/>Date Start - Date End</p>"
+
+                name_match = re.match(r"^([^<]+)", title)
+                if not name_match:
+                    continue
+                name = name_match.group(1).strip()
+
+                # Get position from the title
+                pos_match = re.search(r"/ ([^<]+)<br/>", title)
+                position = pos_match.group(1).strip() if pos_match else ""
+
+                # Get times
+                time_match = re.search(r"(\d{2}:\d{2}) - [^>]+(\d{2}:\d{2})", title)
+                start_time = time_match.group(1) if time_match else "18:00"
+                end_time = time_match.group(2) if time_match else "18:00"
+
+                entries.append(ScheduleEntry(
+                    date=day_date,
+                    section=current_section,
+                    position=position,
+                    name=name,
+                    start_time=start_time,
+                    end_time=end_time,
+                    platoon=platoon,
+                ))
+
+        return DaySchedule(date=day_date, platoon=platoon, entries=entries)
+
+    def get_schedule_range(
+        self,
+        start_date: date,
+        end_date: date,
+    ) -> list[DaySchedule]:
+        """Fetch schedule for a date range.
+
+        Args:
+            start_date: First date to include
+            end_date: Last date to include
+
+        Returns:
+            List of DaySchedule objects, one per day with data
+        """
+        if not self.client:
+            raise RuntimeError("Scraper must be used as context manager")
+
+        schedules: list[DaySchedule] = []
+        all_day_data: dict[str, str] = {}
+
+        # Fetch by month
+        current = start_date.replace(day=1)
+        end_month = end_date.replace(day=1)
+
+        while current <= end_month:
+            logger.info(f"Fetching {current.strftime('%B %Y')}...")
+            month_data = self.fetch_month_schedule(current)
+
+            if month_data:
+                all_day_data.update(month_data)
+
+            # Move to next month
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1)
+            else:
+                current = current.replace(month=current.month + 1)
+
+        # Parse all days within our date range
+        for date_str, html in sorted(all_day_data.items()):
+            try:
+                day_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+
+            if start_date <= day_date <= end_date:
+                day_schedule = self.parse_day_html(date_str, html)
+                if day_schedule.entries:
+                    schedules.append(day_schedule)
+
+        logger.info(f"Fetched {len(schedules)} days with schedule data")
+        return schedules
+
+    def get_schedule_months_ahead(self, months: int = 6) -> list[DaySchedule]:
+        """Fetch schedule from today through N months ahead.
+
+        Args:
+            months: Number of months to fetch (default 6)
+
+        Returns:
+            List of DaySchedule objects
+        """
+        today = date.today()
+        # Calculate end date - go to the last day of the target month
+        end_month = today.month + months
+        end_year = today.year
+        while end_month > 12:
+            end_month -= 12
+            end_year += 1
+
+        # Get last day of end month
+        if end_month == 12:
+            end_date = date(end_year, 12, 31)
+        else:
+            end_date = date(end_year, end_month + 1, 1) - timedelta(days=1)
+
+        return self.get_schedule_range(today, end_date)

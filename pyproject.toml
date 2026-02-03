@@ -25,6 +25,7 @@ ispyfire-admin = "sjifire.scripts.ispyfire_admin:main"
 analyze-mappings = "sjifire.scripts.analyze_mappings:main"
 compare-groups = "sjifire.scripts.compare_group_memberships:main"
 m365-group-scan = "sjifire.scripts.m365_group_scan:main"
+calendar-sync = "sjifire.scripts.calendar_sync:main"
 
 [dependency-groups]
 dev = [
