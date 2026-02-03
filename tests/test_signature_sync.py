@@ -316,11 +316,13 @@ class TestRunSync:
         with (
             patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_manager_class,
             patch("sjifire.scripts.signature_sync.sync_signatures") as mock_sync,
+            patch("sjifire.scripts.signature_sync.sync_footer") as mock_footer,
         ):
             mock_manager = MagicMock()
             mock_manager.get_employees = AsyncMock(return_value=users)
             mock_manager_class.return_value = mock_manager
             mock_sync.return_value = (1, 0, [])
+            mock_footer.return_value = (True, None)
 
             await run_sync(dry_run=False)
 
@@ -349,11 +351,13 @@ class TestRunSync:
         with (
             patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_manager_class,
             patch("sjifire.scripts.signature_sync.sync_signatures") as mock_sync,
+            patch("sjifire.scripts.signature_sync.sync_footer") as mock_footer,
         ):
             mock_manager = MagicMock()
             mock_manager.get_employees = AsyncMock(return_value=users)
             mock_manager_class.return_value = mock_manager
             mock_sync.return_value = (1, 0, [])
+            mock_footer.return_value = (True, None)
 
             exit_code = await run_sync(dry_run=False)
 
@@ -367,11 +371,13 @@ class TestRunSync:
         with (
             patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_manager_class,
             patch("sjifire.scripts.signature_sync.sync_signatures") as mock_sync,
+            patch("sjifire.scripts.signature_sync.sync_footer") as mock_footer,
         ):
             mock_manager = MagicMock()
             mock_manager.get_employees = AsyncMock(return_value=users)
             mock_manager_class.return_value = mock_manager
             mock_sync.return_value = (0, 1, ["error"])
+            mock_footer.return_value = (True, None)
 
             exit_code = await run_sync(dry_run=False)
 
