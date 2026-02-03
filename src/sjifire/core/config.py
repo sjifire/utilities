@@ -7,11 +7,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Re-export for backwards compatibility
-from sjifire.aladtec.client import get_aladtec_credentials
-
-__all__ = ["get_aladtec_credentials"]
-
 
 def get_ispyfire_credentials() -> tuple[str, str, str]:
     """Get iSpyFire credentials from environment.

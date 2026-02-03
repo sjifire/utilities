@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
+from sjifire.aladtec.client import get_aladtec_credentials
 from sjifire.core.config import (
-    get_aladtec_credentials,
     get_graph_credentials,
     load_entra_sync_config,
 )
