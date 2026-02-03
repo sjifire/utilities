@@ -1,7 +1,7 @@
 """Tests for sjifire.calendar.sync module."""
 
 from datetime import date
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -164,9 +164,11 @@ class TestCalendarSyncFiltering:
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
         """Create CalendarSync instance."""
-        with patch("sjifire.calendar.sync.ClientSecretCredential"):
-            with patch("sjifire.calendar.sync.GraphServiceClient"):
-                return CalendarSync()
+        with (
+            patch("sjifire.calendar.sync.ClientSecretCredential"),
+            patch("sjifire.calendar.sync.GraphServiceClient"),
+        ):
+            return CalendarSync()
 
     @pytest.fixture
     def sample_day_schedule(self):
@@ -334,9 +336,11 @@ class TestCalendarSyncContactLookup:
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
         """Create CalendarSync instance."""
-        with patch("sjifire.calendar.sync.ClientSecretCredential"):
-            with patch("sjifire.calendar.sync.GraphServiceClient"):
-                return CalendarSync()
+        with (
+            patch("sjifire.calendar.sync.ClientSecretCredential"),
+            patch("sjifire.calendar.sync.GraphServiceClient"),
+        ):
+            return CalendarSync()
 
     def test_lookup_exact_match(self, calendar_sync):
         """Look up contact by exact name match."""
@@ -405,9 +409,11 @@ class TestCalendarSyncConvertSchedules:
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
         """Create CalendarSync instance."""
-        with patch("sjifire.calendar.sync.ClientSecretCredential"):
-            with patch("sjifire.calendar.sync.GraphServiceClient"):
-                return CalendarSync()
+        with (
+            patch("sjifire.calendar.sync.ClientSecretCredential"),
+            patch("sjifire.calendar.sync.GraphServiceClient"),
+        ):
+            return CalendarSync()
 
     @pytest.fixture
     def sample_schedules(self):

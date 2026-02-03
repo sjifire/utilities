@@ -1,6 +1,6 @@
 """Tests for sjifire.aladtec.schedule module."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import pytest
 

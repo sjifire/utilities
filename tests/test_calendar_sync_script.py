@@ -73,7 +73,7 @@ class TestParseMonth:
             ("Dec 2026", 12),
         ]
         for month_str, expected_month in test_cases:
-            year, month = parse_month(month_str)
+            _, month = parse_month(month_str)
             assert month == expected_month
 
     def test_strips_whitespace(self):
