@@ -280,7 +280,7 @@ class TestMainCLI:
             patch("sjifire.scripts.calendar_sync.date") as mock_date,
         ):
             mock_date.today.return_value = date(2026, 2, 15)
-            mock_date.side_effect = lambda *args, **kwargs: date(*args, **kwargs)
+            mock_date.side_effect = date
             result = main()
 
         assert result == 0

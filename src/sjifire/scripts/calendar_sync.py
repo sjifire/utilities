@@ -51,7 +51,7 @@ def parse_month(month_str: str) -> tuple[int, int]:
         if parsed:
             return parsed.year, parsed.month
     except (ValueError, TypeError):
-        pass
+        pass  # Fall through to raise more descriptive error below
 
     raise ValueError(
         f"Cannot parse month: '{month_str}'. Use formats like 'Jan 2026', '2026-01', or '01/2026'"
