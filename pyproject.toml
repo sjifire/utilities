@@ -28,6 +28,7 @@ compare-groups = "sjifire.scripts.compare_group_memberships:main"
 m365-group-scan = "sjifire.scripts.m365_group_scan:main"
 calendar-sync = "sjifire.scripts.calendar_sync:main"
 calendar-subscriptions = "sjifire.scripts.calendar_subscriptions:main"
+personal-calendar-sync = "sjifire.scripts.personal_calendar_sync:main"
 
 [dependency-groups]
 dev = [
