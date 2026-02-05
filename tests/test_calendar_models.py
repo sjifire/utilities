@@ -298,7 +298,7 @@ class TestAllDayDutyEvent:
         )
         assert event.subject == "On Duty"
 
-    def test_body_html_has_until_section(self, sample_crew):
+    def test_body_html_has_until_section(self, sample_crew, mock_env_vars):
         """Body HTML has 'Until 1800' section."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
@@ -312,7 +312,7 @@ class TestAllDayDutyEvent:
         assert "Until 1800" in html
         assert "(A)" in html
 
-    def test_body_html_has_from_section(self, sample_crew):
+    def test_body_html_has_from_section(self, sample_crew, mock_env_vars):
         """Body HTML has 'From 1800' section."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
@@ -326,7 +326,7 @@ class TestAllDayDutyEvent:
         assert "From 1800" in html
         assert "(B)" in html
 
-    def test_body_html_has_both_sections(self, sample_crew):
+    def test_body_html_has_both_sections(self, sample_crew, mock_env_vars):
         """Body HTML has both sections when both have crew."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
@@ -354,7 +354,7 @@ class TestAllDayDutyEvent:
         assert "Aladtec" in html
         assert "https://test.aladtec.com" in html
 
-    def test_body_html_uses_table_format(self, sample_crew):
+    def test_body_html_uses_table_format(self, sample_crew, mock_env_vars):
         """Body HTML uses table format."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
@@ -369,7 +369,7 @@ class TestAllDayDutyEvent:
         assert "<tr>" in html
         assert "<td" in html
 
-    def test_body_html_includes_crew_names(self, sample_crew):
+    def test_body_html_includes_crew_names(self, sample_crew, mock_env_vars):
         """Body HTML includes crew names."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
@@ -384,7 +384,7 @@ class TestAllDayDutyEvent:
         assert "Jane Smith" in html
         assert "Bob Johnson" in html
 
-    def test_body_html_includes_positions(self, sample_crew):
+    def test_body_html_includes_positions(self, sample_crew, mock_env_vars):
         """Body HTML includes positions."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
@@ -399,7 +399,7 @@ class TestAllDayDutyEvent:
         assert "Firefighter" in html
         assert "Apparatus Operator" in html
 
-    def test_body_html_includes_contact_links(self, sample_crew):
+    def test_body_html_includes_contact_links(self, sample_crew, mock_env_vars):
         """Body HTML includes contact links."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
@@ -441,7 +441,7 @@ class TestAllDayDutyEvent:
         assert "John Doe" in text
         assert "Captain:" in text
 
-    def test_empty_platoon_no_parentheses(self):
+    def test_empty_platoon_no_parentheses(self, mock_env_vars):
         """Empty platoon doesn't add parentheses."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
