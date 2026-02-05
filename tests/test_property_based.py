@@ -5,8 +5,8 @@ import string
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 from sjifire.aladtec.models import Member
-from sjifire.aladtec.scraper import AladtecMemberScraper
 from sjifire.entra.users import EntraUserManager
 
 # Custom strategies

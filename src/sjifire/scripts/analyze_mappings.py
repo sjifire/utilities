@@ -6,7 +6,7 @@ import logging
 import re
 from collections import defaultdict
 
-from sjifire.aladtec.scraper import AladtecMemberScraper
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 from sjifire.entra.groups import EntraGroup, EntraGroupManager, GroupType
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")

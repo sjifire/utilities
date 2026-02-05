@@ -8,7 +8,7 @@ import httpx
 import pytest
 import respx
 
-from sjifire.aladtec.schedule import AladtecScheduleScraper, DaySchedule, ScheduleEntry
+from sjifire.aladtec.schedule_scraper import AladtecScheduleScraper, DaySchedule, ScheduleEntry
 
 
 class TestScheduleEntry:
@@ -563,7 +563,7 @@ class TestAladtecScheduleScraperMonthsAhead:
 
             with (
                 AladtecScheduleScraper() as scraper,
-                patch("sjifire.aladtec.schedule.date") as mock_date,
+                patch("sjifire.aladtec.schedule_scraper.date") as mock_date,
             ):
                 mock_date.today.return_value = date(2026, 2, 15)
                 mock_date.side_effect = lambda *args, **kwargs: date(*args, **kwargs)
@@ -582,7 +582,7 @@ class TestAladtecScheduleScraperMonthsAhead:
 
             with (
                 AladtecScheduleScraper() as scraper,
-                patch("sjifire.aladtec.schedule.date") as mock_date,
+                patch("sjifire.aladtec.schedule_scraper.date") as mock_date,
             ):
                 mock_date.today.return_value = date(2026, 11, 15)
                 mock_date.side_effect = lambda *args, **kwargs: date(*args, **kwargs)

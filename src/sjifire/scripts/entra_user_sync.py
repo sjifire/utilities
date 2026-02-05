@@ -9,7 +9,7 @@ from dataclasses import asdict
 
 from email_validator import EmailNotValidError, validate_email
 
-from sjifire.aladtec.scraper import AladtecMemberScraper
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 from sjifire.core.backup import backup_entra_users
 from sjifire.entra.aladtec_import import AladtecImporter
 from sjifire.entra.users import EntraUserManager

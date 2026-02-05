@@ -5,77 +5,128 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sjifire.aladtec.schedule import DaySchedule, ScheduleEntry
+from sjifire.aladtec.schedule_scraper import DaySchedule, ScheduleEntry
 from sjifire.calendar.models import AllDayDutyEvent, CrewMember
 from sjifire.calendar.sync import (
-    EXCLUDED_SECTIONS,
     CalendarSync,
     is_filled_entry,
+    is_operational_section,
     is_unfilled_position,
     should_exclude_section,
 )
 
 
+class TestIsOperationalSection:
+    """Tests for is_operational_section function.
+
+    Operational sections are those involved in emergency response:
+    - Stations (S31, S32, etc.)
+    - Chief positions
+    - Backup Duty
+    - Support
+    - State Mobe (wildland mobilization)
+    - Marine operations
+    """
+
+    def test_station_s31_is_operational(self):
+        """S31 (station) is operational."""
+        assert is_operational_section("S31") is True
+
+    def test_station_s32_is_operational(self):
+        """S32 (station) is operational."""
+        assert is_operational_section("S32") is True
+
+    def test_station_s33_is_operational(self):
+        """S33 (station) is operational."""
+        assert is_operational_section("S33") is True
+
+    def test_station_s35_is_operational(self):
+        """S35 (station) is operational."""
+        assert is_operational_section("S35") is True
+
+    def test_station_s36_is_operational(self):
+        """S36 (station) is operational."""
+        assert is_operational_section("S36") is True
+
+    def test_station_lowercase_is_operational(self):
+        """Lowercase station names are operational."""
+        assert is_operational_section("s31") is True
+
+    def test_station_word_is_operational(self):
+        """'Station 31' format is operational."""
+        assert is_operational_section("Station 31") is True
+
+    def test_chief_officer_is_operational(self):
+        """Chief Officer is operational."""
+        assert is_operational_section("Chief Officer") is True
+
+    def test_chief_on_call_is_operational(self):
+        """Chief on Call is operational."""
+        assert is_operational_section("Chief on Call") is True
+
+    def test_backup_duty_is_operational(self):
+        """Backup Duty is operational."""
+        assert is_operational_section("Backup Duty") is True
+
+    def test_backup_is_operational(self):
+        """Backup is operational."""
+        assert is_operational_section("Backup") is True
+
+    def test_support_is_operational(self):
+        """Support is operational."""
+        assert is_operational_section("Support") is True
+
+    def test_marine_is_operational(self):
+        """Marine section is operational."""
+        assert is_operational_section("Marine") is True
+
+    def test_administration_is_not_operational(self):
+        """Administration is not operational."""
+        assert is_operational_section("Administration") is False
+
+    def test_operations_is_not_operational(self):
+        """Operations (admin) is not operational."""
+        assert is_operational_section("Operations") is False
+
+    def test_prevention_is_not_operational(self):
+        """Prevention is not operational."""
+        assert is_operational_section("Prevention") is False
+
+    def test_training_is_not_operational(self):
+        """Training is not operational."""
+        assert is_operational_section("Training") is False
+
+    def test_trades_is_not_operational(self):
+        """Trades is not operational."""
+        assert is_operational_section("Trades") is False
+
+    def test_state_mobe_is_operational(self):
+        """State Mobe (wildland mobilization) is operational."""
+        assert is_operational_section("State Mobe") is True
+
+    def test_mobilization_is_operational(self):
+        """Mobilization sections are operational."""
+        assert is_operational_section("Mobilization") is True
+
+    def test_time_off_is_not_operational(self):
+        """Time Off is not operational."""
+        assert is_operational_section("Time Off") is False
+
+
 class TestShouldExcludeSection:
-    """Tests for should_exclude_section function."""
+    """Tests for should_exclude_section (inverse of is_operational_section)."""
 
-    def test_excludes_administration(self):
-        """Administration is excluded."""
+    def test_excludes_non_operational(self):
+        """Non-operational sections are excluded."""
         assert should_exclude_section("Administration") is True
-
-    def test_excludes_operations(self):
-        """Operations is excluded."""
-        assert should_exclude_section("Operations") is True
-
-    def test_excludes_prevention(self):
-        """Prevention is excluded."""
-        assert should_exclude_section("Prevention") is True
-
-    def test_excludes_training(self):
-        """Training is excluded."""
         assert should_exclude_section("Training") is True
-
-    def test_excludes_trades(self):
-        """Trades is excluded."""
-        assert should_exclude_section("Trades") is True
-
-    def test_excludes_state_mobe(self):
-        """State Mobe is excluded."""
-        assert should_exclude_section("State Mobe") is True
-
-    def test_excludes_time_off(self):
-        """Time Off is excluded."""
         assert should_exclude_section("Time Off") is True
 
-    def test_includes_s31(self):
-        """S31 is not excluded."""
+    def test_includes_operational(self):
+        """Operational sections are not excluded."""
         assert should_exclude_section("S31") is False
-
-    def test_includes_s32(self):
-        """S32 is not excluded."""
-        assert should_exclude_section("S32") is False
-
-    def test_includes_chief_officer(self):
-        """Chief Officer is not excluded."""
         assert should_exclude_section("Chief Officer") is False
-
-    def test_includes_backup_duty(self):
-        """Backup Duty is not excluded."""
         assert should_exclude_section("Backup Duty") is False
-
-    def test_excluded_sections_list(self):
-        """Verify all excluded sections are in the list."""
-        expected = [
-            "Administration",
-            "Operations",
-            "Prevention",
-            "Training",
-            "Trades",
-            "State Mobe",
-            "Time Off",
-        ]
-        for section in expected:
-            assert section in EXCLUDED_SECTIONS
 
 
 class TestIsUnfilledPosition:
@@ -470,9 +521,9 @@ class TestCalendarSyncConvertSchedules:
 
         # Feb 2 event should have Feb 1 crew as "until 1800"
         feb2_event = next(e for e in events if e.event_date == date(2026, 2, 2))
-        assert feb2_event.until_1800_platoon == "A"
-        assert "S31" in feb2_event.until_1800_crew
-        assert feb2_event.until_1800_crew["S31"][0].name == "John Doe"
+        assert feb2_event.until_platoon == "A"
+        assert "S31" in feb2_event.until_crew
+        assert feb2_event.until_crew["S31"][0].name == "John Doe"
 
     def test_convert_schedules_from_1800_from_today(self, calendar_sync, sample_schedules):
         """From 1800 crew comes from today's shift."""
@@ -480,9 +531,9 @@ class TestCalendarSyncConvertSchedules:
 
         # Feb 2 event should have Feb 2 crew as "from 1800"
         feb2_event = next(e for e in events if e.event_date == date(2026, 2, 2))
-        assert feb2_event.from_1800_platoon == "B"
-        assert "S31" in feb2_event.from_1800_crew
-        assert feb2_event.from_1800_crew["S31"][0].name == "Jane Smith"
+        assert feb2_event.from_platoon == "B"
+        assert "S31" in feb2_event.from_crew
+        assert feb2_event.from_crew["S31"][0].name == "Jane Smith"
 
     def test_convert_schedules_empty_list(self, calendar_sync):
         """Convert empty schedules returns empty list."""
@@ -519,10 +570,10 @@ class TestCalendarSyncGraphAPI:
         """Create sample AllDayDutyEvent."""
         return AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew={"S31": [CrewMember(name="John Doe", position="Captain")]},
-            from_1800_platoon="B",
-            from_1800_crew={"S31": [CrewMember(name="Jane Smith", position="Captain")]},
+            until_platoon="A",
+            until_crew={"S31": [CrewMember(name="John Doe", position="Captain")]},
+            from_platoon="B",
+            from_crew={"S31": [CrewMember(name="Jane Smith", position="Captain")]},
         )
 
     @pytest.mark.asyncio
@@ -701,10 +752,10 @@ class TestCalendarSyncBatchOperations:
         return [
             AllDayDutyEvent(
                 event_date=date(2026, 2, i),
-                until_1800_platoon="A",
-                until_1800_crew={},
-                from_1800_platoon="B",
-                from_1800_crew={},
+                until_platoon="A",
+                until_crew={},
+                from_platoon="B",
+                from_crew={},
             )
             for i in range(1, 6)  # 5 events
         ]
@@ -800,17 +851,17 @@ class TestCalendarSyncSyncEvents:
         return [
             AllDayDutyEvent(
                 event_date=date(2026, 2, 1),
-                until_1800_platoon="A",
-                until_1800_crew={},
-                from_1800_platoon="B",
-                from_1800_crew={},
+                until_platoon="A",
+                until_crew={},
+                from_platoon="B",
+                from_crew={},
             ),
             AllDayDutyEvent(
                 event_date=date(2026, 2, 2),
-                until_1800_platoon="B",
-                until_1800_crew={},
-                from_1800_platoon="A",
-                from_1800_crew={},
+                until_platoon="B",
+                until_crew={},
+                from_platoon="A",
+                from_crew={},
             ),
         ]
 
@@ -952,17 +1003,17 @@ class TestCalendarSyncUpdateEventsBatch:
         events = [
             AllDayDutyEvent(
                 event_date=date(2026, 2, 1),
-                until_1800_platoon="A",
-                until_1800_crew={},
-                from_1800_platoon="B",
-                from_1800_crew={},
+                until_platoon="A",
+                until_crew={},
+                from_platoon="B",
+                from_crew={},
             ),
             AllDayDutyEvent(
                 event_date=date(2026, 2, 2),
-                until_1800_platoon="B",
-                until_1800_crew={},
-                from_1800_platoon="A",
-                from_1800_crew={},
+                until_platoon="B",
+                until_crew={},
+                from_platoon="A",
+                from_crew={},
             ),
         ]
         events[0].event_id = "id-1"

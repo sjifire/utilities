@@ -190,21 +190,42 @@ def _format_crew_section_text(
     return lines
 
 
+# HTML template for calendar event body
+# Uses {placeholders} for dynamic content
+EVENT_BODY_TEMPLATE = """\
+{until_section}
+{from_section}
+<hr style="margin-top: 24px;">
+<p style="font-size: 0.9em; color: #666; margin-top: 12px;">
+Schedule data from <a href="{aladtec_url}">Aladtec</a>.
+View your personal schedule and make changes there.
+</p>
+"""
+
+SECTION_HEADER_TEMPLATE = '<h3 style="color: #1a5276;">{label}{platoon}</h3>'
+
+
 @dataclass
 class AllDayDutyEvent:
     """An all-day calendar event showing crew for two time periods.
 
     For any calendar day, shows:
-    - Until 1800: Crew from previous day's shift (ending at 1800)
-    - From 1800: Crew starting today's shift (begins at 1800)
+    - Until shift change: Crew from previous day's shift (ending at shift change)
+    - From shift change: Crew starting today's shift (begins at shift change)
     """
 
     event_date: date
-    until_1800_platoon: str
-    until_1800_crew: dict[str, list[CrewMember]]  # section -> list of CrewMember
-    from_1800_platoon: str
-    from_1800_crew: dict[str, list[CrewMember]]  # section -> list of CrewMember
+    until_crew: dict[str, list[CrewMember]]  # section -> list of CrewMember
+    from_crew: dict[str, list[CrewMember]]  # section -> list of CrewMember
+    until_platoon: str = ""
+    from_platoon: str = ""
+    shift_change_hour: int = 18  # Hour when shifts change (e.g., 18 = 6 PM)
     event_id: str | None = None  # M365 event ID if already created
+
+    @property
+    def _shift_time_display(self) -> str:
+        """Format shift change hour for display (e.g., '1800')."""
+        return f"{self.shift_change_hour:02d}00"
 
     @property
     def subject(self) -> str:
@@ -214,48 +235,55 @@ class AllDayDutyEvent:
     @property
     def body_html(self) -> str:
         """Generate event body as HTML with two time period sections."""
-        lines = []
+        shift_time = self._shift_time_display
 
-        # Until 1800 section
-        if self.until_1800_crew:
-            platoon_note = f" ({self.until_1800_platoon})" if self.until_1800_platoon else ""
-            lines.append(f'<h3 style="color: #1a5276;">Until 1800{platoon_note}</h3>')
-            lines.extend(_format_crew_section_html(self.until_1800_crew))
+        # Build "Until" section
+        until_section = ""
+        if self.until_crew:
+            platoon = f" ({self.until_platoon})" if self.until_platoon else ""
+            header = SECTION_HEADER_TEMPLATE.format(
+                label=f"Until {shift_time}",
+                platoon=platoon,
+            )
+            crew_html = "\n".join(_format_crew_section_html(self.until_crew))
+            until_section = f"{header}\n{crew_html}"
 
-        # From 1800 section
-        if self.from_1800_crew:
-            platoon_note = f" ({self.from_1800_platoon})" if self.from_1800_platoon else ""
-            lines.append(f'<h3 style="color: #1a5276;">From 1800{platoon_note}</h3>')
-            lines.extend(_format_crew_section_html(self.from_1800_crew))
+        # Build "From" section
+        from_section = ""
+        if self.from_crew:
+            platoon = f" ({self.from_platoon})" if self.from_platoon else ""
+            header = SECTION_HEADER_TEMPLATE.format(
+                label=f"From {shift_time}",
+                platoon=platoon,
+            )
+            crew_html = "\n".join(_format_crew_section_html(self.from_crew))
+            from_section = f"{header}\n{crew_html}"
 
-        # Add Aladtec link at the bottom with spacing
-        lines.append('<hr style="margin-top: 24px;">')
-        lines.append(
-            f'<p style="font-size: 0.9em; color: #666; margin-top: 12px;">'
-            f'Schedule data from <a href="{get_aladtec_url()}">Aladtec</a>. '
-            f"View your personal schedule and make changes there.</p>"
+        return EVENT_BODY_TEMPLATE.format(
+            until_section=until_section,
+            from_section=from_section,
+            aladtec_url=get_aladtec_url(),
         )
-
-        return "\n".join(lines)
 
     @property
     def body_text(self) -> str:
         """Generate event body as plain text (for comparison)."""
+        shift_time = self._shift_time_display
         lines = []
 
-        # Until 1800 section
-        if self.until_1800_crew:
-            platoon_note = f" ({self.until_1800_platoon})" if self.until_1800_platoon else ""
-            lines.append(f"Until 1800{platoon_note}")
+        # Until section
+        if self.until_crew:
+            platoon = f" ({self.until_platoon})" if self.until_platoon else ""
+            lines.append(f"Until {shift_time}{platoon}")
             lines.append("-" * 20)
-            lines.extend(_format_crew_section_text(self.until_1800_crew))
+            lines.extend(_format_crew_section_text(self.until_crew))
 
-        # From 1800 section
-        if self.from_1800_crew:
-            platoon_note = f" ({self.from_1800_platoon})" if self.from_1800_platoon else ""
-            lines.append(f"From 1800{platoon_note}")
+        # From section
+        if self.from_crew:
+            platoon = f" ({self.from_platoon})" if self.from_platoon else ""
+            lines.append(f"From {shift_time}{platoon}")
             lines.append("-" * 20)
-            lines.extend(_format_crew_section_text(self.from_1800_crew))
+            lines.extend(_format_crew_section_text(self.from_crew))
 
         return "\n".join(lines).strip()
 

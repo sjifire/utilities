@@ -2,7 +2,7 @@
 
 import pytest
 
-from sjifire.aladtec.scraper import AladtecMemberScraper
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 
 
 class TestAladtecMemberScraperCSVParsing:

@@ -15,7 +15,7 @@ from datetime import date
 
 from dateutil import parser as dateparser
 
-from sjifire.aladtec.schedule import AladtecScheduleScraper
+from sjifire.aladtec.schedule_scraper import AladtecScheduleScraper
 from sjifire.calendar import CalendarSync
 
 logging.basicConfig(

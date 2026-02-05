@@ -8,8 +8,8 @@ import sys
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 from sjifire.aladtec.models import Member
-from sjifire.aladtec.scraper import AladtecMemberScraper
 from sjifire.core.msgraph_client import get_graph_client
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")

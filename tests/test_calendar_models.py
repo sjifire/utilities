@@ -291,10 +291,10 @@ class TestAllDayDutyEvent:
         """Subject is always 'On Duty'."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew=sample_crew,
-            from_1800_platoon="B",
-            from_1800_crew=sample_crew,
+            until_crew=sample_crew,
+            from_crew=sample_crew,
+            until_platoon="A",
+            from_platoon="B",
         )
         assert event.subject == "On Duty"
 
@@ -302,10 +302,10 @@ class TestAllDayDutyEvent:
         """Body HTML has 'Until 1800' section."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew=sample_crew,
-            from_1800_platoon="B",
-            from_1800_crew={},
+            until_crew=sample_crew,
+            from_crew={},
+            until_platoon="A",
+            from_platoon="B",
         )
         html = event.body_html
 
@@ -316,10 +316,10 @@ class TestAllDayDutyEvent:
         """Body HTML has 'From 1800' section."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="",
-            until_1800_crew={},
-            from_1800_platoon="B",
-            from_1800_crew=sample_crew,
+            until_crew={},
+            from_crew=sample_crew,
+            until_platoon="",
+            from_platoon="B",
         )
         html = event.body_html
 
@@ -330,10 +330,10 @@ class TestAllDayDutyEvent:
         """Body HTML has both sections when both have crew."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew=sample_crew,
-            from_1800_platoon="B",
-            from_1800_crew=sample_crew,
+            until_crew=sample_crew,
+            from_crew=sample_crew,
+            until_platoon="A",
+            from_platoon="B",
         )
         html = event.body_html
 
@@ -344,10 +344,10 @@ class TestAllDayDutyEvent:
         """Body HTML has Aladtec link."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew=sample_crew,
-            from_1800_platoon="",
-            from_1800_crew={},
+            until_crew=sample_crew,
+            from_crew={},
+            until_platoon="A",
+            from_platoon="",
         )
         html = event.body_html
 
@@ -358,10 +358,10 @@ class TestAllDayDutyEvent:
         """Body HTML uses table format."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew=sample_crew,
-            from_1800_platoon="",
-            from_1800_crew={},
+            until_crew=sample_crew,
+            from_crew={},
+            until_platoon="A",
+            from_platoon="",
         )
         html = event.body_html
 
@@ -373,10 +373,10 @@ class TestAllDayDutyEvent:
         """Body HTML includes crew names."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew=sample_crew,
-            from_1800_platoon="",
-            from_1800_crew={},
+            until_crew=sample_crew,
+            from_crew={},
+            until_platoon="A",
+            from_platoon="",
         )
         html = event.body_html
 
@@ -388,10 +388,10 @@ class TestAllDayDutyEvent:
         """Body HTML includes positions."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew=sample_crew,
-            from_1800_platoon="",
-            from_1800_crew={},
+            until_crew=sample_crew,
+            from_crew={},
+            until_platoon="A",
+            from_platoon="",
         )
         html = event.body_html
 
@@ -403,10 +403,10 @@ class TestAllDayDutyEvent:
         """Body HTML includes contact links."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew=sample_crew,
-            from_1800_platoon="",
-            from_1800_crew={},
+            until_crew=sample_crew,
+            from_crew={},
+            until_platoon="A",
+            from_platoon="",
         )
         html = event.body_html
 
@@ -417,10 +417,10 @@ class TestAllDayDutyEvent:
         """Body text has section labels."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew=sample_crew,
-            from_1800_platoon="B",
-            from_1800_crew=sample_crew,
+            until_crew=sample_crew,
+            from_crew=sample_crew,
+            until_platoon="A",
+            from_platoon="B",
         )
         text = event.body_text
 
@@ -431,10 +431,10 @@ class TestAllDayDutyEvent:
         """Body text includes crew."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="A",
-            until_1800_crew=sample_crew,
-            from_1800_platoon="",
-            from_1800_crew={},
+            until_crew=sample_crew,
+            from_crew={},
+            until_platoon="A",
+            from_platoon="",
         )
         text = event.body_text
 
@@ -445,15 +445,29 @@ class TestAllDayDutyEvent:
         """Empty platoon doesn't add parentheses."""
         event = AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_1800_platoon="",
-            until_1800_crew={"S31": [CrewMember(name="Test", position="FF")]},
-            from_1800_platoon="",
-            from_1800_crew={},
+            until_crew={"S31": [CrewMember(name="Test", position="FF")]},
+            from_crew={},
+            until_platoon="",
+            from_platoon="",
         )
         html = event.body_html
 
         assert "()" not in html
         assert "Until 1800</h3>" in html or "Until 1800<" in html
+
+    def test_custom_shift_change_hour(self, sample_crew, mock_env_vars):
+        """Custom shift change hour displays correctly."""
+        event = AllDayDutyEvent(
+            event_date=date(2026, 2, 1),
+            until_crew=sample_crew,
+            from_crew=sample_crew,
+            shift_change_hour=7,  # 7 AM shift change
+        )
+        html = event.body_html
+
+        assert "Until 0700" in html
+        assert "From 0700" in html
+        assert "1800" not in html
 
 
 class TestSyncResult:

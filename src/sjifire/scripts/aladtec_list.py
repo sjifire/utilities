@@ -7,7 +7,7 @@ import logging
 import sys
 from dataclasses import asdict
 
-from sjifire.aladtec.scraper import AladtecMemberScraper
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

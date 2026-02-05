@@ -5,7 +5,7 @@ import asyncio
 import logging
 from collections import defaultdict
 
-from sjifire.aladtec.scraper import AladtecMemberScraper
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 from sjifire.core.group_strategies import (
     STRATEGY_CLASSES,
     GroupStrategy,

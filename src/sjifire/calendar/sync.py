@@ -23,7 +23,7 @@ from msgraph.generated.users.item.calendar_view.calendar_view_request_builder im
 )
 from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
-from sjifire.aladtec.schedule import DaySchedule, ScheduleEntry
+from sjifire.aladtec.schedule_scraper import DaySchedule, ScheduleEntry
 from sjifire.calendar.models import AllDayDutyEvent, CrewMember, SyncResult
 from sjifire.core.config import get_graph_credentials, get_svc_automations_credentials
 
@@ -101,9 +101,53 @@ class ROPCCredential(TokenCredential):
         raise Exception(f"ROPC authentication failed: {error} - {error_desc}")
 
 
-# Standard shift times
-SHIFT_START_HOUR = 18  # 6 PM
-SHIFT_END_HOUR = 18  # 6 PM next day
+# Default shift change hour (6 PM) - can be overridden by introspection
+DEFAULT_SHIFT_CHANGE_HOUR = 18
+
+
+def detect_shift_change_hour(schedules: list[DaySchedule]) -> int:
+    """Detect the shift change hour from schedule data.
+
+    Analyzes start/end times to find the most common shift boundary.
+    Full shifts typically start and end at the same hour (e.g., 18:00 to 18:00).
+
+    Args:
+        schedules: List of day schedules to analyze
+
+    Returns:
+        Hour (0-23) when shifts typically change, or DEFAULT_SHIFT_CHANGE_HOUR
+    """
+    from collections import Counter
+
+    # Count start hours from full-shift entries (where start == end time)
+    hour_counts: Counter[int] = Counter()
+
+    for day_schedule in schedules:
+        for entry in day_schedule.entries:
+            # Look for entries where start and end time are the same (24-hour shifts)
+            if entry.start_time == entry.end_time:
+                try:
+                    hour = int(entry.start_time.split(":")[0])
+                    hour_counts[hour] += 1
+                except (ValueError, IndexError):
+                    continue
+
+    if not hour_counts:
+        logger.debug(
+            f"No full-shift entries found, using default shift hour: {DEFAULT_SHIFT_CHANGE_HOUR}"
+        )
+        return DEFAULT_SHIFT_CHANGE_HOUR
+
+    # Return the most common shift change hour
+    most_common_hour, count = hour_counts.most_common(1)[0]
+    logger.info(f"Detected shift change hour: {most_common_hour}:00 ({count} entries)")
+    return most_common_hour
+
+
+def format_shift_hour(hour: int) -> str:
+    """Format hour as military time display (e.g., 18 -> '1800')."""
+    return f"{hour:02d}00"
+
 
 # Timezone for all operations (configurable via TIMEZONE env var)
 TIMEZONE_NAME = os.getenv("TIMEZONE", "America/Los_Angeles")
@@ -112,21 +156,52 @@ TIMEZONE = ZoneInfo(TIMEZONE_NAME)
 # Concurrency limit for parallel API calls (avoid rate limiting)
 MAX_CONCURRENT_REQUESTS = 10
 
-# Sections to exclude entirely from calendar events
-EXCLUDED_SECTIONS = [
-    "Administration",
-    "Operations",
-    "Prevention",
-    "Training",
-    "Trades",
-    "State Mobe",
-    "Time Off",
-]
+
+def is_operational_section(section: str) -> bool:
+    """Check if section is operational (should appear in calendar).
+
+    Operational sections are those involved in emergency response:
+    - Stations (S31, S32, S33, etc.)
+    - Chief/Command positions
+    - Backup Duty
+    - Support
+    - State Mobe (wildland mobilization)
+    - Marine operations
+
+    Non-operational sections (administration, training, trades, etc.)
+    are filtered out automatically by this pattern-based approach.
+    """
+    section_lower = section.lower()
+
+    # Stations: S31, S32, S33, Station 31, etc.
+    if section_lower.startswith("s3") and section_lower[2:].isdigit():
+        return True
+    if "station" in section_lower:
+        return True
+
+    # Chief positions (Chief Officer, Chief on Call, etc.)
+    if "chief" in section_lower:
+        return True
+
+    # Backup duty
+    if "backup" in section_lower:
+        return True
+
+    # Support section
+    if section_lower == "support":
+        return True
+
+    # State Mobe (wildland mobilization)
+    if "mobe" in section_lower or "mobilization" in section_lower:
+        return True
+
+    # Marine operations
+    return "marine" in section_lower
 
 
 def should_exclude_section(section: str) -> bool:
-    """Check if section should be excluded."""
-    return section in EXCLUDED_SECTIONS
+    """Check if section should be excluded (not operational)."""
+    return not is_operational_section(section)
 
 
 def is_unfilled_position(entry: ScheduleEntry) -> bool:
@@ -339,8 +414,10 @@ class CalendarSync:
         """Convert Aladtec schedules to all-day calendar events.
 
         For each calendar date, creates an all-day event showing:
-        - Until 6 PM: Crew from previous day's shift
-        - From 6 PM: Crew starting that day's shift
+        - Until shift change: Crew from previous day's shift
+        - From shift change: Crew starting that day's shift
+
+        The shift change hour is introspected from the schedule data.
 
         Args:
             schedules: List of daily schedules from Aladtec
@@ -349,56 +426,59 @@ class CalendarSync:
         Returns:
             List of AllDayDutyEvent objects ready for calendar sync
         """
-        # Build a lookup by date for quick access
-        schedules_by_date: dict[date, DaySchedule] = {ds.date: ds for ds in schedules}
-
-        # Determine the full date range we need to cover
         if not schedules:
             return []
+
+        # Introspect shift change hour from the data
+        shift_change_hour = detect_shift_change_hour(schedules)
+
+        # Build a lookup by date for quick access
+        schedules_by_date: dict[date, DaySchedule] = {ds.date: ds for ds in schedules}
 
         # Get all unique dates from schedules
         all_dates = sorted(schedules_by_date.keys())
 
-        # For each date, we show crew "until 1800" (from previous day's shift)
-        # and "from 1800" (from this day's shift)
-        # The first date in range won't have "until 1800" data from previous day
+        # For each date, we show crew "until shift change" (from previous day's shift)
+        # and "from shift change" (from this day's shift)
+        # The first date in range won't have "until" data from previous day
         # unless that previous day is also in our data
 
         events: list[AllDayDutyEvent] = []
 
         for event_date in all_dates:
-            # Previous day's schedule provides "until 1800" crew
+            # Previous day's schedule provides "until shift change" crew
             prev_date = event_date - timedelta(days=1)
             prev_schedule = schedules_by_date.get(prev_date)
 
-            # This day's schedule provides "from 1800" crew
+            # This day's schedule provides "from shift change" crew
             today_schedule = schedules_by_date.get(event_date)
 
-            # Build until 1800 crew (from previous day's shift)
-            until_1800_crew: dict[str, list[CrewMember]] = {}
-            until_1800_platoon = ""
+            # Build "until" crew (from previous day's shift)
+            until_crew: dict[str, list[CrewMember]] = {}
+            until_platoon = ""
             if prev_schedule:
-                until_1800_platoon = prev_schedule.platoon
+                until_platoon = prev_schedule.platoon
                 filled = self._get_filled_entries(prev_schedule)
-                until_1800_crew = self._entries_to_crew(filled, user_cache)
+                until_crew = self._entries_to_crew(filled, user_cache)
 
-            # Build from 1800 crew (from today's shift)
-            from_1800_crew: dict[str, list[CrewMember]] = {}
-            from_1800_platoon = ""
+            # Build "from" crew (from today's shift)
+            from_crew: dict[str, list[CrewMember]] = {}
+            from_platoon = ""
             if today_schedule:
-                from_1800_platoon = today_schedule.platoon
+                from_platoon = today_schedule.platoon
                 filled = self._get_filled_entries(today_schedule)
-                from_1800_crew = self._entries_to_crew(filled, user_cache)
+                from_crew = self._entries_to_crew(filled, user_cache)
 
             # Only create event if we have at least some crew data
-            if until_1800_crew or from_1800_crew:
+            if until_crew or from_crew:
                 events.append(
                     AllDayDutyEvent(
                         event_date=event_date,
-                        until_1800_platoon=until_1800_platoon,
-                        until_1800_crew=until_1800_crew,
-                        from_1800_platoon=from_1800_platoon,
-                        from_1800_crew=from_1800_crew,
+                        until_crew=until_crew,
+                        from_crew=from_crew,
+                        until_platoon=until_platoon,
+                        from_platoon=from_platoon,
+                        shift_change_hour=shift_change_hour,
                     )
                 )
 
