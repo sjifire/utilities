@@ -477,6 +477,7 @@ class TestSyncM365Group:
         mock_entra_groups.get_group_by_mail_nickname = AsyncMock(return_value=None)
 
         manager._entra_groups = mock_entra_groups
+        manager._entra_users_cache = []  # Prevent entra_users.get_users() call
 
         strategy = FirefighterStrategy()
         user = self._make_entra_user()
