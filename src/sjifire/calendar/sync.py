@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -104,9 +105,9 @@ class ROPCCredential(TokenCredential):
 SHIFT_START_HOUR = 18  # 6 PM
 SHIFT_END_HOUR = 18  # 6 PM next day
 
-# Timezone for all operations
-TIMEZONE = ZoneInfo("America/Los_Angeles")
-TIMEZONE_NAME = "America/Los_Angeles"
+# Timezone for all operations (configurable via TIMEZONE env var)
+TIMEZONE_NAME = os.getenv("TIMEZONE", "America/Los_Angeles")
+TIMEZONE = ZoneInfo(TIMEZONE_NAME)
 
 # Concurrency limit for parallel API calls (avoid rate limiting)
 MAX_CONCURRENT_REQUESTS = 10
