@@ -21,6 +21,13 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from sjifire.core.backup import backup_entra_groups, backup_mail_groups
 from sjifire.core.group_strategies import (
     STRATEGY_NAMES,
@@ -157,6 +164,93 @@ class UnifiedGroupSyncManager:
             logger.info(f"Loaded {len(self._entra_users_cache)} Entra users for group sync")
         return self._entra_users_cache
 
+    async def _add_svc_automations_to_group(self, group_id: str) -> bool:
+        """Add svc-automations to an M365 group for delegated calendar auth.
+
+        The svc-automations service account needs to be a member of any M365 group
+        where we want to write calendar events, because application permissions
+        don't support group calendar writes.
+
+        Uses retry logic to handle M365 group provisioning delays (group may not
+        be immediately available after creation).
+
+        Args:
+            group_id: The M365 group ID
+
+        Returns:
+            True if added successfully or already a member
+        """
+        svc_email = "svc-automations@sjifire.org"
+
+        # Find svc-automations user (do this once, outside retry)
+        all_users = await self.entra_users.get_users(include_disabled=True)
+        svc_user = next(
+            (u for u in all_users if u.email and u.email.lower() == svc_email),
+            None,
+        )
+
+        if not svc_user:
+            logger.warning(f"Could not find {svc_email} to add to group")
+            return False
+
+        # Retry logic for adding user (handles provisioning delay)
+        @retry(
+            retry=retry_if_exception_type(Exception),
+            stop=stop_after_attempt(5),
+            wait=wait_exponential(multiplier=2, min=2, max=30),
+            reraise=True,
+        )
+        async def _add_with_retry() -> bool:
+            result = await self.entra_groups.add_user_to_group(group_id, svc_user.id)
+            if not result:
+                # add_user_to_group returns False on failure, raise to trigger retry
+                raise RuntimeError(f"Failed to add {svc_email} to group {group_id}")
+            return result
+
+        try:
+            await _add_with_retry()
+            logger.info(f"Added {svc_email} to group for delegated calendar auth")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to add {svc_email} to group after retries: {e}")
+            return False
+
+    async def _get_group_members_with_retry(
+        self, group_id: str, newly_created: bool = False
+    ) -> set[str]:
+        """Get group members with retry logic for newly created groups.
+
+        M365 groups may not be immediately queryable after creation due to
+        provisioning delays. This method retries on 404 errors.
+
+        Args:
+            group_id: The M365 group ID
+            newly_created: If True, use more aggressive retry for provisioning
+
+        Returns:
+            Set of member user IDs
+        """
+        if not newly_created:
+            # For existing groups, just get members directly
+            return set(await self.entra_groups.get_group_members(group_id))
+
+        # For newly created groups, retry on failure
+        @retry(
+            retry=retry_if_exception_type(Exception),
+            stop=stop_after_attempt(5),
+            wait=wait_exponential(multiplier=2, min=2, max=30),
+            reraise=True,
+        )
+        async def _get_with_retry() -> list[str]:
+            return await self.entra_groups.get_group_members(group_id)
+
+        try:
+            members = await _get_with_retry()
+            return set(members)
+        except Exception as e:
+            logger.warning(f"Failed to get group members after retries: {e}")
+            return set()
+
     async def detect_group_type(self, email: str, mail_nickname: str) -> GroupType:
         """Detect if a group exists and what type it is.
 
@@ -217,6 +311,8 @@ class UnifiedGroupSyncManager:
         group_members: list[GroupMember],
         new_group_type: GroupType,
         dry_run: bool = False,
+        partial_sync: bool = False,
+        source_emails: set[str] | None = None,
     ) -> GroupSyncResult:
         """Sync a single group, detecting type automatically.
 
@@ -226,6 +322,8 @@ class UnifiedGroupSyncManager:
             group_members: Members who should be in this group (EntraUser or Member)
             new_group_type: Type to create if group doesn't exist
             dry_run: If True, don't make changes
+            partial_sync: If True, preserve members not in source_emails
+            source_emails: Set of all source member emails (for partial sync)
 
         Returns:
             GroupSyncResult with sync details
@@ -266,6 +364,8 @@ class UnifiedGroupSyncManager:
                 group_members=group_members,
                 dry_run=dry_run,
                 creating=creating,
+                partial_sync=partial_sync,
+                source_emails=source_emails,
             )
         else:  # EXCHANGE
             return await self._sync_exchange_group(
@@ -283,10 +383,22 @@ class UnifiedGroupSyncManager:
         group_members: list[GroupMember],
         dry_run: bool,
         creating: bool,
+        partial_sync: bool = False,
+        source_emails: set[str] | None = None,
     ) -> GroupSyncResult:
         """Sync a group via M365 (Graph API).
 
         When group_members are EntraUser objects, we already have their IDs.
+
+        Args:
+            strategy: The group strategy instance
+            group_key: Key identifying the group within the strategy
+            group_members: Members who should be in this group
+            dry_run: If True, don't make changes
+            creating: If True, the group needs to be created
+            partial_sync: If True, only remove members who are in source_emails
+                         (preserves manually-added members not in the source data)
+            source_emails: Set of all source member emails (lowercase)
         """
         config = strategy.get_config(group_key)
         display_name = config.display_name
@@ -304,6 +416,7 @@ class UnifiedGroupSyncManager:
 
         # Get or create the group
         group = None
+        newly_created = False
         if creating:
             if dry_run:
                 logger.info(f"Would create M365 group: {display_name}")
@@ -315,6 +428,10 @@ class UnifiedGroupSyncManager:
                 )
                 if group:
                     logger.info(f"Created M365 group: {display_name}")
+                    newly_created = True
+                    # Add svc-automations as member (required for delegated calendar auth)
+                    # Uses retry logic to handle provisioning delay
+                    await self._add_svc_automations_to_group(group.id)
                 else:
                     return GroupSyncResult(
                         group_name=display_name,
@@ -327,9 +444,11 @@ class UnifiedGroupSyncManager:
 
         # Sync membership
         if group or dry_run:
-            # Get current members
+            # Get current members (with retry for newly created groups)
             if group:
-                current_member_ids = set(await self.entra_groups.get_group_members(group.id))
+                current_member_ids = await self._get_group_members_with_retry(
+                    group.id, newly_created
+                )
             else:
                 current_member_ids = set()
 
@@ -369,14 +488,21 @@ class UnifiedGroupSyncManager:
                         errors.append(f"Failed to add {name}")
 
             # Remove extra members
+            # Build a lookup of user_id -> EntraUser for the removal logic
+            users = await self.get_entra_users()
+            users_by_id = {u.id: u for u in users}
+
             for user_id in current_member_ids - should_be_ids:
-                # Find user name for logging
-                name = user_id
-                users = await self.get_entra_users()
-                for user in users:
-                    if user.id == user_id:
-                        name = user.display_name or user_id
-                        break
+                user = users_by_id.get(user_id)
+                name = user.display_name if user else user_id
+
+                # Partial sync: only remove if user is in source data
+                # (preserves manually-added members who aren't in Aladtec/source)
+                if partial_sync and source_emails:
+                    user_email = user.email.lower() if user and user.email else None
+                    if user_email and user_email not in source_emails:
+                        logger.debug(f"Preserving non-source member: {name}")
+                        continue  # Skip removal - not in source data
 
                 if dry_run:
                     logger.info(f"Would remove {name} from {display_name}")
@@ -558,6 +684,7 @@ class UnifiedGroupSyncManager:
         members: list[GroupMember],
         new_group_type: GroupType = GroupType.EXCHANGE,
         dry_run: bool = False,
+        partial_sync: bool = False,
     ) -> FullSyncResult:
         """Sync all groups for a strategy.
 
@@ -566,6 +693,7 @@ class UnifiedGroupSyncManager:
             members: List of members (EntraUser or Aladtec Member)
             new_group_type: Type to use for new groups (default: Exchange)
             dry_run: If True, don't make changes
+            partial_sync: If True, preserve members not in source data
 
         Returns:
             FullSyncResult with all group results
@@ -583,6 +711,12 @@ class UnifiedGroupSyncManager:
             f"{', '.join(sorted(groups_to_sync.keys()))}"
         )
 
+        # For partial sync, collect all source member emails
+        # This is used to determine which current members to preserve
+        source_emails: set[str] | None = None
+        if partial_sync:
+            source_emails = {m.email.lower() for m in members if m.email}
+
         results: list[GroupSyncResult] = []
 
         for group_key in sorted(groups_to_sync.keys()):
@@ -595,6 +729,8 @@ class UnifiedGroupSyncManager:
                 group_members=group_members,
                 new_group_type=new_group_type,
                 dry_run=dry_run,
+                partial_sync=partial_sync,
+                source_emails=source_emails,
             )
             results.append(result)
 
@@ -702,6 +838,7 @@ async def backup_groups(
             "marine": ["Marine"],
             "volunteers": ["Volunteers"],
             "mobe": ["mobe"],
+            "all-personnel": ["all-personnel"],
         }
         for key in sample_keys.get(strategy_name, [strategy_name]):
             try:
@@ -769,6 +906,7 @@ async def run_sync(
     strategies: list[str],
     new_group_type: GroupType = GroupType.EXCHANGE,
     dry_run: bool = False,
+    partial_sync: bool = False,
 ) -> int:
     """Run group sync for specified strategies.
 
@@ -778,6 +916,7 @@ async def run_sync(
         strategies: List of strategy names to run
         new_group_type: Type to use for new groups
         dry_run: If True, don't make changes
+        partial_sync: If True, preserve members not in source data (for mixed groups)
 
     Returns:
         Exit code
@@ -788,6 +927,9 @@ async def run_sync(
 
     if dry_run:
         logger.info("DRY RUN - no changes will be made")
+
+    if partial_sync:
+        logger.info("PARTIAL SYNC - preserving non-Aladtec members")
 
     logger.info(f"Strategies: {', '.join(strategies)}")
     logger.info(f"New group type: {new_group_type.value}")
@@ -837,6 +979,7 @@ async def run_sync(
                     members=members,
                     new_group_type=new_group_type,
                     dry_run=dry_run,
+                    partial_sync=partial_sync,
                 )
                 print_result(result, dry_run=dry_run)
                 total_errors += result.total_errors
@@ -859,7 +1002,10 @@ async def run_sync(
 
 
 async def delete_group(email: str, dry_run: bool = False) -> int:
-    """Delete an Exchange distribution group.
+    """Delete a group (M365 or Exchange), with full backup first.
+
+    Automatically detects whether the group is an M365 Unified Group or
+    Exchange mail-enabled security group, backs it up, then deletes.
 
     Args:
         email: Email address of the group to delete
@@ -869,7 +1015,7 @@ async def delete_group(email: str, dry_run: bool = False) -> int:
         Exit code
     """
     logger.info("=" * 60)
-    logger.info("Delete Distribution Group")
+    logger.info("Delete Group (Unified)")
     logger.info("=" * 60)
 
     if dry_run:
@@ -877,48 +1023,141 @@ async def delete_group(email: str, dry_run: bool = False) -> int:
 
     logger.info(f"Target: {email}")
 
-    client = ExchangeOnlineClient()
+    # Extract mail_nickname from email
+    if "@" not in email:
+        logger.error(f"Invalid email format: {email}")
+        return 1
+    mail_nickname = email.split("@")[0]
+
+    manager = UnifiedGroupSyncManager()
 
     try:
-        # Check if group exists and get members for backup
-        group, members = await client.get_group_with_members(email)
+        # Detect group type
+        group_type = await manager.detect_group_type(email, mail_nickname)
 
-        if not group:
+        if group_type == GroupType.NONE:
             logger.warning(f"Group not found: {email}")
             return 1
 
-        logger.info(f"Found group: {group.display_name} ({group.primary_smtp_address})")
-        logger.info(f"Group has {len(members)} members")
-
-        if dry_run:
-            logger.info(f"Would delete: {email}")
-            return 0
-
-        # Backup the group before deleting
-        logger.info("Creating backup before delete...")
-        group_data = {
-            "identity": group.identity,
-            "display_name": group.display_name,
-            "email": group.primary_smtp_address,
-            "group_type": group.group_type,
-            "members": members,
-        }
-        backup_path = backup_mail_groups([group_data])
-        logger.info(f"Backup saved: {backup_path}")
-
-        # Delete the group
-        if await client.delete_distribution_group(email):
-            logger.info(f"Successfully deleted: {email}")
-            return 0
-        else:
-            logger.error(f"Failed to delete: {email}")
+        if group_type == GroupType.BOTH:
+            logger.error(
+                f"Group exists in both M365 and Exchange: {email}. "
+                "Please delete manually to resolve the conflict."
+            )
             return 1
+
+        logger.info(f"Detected group type: {group_type.value.upper()}")
+
+        # Handle M365 group
+        if group_type == GroupType.M365:
+            return await _delete_m365_group(manager, email, mail_nickname, dry_run)
+
+        # Handle Exchange group
+        return await _delete_exchange_group(manager, email, dry_run)
 
     except Exception as e:
         logger.error(f"Error: {e}")
         return 1
     finally:
-        await client.close()
+        await manager.close()
+
+
+async def _delete_m365_group(
+    manager: UnifiedGroupSyncManager,
+    email: str,
+    mail_nickname: str,
+    dry_run: bool,
+) -> int:
+    """Delete an M365 Unified Group with backup.
+
+    Args:
+        manager: The sync manager with initialized clients
+        email: Email address of the group
+        mail_nickname: Mail nickname of the group
+        dry_run: If True, just show what would happen
+
+    Returns:
+        Exit code
+    """
+    # Get group details
+    group = await manager.entra_groups.get_group_by_mail_nickname(mail_nickname)
+    if not group:
+        logger.error(f"M365 group not found: {email}")
+        return 1
+
+    logger.info(f"Found M365 group: {group.display_name} ({group.mail})")
+
+    # Get members for backup
+    member_ids = await manager.entra_groups.get_group_members(group.id)
+    logger.info(f"Group has {len(member_ids)} members")
+
+    if dry_run:
+        logger.info(f"Would delete M365 group: {email}")
+        return 0
+
+    # Create backup before deleting
+    logger.info("Creating backup before delete...")
+    memberships = {group.id: member_ids}
+    backup_path = backup_entra_groups([group], memberships)
+    logger.info(f"Backup saved: {backup_path}")
+
+    # Delete the group
+    if await manager.entra_groups.delete_group(group.id):
+        logger.info(f"Successfully deleted M365 group: {email}")
+        return 0
+    else:
+        logger.error(f"Failed to delete M365 group: {email}")
+        return 1
+
+
+async def _delete_exchange_group(
+    manager: UnifiedGroupSyncManager,
+    email: str,
+    dry_run: bool,
+) -> int:
+    """Delete an Exchange mail-enabled security group with backup.
+
+    Args:
+        manager: The sync manager with initialized clients
+        email: Email address of the group
+        dry_run: If True, just show what would happen
+
+    Returns:
+        Exit code
+    """
+    # Get group details and members
+    group, members = await manager.exchange_client.get_group_with_members(email)
+
+    if not group:
+        logger.error(f"Exchange group not found: {email}")
+        return 1
+
+    logger.info(f"Found Exchange group: {group.display_name} ({group.primary_smtp_address})")
+    logger.info(f"Group has {len(members)} members")
+
+    if dry_run:
+        logger.info(f"Would delete Exchange group: {email}")
+        return 0
+
+    # Backup the group before deleting
+    logger.info("Creating backup before delete...")
+    group_data = {
+        "identity": group.identity,
+        "display_name": group.display_name,
+        "email": group.primary_smtp_address,
+        "group_type": group.group_type,
+        "members": members,
+    }
+    backup_path = backup_mail_groups([group_data])
+    logger.info(f"Backup saved: {backup_path}")
+
+    # Delete the group
+    if await manager.exchange_client.delete_distribution_group(email):
+        logger.info(f"Successfully deleted Exchange group: {email}")
+        return 0
+    else:
+        logger.error(f"Failed to delete Exchange group: {email}")
+        return 1
 
 
 def main() -> None:
@@ -957,7 +1196,12 @@ def main() -> None:
     parser.add_argument(
         "--delete",
         metavar="EMAIL",
-        help="Delete an Exchange distribution group by email address",
+        help="Delete a group by email (auto-detects M365 vs Exchange, backs up first)",
+    )
+    parser.add_argument(
+        "--partial-sync",
+        action="store_true",
+        help="Preserve members not in Aladtec (for mixed manual/auto groups like All Personnel)",
     )
 
     args = parser.parse_args()
@@ -985,6 +1229,7 @@ def main() -> None:
             strategies=strategies,
             new_group_type=new_group_type,
             dry_run=args.dry_run,
+            partial_sync=args.partial_sync,
         )
     )
     sys.exit(exit_code)

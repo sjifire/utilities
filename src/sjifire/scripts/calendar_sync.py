@@ -98,8 +98,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--mailbox",
-        default="svc-automations@sjifire.org",
-        help="Shared mailbox email address (default: svc-automations@sjifire.org)",
+        required=True,
+        help="Target mailbox/group calendar (e.g., all-personnel@sjifire.org)",
     )
     parser.add_argument(
         "-v",

@@ -10,7 +10,7 @@ Supports both Aladtec Member and EntraUser objects via the GroupMember protocol.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import ClassVar, Protocol, runtime_checkable
 
 from sjifire.core.constants import MARINE_POSITIONS, OPERATIONAL_POSITIONS
 
@@ -407,6 +407,76 @@ class MobeScheduleStrategy(GroupStrategy):
         )
 
 
+class AllPersonnelStrategy(GroupStrategy):
+    """Strategy for All Personnel M365 group membership.
+
+    Provides shared calendar (On Duty events) and email distribution.
+    Auto-manages operational employees while preserving
+    manually-added members (those not in Aladtec).
+
+    This group should be created as M365 (not Exchange) to get
+    the shared calendar functionality.
+    """
+
+    # TEST MODE: Only include specific test users
+    # Set to None to enable full operational employee logic
+    TEST_USERS: ClassVar[set[str] | None] = {"agreene@sjifire.org"}
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "all-personnel"
+
+    @property
+    def membership_criteria(self) -> str:
+        """Return membership criteria description."""
+        if self.TEST_USERS is not None:
+            return f"Test mode: {', '.join(sorted(self.TEST_USERS))}"
+        return "Active employees with operational positions (synced from Aladtec)"
+
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
+        """Return members for the All Personnel group.
+
+        In test mode, only includes specific test users.
+        In full mode, includes all active employees with operational positions.
+        """
+        # TEST MODE: Only include specific test users
+        if self.TEST_USERS is not None:
+            eligible = [m for m in members if m.email and m.email.lower() in self.TEST_USERS]
+            return {"all-personnel": eligible}
+
+        # FULL MODE: All active employees with operational positions
+        eligible = [
+            m
+            for m in members
+            if self._is_active(m) and self._is_employee(m) and self._has_operational_position(m)
+        ]
+        return {"all-personnel": eligible}
+
+    def _is_active(self, member: GroupMember) -> bool:
+        """Check if member has an active account."""
+        # EntraUser has is_active property, others may not
+        return getattr(member, "is_active", True)
+
+    def _is_employee(self, member: GroupMember) -> bool:
+        """Check if member is an employee (has employee_id)."""
+        # EntraUser has is_employee property, others may not
+        return getattr(member, "is_employee", True)
+
+    def _has_operational_position(self, member: GroupMember) -> bool:
+        """Check if member has at least one operational position."""
+        positions = set(member.positions or [])
+        return bool(positions & OPERATIONAL_POSITIONS)
+
+    def get_config(self, group_key: str) -> GroupConfig:
+        """Return group configuration."""
+        return GroupConfig(
+            display_name="All Personnel",
+            mail_nickname="all-personnel",
+            description="All personnel - shared calendar and email distribution.",
+        )
+
+
 # Registry of all available strategies
 STRATEGY_CLASSES: dict[str, type[GroupStrategy]] = {
     "stations": StationStrategy,
@@ -418,6 +488,7 @@ STRATEGY_CLASSES: dict[str, type[GroupStrategy]] = {
     "volunteers": VolunteerStrategy,
     "staff": StaffStrategy,
     "mobe": MobeScheduleStrategy,
+    "all-personnel": AllPersonnelStrategy,
 }
 
 # List of strategy names for CLI

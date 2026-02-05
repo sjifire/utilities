@@ -5,8 +5,14 @@ import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import msal
+from azure.core.credentials import AccessToken, TokenCredential
 from azure.identity import ClientSecretCredential
 from msgraph import GraphServiceClient
+from msgraph.generated.groups.groups_request_builder import GroupsRequestBuilder
+from msgraph.generated.groups.item.calendar_view.calendar_view_request_builder import (
+    CalendarViewRequestBuilder as GroupCalendarViewRequestBuilder,
+)
 from msgraph.generated.models.body_type import BodyType
 from msgraph.generated.models.date_time_time_zone import DateTimeTimeZone
 from msgraph.generated.models.event import Event
@@ -18,9 +24,81 @@ from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
 from sjifire.aladtec.schedule import DaySchedule, ScheduleEntry
 from sjifire.calendar.models import AllDayDutyEvent, CrewMember, SyncResult
-from sjifire.core.config import get_graph_credentials
+from sjifire.core.config import get_graph_credentials, get_svc_automations_credentials
 
 logger = logging.getLogger(__name__)
+
+
+class ROPCCredential(TokenCredential):
+    """ROPC credential for confidential clients using msal.
+
+    Supports username/password authentication with client_secret,
+    which azure-identity's UsernamePasswordCredential doesn't support.
+    """
+
+    def __init__(
+        self,
+        tenant_id: str,
+        client_id: str,
+        client_secret: str,
+        username: str,
+        password: str,
+    ) -> None:
+        """Initialize ROPC credential.
+
+        Args:
+            tenant_id: Azure AD tenant ID
+            client_id: Application (client) ID
+            client_secret: Application client secret
+            username: User's email/UPN
+            password: User's password
+        """
+        self._authority = f"https://login.microsoftonline.com/{tenant_id}"
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._username = username
+        self._password = password
+        self._app = msal.ConfidentialClientApplication(
+            client_id=client_id,
+            client_credential=client_secret,
+            authority=self._authority,
+        )
+
+    def get_token(
+        self,
+        *scopes: str,
+        **kwargs,  # Required by TokenCredential interface, unused
+    ) -> AccessToken:
+        """Acquire token using ROPC flow.
+
+        Args:
+            *scopes: OAuth scopes to request
+            **kwargs: Additional keyword arguments (unused, required by interface)
+
+        Returns:
+            AccessToken with token and expiration
+
+        Raises:
+            Exception: If authentication fails
+        """
+        _ = kwargs  # Explicitly mark as unused
+        result = self._app.acquire_token_by_username_password(
+            username=self._username,
+            password=self._password,
+            scopes=list(scopes),
+        )
+
+        if "access_token" in result:
+            return AccessToken(
+                token=result["access_token"],
+                expires_on=result.get("expires_in", 3600) + int(datetime.now().timestamp()),
+            )
+
+        # Authentication failed
+        error = result.get("error", "unknown_error")
+        error_desc = result.get("error_description", "No description")
+        raise Exception(f"ROPC authentication failed: {error} - {error_desc}")
+
 
 # Standard shift times
 SHIFT_START_HOUR = 18  # 6 PM
@@ -67,24 +145,112 @@ def is_filled_entry(entry: ScheduleEntry) -> bool:
 
 
 class CalendarSync:
-    """Sync on-duty schedule to M365 shared calendar."""
+    """Sync on-duty schedule to M365 shared calendar or group calendar."""
 
     def __init__(self, mailbox: str = "svc-automations@sjifire.org") -> None:
         """Initialize with Graph API credentials.
 
         Args:
-            mailbox: Email address of the shared mailbox calendar
+            mailbox: Email address of the shared mailbox or M365 group calendar
+
+        Note:
+            For M365 group calendars, delegated auth (username/password) is required
+            because application permissions don't support group calendar writes.
+            The svc-automations account is used for delegated auth.
         """
         self.mailbox = mailbox
-        tenant_id, client_id, client_secret = get_graph_credentials()
+        self._tenant_id, self._client_id, self._client_secret = get_graph_credentials()
 
-        self.credential = ClientSecretCredential(
-            tenant_id=tenant_id,
-            client_id=client_id,
-            client_secret=client_secret,
+        # Start with app-only credential for initial detection
+        self._app_credential = ClientSecretCredential(
+            tenant_id=self._tenant_id,
+            client_id=self._client_id,
+            client_secret=self._client_secret,
         )
-        self.client = GraphServiceClient(credentials=self.credential)
+        self.client = GraphServiceClient(credentials=self._app_credential)
         self._user_cache: dict[str, dict] | None = None
+        self._group_id: str | None = None
+        self._is_group: bool | None = None  # None = not yet determined
+        self._delegated_client: GraphServiceClient | None = None
+
+    async def _detect_if_group(self) -> bool:
+        """Detect if the mailbox is an M365 group and cache the group ID.
+
+        If it's a group, switches to delegated auth using svc-automations credentials
+        because application permissions don't support group calendar writes.
+
+        Returns:
+            True if it's an M365 group, False otherwise
+        """
+        if self._is_group is not None:
+            return self._is_group
+
+        # Extract mail nickname from email
+        mail_nickname = self.mailbox.split("@")[0]
+
+        # Query for M365 groups with matching mailNickname
+        query_params = GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters(
+            filter=f"mailNickname eq '{mail_nickname}'",
+            select=["id", "displayName", "mailNickname", "groupTypes"],
+        )
+        config = GroupsRequestBuilder.GroupsRequestBuilderGetRequestConfiguration(
+            query_parameters=query_params,
+        )
+
+        try:
+            result = await self.client.groups.get(request_configuration=config)
+            if result and result.value:
+                for group in result.value:
+                    # Check if it's a Unified (M365) group
+                    if group.group_types and "Unified" in group.group_types:
+                        self._group_id = group.id
+                        self._is_group = True
+                        logger.info(f"Detected M365 group: {group.display_name} ({group.id})")
+                        logger.info("Switching to delegated auth for group calendar access")
+                        self._setup_delegated_client()
+                        return True
+        except Exception as e:
+            logger.debug(f"Error checking for group: {e}")
+
+        self._is_group = False
+        return False
+
+    def _setup_delegated_client(self) -> None:
+        """Set up delegated auth client using svc-automations credentials.
+
+        Required for M365 group calendar operations because application
+        permissions don't support group calendar writes. Uses ROPC flow
+        with a confidential client (includes client_secret).
+        """
+        if self._delegated_client is not None:
+            return
+
+        try:
+            username, password = get_svc_automations_credentials()
+            delegated_credential = ROPCCredential(
+                tenant_id=self._tenant_id,
+                client_id=self._client_id,
+                client_secret=self._client_secret,
+                username=username,
+                password=password,
+            )
+            self._delegated_client = GraphServiceClient(credentials=delegated_credential)
+            logger.debug("Delegated auth client initialized with ROPC")
+        except Exception as e:
+            logger.error(f"Failed to set up delegated auth: {e}")
+            raise RuntimeError(
+                "Delegated auth required for M365 group calendars. "
+                "Ensure SVC_AUTOMATIONS_USERNAME and SVC_AUTOMATIONS_PASSWORD are set."
+            ) from e
+
+    def _get_client_for_calendar(self) -> GraphServiceClient:
+        """Get the appropriate client for calendar operations.
+
+        Returns delegated client for group calendars, app client for user mailboxes.
+        """
+        if self._is_group and self._delegated_client:
+            return self._delegated_client
+        return self.client
 
     async def _load_user_contacts(self) -> dict[str, dict]:
         """Load all user contact info from Entra ID.
@@ -313,21 +479,50 @@ class CalendarSync:
             end_date + timedelta(days=1), datetime.min.time(), tzinfo=TIMEZONE
         )
 
-        query_params = CalendarViewRequestBuilder.CalendarViewRequestBuilderGetQueryParameters(
-            start_date_time=start_dt.isoformat(),
-            end_date_time=end_dt.isoformat(),
-            filter="startswith(subject, 'On Duty')",
-            top=500,
-            select=["id", "subject", "start", "end", "isAllDay"],
-        )
-        config = CalendarViewRequestBuilder.CalendarViewRequestBuilderGetRequestConfiguration(
-            query_parameters=query_params,
-        )
+        # Check if this is a group calendar
+        is_group = await self._detect_if_group()
 
         try:
-            result = await self.client.users.by_user_id(self.mailbox).calendar_view.get(
-                request_configuration=config
-            )
+            client = self._get_client_for_calendar()
+            if is_group and self._group_id:
+                # Use group calendar endpoint
+                query_params = (
+                    GroupCalendarViewRequestBuilder.CalendarViewRequestBuilderGetQueryParameters(
+                        start_date_time=start_dt.isoformat(),
+                        end_date_time=end_dt.isoformat(),
+                        filter="startswith(subject, 'On Duty')",
+                        top=500,
+                        select=["id", "subject", "start", "end", "isAllDay"],
+                    )
+                )
+                # fmt: off
+                request_config_class = (
+                    GroupCalendarViewRequestBuilder.CalendarViewRequestBuilderGetRequestConfiguration
+                )
+                # fmt: on
+                config = request_config_class(query_parameters=query_params)
+                result = await client.groups.by_group_id(self._group_id).calendar_view.get(
+                    request_configuration=config
+                )
+            else:
+                # Use user calendar endpoint
+                query_params = (
+                    CalendarViewRequestBuilder.CalendarViewRequestBuilderGetQueryParameters(
+                        start_date_time=start_dt.isoformat(),
+                        end_date_time=end_dt.isoformat(),
+                        filter="startswith(subject, 'On Duty')",
+                        top=500,
+                        select=["id", "subject", "start", "end", "isAllDay"],
+                    )
+                )
+                config = (
+                    CalendarViewRequestBuilder.CalendarViewRequestBuilderGetRequestConfiguration(
+                        query_parameters=query_params,
+                    )
+                )
+                result = await client.users.by_user_id(self.mailbox).calendar_view.get(
+                    request_configuration=config
+                )
         except Exception as e:
             logger.error(f"Failed to fetch existing events: {e}")
             return {}
@@ -381,7 +576,14 @@ class CalendarSync:
         )
 
         try:
-            result = await self.client.users.by_user_id(self.mailbox).events.post(graph_event)
+            # Use group or user endpoint based on detection
+            client = self._get_client_for_calendar()
+            if self._is_group and self._group_id:
+                result = await client.groups.by_group_id(self._group_id).calendar.events.post(
+                    graph_event
+                )
+            else:
+                result = await client.users.by_user_id(self.mailbox).events.post(graph_event)
             return result.id if result else None
         except Exception as e:
             logger.error(f"Failed to create event: {e}")
@@ -415,11 +617,20 @@ class CalendarSync:
         )
 
         try:
-            await (
-                self.client.users.by_user_id(self.mailbox)
-                .events.by_event_id(event.event_id)
-                .patch(graph_event)
-            )
+            # Use group or user endpoint based on detection
+            client = self._get_client_for_calendar()
+            if self._is_group and self._group_id:
+                await (
+                    client.groups.by_group_id(self._group_id)
+                    .calendar.events.by_event_id(event.event_id)
+                    .patch(graph_event)
+                )
+            else:
+                await (
+                    client.users.by_user_id(self.mailbox)
+                    .events.by_event_id(event.event_id)
+                    .patch(graph_event)
+                )
             return True
         except Exception as e:
             logger.error(f"Failed to update event {event.event_id}: {e}")
@@ -428,7 +639,16 @@ class CalendarSync:
     async def delete_event(self, event_id: str) -> bool:
         """Delete a calendar event."""
         try:
-            await self.client.users.by_user_id(self.mailbox).events.by_event_id(event_id).delete()
+            # Use group or user endpoint based on detection
+            client = self._get_client_for_calendar()
+            if self._is_group and self._group_id:
+                await (
+                    client.groups.by_group_id(self._group_id)
+                    .calendar.events.by_event_id(event_id)
+                    .delete()
+                )
+            else:
+                await client.users.by_user_id(self.mailbox).events.by_event_id(event_id).delete()
             return True
         except Exception as e:
             logger.error(f"Failed to delete event {event_id}: {e}")

@@ -189,7 +189,9 @@ class TestMainCLI:
         """Delete mode calls delete_date_range."""
         mock_calendar_sync.delete_date_range.return_value = SyncResult(events_deleted=5)
 
-        with patch.object(sys, "argv", ["calendar-sync", "--delete", "Jan 2026"]):
+        with patch.object(
+            sys, "argv", ["calendar-sync", "--delete", "Jan 2026", "--mailbox", "test@sjifire.org"]
+        ):
             result = main()
 
         assert result == 0
@@ -203,7 +205,11 @@ class TestMainCLI:
         """Delete mode respects --dry-run flag."""
         mock_calendar_sync.delete_date_range.return_value = SyncResult(events_deleted=5)
 
-        with patch.object(sys, "argv", ["calendar-sync", "--delete", "Jan 2026", "--dry-run"]):
+        with patch.object(
+            sys,
+            "argv",
+            ["calendar-sync", "--delete", "Jan 2026", "--dry-run", "--mailbox", "test@sjifire.org"],
+        ):
             result = main()
 
         assert result == 0
@@ -216,14 +222,18 @@ class TestMainCLI:
             events_deleted=3, errors=["Failed to delete event"]
         )
 
-        with patch.object(sys, "argv", ["calendar-sync", "--delete", "Jan 2026"]):
+        with patch.object(
+            sys, "argv", ["calendar-sync", "--delete", "Jan 2026", "--mailbox", "test@sjifire.org"]
+        ):
             result = main()
 
         assert result == 1
 
     def test_delete_mode_invalid_month_returns_error(self, mock_calendar_sync, mock_env_vars):
         """Delete mode returns error for invalid month."""
-        with patch.object(sys, "argv", ["calendar-sync", "--delete", "invalid"]):
+        with patch.object(
+            sys, "argv", ["calendar-sync", "--delete", "invalid", "--mailbox", "test@sjifire.org"]
+        ):
             result = main()
 
         assert result == 1
@@ -233,7 +243,9 @@ class TestMainCLI:
         """Month mode fetches from Aladtec and syncs."""
         mock_calendar_sync.sync.return_value = SyncResult(events_created=10)
 
-        with patch.object(sys, "argv", ["calendar-sync", "--month", "Jan 2026"]):
+        with patch.object(
+            sys, "argv", ["calendar-sync", "--month", "Jan 2026", "--mailbox", "test@sjifire.org"]
+        ):
             result = main()
 
         assert result == 0
@@ -247,7 +259,9 @@ class TestMainCLI:
         """Month mode returns error if Aladtec login fails."""
         mock_aladtec_scraper.login.return_value = False
 
-        with patch.object(sys, "argv", ["calendar-sync", "--month", "Jan 2026"]):
+        with patch.object(
+            sys, "argv", ["calendar-sync", "--month", "Jan 2026", "--mailbox", "test@sjifire.org"]
+        ):
             result = main()
 
         assert result == 1
@@ -260,7 +274,9 @@ class TestMainCLI:
         mock_calendar_sync.sync.return_value = SyncResult(events_created=30)
 
         with (
-            patch.object(sys, "argv", ["calendar-sync", "--months", "2"]),
+            patch.object(
+                sys, "argv", ["calendar-sync", "--months", "2", "--mailbox", "test@sjifire.org"]
+            ),
             patch("sjifire.scripts.calendar_sync.date") as mock_date,
         ):
             mock_date.today.return_value = date(2026, 2, 15)

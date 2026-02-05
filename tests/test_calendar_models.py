@@ -15,29 +15,123 @@ from sjifire.calendar.models import (
 
 
 class TestSectionSortKey:
-    """Tests for section_sort_key function."""
+    """Tests for section_sort_key function.
 
-    def test_stations_sorted_numerically(self):
-        """Stations should sort numerically by number."""
+    Sort order priority (soft matching, case-insensitive):
+    1. Chief (matches "chief", "chief officer", etc.)
+    2. S31 (the primary station)
+    3. Backup (matches "backup", "backup duty officer", etc.)
+    4. Support (matches "support")
+    5. Other stations (S32, S33, etc.) - sorted by number
+    6. Everything else - sorted alphabetically
+    """
+
+    def test_chief_first(self):
+        """Chief sections should sort first (soft match)."""
+        assert section_sort_key("Chief") < section_sort_key("S31")
+        assert section_sort_key("Chief Officer") < section_sort_key("S31")
+        assert section_sort_key("chief on call") < section_sort_key("S31")
+
+    def test_s31_second(self):
+        """S31 should sort after Chief but before Backup."""
+        assert section_sort_key("S31") < section_sort_key("Backup")
         assert section_sort_key("S31") < section_sort_key("S32")
+
+    def test_backup_third(self):
+        """Backup sections should sort after S31 (soft match)."""
+        assert section_sort_key("Backup") < section_sort_key("Support")
+        assert section_sort_key("Backup Duty Officer") < section_sort_key("Support")
+        assert section_sort_key("backup") < section_sort_key("Support")
+
+    def test_support_fourth(self):
+        """Support should sort after Backup but before other stations."""
+        assert section_sort_key("Support") < section_sort_key("S32")
+        assert section_sort_key("support") < section_sort_key("S33")
+
+    def test_other_stations_sorted_numerically(self):
+        """Other stations (not S31) should sort numerically after Support."""
         assert section_sort_key("S32") < section_sort_key("S33")
+        assert section_sort_key("S33") < section_sort_key("S34")
 
-    def test_stations_before_other_sections(self):
-        """Stations should sort before non-station sections."""
-        assert section_sort_key("S31") < section_sort_key("Chief Officer")
-        assert section_sort_key("S32") < section_sort_key("Backup Duty")
-        assert section_sort_key("S33") < section_sort_key("Support")
+    def test_other_sections_last(self):
+        """Unknown sections should sort last, alphabetically."""
+        assert section_sort_key("S36") < section_sort_key("Unknown Section")
+        assert section_sort_key("Alpha") < section_sort_key("Zebra")
 
-    def test_non_stations_sorted_alphabetically(self):
-        """Non-station sections should sort alphabetically."""
-        assert section_sort_key("Backup Duty") < section_sort_key("Chief Officer")
-        assert section_sort_key("Chief Officer") < section_sort_key("Support")
+    # Edge cases for soft matching
 
-    def test_station_variants_not_treated_as_stations(self):
-        """Station variants (like Standby) should sort with other sections."""
-        # "S31 Standby" is not a pure station, so it goes after stations
-        assert section_sort_key("S31 Standby") > section_sort_key("S32")
-        assert section_sort_key("S32 Standby") > section_sort_key("S33")
+    def test_chief_case_insensitive(self):
+        """Chief matching is case-insensitive."""
+        assert section_sort_key("CHIEF") < section_sort_key("S31")
+        assert section_sort_key("Chief") < section_sort_key("S31")
+        assert section_sort_key("chief") < section_sort_key("S31")
+        assert section_sort_key("ChIeF") < section_sort_key("S31")
+
+    def test_chief_partial_match(self):
+        """Chief matches partial strings containing 'chief'."""
+        assert section_sort_key("Chief Officer") < section_sort_key("S31")
+        assert section_sort_key("Chief on Call") < section_sort_key("S31")
+        assert section_sort_key("Acting Chief") < section_sort_key("S31")
+        assert section_sort_key("Battalion Chief") < section_sort_key("S31")
+
+    def test_backup_case_insensitive(self):
+        """Backup matching is case-insensitive."""
+        assert section_sort_key("BACKUP") < section_sort_key("Support")
+        assert section_sort_key("Backup") < section_sort_key("Support")
+        assert section_sort_key("backup") < section_sort_key("Support")
+
+    def test_backup_partial_match(self):
+        """Backup matches partial strings containing 'backup'."""
+        assert section_sort_key("Backup Duty") < section_sort_key("Support")
+        assert section_sort_key("Backup Duty Officer") < section_sort_key("Support")
+        assert section_sort_key("On-Call Backup") < section_sort_key("Support")
+
+    def test_support_case_insensitive(self):
+        """Support matching is case-insensitive."""
+        assert section_sort_key("SUPPORT") < section_sort_key("S32")
+        assert section_sort_key("Support") < section_sort_key("S32")
+        assert section_sort_key("support") < section_sort_key("S32")
+
+    def test_s31_case_insensitive(self):
+        """S31 matching is case-insensitive."""
+        assert section_sort_key("s31") < section_sort_key("Backup")
+        assert section_sort_key("S31") < section_sort_key("Backup")
+
+    def test_station_31_alternative_format(self):
+        """'Station 31' is treated same as S31."""
+        assert section_sort_key("Station 31") < section_sort_key("Backup")
+        assert section_sort_key("station 31") < section_sort_key("Backup")
+
+    def test_full_sort_order(self):
+        """Verify complete sort order with all priority levels."""
+        sections = [
+            "S35",
+            "Support",
+            "S31",
+            "Unknown",
+            "Backup Duty",
+            "Chief Officer",
+            "S32",
+        ]
+        sorted_sections = sorted(sections, key=section_sort_key)
+
+        # Expected order: Chief, S31, Backup, Support, S32, S35, Unknown
+        assert sorted_sections == [
+            "Chief Officer",
+            "S31",
+            "Backup Duty",
+            "Support",
+            "S32",
+            "S35",
+            "Unknown",
+        ]
+
+    def test_combined_keywords_chief_wins(self):
+        """When section contains multiple keywords, earliest priority wins."""
+        # 'Chief Backup' contains both 'chief' (priority 0) and 'backup' (priority 2)
+        # Chief should win since it has higher priority (lower number)
+        assert section_sort_key("Chief Backup") < section_sort_key("S31")
+        assert section_sort_key("Chief Backup") < section_sort_key("Backup")
 
 
 class TestPositionSortKey:

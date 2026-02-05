@@ -6,6 +6,7 @@ from sjifire.aladtec.models import Member
 from sjifire.core.group_strategies import (
     STRATEGY_CLASSES,
     STRATEGY_NAMES,
+    AllPersonnelStrategy,
     ApparatusOperatorStrategy,
     FirefighterStrategy,
     GroupConfig,
@@ -61,6 +62,8 @@ def make_entra_user(
     office_location: str | None = None,  # "Station XX" format
     employee_type: str | None = None,  # work_group
     evip: str | None = None,  # extension_attribute2
+    account_enabled: bool = True,
+    employee_id: str | None = "EMP001",
 ) -> EntraUser:
     """Helper to create test EntraUser objects with defaults."""
     return EntraUser(
@@ -70,8 +73,8 @@ def make_entra_user(
         last_name=display_name.split()[-1] if display_name else None,
         email=email,
         upn=email,
-        employee_id="EMP001",
-        account_enabled=True,
+        employee_id=employee_id,
+        account_enabled=account_enabled,
         office_location=office_location,
         employee_type=employee_type,
         extension_attribute2=evip,
@@ -100,6 +103,7 @@ class TestStrategyRegistry:
             "volunteers",
             "staff",
             "mobe",
+            "all-personnel",
         }
         assert set(STRATEGY_CLASSES.keys()) == expected
 
@@ -875,6 +879,201 @@ class TestMobeScheduleStrategy:
         assert config.display_name == "State Mobilization"
         assert config.mail_nickname == "statemobe"
         assert "mobilization" in config.description.lower()
+
+
+class TestAllPersonnelStrategy:
+    """Tests for AllPersonnelStrategy - all personnel with operational positions."""
+
+    def setup_method(self):
+        """Create strategy instance for each test."""
+        self.strategy = AllPersonnelStrategy()
+
+    def test_name(self):
+        """Strategy name should be 'all-personnel'."""
+        assert self.strategy.name == "all-personnel"
+
+    def test_membership_criteria_test_mode(self):
+        """In test mode, criteria should mention test users."""
+        criteria = self.strategy.membership_criteria
+        assert "Test mode" in criteria or "agreene@sjifire.org" in criteria
+
+    def test_get_members_test_mode_only_specific_emails(self):
+        """In test mode, only specific test emails should be included."""
+        members = [
+            make_member(member_id="1", email="agreene@sjifire.org", positions=["Firefighter"]),
+            make_member(member_id="2", email="other@sjifire.org", positions=["Firefighter"]),
+        ]
+        result = self.strategy.get_members(members)
+        assert "all-personnel" in result
+        assert len(result["all-personnel"]) == 1
+        assert result["all-personnel"][0].email == "agreene@sjifire.org"
+
+    def test_get_members_test_mode_case_insensitive(self):
+        """Test mode email matching should be case-insensitive."""
+        members = [
+            make_member(member_id="1", email="AGreene@sjifire.org", positions=["Firefighter"]),
+        ]
+        result = self.strategy.get_members(members)
+        assert len(result["all-personnel"]) == 1
+
+    def test_get_members_test_mode_no_match(self):
+        """In test mode, non-test users should not be included."""
+        members = [
+            make_member(member_id="1", email="other@sjifire.org", positions=["Firefighter"]),
+            make_member(member_id="2", email="another@sjifire.org", positions=["Support"]),
+        ]
+        result = self.strategy.get_members(members)
+        assert "all-personnel" in result
+        assert len(result["all-personnel"]) == 0
+
+    def test_get_config(self):
+        """get_config should return proper GroupConfig."""
+        config = self.strategy.get_config("all-personnel")
+        assert config.display_name == "All Personnel"
+        assert config.mail_nickname == "all-personnel"
+        assert "calendar" in config.description.lower() or "email" in config.description.lower()
+
+
+# =============================================================================
+# AllPersonnelStrategy Internal Methods Tests
+# =============================================================================
+
+
+class TestAllPersonnelStrategyInternalMethods:
+    """Tests for AllPersonnelStrategy internal helper methods."""
+
+    def setup_method(self):
+        """Create strategy instance for each test."""
+        self.strategy = AllPersonnelStrategy()
+
+    # _is_active tests
+
+    def test_is_active_returns_true_for_active_entra_user(self):
+        """_is_active returns True for active EntraUser."""
+        user = make_entra_user(account_enabled=True)
+        assert self.strategy._is_active(user) is True
+
+    def test_is_active_returns_false_for_disabled_entra_user(self):
+        """_is_active returns False for disabled EntraUser."""
+        user = make_entra_user(
+            display_name="Disabled User",
+            email="disabled@sjifire.org",
+            account_enabled=False,
+        )
+        assert self.strategy._is_active(user) is False
+
+    def test_is_active_returns_true_for_member_without_is_active(self):
+        """_is_active defaults to True for objects without is_active property."""
+        member = make_member()  # Aladtec Member doesn't have is_active
+        assert self.strategy._is_active(member) is True
+
+    def test_is_active_returns_true_when_attribute_missing(self):
+        """_is_active defaults to True when attribute is missing."""
+
+        class MockMember:
+            email = "test@sjifire.org"
+            display_name = "Test"
+            positions = ["Firefighter"]  # noqa: RUF012
+            schedules = []  # noqa: RUF012
+            evip = None
+            work_group = None
+            station_number = None
+
+        mock = MockMember()
+        assert self.strategy._is_active(mock) is True
+
+    # _is_employee tests
+
+    def test_is_employee_returns_true_for_employee_entra_user(self):
+        """_is_employee returns True for EntraUser with employee_id."""
+        user = make_entra_user(employee_id="EMP001")
+        assert self.strategy._is_employee(user) is True
+
+    def test_is_employee_returns_false_for_non_employee_entra_user(self):
+        """_is_employee returns False for EntraUser without employee_id."""
+        user = EntraUser(
+            id="user-1",
+            display_name="Guest User",
+            email="guest@sjifire.org",
+            upn="guest@sjifire.org",
+            first_name="Guest",
+            last_name="User",
+            employee_id=None,
+            account_enabled=True,
+        )
+        assert self.strategy._is_employee(user) is False
+
+    def test_is_employee_returns_true_for_member_without_is_employee(self):
+        """_is_employee defaults to True for objects without is_employee property."""
+        member = make_member()  # Aladtec Member doesn't have is_employee
+        assert self.strategy._is_employee(member) is True
+
+    # _has_operational_position tests
+
+    def test_has_operational_position_firefighter(self):
+        """_has_operational_position returns True for Firefighter."""
+        member = make_member(positions=["Firefighter"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_apparatus_operator(self):
+        """_has_operational_position returns True for Apparatus Operator."""
+        member = make_member(positions=["Apparatus Operator"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_support(self):
+        """_has_operational_position returns True for Support."""
+        member = make_member(positions=["Support"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_wildland_firefighter(self):
+        """_has_operational_position returns True for Wildland Firefighter."""
+        member = make_member(positions=["Wildland Firefighter"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_marine_pilot(self):
+        """_has_operational_position returns True for Marine: Pilot."""
+        member = make_member(positions=["Marine: Pilot"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_marine_mate(self):
+        """_has_operational_position returns True for Marine: Mate."""
+        member = make_member(positions=["Marine: Mate"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_deckhand(self):
+        """_has_operational_position returns True for Marine: Deckhand."""
+        member = make_member(positions=["Marine: Deckhand"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_returns_false_for_non_operational(self):
+        """_has_operational_position returns False for non-operational positions."""
+        member = make_member(positions=["Administrative"])
+        assert self.strategy._has_operational_position(member) is False
+
+    def test_has_operational_position_returns_false_for_empty_positions(self):
+        """_has_operational_position returns False for empty positions."""
+        member = make_member(positions=[])
+        assert self.strategy._has_operational_position(member) is False
+
+    def test_has_operational_position_returns_false_for_none_positions(self):
+        """_has_operational_position returns False for None positions."""
+        member = make_member(positions=None)
+        assert self.strategy._has_operational_position(member) is False
+
+    def test_has_operational_position_multiple_with_one_operational(self):
+        """_has_operational_position returns True if any position is operational."""
+        member = make_member(positions=["Administrative", "Firefighter"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_works_with_entra_user(self):
+        """_has_operational_position works with EntraUser objects."""
+        user = make_entra_user(positions="Firefighter,Support")
+        assert self.strategy._has_operational_position(user) is True
+
+    def test_has_operational_position_entra_user_non_operational(self):
+        """_has_operational_position returns False for EntraUser with non-operational."""
+        user = make_entra_user(positions="Administrative")
+        assert self.strategy._has_operational_position(user) is False
 
 
 # =============================================================================

@@ -28,21 +28,42 @@ def get_aladtec_url() -> str:
     return url
 
 
-def section_sort_key(section: str) -> tuple[int, str]:
-    """Sort key for sections - stations first (numerically), then others alphabetically.
+def section_sort_key(section: str) -> tuple[int, int, str]:
+    """Sort key for sections with custom priority order.
 
-    Sorting priority:
-    1. Station sections (S31, S32, S33, etc.) - sorted by number
-    2. All other sections - sorted alphabetically
+    Sorting priority (soft matching, case-insensitive):
+    1. Chief (matches "chief", "chief officer", "chief on call", etc.)
+    2. S31 (the primary station)
+    3. Backup (matches "backup", "backup duty officer", etc.)
+    4. Support (matches "support")
+    5. Other stations (S32, S33, etc.) - sorted by number
+    6. Everything else - sorted alphabetically
     """
-    # Check if it's a station section (S followed by numbers)
-    station_match = re.match(r"^S(\d+)$", section)
-    if station_match:
-        # Stations get priority 0, sorted by station number
-        return (0, int(station_match.group(1)), section)
+    section_lower = section.lower()
 
-    # Everything else gets priority 1, sorted alphabetically
-    return (1, 0, section)
+    # Priority 0: Chief (soft match)
+    if "chief" in section_lower:
+        return (0, 0, section)
+
+    # Priority 1: S31 specifically
+    if section_lower == "s31" or section_lower == "station 31":
+        return (1, 0, section)
+
+    # Priority 2: Backup (soft match)
+    if "backup" in section_lower:
+        return (2, 0, section)
+
+    # Priority 3: Support (soft match)
+    if "support" in section_lower:
+        return (3, 0, section)
+
+    # Priority 4: Other stations (sorted by number)
+    station_match = re.match(r"^S(\d+)$", section, re.IGNORECASE)
+    if station_match:
+        return (4, int(station_match.group(1)), section)
+
+    # Priority 5: Everything else alphabetically
+    return (5, 0, section)
 
 
 def position_sort_key(position: str) -> int:
