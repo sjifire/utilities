@@ -75,6 +75,14 @@ jobs:
             echo "::add-mask::$MS_GRAPH_CLIENT_SECRET"
             echo "MS_GRAPH_CLIENT_SECRET=$MS_GRAPH_CLIENT_SECRET" >> $GITHUB_ENV
 
+            SVC_AUTOMATIONS_USERNAME=$(az keyvault secret show --vault-name gh-website-utilities --name SVC-AUTOMATIONS-USERNAME --query value -o tsv)
+            echo "::add-mask::$SVC_AUTOMATIONS_USERNAME"
+            echo "SVC_AUTOMATIONS_USERNAME=$SVC_AUTOMATIONS_USERNAME" >> $GITHUB_ENV
+
+            SVC_AUTOMATIONS_PASSWORD=$(az keyvault secret show --vault-name gh-website-utilities --name SVC-AUTOMATIONS-PASSWORD --query value -o tsv)
+            echo "::add-mask::$SVC_AUTOMATIONS_PASSWORD"
+            echo "SVC_AUTOMATIONS_PASSWORD=$SVC_AUTOMATIONS_PASSWORD" >> $GITHUB_ENV
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -89,8 +97,9 @@ jobs:
       - name: Run calendar sync
         run: |
           MONTHS="${{ inputs.months || '4' }}"
+          MAILBOX="all-personnel@sjifire.org"
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run calendar-sync --months "$MONTHS" --dry-run
+            uv run calendar-sync --months "$MONTHS" --mailbox "$MAILBOX" --dry-run
           else
-            uv run calendar-sync --months "$MONTHS"
+            uv run calendar-sync --months "$MONTHS" --mailbox "$MAILBOX"
           fi
