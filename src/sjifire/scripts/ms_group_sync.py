@@ -711,11 +711,13 @@ class UnifiedGroupSyncManager:
             f"{', '.join(sorted(groups_to_sync.keys()))}"
         )
 
-        # For partial sync, collect all source member emails
-        # This is used to determine which current members to preserve
+        # For partial sync, collect Aladtec-synced member emails only
+        # This preserves non-Aladtec members (svc-automations, board members, etc.)
         source_emails: set[str] | None = None
         if partial_sync:
-            source_emails = {m.email.lower() for m in members if m.email}
+            source_emails = {
+                m.email.lower() for m in members if m.email and getattr(m, "is_employee", True)
+            }
 
         results: list[GroupSyncResult] = []
 
