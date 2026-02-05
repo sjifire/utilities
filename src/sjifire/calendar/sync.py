@@ -654,6 +654,7 @@ class CalendarSync:
                 time_zone=TIMEZONE_NAME,
             ),
             is_all_day=True,
+            is_reminder_on=False,
         )
 
         try:
@@ -695,6 +696,7 @@ class CalendarSync:
                 time_zone=TIMEZONE_NAME,
             ),
             is_all_day=True,
+            is_reminder_on=False,
         )
 
         try:
