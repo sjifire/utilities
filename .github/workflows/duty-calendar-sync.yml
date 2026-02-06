@@ -2,10 +2,12 @@ name: Duty Calendar Sync
 
 on:
   schedule:
-    # Run 3x daily at 9am, 4pm, 7pm Pacific
+    # Current month: 3x daily at 9am, 4pm, 7pm Pacific
     - cron: '0 17 * * *'  # 9am PST / 10am PDT
     - cron: '0 0 * * *'   # 4pm PST / 5pm PDT
     - cron: '0 3 * * *'   # 7pm PST / 8pm PDT
+    # Future months: 1x daily at noon Pacific
+    - cron: '0 20 * * *'  # 12pm PST / 1pm PDT
   workflow_dispatch:
     inputs:
       dry_run:
@@ -98,8 +100,14 @@ jobs:
 
       - name: Run duty calendar sync
         run: |
-          MONTHS="${{ inputs.months || '4' }}"
           MAILBOX="all-personnel@sjifire.org"
+          # Noon schedule (0 20 * * *) syncs 4 months; others sync current month only
+          if [ "${{ github.event.schedule }}" = "0 20 * * *" ]; then
+            MONTHS="4"
+          else
+            MONTHS="${{ inputs.months || '1' }}"
+          fi
+          echo "Syncing $MONTHS month(s) to $MAILBOX"
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             uv run duty-calendar-sync --months "$MONTHS" --mailbox "$MAILBOX" --dry-run
           else
