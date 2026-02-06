@@ -213,9 +213,18 @@ class PersonalCalendarSync:
                 for cal in result.value:
                     if cal.name == CALENDAR_NAME and cal.id:
                         self._calendar_cache[user_email] = cal.id
-                        # Store ID for future lookups
-                        await self._store_calendar_id(user_email, cal.id)
-                        logger.debug(f"Found calendar by name for {user_email}")
+                        # Store ID for future lookups (if not already stored)
+                        if not stored_id:
+                            logger.info(
+                                f"Found existing '{CALENDAR_NAME}' calendar for {user_email}, "
+                                "storing ID in extensionAttribute5"
+                            )
+                            success = await self._store_calendar_id(user_email, cal.id)
+                            if not success:
+                                logger.warning(
+                                    f"Could not store calendar ID for {user_email} - "
+                                    "calendar will be looked up by name on each sync"
+                                )
                         return cal.id
 
             # Create new calendar
@@ -224,9 +233,14 @@ class PersonalCalendarSync:
 
             if created and created.id:
                 self._calendar_cache[user_email] = created.id
+                logger.info(f"Created '{CALENDAR_NAME}' calendar for {user_email}")
                 # Store ID for future lookups
-                await self._store_calendar_id(user_email, created.id)
-                logger.info(f"Created Aladtec Schedule calendar for {user_email}")
+                success = await self._store_calendar_id(user_email, created.id)
+                if not success:
+                    logger.warning(
+                        f"Could not store calendar ID for {user_email} - "
+                        "calendar will be looked up by name on each sync"
+                    )
                 return created.id
 
         except Exception as e:
