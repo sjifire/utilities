@@ -128,10 +128,10 @@ uv run ispyfire-admin deactivate user@sjifire.org # Logout devices and deactivat
 
 ### Calendar Sync
 
-**Shared calendar sync (On Duty events to shared mailbox):**
+**Duty calendar sync (On Duty events to shared group calendar):**
 ```bash
-uv run calendar-sync --mailbox on-duty@sjifire.org --month "Feb 2026" --dry-run
-uv run calendar-sync --mailbox on-duty@sjifire.org --month "Feb 2026"
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026" --dry-run
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026"
 ```
 
 The sync:
@@ -347,7 +347,7 @@ src/sjifire/
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
-    ├── calendar_sync.py             # Shared calendar sync CLI
+    ├── duty_calendar_sync.py        # Duty calendar sync CLI
     ├── compare_group_memberships.py # Compare group memberships
     ├── entra_audit.py
     ├── entra_user_sync.py           # User sync CLI

@@ -49,7 +49,7 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 ### Calendar Sync
 Two types of calendar sync from Aladtec schedules to Outlook:
 
-**Shared Calendar Sync** (`calendar-sync`):
+**Duty Calendar Sync** (`duty-calendar-sync`):
 - Syncs "On Duty" events to a shared mailbox/group calendar
 - Creates all-day events for each filled position per day
 - Overwrites all events in the target date range
@@ -195,10 +195,10 @@ uv run ispyfire-admin activate user@sjifire.org
 uv run ispyfire-admin deactivate user@sjifire.org
 ```
 
-### Shared calendar sync (On Duty events)
+### Duty calendar sync (On Duty events)
 ```bash
-uv run calendar-sync --mailbox on-duty@sjifire.org --month "Feb 2026" --dry-run
-uv run calendar-sync --mailbox on-duty@sjifire.org --month "Feb 2026"
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026" --dry-run
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026"
 ```
 
 ### Personal calendar sync (individual schedules)
@@ -254,5 +254,6 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ci.yml`: Lint + test on PR/push
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Sync every 30 minutes (Entra to iSpyFire), uploads backup artifacts
+- `duty-calendar-sync.yml`: Daily at 5 PM Pacific (On Duty events to shared calendar)
 
 All workflows authenticate via OIDC and fetch secrets from Key Vault (no GitHub secrets required).

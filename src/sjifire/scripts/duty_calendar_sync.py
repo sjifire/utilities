@@ -2,10 +2,10 @@
 """Sync Aladtec on-duty schedule to M365 shared calendar.
 
 Usage:
-    uv run calendar-sync --month "Jan 2026"   # Sync specific month
-    uv run calendar-sync --months 4           # Sync next 4 months
-    uv run calendar-sync --delete "Jan 2026"  # Delete all events for a month
-    uv run calendar-sync --inspect "Feb 2026" # View existing events
+    uv run duty-calendar-sync --month "Jan 2026"   # Sync specific month
+    uv run duty-calendar-sync --months 4           # Sync next 4 months
+    uv run duty-calendar-sync --delete "Jan 2026"  # Delete all events for a month
+    uv run duty-calendar-sync --inspect "Feb 2026" # View existing events
 """
 
 import argparse

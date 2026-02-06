@@ -1,4 +1,4 @@
-"""Tests for sjifire.scripts.calendar_sync module."""
+"""Tests for sjifire.scripts.duty_calendar_sync module."""
 
 import sys
 from datetime import date
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from sjifire.calendar.models import SyncResult
-from sjifire.scripts.calendar_sync import get_month_date_range, main, parse_month
+from sjifire.scripts.duty_calendar_sync import get_month_date_range, main, parse_month
 
 
 class TestParseMonth:
@@ -136,7 +136,7 @@ class TestMainCLI:
     @pytest.fixture
     def mock_calendar_sync(self):
         """Mock CalendarSync class."""
-        with patch("sjifire.scripts.calendar_sync.CalendarSync") as mock:
+        with patch("sjifire.scripts.duty_calendar_sync.CalendarSync") as mock:
             instance = MagicMock()
             mock.return_value = instance
             yield instance
@@ -144,7 +144,7 @@ class TestMainCLI:
     @pytest.fixture
     def mock_aladtec_scraper(self):
         """Mock AladtecScheduleScraper."""
-        with patch("sjifire.scripts.calendar_sync.AladtecScheduleScraper") as mock:
+        with patch("sjifire.scripts.duty_calendar_sync.AladtecScheduleScraper") as mock:
             instance = MagicMock()
             instance.__enter__ = MagicMock(return_value=instance)
             instance.__exit__ = MagicMock(return_value=False)
@@ -277,7 +277,7 @@ class TestMainCLI:
             patch.object(
                 sys, "argv", ["calendar-sync", "--months", "2", "--mailbox", "test@sjifire.org"]
             ),
-            patch("sjifire.scripts.calendar_sync.date") as mock_date,
+            patch("sjifire.scripts.duty_calendar_sync.date") as mock_date,
         ):
             mock_date.today.return_value = date(2026, 2, 15)
             mock_date.side_effect = date
@@ -298,7 +298,7 @@ class TestMainCLI:
             main()
 
         # Check CalendarSync was constructed with custom mailbox
-        with patch("sjifire.scripts.calendar_sync.CalendarSync") as mock_class:
+        with patch("sjifire.scripts.duty_calendar_sync.CalendarSync") as mock_class:
             mock_class.return_value = mock_calendar_sync
             mock_calendar_sync.delete_date_range.return_value = SyncResult()
 

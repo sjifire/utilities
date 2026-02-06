@@ -1,4 +1,4 @@
-name: Calendar Sync
+name: Duty Calendar Sync
 
 on:
   schedule:
@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   sync:
-    name: Sync Aladtec to M365 Calendar
+    name: Sync On Duty Schedule to M365 Calendar
     runs-on: ubuntu-latest
     environment: production
 
@@ -94,12 +94,12 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run calendar sync
+      - name: Run duty calendar sync
         run: |
           MONTHS="${{ inputs.months || '4' }}"
           MAILBOX="all-personnel@sjifire.org"
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run calendar-sync --months "$MONTHS" --mailbox "$MAILBOX" --dry-run
+            uv run duty-calendar-sync --months "$MONTHS" --mailbox "$MAILBOX" --dry-run
           else
-            uv run calendar-sync --months "$MONTHS" --mailbox "$MAILBOX"
+            uv run duty-calendar-sync --months "$MONTHS" --mailbox "$MAILBOX"
           fi
