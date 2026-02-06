@@ -1,4 +1,4 @@
-name: Duty Calendar Sync
+name: Calendar Sync
 
 on:
   schedule:
@@ -36,7 +36,7 @@ permissions:
 
 jobs:
   sync:
-    name: Sync On Duty Schedule to M365 Calendar
+    name: Sync Aladtec Schedules to M365 Calendars
     runs-on: ubuntu-latest
     environment: production
 
