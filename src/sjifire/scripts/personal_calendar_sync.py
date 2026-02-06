@@ -166,7 +166,7 @@ def main() -> int:
             logger.error("Failed to login to Aladtec")
             return 1
 
-        member_list = scraper.get_members()
+        member_list = scraper.get_members(enrich=False)  # Only need name/email mapping
         for member in member_list:
             if member.email:
                 # Map both "First Last" and other variations

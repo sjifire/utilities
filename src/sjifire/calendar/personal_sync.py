@@ -13,20 +13,21 @@ from msgraph.generated.models.calendar import Calendar
 from msgraph.generated.models.date_time_time_zone import DateTimeTimeZone
 from msgraph.generated.models.event import Event
 from msgraph.generated.models.item_body import ItemBody
-from msgraph.generated.users.item.calendars.calendars_request_builder import (
-    CalendarsRequestBuilder,
-)
 from msgraph.generated.users.item.calendars.item.events.events_request_builder import (
     EventsRequestBuilder,
 )
 
 from sjifire.aladtec.schedule_scraper import ScheduleEntry
+from sjifire.calendar.models import get_aladtec_url
 from sjifire.core.config import get_graph_credentials
 
 logger = logging.getLogger(__name__)
 
 # Calendar name in each user's mailbox
 CALENDAR_NAME = "Aladtec Schedule"
+
+# Entra extension attribute to store calendar ID (survives renames)
+CALENDAR_ID_ATTRIBUTE = "extension_attribute5"
 
 # Timezone for all operations
 TIMEZONE_NAME = "America/Los_Angeles"
@@ -61,22 +62,18 @@ class PersonalSyncResult:
 
 def make_event_subject(entry: ScheduleEntry) -> str:
     """Create event subject from schedule entry."""
-    return f"{entry.position} - {entry.section}"
+    return f"{entry.section} - {entry.position}"
 
 
 def make_event_body(entry: ScheduleEntry) -> str:
     """Create event body from schedule entry."""
+    aladtec_url = get_aladtec_url()
     return f"""Position: {entry.position}
 Section: {entry.section}
-Platoon: {entry.platoon}
 
-This event is managed by automated sync from Aladtec.
-Changes made here will be overwritten."""
+This event is imported automatically from Aladtec. Any changes will be overwritten.
 
-
-def make_event_key(entry: ScheduleEntry) -> str:
-    """Create unique key for an entry (for matching existing events)."""
-    return f"{entry.date}|{entry.section}|{entry.position}|{entry.start_time}|{entry.end_time}"
+Modify your schedule: {aladtec_url}"""
 
 
 class PersonalCalendarSync:
@@ -93,8 +90,83 @@ class PersonalCalendarSync:
         self.client = GraphServiceClient(credentials=credential)
         self._calendar_cache: dict[str, str] = {}  # user_email -> calendar_id
 
+    async def _get_stored_calendar_id(self, user_email: str) -> str | None:
+        """Get stored calendar ID from user's Entra extension attribute.
+
+        Returns:
+            Calendar ID or None if not stored
+        """
+        try:
+            from msgraph.generated.users.item.user_item_request_builder import (
+                UserItemRequestBuilder,
+            )
+
+            query_params = UserItemRequestBuilder.UserItemRequestBuilderGetQueryParameters(
+                select=["id", "onPremisesExtensionAttributes"],
+            )
+            config = UserItemRequestBuilder.UserItemRequestBuilderGetRequestConfiguration(
+                query_parameters=query_params,
+            )
+            user = await self.client.users.by_user_id(user_email).get(request_configuration=config)
+            if user and user.on_premises_extension_attributes:
+                cal_id = getattr(
+                    user.on_premises_extension_attributes,
+                    CALENDAR_ID_ATTRIBUTE,
+                    None,
+                )
+                if cal_id and str(cal_id).strip():
+                    return str(cal_id).strip()
+        except Exception as e:
+            logger.debug(f"Could not get stored calendar ID for {user_email}: {e}")
+        return None
+
+    async def _store_calendar_id(self, user_email: str, calendar_id: str) -> bool:
+        """Store calendar ID in user's Entra extension attribute.
+
+        Returns:
+            True if successful
+        """
+        if not calendar_id or not calendar_id.strip():
+            return False
+        try:
+            from msgraph.generated.models.on_premises_extension_attributes import (
+                OnPremisesExtensionAttributes,
+            )
+            from msgraph.generated.models.user import User
+
+            ext_attrs = OnPremisesExtensionAttributes()
+            setattr(ext_attrs, CALENDAR_ID_ATTRIBUTE, calendar_id)
+
+            update = User(on_premises_extension_attributes=ext_attrs)
+            await self.client.users.by_user_id(user_email).patch(update)
+            logger.debug(f"Stored calendar ID for {user_email}")
+            return True
+        except Exception as e:
+            # Log at debug level - this is expected to fail for some users
+            logger.debug(f"Could not store calendar ID for {user_email}: {e}")
+            return False
+
+    async def _calendar_exists(self, user_email: str, calendar_id: str) -> bool:
+        """Check if a calendar exists.
+
+        Returns:
+            True if calendar exists
+        """
+        if not calendar_id or not calendar_id.strip():
+            return False
+        try:
+            cal = await (
+                self.client.users.by_user_id(user_email).calendars.by_calendar_id(calendar_id).get()
+            )
+            return cal is not None and cal.id is not None
+        except Exception:
+            return False
+
     async def get_or_create_calendar(self, user_email: str) -> str | None:
         """Get or create the Aladtec Schedule calendar for a user.
+
+        Uses Entra extension attribute to store calendar ID, which survives
+        renames. Falls back to name matching for backwards compatibility.
 
         Returns:
             Calendar ID or None if failed
@@ -104,23 +176,23 @@ class PersonalCalendarSync:
             return self._calendar_cache[user_email]
 
         try:
-            # Search for existing calendar
-            query_params = CalendarsRequestBuilder.CalendarsRequestBuilderGetQueryParameters(
-                filter=f"name eq '{CALENDAR_NAME}'",
-            )
-            config = CalendarsRequestBuilder.CalendarsRequestBuilderGetRequestConfiguration(
-                query_parameters=query_params,
-            )
+            # First, check for stored calendar ID in Entra
+            stored_id = await self._get_stored_calendar_id(user_email)
+            if stored_id and await self._calendar_exists(user_email, stored_id):
+                self._calendar_cache[user_email] = stored_id
+                logger.debug(f"Found calendar by stored ID for {user_email}")
+                return stored_id
 
-            result = await self.client.users.by_user_id(user_email).calendars.get(
-                request_configuration=config
-            )
+            # Fall back to name-based lookup
+            result = await self.client.users.by_user_id(user_email).calendars.get()
 
             if result and result.value:
                 for cal in result.value:
                     if cal.name == CALENDAR_NAME and cal.id:
                         self._calendar_cache[user_email] = cal.id
-                        logger.debug(f"Found existing calendar for {user_email}")
+                        # Store ID for future lookups
+                        await self._store_calendar_id(user_email, cal.id)
+                        logger.debug(f"Found calendar by name for {user_email}")
                         return cal.id
 
             # Create new calendar
@@ -129,6 +201,8 @@ class PersonalCalendarSync:
 
             if created and created.id:
                 self._calendar_cache[user_email] = created.id
+                # Store ID for future lookups
+                await self._store_calendar_id(user_email, created.id)
                 logger.info(f"Created Aladtec Schedule calendar for {user_email}")
                 return created.id
 

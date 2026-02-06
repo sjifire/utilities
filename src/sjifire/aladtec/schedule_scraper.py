@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from bs4 import BeautifulSoup
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from sjifire.aladtec.client import AladtecClient
 
@@ -98,6 +99,11 @@ class AladtecScheduleScraper(AladtecClient):
         """Initialize the scraper with credentials from environment."""
         super().__init__(timeout=60.0)
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
     def _fetch_ajax_schedule(self, start_date: date) -> dict[str, str]:
         """Fetch schedule via AJAX for a specific start date.
 

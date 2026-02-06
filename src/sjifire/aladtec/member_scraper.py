@@ -42,7 +42,12 @@ class AladtecMemberScraper(AladtecClient):
         """Initialize the scraper with credentials from environment."""
         super().__init__(timeout=30.0)
 
-    def get_members(self, layout: str = "g_all", include_inactive: bool = False) -> list[Member]:
+    def get_members(
+        self,
+        layout: str = "g_all",
+        include_inactive: bool = False,
+        enrich: bool = True,
+    ) -> list[Member]:
         """Fetch all members via CSV export.
 
         Args:
@@ -53,6 +58,9 @@ class AladtecMemberScraper(AladtecClient):
             include_inactive: If True, also fetch inactive members.
                 Note: Inactive members are fetched from a separate layout (g_inactive)
                 which has limited fields (name and status only - no email, phone, etc.)
+            enrich: If True (default), fetch additional position/schedule data for each
+                member. Set to False to skip enrichment and reduce API calls when only
+                basic member info (name, email) is needed.
 
         Returns:
             List of Member objects. If include_inactive=True, includes both active
@@ -101,8 +109,9 @@ class AladtecMemberScraper(AladtecClient):
         logger.debug(f"Got CSV export ({len(content)} bytes)")
         members = self._parse_csv(content)
 
-        # Always enrich with full position and schedule lists
-        members = self.enrich_member_details(members)
+        # Optionally enrich with full position and schedule lists
+        if enrich:
+            members = self.enrich_member_details(members)
 
         # Fetch inactive members if requested
         if include_inactive:
