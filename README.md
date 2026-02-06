@@ -346,7 +346,6 @@ src/sjifire/
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
-    ├── calendar_subscriptions.py    # Calendar subscription management
     ├── calendar_sync.py             # Shared calendar sync CLI
     ├── compare_group_memberships.py # Compare group memberships
     ├── entra_audit.py

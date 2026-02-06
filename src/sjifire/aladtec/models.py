@@ -34,7 +34,6 @@ class Member:
     station_assignment: str | None = None
     evip: str | None = None
     date_hired: str | None = None
-    ical_url: str | None = None  # Personal iCal calendar subscription URL
 
     @property
     def display_name(self) -> str:
