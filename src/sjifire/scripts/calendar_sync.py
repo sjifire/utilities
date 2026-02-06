@@ -5,9 +5,11 @@ Usage:
     uv run calendar-sync --month "Jan 2026"   # Sync specific month
     uv run calendar-sync --months 4           # Sync next 4 months
     uv run calendar-sync --delete "Jan 2026"  # Delete all events for a month
+    uv run calendar-sync --inspect "Feb 2026" # View existing events
 """
 
 import argparse
+import asyncio
 import calendar
 import logging
 import sys
@@ -97,6 +99,12 @@ def main() -> int:
         help="Delete all On Duty events for a month (e.g., 'Jan 2026')",
     )
     parser.add_argument(
+        "--inspect",
+        type=str,
+        metavar="MONTH",
+        help="View existing events for a month (e.g., 'Feb 2026')",
+    )
+    parser.add_argument(
         "--mailbox",
         required=True,
         help="Target mailbox/group calendar (e.g., all-personnel@sjifire.org)",
@@ -116,12 +124,12 @@ def main() -> int:
         logging.getLogger("azure").setLevel(logging.DEBUG)
         logging.getLogger("httpx").setLevel(logging.DEBUG)
 
-    # Require exactly one of --month, --months, or --delete
-    options_set = sum(bool(x) for x in [args.month, args.months, args.delete])
+    # Require exactly one of --month, --months, --delete, or --inspect
+    options_set = sum(bool(x) for x in [args.month, args.months, args.delete, args.inspect])
     if options_set == 0:
-        parser.error("One of --month, --months, or --delete is required")
+        parser.error("One of --month, --months, --delete, or --inspect is required")
     if options_set > 1:
-        parser.error("Cannot combine --month, --months, and --delete")
+        parser.error("Cannot combine --month, --months, --delete, and --inspect")
 
     if args.dry_run:
         logger.info("DRY RUN - no changes will be made")
@@ -148,6 +156,36 @@ def main() -> int:
             return 1
 
         return 0
+
+    # Handle inspect mode
+    if args.inspect:
+        try:
+            year, month = parse_month(args.inspect)
+            start_date, end_date = get_month_date_range(year, month)
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
+
+        logger.info(f"Inspecting calendar {args.mailbox} for {start_date} to {end_date}")
+
+        calendar_sync = CalendarSync(mailbox=args.mailbox)
+
+        async def do_inspect() -> int:
+            events = await calendar_sync.get_existing_events(start_date, end_date)
+            if not events:
+                print(f"No 'On Duty' events found in {args.mailbox} for this period")
+                return 0
+
+            print(f"\nFound events on {len(events)} days:\n")
+            for event_date in sorted(events.keys()):
+                event_id = events[event_date]
+                # Show date and that an event exists (ID is just for reference)
+                print(f"  {event_date}: On Duty (id: {event_id[:8]}...)")
+
+            print(f"\nTotal: {len(events)} days with On Duty events")
+            return 0
+
+        return asyncio.run(do_inspect())
 
     # Calculate date range
     if args.month:

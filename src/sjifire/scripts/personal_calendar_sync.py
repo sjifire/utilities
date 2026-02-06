@@ -7,6 +7,7 @@ scheduled shifts from Aladtec. This is a one-way sync (Aladtec -> M365).
 Usage:
     uv run personal-calendar-sync --user agreene@sjifire.org --month "Feb 2026"
     uv run personal-calendar-sync --all --month "Feb 2026" --dry-run
+    uv run personal-calendar-sync --inspect --user agreene@sjifire.org --month "Feb 2026"
 """
 
 import argparse
@@ -137,6 +138,11 @@ def main() -> int:
         action="store_true",
         help="Force update all events even if body hasn't changed",
     )
+    parser.add_argument(
+        "--inspect",
+        action="store_true",
+        help="View existing events instead of syncing",
+    )
 
     args = parser.parse_args()
 
@@ -159,6 +165,42 @@ def main() -> int:
 
     if args.dry_run:
         logger.info("DRY RUN - no changes will be made")
+
+    # Handle inspect mode
+    if args.inspect:
+        if not args.user:
+            parser.error("--inspect requires --user")
+
+        logger.info(f"Inspecting {args.user} for {start_date} to {end_date}")
+        sync = PersonalCalendarSync()
+
+        async def do_inspect() -> int:
+            # Get or create calendar to find its ID
+            calendar_id = await sync.get_or_create_calendar(args.user)
+            if not calendar_id:
+                print(f"No Aladtec Schedule calendar found for {args.user}")
+                return 1
+
+            events = await sync.get_existing_events(args.user, calendar_id, start_date, end_date)
+
+            if not events:
+                print(f"\nNo events found in Aladtec Schedule calendar for {args.user}")
+                return 0
+
+            print(f"\nFound {len(events)} events in Aladtec Schedule calendar:\n")
+            for key in sorted(events.keys()):
+                # Key format: date|subject|start_time|end_time
+                parts = key.split("|")
+                if len(parts) >= 4:
+                    event_date, subject = parts[0], parts[1]
+                    start_time, end_time = parts[2], parts[3]
+                    print(f"  {event_date} {start_time}-{end_time}: {subject}")
+                else:
+                    print(f"  {key}")
+
+            return 0
+
+        return asyncio.run(do_inspect())
 
     logger.info(f"Syncing {start_date} to {end_date}")
 
