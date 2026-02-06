@@ -2,8 +2,10 @@ name: Duty Calendar Sync
 
 on:
   schedule:
-    # Run daily at 5 PM Pacific (01:00 UTC = 5pm PST / 6pm PDT)
-    - cron: '0 1 * * *'
+    # Run 3x daily at 9am, 4pm, 7pm Pacific
+    - cron: '0 17 * * *'  # 9am PST / 10am PDT
+    - cron: '0 0 * * *'   # 4pm PST / 5pm PDT
+    - cron: '0 3 * * *'   # 7pm PST / 8pm PDT
   workflow_dispatch:
     inputs:
       dry_run:
