@@ -159,6 +159,23 @@ class TestGroupConfig:
         )
         assert config.description is None
 
+    def test_group_config_enforce_calendar_visibility_default_false(self):
+        """enforce_calendar_visibility should default to False."""
+        config = GroupConfig(
+            display_name="Test Group",
+            mail_nickname="testgroup",
+        )
+        assert config.enforce_calendar_visibility is False
+
+    def test_group_config_enforce_calendar_visibility_can_be_set(self):
+        """enforce_calendar_visibility can be set to True."""
+        config = GroupConfig(
+            display_name="Test Group",
+            mail_nickname="testgroup",
+            enforce_calendar_visibility=True,
+        )
+        assert config.enforce_calendar_visibility is True
+
 
 # =============================================================================
 # Test StationStrategy
@@ -932,6 +949,11 @@ class TestAllPersonnelStrategy:
         assert config.display_name == "All Personnel"
         assert config.mail_nickname == "all-personnel"
         assert "calendar" in config.description.lower() or "email" in config.description.lower()
+
+    def test_get_config_enforce_calendar_visibility(self):
+        """get_config should set enforce_calendar_visibility=True for M365 calendar visibility."""
+        config = self.strategy.get_config("all-personnel")
+        assert config.enforce_calendar_visibility is True
 
 
 # =============================================================================
