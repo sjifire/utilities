@@ -124,7 +124,14 @@ class TestCLIArguments:
             patch.object(
                 sys,
                 "argv",
-                ["personal-calendar-sync", "--user", "test@example.com", "--all", "--month", "Feb 2026"],
+                [
+                    "personal-calendar-sync",
+                    "--user",
+                    "test@example.com",
+                    "--all",
+                    "--month",
+                    "Feb 2026",
+                ],
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -233,9 +240,7 @@ class TestMainWithAllFlag:
         self, mock_env_vars, mock_member_scraper, mock_schedule_scraper, mock_personal_sync
     ):
         """--all syncs all users who have schedule entries."""
-        with patch.object(
-            sys, "argv", ["personal-calendar-sync", "--all", "--month", "Feb 2026"]
-        ):
+        with patch.object(sys, "argv", ["personal-calendar-sync", "--all", "--month", "Feb 2026"]):
             result = main()
 
         assert result == 0
@@ -316,7 +321,9 @@ class TestMainWithLoadSchedule:
                         temp_path,
                     ],
                 ),
-                patch("sjifire.scripts.personal_calendar_sync.AladtecScheduleScraper") as mock_scraper,
+                patch(
+                    "sjifire.scripts.personal_calendar_sync.AladtecScheduleScraper"
+                ) as mock_scraper,
             ):
                 result = main()
 
