@@ -7,9 +7,11 @@ from sjifire.aladtec.schedule_scraper import ScheduleEntry
 from sjifire.calendar.personal_sync import (
     CALENDAR_ID_ATTRIBUTE,
     CALENDAR_NAME,
+    ExistingEvent,
     PersonalSyncResult,
     make_event_body,
     make_event_subject,
+    normalize_body_for_comparison,
 )
 
 
@@ -162,3 +164,54 @@ class TestConstants:
     def test_calendar_id_attribute(self):
         """Extension attribute name uses snake_case for SDK."""
         assert CALENDAR_ID_ATTRIBUTE == "extension_attribute5"
+
+
+class TestNormalizeBodyForComparison:
+    """Tests for normalize_body_for_comparison function."""
+
+    def test_strips_html_tags(self):
+        """Removes HTML tags from body."""
+        html = "<html><body><p>Hello World</p></body></html>"
+        assert normalize_body_for_comparison(html) == "Hello World"
+
+    def test_normalizes_whitespace(self):
+        """Collapses multiple spaces and newlines."""
+        text = "Hello\n\n  World\t\tTest"
+        assert normalize_body_for_comparison(text) == "Hello World Test"
+
+    def test_handles_exchange_html_format(self):
+        """Handles Microsoft Exchange HTML conversion format."""
+        html = (
+            '<html><head><meta http-equiv="Content-Type" content="text/html">\r\n'
+            "</head>\r\n<body>\r\n"
+            '<div class="PlainText">Position: Captain<br>\r\n'
+            "Section: S31</div>\r\n</body></html>"
+        )
+        result = normalize_body_for_comparison(html)
+        assert "Position: Captain" in result
+        assert "Section: S31" in result
+
+    def test_plain_text_unchanged(self):
+        """Plain text content normalized correctly."""
+        text = "Position: Captain\nSection: S31"
+        result = normalize_body_for_comparison(text)
+        assert result == "Position: Captain Section: S31"
+
+    def test_empty_string(self):
+        """Empty string returns empty."""
+        assert normalize_body_for_comparison("") == ""
+
+
+class TestExistingEvent:
+    """Tests for ExistingEvent dataclass."""
+
+    def test_creates_with_event_id_and_body(self):
+        """Creates ExistingEvent with required fields."""
+        event = ExistingEvent(event_id="abc123", body="test body")
+        assert event.event_id == "abc123"
+        assert event.body == "test body"
+
+    def test_empty_body(self):
+        """Handles empty body."""
+        event = ExistingEvent(event_id="abc123", body="")
+        assert event.body == ""

@@ -38,6 +38,14 @@ MAX_CONCURRENT_REQUESTS = 5
 
 
 @dataclass
+class ExistingEvent:
+    """Info about an existing calendar event."""
+
+    event_id: str
+    body: str
+
+
+@dataclass
 class PersonalSyncResult:
     """Result of syncing personal calendar."""
 
@@ -74,6 +82,21 @@ Section: {entry.section}
 This event is imported automatically from Aladtec. Any changes will be overwritten.
 
 Modify your schedule: {aladtec_url}"""
+
+
+def normalize_body_for_comparison(body: str) -> str:
+    """Normalize body text for comparison.
+
+    Microsoft Exchange converts plain text to HTML, so we need to
+    extract text content and normalize whitespace for comparison.
+    """
+    import re
+
+    # Remove HTML tags
+    text = re.sub(r"<[^>]+>", "", body)
+    # Normalize whitespace (collapse multiple spaces/newlines)
+    text = " ".join(text.split())
+    return text
 
 
 class PersonalCalendarSync:
@@ -217,11 +240,11 @@ class PersonalCalendarSync:
         calendar_id: str,
         start_date: date,
         end_date: date,
-    ) -> dict[str, str]:
+    ) -> dict[str, ExistingEvent]:
         """Get existing Aladtec events in date range.
 
         Returns:
-            Dict mapping event_key to event_id
+            Dict mapping event_key to ExistingEvent (id and body)
         """
         # Note: We filter by date after fetching, not by calendarView endpoint
         # because we need to match events by key for sync logic
@@ -231,7 +254,7 @@ class PersonalCalendarSync:
             # Get all events from this calendar (it's dedicated to Aladtec)
             query_params = EventsRequestBuilder.EventsRequestBuilderGetQueryParameters(
                 top=500,
-                select=["id", "subject", "start", "end"],
+                select=["id", "subject", "start", "end", "body"],
             )
             config = EventsRequestBuilder.EventsRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params,
@@ -243,7 +266,7 @@ class PersonalCalendarSync:
                 .events.get(request_configuration=config)
             )
 
-            events_by_key: dict[str, str] = {}
+            events_by_key: dict[str, ExistingEvent] = {}
 
             if result and result.value:
                 for event in result.value:
@@ -289,11 +312,41 @@ class PersonalCalendarSync:
 
                     # Only include events in our date range
                     if start_date <= event_date <= end_date:
-                        # Create key from subject and start time (local time)
-                        # Format: "date|subject|start_time"
+                        # Parse end time
+                        end_time_str = "00:00"
+                        if event.end and event.end.date_time:
+                            end_dt_str = event.end.date_time
+                            if "." in end_dt_str:
+                                end_dt_str = end_dt_str.split(".")[0]
+                            try:
+                                end_dt = datetime.fromisoformat(end_dt_str)
+                                # Apply same timezone logic
+                                end_tz = event.end.time_zone
+                                if end_tz and end_tz.upper() == "UTC":
+                                    end_dt = end_dt.replace(tzinfo=ZoneInfo("UTC"))
+                                    end_dt = end_dt.astimezone(TIMEZONE)
+                                elif end_tz:
+                                    try:
+                                        tz = ZoneInfo(end_tz)
+                                        end_dt = end_dt.replace(tzinfo=tz)
+                                        end_dt = end_dt.astimezone(TIMEZONE)
+                                    except KeyError:
+                                        end_dt = end_dt.replace(tzinfo=TIMEZONE)
+                                else:
+                                    end_dt = end_dt.replace(tzinfo=TIMEZONE)
+                                end_time_str = end_dt.strftime("%H:%M")
+                            except ValueError:
+                                pass
+
+                        # Create key from subject, start time, and end time
+                        # Format: "date|subject|start_time|end_time"
                         start_time = event_dt.strftime("%H:%M")
-                        key = f"{event_date}|{event.subject}|{start_time}"
-                        events_by_key[key] = event.id
+                        key = f"{event_date}|{event.subject}|{start_time}|{end_time_str}"
+                        # Extract body content
+                        body = ""
+                        if event.body and event.body.content:
+                            body = event.body.content
+                        events_by_key[key] = ExistingEvent(event_id=event.id, body=body)
 
             return events_by_key
 
@@ -339,6 +392,46 @@ class PersonalCalendarSync:
             logger.error(f"Failed to create event for {user_email}: {e}")
             return False
 
+    async def update_event(
+        self,
+        user_email: str,
+        calendar_id: str,
+        event_id: str,
+        entry: ScheduleEntry,
+    ) -> bool:
+        """Update an existing calendar event."""
+        start_dt = entry.start_datetime
+        end_dt = entry.end_datetime
+
+        event = Event(
+            subject=make_event_subject(entry),
+            body=ItemBody(
+                content_type=BodyType.Text,
+                content=make_event_body(entry),
+            ),
+            start=DateTimeTimeZone(
+                date_time=start_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+                time_zone=TIMEZONE_NAME,
+            ),
+            end=DateTimeTimeZone(
+                date_time=end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+                time_zone=TIMEZONE_NAME,
+            ),
+            is_reminder_on=False,
+        )
+
+        try:
+            await (
+                self.client.users.by_user_id(user_email)
+                .calendars.by_calendar_id(calendar_id)
+                .events.by_event_id(event_id)
+                .patch(event)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update event {event_id}: {e}")
+            return False
+
     async def delete_event(
         self,
         user_email: str,
@@ -365,6 +458,7 @@ class PersonalCalendarSync:
         start_date: date,
         end_date: date,
         dry_run: bool = False,
+        force: bool = False,
     ) -> PersonalSyncResult:
         """Sync schedule entries to a user's personal calendar.
 
@@ -374,6 +468,7 @@ class PersonalCalendarSync:
             start_date: Start of sync range
             end_date: End of sync range
             dry_run: If True, preview without making changes
+            force: If True, update all events even if body hasn't changed
 
         Returns:
             PersonalSyncResult with counts and errors
@@ -396,21 +491,45 @@ class PersonalCalendarSync:
         for entry in entries:
             subject = make_event_subject(entry)
             start_time = entry.start_datetime.strftime("%H:%M")
-            key = f"{entry.date}|{subject}|{start_time}"
+            end_time = entry.end_datetime.strftime("%H:%M")
+            key = f"{entry.date}|{subject}|{start_time}|{end_time}"
             new_event_keys.add(key)
             entries_by_key[key] = entry
 
-        # Determine what to create and delete
+        # Determine what to create, update, and delete
         existing_keys = set(existing.keys())
         to_create = new_event_keys - existing_keys
         to_delete = existing_keys - new_event_keys
+        maybe_update = new_event_keys & existing_keys  # Keys in both sets
+
+        # Check which existing events need body updates
+        to_update: list[tuple[str, str]] = []  # (key, event_id)
+        for key in maybe_update:
+            if force:
+                # Force update all matching events
+                to_update.append((key, existing[key].event_id))
+            else:
+                # Only update if body has changed
+                entry = entries_by_key[key]
+                new_body = make_event_body(entry)
+                existing_body = existing[key].body
+                # Normalize both for comparison (Exchange converts plain text to HTML)
+                if normalize_body_for_comparison(new_body) != normalize_body_for_comparison(
+                    existing_body
+                ):
+                    logger.debug(f"Body mismatch for {key}")
+                    to_update.append((key, existing[key].event_id))
 
         if dry_run:
             result.events_created = len(to_create)
+            result.events_updated = len(to_update)
             result.events_deleted = len(to_delete)
             for key in to_create:
                 entry = entries_by_key[key]
                 logger.info(f"Would create: {entry.date} - {entry.position}")
+            for key, _ in to_update:
+                entry = entries_by_key[key]
+                logger.info(f"Would update: {entry.date} - {entry.position}")
             for key in to_delete:
                 logger.info(f"Would delete: {key}")
         else:
@@ -427,13 +546,26 @@ class PersonalCalendarSync:
                 result.events_created = sum(1 for r in create_results if r)
                 result.errors.extend(["Failed to create event" for r in create_results if not r])
 
+            # Update existing events with changed bodies
+            async def update_with_semaphore(key: str, event_id: str) -> bool:
+                async with semaphore:
+                    return await self.update_event(
+                        user_email, calendar_id, event_id, entries_by_key[key]
+                    )
+
+            if to_update:
+                update_tasks = [update_with_semaphore(key, eid) for key, eid in to_update]
+                update_results = await asyncio.gather(*update_tasks)
+                result.events_updated = sum(1 for r in update_results if r)
+                result.errors.extend(["Failed to update event" for r in update_results if not r])
+
             # Delete old events
             async def delete_with_semaphore(event_id: str) -> bool:
                 async with semaphore:
                     return await self.delete_event(user_email, calendar_id, event_id)
 
             if to_delete:
-                delete_tasks = [delete_with_semaphore(existing[key]) for key in to_delete]
+                delete_tasks = [delete_with_semaphore(existing[key].event_id) for key in to_delete]
                 delete_results = await asyncio.gather(*delete_tasks)
                 result.events_deleted = sum(1 for r in delete_results if r)
                 result.errors.extend(["Failed to delete event" for r in delete_results if not r])
@@ -447,6 +579,9 @@ class PersonalCalendarSync:
         start_date: date,
         end_date: date,
         dry_run: bool = False,
+        force: bool = False,
     ) -> PersonalSyncResult:
         """Synchronous wrapper for sync_user."""
-        return asyncio.run(self.sync_user(user_email, entries, start_date, end_date, dry_run))
+        return asyncio.run(
+            self.sync_user(user_email, entries, start_date, end_date, dry_run, force)
+        )

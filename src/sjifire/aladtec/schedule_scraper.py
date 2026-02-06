@@ -257,8 +257,8 @@ class AladtecScheduleScraper(AladtecClient):
                 pos_match = re.search(r"/ ([^<]+)<br/>", title)
                 position = pos_match.group(1).strip() if pos_match else ""
 
-                # Get times
-                time_match = re.search(r"(\d{2}:\d{2}) - [^>]+(\d{2}:\d{2})", title)
+                # Get times - handles both "19:00 - 20:00" and "20:00 - Tue, Feb 3 10:00"
+                time_match = re.search(r"(\d{2}:\d{2})\s*-\s*[^>]*?(\d{2}:\d{2})", title)
                 start_time = time_match.group(1) if time_match else "18:00"
                 end_time = time_match.group(2) if time_match else "18:00"
 

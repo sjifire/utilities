@@ -132,6 +132,11 @@ def main() -> int:
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force update all events even if body hasn't changed",
+    )
 
     args = parser.parse_args()
 
@@ -225,7 +230,9 @@ def main() -> int:
         results = []
         for email, entries in entries_by_email.items():
             logger.info(f"Syncing {email} ({len(entries)} entries)...")
-            result = await sync.sync_user(email, entries, start_date, end_date, args.dry_run)
+            result = await sync.sync_user(
+                email, entries, start_date, end_date, args.dry_run, args.force
+            )
             results.append(result)
             logger.info(f"  {result}")
         return results
@@ -234,10 +241,14 @@ def main() -> int:
 
     # Summary
     total_created = sum(r.events_created for r in results)
+    total_updated = sum(r.events_updated for r in results)
     total_deleted = sum(r.events_deleted for r in results)
     total_errors = sum(len(r.errors) for r in results)
 
-    logger.info(f"\nSync complete: {total_created} created, {total_deleted} deleted")
+    logger.info(
+        f"\nSync complete: {total_created} created, {total_updated} updated, "
+        f"{total_deleted} deleted"
+    )
     if total_errors:
         logger.error(f"{total_errors} errors occurred")
         return 1
