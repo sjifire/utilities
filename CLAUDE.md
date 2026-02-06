@@ -254,6 +254,6 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ci.yml`: Lint + test on PR/push
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Sync every 30 minutes (Entra to iSpyFire), uploads backup artifacts
-- `duty-calendar-sync.yml`: Daily at 5 PM Pacific (On Duty events to shared calendar)
+- `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
 
 All workflows authenticate via OIDC and fetch secrets from Key Vault (no GitHub secrets required).
