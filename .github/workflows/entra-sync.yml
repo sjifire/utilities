@@ -2,8 +2,16 @@ name: Entra ID Sync
 
 on:
   schedule:
+    # Run at 8am Pacific, Monday-Friday (16:00 UTC = 8am PST / 9am PDT)
+    - cron: '0 16 * * 1-5'
     # Run at noon Pacific, Monday-Friday (20:00 UTC = 12pm PST / 1pm PDT)
     - cron: '0 20 * * 1-5'
+    # Run at 6pm Pacific, Monday-Friday (02:00 UTC next day = 6pm PST / 7pm PDT)
+    - cron: '0 2 * * 2-6'
+    # Run at noon Pacific, Saturday (20:00 UTC = 12pm PST / 1pm PDT)
+    - cron: '0 20 * * 6'
+    # Run at noon Pacific, Sunday (20:00 UTC = 12pm PST / 1pm PDT)
+    - cron: '0 20 * * 0'
   workflow_dispatch:
     inputs:
       dry_run:
