@@ -341,8 +341,9 @@ src/sjifire/
 │   ├── models.py      # ISpyFirePerson data model
 │   └── sync.py        # Sync logic and comparison
 ├── calendar/          # Calendar sync
-│   ├── shared_sync.py     # Shared calendar sync (On Duty events)
-│   └── personal_sync.py   # Personal calendar sync
+│   ├── models.py          # OnDutyEvent, SyncResult dataclasses
+│   ├── sync.py            # CalendarSync for shared mailbox
+│   └── personal_sync.py   # PersonalCalendarSync for user calendars
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py

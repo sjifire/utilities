@@ -96,8 +96,9 @@ src/sjifire/
 │   ├── models.py      # ISpyFirePerson dataclass
 │   └── sync.py        # Sync logic, comparison, filtering
 ├── calendar/
-│   ├── shared_sync.py     # Shared calendar sync (On Duty events)
-│   └── personal_sync.py   # Personal calendar sync (individual schedules)
+│   ├── models.py          # OnDutyEvent, SyncResult dataclasses
+│   ├── sync.py            # CalendarSync for shared mailbox (On Duty events)
+│   └── personal_sync.py   # PersonalCalendarSync for user calendars
 └── scripts/           # CLI entry points
 ```
 
