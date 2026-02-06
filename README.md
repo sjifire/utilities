@@ -342,7 +342,7 @@ src/sjifire/
 │   └── sync.py        # Sync logic and comparison
 ├── calendar/          # Calendar sync
 │   ├── models.py          # OnDutyEvent, SyncResult dataclasses
-│   ├── sync.py            # CalendarSync for shared mailbox
+│   ├── duty_sync.py       # DutyCalendarSync for shared mailbox
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
 └── scripts/           # CLI entry points
     ├── aladtec_list.py

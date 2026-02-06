@@ -97,7 +97,7 @@ src/sjifire/
 │   └── sync.py        # Sync logic, comparison, filtering
 ├── calendar/
 │   ├── models.py          # OnDutyEvent, SyncResult dataclasses
-│   ├── sync.py            # CalendarSync for shared mailbox (On Duty events)
+│   ├── duty_sync.py       # DutyCalendarSync for shared mailbox (On Duty events)
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
 └── scripts/           # CLI entry points
 ```
