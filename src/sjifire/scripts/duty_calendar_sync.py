@@ -18,7 +18,7 @@ from datetime import date
 from dateutil import parser as dateparser
 
 from sjifire.aladtec.schedule_scraper import AladtecScheduleScraper
-from sjifire.calendar import CalendarSync
+from sjifire.calendar import DutyCalendarSync
 
 logging.basicConfig(
     level=logging.INFO,
@@ -145,7 +145,7 @@ def main() -> int:
 
         logger.info(f"Deleting On Duty events from {args.mailbox} for {start_date} to {end_date}")
 
-        calendar_sync = CalendarSync(mailbox=args.mailbox)
+        calendar_sync = DutyCalendarSync(mailbox=args.mailbox)
         result = calendar_sync.delete_date_range(start_date, end_date, dry_run=args.dry_run)
 
         logger.info(f"Delete complete: {result}")
@@ -168,7 +168,7 @@ def main() -> int:
 
         logger.info(f"Inspecting calendar {args.mailbox} for {start_date} to {end_date}")
 
-        calendar_sync = CalendarSync(mailbox=args.mailbox)
+        calendar_sync = DutyCalendarSync(mailbox=args.mailbox)
 
         async def do_inspect() -> int:
             events = await calendar_sync.get_existing_events(start_date, end_date)
@@ -233,7 +233,7 @@ def main() -> int:
     # Step 2: Sync to calendar
     logger.info(f"Syncing to calendar: {args.mailbox}")
 
-    calendar_sync = CalendarSync(mailbox=args.mailbox)
+    calendar_sync = DutyCalendarSync(mailbox=args.mailbox)
     result = calendar_sync.sync(schedules, dry_run=args.dry_run)
 
     # Report results

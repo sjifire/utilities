@@ -220,7 +220,7 @@ def is_filled_entry(entry: ScheduleEntry) -> bool:
     return not is_unfilled_position(entry)
 
 
-class CalendarSync:
+class DutyCalendarSync:
     """Sync on-duty schedule to M365 shared calendar or group calendar."""
 
     def __init__(self, mailbox: str = "svc-automations@sjifire.org") -> None:

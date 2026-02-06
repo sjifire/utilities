@@ -1,4 +1,4 @@
-"""Tests for sjifire.calendar.sync module."""
+"""Tests for sjifire.calendar.duty_sync module."""
 
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -6,14 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sjifire.aladtec.schedule_scraper import DaySchedule, ScheduleEntry
-from sjifire.calendar.models import AllDayDutyEvent, CrewMember
-from sjifire.calendar.sync import (
-    CalendarSync,
+from sjifire.calendar.duty_sync import (
+    DutyCalendarSync,
     is_filled_entry,
     is_operational_section,
     is_unfilled_position,
     should_exclude_section,
 )
+from sjifire.calendar.models import AllDayDutyEvent, CrewMember
 
 
 class TestIsOperationalSection:
@@ -209,17 +209,17 @@ class TestIsFilledEntry:
         assert is_filled_entry(entry) is False
 
 
-class TestCalendarSyncFiltering:
-    """Tests for CalendarSync filtering methods."""
+class TestDutyCalendarSyncFiltering:
+    """Tests for DutyCalendarSync filtering methods."""
 
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
-        """Create CalendarSync instance."""
+        """Create DutyCalendarSync instance."""
         with (
-            patch("sjifire.calendar.sync.ClientSecretCredential"),
-            patch("sjifire.calendar.sync.GraphServiceClient"),
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient"),
         ):
-            return CalendarSync()
+            return DutyCalendarSync()
 
     @pytest.fixture
     def sample_day_schedule(self):
@@ -381,17 +381,17 @@ class TestCalendarSyncFiltering:
         assert member.phone == "555-1234"
 
 
-class TestCalendarSyncContactLookup:
-    """Tests for contact lookup in CalendarSync."""
+class TestDutyCalendarSyncContactLookup:
+    """Tests for contact lookup in DutyCalendarSync."""
 
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
-        """Create CalendarSync instance."""
+        """Create DutyCalendarSync instance."""
         with (
-            patch("sjifire.calendar.sync.ClientSecretCredential"),
-            patch("sjifire.calendar.sync.GraphServiceClient"),
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient"),
         ):
-            return CalendarSync()
+            return DutyCalendarSync()
 
     def test_lookup_exact_match(self, calendar_sync):
         """Look up contact by exact name match."""
@@ -454,17 +454,17 @@ class TestCalendarSyncContactLookup:
         assert phone is None
 
 
-class TestCalendarSyncConvertSchedules:
+class TestDutyCalendarSyncConvertSchedules:
     """Tests for schedule to event conversion."""
 
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
-        """Create CalendarSync instance."""
+        """Create DutyCalendarSync instance."""
         with (
-            patch("sjifire.calendar.sync.ClientSecretCredential"),
-            patch("sjifire.calendar.sync.GraphServiceClient"),
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient"),
         ):
-            return CalendarSync()
+            return DutyCalendarSync()
 
     @pytest.fixture
     def sample_schedules(self):
@@ -549,19 +549,19 @@ class TestCalendarSyncConvertSchedules:
         assert events[0].event_date < events[1].event_date
 
 
-class TestCalendarSyncGraphAPI:
-    """Tests for CalendarSync Graph API methods."""
+class TestDutyCalendarSyncGraphAPI:
+    """Tests for DutyCalendarSync Graph API methods."""
 
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
-        """Create CalendarSync with mocked Graph client."""
+        """Create DutyCalendarSync with mocked Graph client."""
         with (
-            patch("sjifire.calendar.sync.ClientSecretCredential"),
-            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
-            sync = CalendarSync()
+            sync = DutyCalendarSync()
             sync.client = mock_client
             return sync
 
@@ -730,19 +730,19 @@ class TestCalendarSyncGraphAPI:
         assert result is False
 
 
-class TestCalendarSyncBatchOperations:
-    """Tests for CalendarSync batch operations."""
+class TestDutyCalendarSyncBatchOperations:
+    """Tests for DutyCalendarSync batch operations."""
 
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
-        """Create CalendarSync with mocked Graph client."""
+        """Create DutyCalendarSync with mocked Graph client."""
         with (
-            patch("sjifire.calendar.sync.ClientSecretCredential"),
-            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
-            sync = CalendarSync()
+            sync = DutyCalendarSync()
             sync.client = mock_client
             return sync
 
@@ -829,19 +829,19 @@ class TestCalendarSyncBatchOperations:
         assert errors == []
 
 
-class TestCalendarSyncSyncEvents:
+class TestDutyCalendarSyncSyncEvents:
     """Tests for sync_events orchestration."""
 
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
-        """Create CalendarSync with mocked methods."""
+        """Create DutyCalendarSync with mocked methods."""
         with (
-            patch("sjifire.calendar.sync.ClientSecretCredential"),
-            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
-            sync = CalendarSync()
+            sync = DutyCalendarSync()
             sync.client = mock_client
             return sync
 
@@ -914,19 +914,19 @@ class TestCalendarSyncSyncEvents:
         calendar_sync.update_events_batch.assert_not_called()
 
 
-class TestCalendarSyncDeleteDateRange:
+class TestDutyCalendarSyncDeleteDateRange:
     """Tests for delete_date_range method."""
 
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
-        """Create CalendarSync with mocked methods."""
+        """Create DutyCalendarSync with mocked methods."""
         with (
-            patch("sjifire.calendar.sync.ClientSecretCredential"),
-            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
-            sync = CalendarSync()
+            sync = DutyCalendarSync()
             sync.client = mock_client
             return sync
 
@@ -981,19 +981,19 @@ class TestCalendarSyncDeleteDateRange:
         assert result.errors == []
 
 
-class TestCalendarSyncUpdateEventsBatch:
+class TestDutyCalendarSyncUpdateEventsBatch:
     """Tests for update_events_batch method."""
 
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
-        """Create CalendarSync with mocked client."""
+        """Create DutyCalendarSync with mocked client."""
         with (
-            patch("sjifire.calendar.sync.ClientSecretCredential"),
-            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
-            sync = CalendarSync()
+            sync = DutyCalendarSync()
             sync.client = mock_client
             return sync
 
@@ -1062,19 +1062,19 @@ class TestCalendarSyncUpdateEventsBatch:
         assert "Failed to update" in errors[0]
 
 
-class TestCalendarSyncSyncWrapper:
+class TestDutyCalendarSyncSyncWrapper:
     """Tests for the synchronous sync() wrapper method."""
 
     @pytest.fixture
     def calendar_sync(self, mock_env_vars):
-        """Create CalendarSync with mocked methods."""
+        """Create DutyCalendarSync with mocked methods."""
         with (
-            patch("sjifire.calendar.sync.ClientSecretCredential"),
-            patch("sjifire.calendar.sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
-            sync = CalendarSync()
+            sync = DutyCalendarSync()
             sync.client = mock_client
             return sync
 

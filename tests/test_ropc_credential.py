@@ -1,11 +1,11 @@
-"""Tests for ROPCCredential class and CalendarSync in sjifire/calendar/sync.py."""
+"""Tests for ROPCCredential class and DutyCalendarSync in sjifire/calendar/sync.py."""
 
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sjifire.calendar.sync import CalendarSync, ROPCCredential
+from sjifire.calendar.duty_sync import DutyCalendarSync, ROPCCredential
 
 # =============================================================================
 # Test Fixtures
@@ -15,7 +15,7 @@ from sjifire.calendar.sync import CalendarSync, ROPCCredential
 @pytest.fixture
 def mock_msal_app():
     """Mock msal.ConfidentialClientApplication."""
-    with patch("sjifire.calendar.sync.msal.ConfidentialClientApplication") as mock:
+    with patch("sjifire.calendar.duty_sync.msal.ConfidentialClientApplication") as mock:
         yield mock
 
 
@@ -256,31 +256,31 @@ class TestROPCCredentialSecurity:
 
 
 # =============================================================================
-# CalendarSync _detect_if_group Tests
+# DutyCalendarSync _detect_if_group Tests
 # =============================================================================
 
 
 class TestDetectIfGroup:
-    """Tests for CalendarSync._detect_if_group method."""
+    """Tests for DutyCalendarSync._detect_if_group method."""
 
     @pytest.fixture
     def mock_graph_client(self):
         """Mock GraphServiceClient."""
-        with patch("sjifire.calendar.sync.GraphServiceClient") as mock:
+        with patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock:
             yield mock
 
     @pytest.fixture
     def mock_credentials(self):
         """Mock credential functions."""
-        with patch("sjifire.calendar.sync.get_graph_credentials") as mock_graph:
+        with patch("sjifire.calendar.duty_sync.get_graph_credentials") as mock_graph:
             mock_graph.return_value = ("tenant", "client", "secret")
-            with patch("sjifire.calendar.sync.ClientSecretCredential"):
+            with patch("sjifire.calendar.duty_sync.ClientSecretCredential"):
                 yield mock_graph
 
     @pytest.mark.asyncio
     async def test_detects_m365_unified_group(self, mock_graph_client, mock_credentials):
         """Detects M365 Unified group and caches group ID."""
-        sync = CalendarSync("test-group@sjifire.org")
+        sync = DutyCalendarSync("test-group@sjifire.org")
 
         # Mock the groups API response
         mock_group = MagicMock()
@@ -295,9 +295,9 @@ class TestDetectIfGroup:
         mock_client_instance.groups.get = AsyncMock(return_value=mock_result)
 
         # Mock the svc-automations credentials and ROPCCredential for delegated client setup
-        with patch("sjifire.calendar.sync.get_svc_automations_credentials") as mock_svc:
+        with patch("sjifire.calendar.duty_sync.get_svc_automations_credentials") as mock_svc:
             mock_svc.return_value = ("svc@test.org", "password")
-            with patch("sjifire.calendar.sync.ROPCCredential"):
+            with patch("sjifire.calendar.duty_sync.ROPCCredential"):
                 result = await sync._detect_if_group()
 
         assert result is True
@@ -307,7 +307,7 @@ class TestDetectIfGroup:
     @pytest.mark.asyncio
     async def test_detects_non_group_mailbox(self, mock_graph_client, mock_credentials):
         """Detects regular user mailbox (not a group)."""
-        sync = CalendarSync("user@sjifire.org")
+        sync = DutyCalendarSync("user@sjifire.org")
 
         # Mock empty groups response
         mock_result = MagicMock()
@@ -325,7 +325,7 @@ class TestDetectIfGroup:
     @pytest.mark.asyncio
     async def test_caches_detection_result(self, mock_graph_client, mock_credentials):
         """Caches detection result and doesn't call API twice."""
-        sync = CalendarSync("test@sjifire.org")
+        sync = DutyCalendarSync("test@sjifire.org")
         sync._is_group = False  # Pre-set cached value
 
         # Should return cached value without API call
@@ -338,7 +338,7 @@ class TestDetectIfGroup:
     @pytest.mark.asyncio
     async def test_handles_api_error_gracefully(self, mock_graph_client, mock_credentials):
         """Handles API errors gracefully and returns False."""
-        sync = CalendarSync("test@sjifire.org")
+        sync = DutyCalendarSync("test@sjifire.org")
 
         mock_client_instance = mock_graph_client.return_value
         mock_client_instance.groups.get = AsyncMock(side_effect=Exception("API Error"))
@@ -351,7 +351,7 @@ class TestDetectIfGroup:
     @pytest.mark.asyncio
     async def test_ignores_non_unified_groups(self, mock_graph_client, mock_credentials):
         """Ignores groups that are not Unified (M365) groups."""
-        sync = CalendarSync("security-group@sjifire.org")
+        sync = DutyCalendarSync("security-group@sjifire.org")
 
         # Mock a security group (not Unified)
         mock_group = MagicMock()
@@ -373,7 +373,7 @@ class TestDetectIfGroup:
     @pytest.mark.asyncio
     async def test_sets_up_delegated_client_for_group(self, mock_graph_client, mock_credentials):
         """Sets up delegated auth client when group is detected."""
-        sync = CalendarSync("test-group@sjifire.org")
+        sync = DutyCalendarSync("test-group@sjifire.org")
 
         # Mock the groups API response
         mock_group = MagicMock()
@@ -387,9 +387,9 @@ class TestDetectIfGroup:
         mock_client_instance = mock_graph_client.return_value
         mock_client_instance.groups.get = AsyncMock(return_value=mock_result)
 
-        with patch("sjifire.calendar.sync.get_svc_automations_credentials") as mock_svc:
+        with patch("sjifire.calendar.duty_sync.get_svc_automations_credentials") as mock_svc:
             mock_svc.return_value = ("svc@test.org", "password")
-            with patch("sjifire.calendar.sync.ROPCCredential"):
+            with patch("sjifire.calendar.duty_sync.ROPCCredential"):
                 await sync._detect_if_group()
 
         # Should have set up delegated client

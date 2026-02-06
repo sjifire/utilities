@@ -135,8 +135,8 @@ class TestMainCLI:
 
     @pytest.fixture
     def mock_calendar_sync(self):
-        """Mock CalendarSync class."""
-        with patch("sjifire.scripts.duty_calendar_sync.CalendarSync") as mock:
+        """Mock DutyCalendarSync class."""
+        with patch("sjifire.scripts.duty_calendar_sync.DutyCalendarSync") as mock:
             instance = MagicMock()
             mock.return_value = instance
             yield instance
@@ -289,7 +289,7 @@ class TestMainCLI:
         assert call_args[0][0] == date(2026, 2, 1)  # start of current month
 
     def test_custom_mailbox(self, mock_calendar_sync, mock_env_vars):
-        """Custom mailbox is passed to CalendarSync."""
+        """Custom mailbox is passed to DutyCalendarSync."""
         mock_calendar_sync.delete_date_range.return_value = SyncResult()
 
         with patch.object(
@@ -297,8 +297,8 @@ class TestMainCLI:
         ):
             main()
 
-        # Check CalendarSync was constructed with custom mailbox
-        with patch("sjifire.scripts.duty_calendar_sync.CalendarSync") as mock_class:
+        # Check DutyCalendarSync was constructed with custom mailbox
+        with patch("sjifire.scripts.duty_calendar_sync.DutyCalendarSync") as mock_class:
             mock_class.return_value = mock_calendar_sync
             mock_calendar_sync.delete_date_range.return_value = SyncResult()
 

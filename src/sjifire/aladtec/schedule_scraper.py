@@ -164,10 +164,11 @@ class AladtecScheduleScraper(AladtecClient):
         return {}
 
     def fetch_month_schedule(self, month_start: date) -> dict[str, str]:
-        """Fetch a full month's schedule via multiple AJAX requests.
+        """Fetch a full month's schedule via chained AJAX requests.
 
-        The AJAX endpoint returns partial data, so we make multiple requests
-        with different start dates to accumulate the full month.
+        The AJAX endpoint returns a variable-sized window of data (typically 10-30 days).
+        We chain requests by using the day after the last fetched date as the next
+        start date, continuing until the full month is covered.
 
         Args:
             month_start: First day of the month to fetch (day is ignored, uses 1st)
@@ -178,36 +179,51 @@ class AladtecScheduleScraper(AladtecClient):
         if not self.client:
             raise RuntimeError("Scraper must be used as context manager")
 
+        from calendar import monthrange
+
         # Normalize to first of month
         first_of_month = month_start.replace(day=1)
         month_str = first_of_month.strftime("%Y-%m")
+        last_day = monthrange(first_of_month.year, first_of_month.month)[1]
+        month_end = first_of_month.replace(day=last_day)
 
         all_data: dict[str, str] = {}
+        current_start = first_of_month
+        max_fetches = 10  # Safety limit to prevent infinite loops
+        fetch_count = 0
 
-        # Fetch with multiple start dates - every 5 days to ensure complete coverage
-        # Each fetch does its own POST navigation for consistency
-        fetch_days = [1, 5, 10, 15, 20, 25, 28, 31]
+        while current_start <= month_end and fetch_count < max_fetches:
+            fetch_count += 1
+            data = self._fetch_ajax_schedule(current_start)
 
-        for day in fetch_days:
-            # Handle months with fewer than 31 days
-            try:
-                fetch_date = first_of_month.replace(day=day)
-            except ValueError:
-                # Day doesn't exist in this month, skip
+            if not data:
+                # No data returned, advance by 5 days and retry
+                logger.debug(f"No data from {current_start}, advancing by 5 days")
+                current_start += timedelta(days=5)
                 continue
 
-            data = self._fetch_ajax_schedule(fetch_date)
-            if data:
-                # Only keep dates for this month
-                all_data.update(
-                    {
-                        date_str: html
-                        for date_str, html in data.items()
-                        if date_str.startswith(month_str)
-                    }
-                )
+            # Collect dates for this month
+            all_data.update(
+                {
+                    date_str: html
+                    for date_str, html in data.items()
+                    if date_str.startswith(month_str)
+                }
+            )
 
-        logger.debug(f"Fetched {len(all_data)} days for {month_str}")
+            # Find the last date returned and move to the day after
+            last_fetched_str = max(data.keys())
+            last_fetched = datetime.strptime(last_fetched_str, "%Y-%m-%d").date()
+            next_start = last_fetched + timedelta(days=1)
+
+            if next_start <= current_start:
+                # No progress made, force advance to avoid infinite loop
+                logger.debug(f"No progress from {current_start}, forcing advance")
+                current_start += timedelta(days=5)
+            else:
+                current_start = next_start
+
+        logger.debug(f"Fetched {len(all_data)} days for {month_str} in {fetch_count} requests")
         return all_data
 
     def parse_day_html(self, date_str: str, html: str) -> DaySchedule:
