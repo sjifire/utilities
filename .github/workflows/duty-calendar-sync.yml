@@ -101,6 +101,7 @@ jobs:
       - name: Run duty calendar sync
         run: |
           MAILBOX="all-personnel@sjifire.org"
+          SCHEDULE_CACHE="/tmp/schedule.json"
           # Noon schedule (0 20 * * *) syncs 4 months; others sync current month only
           if [ "${{ github.event.schedule }}" = "0 20 * * *" ]; then
             MONTHS="4"
@@ -109,7 +110,23 @@ jobs:
           fi
           echo "Syncing $MONTHS month(s) to $MAILBOX"
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run duty-calendar-sync --months "$MONTHS" --mailbox "$MAILBOX" --dry-run
+            uv run duty-calendar-sync --months "$MONTHS" --mailbox "$MAILBOX" --save-schedule "$SCHEDULE_CACHE" --dry-run
           else
-            uv run duty-calendar-sync --months "$MONTHS" --mailbox "$MAILBOX"
+            uv run duty-calendar-sync --months "$MONTHS" --mailbox "$MAILBOX" --save-schedule "$SCHEDULE_CACHE"
+          fi
+
+      - name: Run personal calendar sync
+        run: |
+          SCHEDULE_CACHE="/tmp/schedule.json"
+          # Use same months as duty sync
+          if [ "${{ github.event.schedule }}" = "0 20 * * *" ]; then
+            MONTHS="4"
+          else
+            MONTHS="${{ inputs.months || '1' }}"
+          fi
+          echo "Syncing personal calendars for $MONTHS month(s) from cache"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            uv run personal-calendar-sync --all --months "$MONTHS" --load-schedule "$SCHEDULE_CACHE" --dry-run
+          else
+            uv run personal-calendar-sync --all --months "$MONTHS" --load-schedule "$SCHEDULE_CACHE"
           fi

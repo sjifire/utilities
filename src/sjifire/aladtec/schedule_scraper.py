@@ -5,6 +5,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -368,3 +369,75 @@ class AladtecScheduleScraper(AladtecClient):
             end_date = date(end_year, end_month + 1, 1) - timedelta(days=1)
 
         return self.get_schedule_range(today, end_date)
+
+
+def save_schedules(schedules: list[DaySchedule], path: str | Path) -> None:
+    """Save schedule data to a JSON file for caching.
+
+    Args:
+        schedules: List of DaySchedule objects to save
+        path: Path to write JSON file
+    """
+    data = []
+    for day in schedules:
+        day_dict = {
+            "date": day.date.isoformat(),
+            "platoon": day.platoon,
+            "entries": [
+                {
+                    "date": entry.date.isoformat(),
+                    "section": entry.section,
+                    "position": entry.position,
+                    "name": entry.name,
+                    "start_time": entry.start_time,
+                    "end_time": entry.end_time,
+                    "platoon": entry.platoon,
+                }
+                for entry in day.entries
+            ],
+        }
+        data.append(day_dict)
+
+    Path(path).write_text(json.dumps(data, indent=2))
+    logger.info(f"Saved {len(schedules)} days of schedule data to {path}")
+
+
+def load_schedules(path: str | Path) -> list[DaySchedule]:
+    """Load schedule data from a JSON cache file.
+
+    Args:
+        path: Path to JSON file
+
+    Returns:
+        List of DaySchedule objects
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        json.JSONDecodeError: If file is invalid JSON
+    """
+    content = Path(path).read_text()
+    data = json.loads(content)
+
+    schedules = []
+    for day_dict in data:
+        entries = [
+            ScheduleEntry(
+                date=datetime.strptime(e["date"], "%Y-%m-%d").date(),
+                section=e["section"],
+                position=e["position"],
+                name=e["name"],
+                start_time=e["start_time"],
+                end_time=e["end_time"],
+                platoon=e.get("platoon", ""),
+            )
+            for e in day_dict["entries"]
+        ]
+        day = DaySchedule(
+            date=datetime.strptime(day_dict["date"], "%Y-%m-%d").date(),
+            platoon=day_dict["platoon"],
+            entries=entries,
+        )
+        schedules.append(day)
+
+    logger.info(f"Loaded {len(schedules)} days of schedule data from {path}")
+    return schedules

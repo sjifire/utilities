@@ -20,7 +20,11 @@ from datetime import date
 from dateutil import parser as dateparser
 
 from sjifire.aladtec.member_scraper import AladtecMemberScraper
-from sjifire.aladtec.schedule_scraper import AladtecScheduleScraper, ScheduleEntry
+from sjifire.aladtec.schedule_scraper import (
+    AladtecScheduleScraper,
+    ScheduleEntry,
+    load_schedules,
+)
 from sjifire.calendar.personal_sync import PersonalCalendarSync
 
 logging.basicConfig(
@@ -114,8 +118,18 @@ def main() -> int:
     parser.add_argument(
         "--month",
         type=str,
-        required=True,
         help="Month to sync (e.g., 'Feb 2026', '2026-02')",
+    )
+    parser.add_argument(
+        "--months",
+        type=int,
+        help="Sync the next N months starting from today",
+    )
+    parser.add_argument(
+        "--load-schedule",
+        type=str,
+        metavar="PATH",
+        help="Load schedule from JSON file (from duty-calendar-sync --save-schedule)",
     )
     parser.add_argument(
         "--user",
@@ -155,13 +169,32 @@ def main() -> int:
     if args.user and args.all:
         parser.error("Cannot use both --user and --all")
 
-    # Parse month
-    try:
-        year, month = parse_month(args.month)
-        start_date, end_date = get_month_date_range(year, month)
-    except ValueError as e:
-        logger.error(str(e))
-        return 1
+    if not args.month and not args.months:
+        parser.error("Either --month or --months is required")
+
+    if args.month and args.months:
+        parser.error("Cannot use both --month and --months")
+
+    # Calculate date range
+    if args.month:
+        try:
+            year, month = parse_month(args.month)
+            start_date, end_date = get_month_date_range(year, month)
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
+    else:
+        # --months: sync next N months from today
+        today = date.today()
+        start_date = date(today.year, today.month, 1)
+
+        end_month = today.month + args.months - 1
+        end_year = today.year
+        while end_month > 12:
+            end_month -= 12
+            end_year += 1
+        last_day_num = calendar.monthrange(end_year, end_month)[1]
+        end_date = date(end_year, end_month, last_day_num)
 
     if args.dry_run:
         logger.info("DRY RUN - no changes will be made")
@@ -222,17 +255,28 @@ def main() -> int:
 
     logger.info(f"Found {len(members)} members with emails")
 
-    # Step 2: Fetch schedule from Aladtec
-    logger.info("Fetching schedule from Aladtec...")
-
-    with AladtecScheduleScraper() as scraper:
-        if not scraper.login():
-            logger.error("Failed to login to Aladtec")
+    # Step 2: Get schedule data (from cache or Aladtec)
+    if args.load_schedule:
+        logger.info(f"Loading schedule from {args.load_schedule}...")
+        try:
+            schedules = load_schedules(args.load_schedule)
+            # Filter to our date range (cache may have more data)
+            schedules = [s for s in schedules if start_date <= s.date <= end_date]
+        except FileNotFoundError:
+            logger.error(f"Schedule file not found: {args.load_schedule}")
             return 1
+        except Exception as e:
+            logger.error(f"Failed to load schedule: {e}")
+            return 1
+    else:
+        logger.info("Fetching schedule from Aladtec...")
+        with AladtecScheduleScraper() as scraper:
+            if not scraper.login():
+                logger.error("Failed to login to Aladtec")
+                return 1
+            schedules = scraper.get_schedule_range(start_date, end_date)
 
-        schedules = scraper.get_schedule_range(start_date, end_date)
-
-    logger.info(f"Fetched {len(schedules)} days with schedule data")
+    logger.info(f"Got {len(schedules)} days with schedule data")
 
     # Step 3: Group entries by user
     entries_by_email: dict[str, list[ScheduleEntry]] = {}

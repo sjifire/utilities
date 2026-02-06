@@ -17,7 +17,7 @@ from datetime import date
 
 from dateutil import parser as dateparser
 
-from sjifire.aladtec.schedule_scraper import AladtecScheduleScraper
+from sjifire.aladtec.schedule_scraper import AladtecScheduleScraper, save_schedules
 from sjifire.calendar import DutyCalendarSync
 
 logging.basicConfig(
@@ -114,6 +114,12 @@ def main() -> int:
         "--verbose",
         action="store_true",
         help="Enable verbose logging",
+    )
+    parser.add_argument(
+        "--save-schedule",
+        type=str,
+        metavar="PATH",
+        help="Save fetched schedule to JSON file (for personal-calendar-sync --load-schedule)",
     )
 
     args = parser.parse_args()
@@ -229,6 +235,10 @@ def main() -> int:
         schedules = []
 
     logger.info(f"Retrieved {len(schedules)} days of schedule data")
+
+    # Save schedule for personal-calendar-sync to reuse
+    if args.save_schedule:
+        save_schedules(schedules, args.save_schedule)
 
     # Step 2: Sync to calendar
     logger.info(f"Syncing to calendar: {args.mailbox}")
