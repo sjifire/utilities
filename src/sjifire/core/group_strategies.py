@@ -26,37 +26,30 @@ class GroupMember(Protocol):
     @property
     def email(self) -> str | None:
         """Email address for matching/sync."""
-        ...
 
     @property
     def display_name(self) -> str | None:
         """Display name for logging."""
-        ...
 
     @property
     def positions(self) -> set[str] | list[str]:
         """Scheduling positions (Firefighter, Support, etc.)."""
-        ...
 
     @property
     def schedules(self) -> set[str] | list[str]:
         """Schedule visibility (State Mobe, etc.)."""
-        ...
 
     @property
     def evip(self) -> str | None:
         """EVIP expiration date (indicates Apparatus Operator certification)."""
-        ...
 
     @property
     def work_group(self) -> str | None:
         """Work group (Volunteer, Career, etc.)."""
-        ...
 
     @property
     def station_number(self) -> str | None:
         """Station number extracted from station assignment/office location."""
-        ...
 
 
 @dataclass
