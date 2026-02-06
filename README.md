@@ -126,6 +126,35 @@ uv run ispyfire-admin activate user@sjifire.org   # Reactivate and send password
 uv run ispyfire-admin deactivate user@sjifire.org # Logout devices and deactivate
 ```
 
+### Calendar Sync
+
+**Shared calendar sync (On Duty events to shared mailbox):**
+```bash
+uv run calendar-sync --mailbox on-duty@sjifire.org --month "Feb 2026" --dry-run
+uv run calendar-sync --mailbox on-duty@sjifire.org --month "Feb 2026"
+```
+
+The sync:
+- Fetches schedule data from Aladtec for the specified month
+- Creates all-day "On Duty" events for each filled position
+- Clears existing events in the target date range before creating new ones
+- Events include position, section, and Aladtec reference link
+
+**Personal calendar sync (individual schedules to user calendars):**
+```bash
+uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --dry-run
+uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026"
+uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --force
+```
+
+The sync:
+- Creates an "Aladtec Schedule" calendar in the user's mailbox (if not exists)
+- Stores the calendar ID in extensionAttribute5 for reuse
+- Creates events matching actual shift times (supports partial shifts)
+- Compares existing events to avoid unnecessary updates
+- Use `--force` to update all events regardless of content changes
+- Events marked as auto-synced (changes will be overwritten)
+
 ### Aladtec Tools
 
 **List members:**
@@ -311,14 +340,20 @@ src/sjifire/
 │   ├── client.py      # API client for iSpyFire
 │   ├── models.py      # ISpyFirePerson data model
 │   └── sync.py        # Sync logic and comparison
+├── calendar/          # Calendar sync
+│   ├── shared_sync.py     # Shared calendar sync (On Duty events)
+│   └── personal_sync.py   # Personal calendar sync
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
-    ├── create_security_groups.py
+    ├── calendar_subscriptions.py    # Calendar subscription management
+    ├── calendar_sync.py             # Shared calendar sync CLI
+    ├── compare_group_memberships.py # Compare group memberships
     ├── entra_audit.py
-    ├── entra_group_sync.py  # M365 group sync CLI
-    ├── entra_user_sync.py   # User sync CLI
-    ├── ispyfire_admin.py    # iSpyFire admin CLI (activate/deactivate)
-    ├── ispyfire_sync.py     # iSpyFire sync CLI
-    └── mail_group_sync.py   # Mail-enabled security group sync CLI
+    ├── entra_user_sync.py           # User sync CLI
+    ├── ispyfire_admin.py            # iSpyFire admin CLI
+    ├── ispyfire_sync.py             # iSpyFire sync CLI
+    ├── m365_group_scan.py           # M365 group scanning
+    ├── ms_group_sync.py             # M365/Exchange group sync CLI
+    └── personal_calendar_sync.py    # Personal calendar sync CLI
 ```
