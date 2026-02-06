@@ -251,6 +251,44 @@ class UnifiedGroupSyncManager:
             logger.warning(f"Failed to get group members after retries: {e}")
             return set()
 
+    def _enforce_m365_group_calendar_settings(
+        self, mail_nickname: str, dry_run: bool = False
+    ) -> bool:
+        """Ensure M365 group has correct Exchange settings for calendar visibility.
+
+        Sets AutoSubscribeNewMembers=True so the group calendar automatically
+        appears in members' Outlook clients (desktop, mobile, web).
+
+        Args:
+            mail_nickname: The group's mail nickname (e.g., "all-personnel")
+            dry_run: If True, only log what would be done
+
+        Returns:
+            True if settings were verified/applied successfully
+        """
+        email = f"{mail_nickname}@{self.domain}"
+
+        if dry_run:
+            logger.info(f"Would enforce calendar settings for {email}")
+            return True
+
+        try:
+            # Use Exchange PowerShell to set the group settings
+            result = self.exchange_client.run_command(
+                f"Set-UnifiedGroup -Identity '{email}' "
+                f"-AutoSubscribeNewMembers:$true "
+                f"-AlwaysSubscribeMembersToCalendarEvents:$true"
+            )
+            if result.returncode == 0:
+                logger.info(f"Enforced calendar settings for {email}")
+                return True
+            else:
+                logger.warning(f"Failed to set calendar settings for {email}: {result.stderr}")
+                return False
+        except Exception as e:
+            logger.warning(f"Error enforcing calendar settings for {email}: {e}")
+            return False
+
     async def detect_group_type(self, email: str, mail_nickname: str) -> GroupType:
         """Detect if a group exists and what type it is.
 
@@ -512,6 +550,11 @@ class UnifiedGroupSyncManager:
                         removed.append(name)
                     else:
                         errors.append(f"Failed to remove {name}")
+
+        # Enforce calendar visibility settings for groups that need it
+        # (M365 group calendars don't auto-appear in Outlook without these)
+        if config.enforce_calendar_visibility:
+            self._enforce_m365_group_calendar_settings(mail_nickname, dry_run)
 
         return GroupSyncResult(
             group_name=display_name,

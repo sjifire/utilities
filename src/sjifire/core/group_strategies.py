@@ -67,6 +67,7 @@ class GroupConfig:
     mail_nickname: str  # e.g., "station31", "ff"
     description: str | None = None
     aliases: list[str] | None = None  # Additional email aliases (without domain)
+    enforce_calendar_visibility: bool = False  # For M365 groups: ensure AutoSubscribeNewMembers
 
 
 class GroupStrategy(ABC):
@@ -481,6 +482,7 @@ class AllPersonnelStrategy(GroupStrategy):
             display_name="All Personnel",
             mail_nickname="all-personnel",
             description="All personnel - shared calendar and email distribution.",
+            enforce_calendar_visibility=True,  # Group calendar must appear in Outlook
         )
 
 
