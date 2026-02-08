@@ -37,6 +37,7 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - `extensionAttribute2`: EVIP expiration date
 - `extensionAttribute3`: Positions (comma-delimited scheduling positions)
 - `extensionAttribute4`: Schedules (comma-delimited schedule visibility from Aladtec)
+- `extensionAttribute5`: Personal calendar ID (for personal Aladtec schedule sync)
 
 ### iSpyFire
 - Incident response and paging system
@@ -44,6 +45,22 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - Users have `isActive` and `isLoginActive` flags (both must match)
 - `isUtility` flag marks service/apparatus accounts (skip from auto-removal)
 - Device logout requires two steps: logout push notifications, then remove devices
+
+### Calendar Sync
+Two types of calendar sync from Aladtec schedules to Outlook:
+
+**Duty Calendar Sync** (`duty-calendar-sync`):
+- Syncs "On Duty" events to a shared mailbox/group calendar
+- Creates all-day events for each filled position per day
+- Overwrites all events in the target date range
+
+**Personal Calendar Sync** (`personal-calendar-sync`):
+- Syncs individual's Aladtec shifts to their personal Outlook calendar
+- Creates events matching shift start/end times (supports partial shifts like 19:00-20:00)
+- Uses extensionAttribute5 to store "Aladtec Schedule" calendar ID per user
+- Compares events by key: `{date}|{subject}|{start_time}|{end_time}`
+- Normalizes body content for comparison (Exchange converts plain text to HTML)
+- Supports `--force` flag to update all events regardless of content changes
 
 ### Rank Hierarchy
 Ranks are extracted from Title or Employee Type fields:
@@ -78,6 +95,10 @@ src/sjifire/
 │   ├── client.py      # API client with tenacity retry for rate limiting
 │   ├── models.py      # ISpyFirePerson dataclass
 │   └── sync.py        # Sync logic, comparison, filtering
+├── calendar/
+│   ├── models.py          # OnDutyEvent, SyncResult dataclasses
+│   ├── duty_sync.py       # DutyCalendarSync for shared mailbox (On Duty events)
+│   └── personal_sync.py   # PersonalCalendarSync for user calendars
 └── scripts/           # CLI entry points
 ```
 
@@ -174,6 +195,19 @@ uv run ispyfire-admin activate user@sjifire.org
 uv run ispyfire-admin deactivate user@sjifire.org
 ```
 
+### Duty calendar sync (On Duty events)
+```bash
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026" --dry-run
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026"
+```
+
+### Personal calendar sync (individual schedules)
+```bash
+uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --dry-run
+uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026"
+uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --force  # Update all events
+```
+
 ### Group sync details
 The `ms-group-sync` command uses Entra ID as the source of truth for membership data:
 - **Data source**: Entra ID users (synced from Aladtec via `entra-user-sync`)
@@ -220,5 +254,6 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ci.yml`: Lint + test on PR/push
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Sync every 30 minutes (Entra to iSpyFire), uploads backup artifacts
+- `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
 
 All workflows authenticate via OIDC and fetch secrets from Key Vault (no GitHub secrets required).

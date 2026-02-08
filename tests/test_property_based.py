@@ -5,8 +5,8 @@ import string
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 from sjifire.aladtec.models import Member
-from sjifire.aladtec.scraper import AladtecScraper
 from sjifire.entra.users import EntraUserManager
 
 # Custom strategies
@@ -55,7 +55,7 @@ class TestCSVRowParsingProperties:
     @given(first=valid_name, last=valid_name, email=valid_email)
     @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_parse_csv_row_extracts_names(self, mock_env_vars, first, last, email):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {"first name": first, "last name": last, "email": email}
         member = scraper._parse_csv_row(row)
 
@@ -67,7 +67,7 @@ class TestCSVRowParsingProperties:
     @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_parse_csv_row_handles_name_column_comma_format(self, mock_env_vars, first, last):
         assume(first.strip() and last.strip())  # Non-empty after strip
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {"name": f"{last}, {first}"}
         member = scraper._parse_csv_row(row)
 
@@ -80,7 +80,7 @@ class TestCSVRowParsingProperties:
     def test_parse_csv_row_handles_name_column_space_format(self, mock_env_vars, first, last):
         assume(" " not in first and " " not in last)  # Single-word names for this test
         assume(first.strip() and last.strip())
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {"name": f"{first} {last}"}
         member = scraper._parse_csv_row(row)
 
@@ -95,7 +95,7 @@ class TestCSVRowParsingProperties:
     )
     @settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_parse_csv_row_normalizes_column_names(self, mock_env_vars, first, last, col_name):
-        scraper = AladtecScraper()
+        scraper = AladtecMemberScraper()
         row = {col_name: first, "last name": last}
         member = scraper._parse_csv_row(row)
 

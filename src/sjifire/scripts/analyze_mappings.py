@@ -6,7 +6,7 @@ import logging
 import re
 from collections import defaultdict
 
-from sjifire.aladtec.scraper import AladtecScraper
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 from sjifire.entra.groups import EntraGroup, EntraGroupManager, GroupType
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -80,7 +80,7 @@ async def analyze_mappings(verbose: bool = False) -> None:
     logger.info("Fetching Aladtec members...")
 
     try:
-        with AladtecScraper() as scraper:
+        with AladtecMemberScraper() as scraper:
             if not scraper.login():
                 logger.error("Failed to log in to Aladtec")
                 return

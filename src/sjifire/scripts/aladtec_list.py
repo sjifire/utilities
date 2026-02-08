@@ -7,7 +7,7 @@ import logging
 import sys
 from dataclasses import asdict
 
-from sjifire.aladtec.scraper import AladtecScraper
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ def run_list(output_format: str = "table") -> int:
     logger.info("Fetching members from Aladtec...")
 
     try:
-        with AladtecScraper() as scraper:
+        with AladtecMemberScraper() as scraper:
             if not scraper.login():
                 logger.error("Failed to log in to Aladtec")
                 return 1
