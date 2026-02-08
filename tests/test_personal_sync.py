@@ -90,7 +90,7 @@ class TestMakeEventBody:
             end_time="18:00",
         )
         body = make_event_body(entry)
-        assert "imported automatically from Aladtec" in body
+        assert "automatically imported from Aladtec" in body
         assert "changes will be overwritten" in body
 
 
