@@ -29,6 +29,13 @@ CALENDAR_NAME = "Aladtec Schedule"
 # Entra extension attribute to store calendar ID (survives renames)
 CALENDAR_ID_ATTRIBUTE = "extension_attribute5"
 
+# Category for Aladtec events (when using primary calendar)
+ALADTEC_CATEGORY = "Aladtec"
+
+# Test users who get events in their primary Calendar instead of separate calendar
+# Set to None to disable this feature, or add emails to test
+PRIMARY_CALENDAR_TEST_USERS: set[str] | None = {"agreene@sjifire.org", "schadwick@sjifire.org"}
+
 # Timezone for all operations
 TIMEZONE_NAME = "America/Los_Angeles"
 TIMEZONE = ZoneInfo(TIMEZONE_NAME)
@@ -79,7 +86,7 @@ def make_event_body(entry: ScheduleEntry) -> str:
     return f"""Position: {entry.position}
 Section: {entry.section}
 
-This event is imported automatically from Aladtec. Any changes will be overwritten.
+This event is automatically imported from Aladtec. Any changes will be overwritten.
 
 Modify your schedule: {aladtec_url}"""
 
@@ -112,6 +119,24 @@ class PersonalCalendarSync:
         )
         self.client = GraphServiceClient(credentials=credential)
         self._calendar_cache: dict[str, str] = {}  # user_email -> calendar_id
+        self._uses_primary_calendar: set[str] = set()  # users using primary calendar
+
+    def _should_use_primary_calendar(self, user_email: str) -> bool:
+        """Check if user should use primary calendar instead of separate Aladtec calendar."""
+        if PRIMARY_CALENDAR_TEST_USERS is None:
+            return False
+        return user_email.lower() in {u.lower() for u in PRIMARY_CALENDAR_TEST_USERS}
+
+    async def _get_primary_calendar_id(self, user_email: str) -> str | None:
+        """Get the user's primary (default) calendar ID."""
+        try:
+            # The /calendar endpoint returns the default calendar
+            calendar = await self.client.users.by_user_id(user_email).calendar.get()
+            if calendar and calendar.id:
+                return calendar.id
+        except Exception as e:
+            logger.error(f"Failed to get primary calendar for {user_email}: {e}")
+        return None
 
     async def _get_stored_calendar_id(self, user_email: str) -> str | None:
         """Get stored calendar ID from user's Entra extension attribute.
@@ -188,6 +213,10 @@ class PersonalCalendarSync:
     async def get_or_create_calendar(self, user_email: str) -> str | None:
         """Get or create the Aladtec Schedule calendar for a user.
 
+        For test users in PRIMARY_CALENDAR_TEST_USERS, returns the primary calendar
+        and events will be tagged with the Aladtec category.
+
+        For other users, creates/finds a dedicated "Aladtec Schedule" calendar.
         Uses Entra extension attribute to store calendar ID, which survives
         renames. Falls back to name matching for backwards compatibility.
 
@@ -197,6 +226,17 @@ class PersonalCalendarSync:
         # Check cache first
         if user_email in self._calendar_cache:
             return self._calendar_cache[user_email]
+
+        # Check if user should use primary calendar
+        if self._should_use_primary_calendar(user_email):
+            calendar_id = await self._get_primary_calendar_id(user_email)
+            if calendar_id:
+                self._calendar_cache[user_email] = calendar_id
+                self._uses_primary_calendar.add(user_email.lower())
+                logger.info(f"Using primary calendar for {user_email} (test mode)")
+                return calendar_id
+            else:
+                logger.warning(f"Failed to get primary calendar for {user_email}, falling back")
 
         try:
             # First, check for stored calendar ID in Entra
@@ -257,6 +297,9 @@ class PersonalCalendarSync:
     ) -> dict[str, ExistingEvent]:
         """Get existing Aladtec events in date range.
 
+        When using primary calendar, only returns events with the Aladtec category.
+        When using dedicated Aladtec calendar, returns all events.
+
         Returns:
             Dict mapping event_key to ExistingEvent (id and body)
         """
@@ -264,11 +307,18 @@ class PersonalCalendarSync:
         # because we need to match events by key for sync logic
         _ = start_date, end_date  # Used for filtering below
 
+        # If using primary calendar, filter by Aladtec category
+        uses_primary = user_email.lower() in self._uses_primary_calendar
+        filter_query = None
+        if uses_primary:
+            filter_query = f"categories/any(c:c eq '{ALADTEC_CATEGORY}')"
+
         try:
-            # Get all events from this calendar (it's dedicated to Aladtec)
+            # Get events from this calendar
             query_params = EventsRequestBuilder.EventsRequestBuilderGetQueryParameters(
                 top=500,
-                select=["id", "subject", "start", "end", "body"],
+                select=["id", "subject", "start", "end", "body", "categories"],
+                filter=filter_query,
             )
             config = EventsRequestBuilder.EventsRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params,
@@ -378,6 +428,11 @@ class PersonalCalendarSync:
         start_dt = entry.start_datetime
         end_dt = entry.end_datetime
 
+        # Add category if using primary calendar (to identify Aladtec events)
+        categories = None
+        if user_email.lower() in self._uses_primary_calendar:
+            categories = [ALADTEC_CATEGORY]
+
         event = Event(
             subject=make_event_subject(entry),
             body=ItemBody(
@@ -393,6 +448,7 @@ class PersonalCalendarSync:
                 time_zone=TIMEZONE_NAME,
             ),
             is_reminder_on=False,
+            categories=categories,
         )
 
         try:
@@ -417,6 +473,11 @@ class PersonalCalendarSync:
         start_dt = entry.start_datetime
         end_dt = entry.end_datetime
 
+        # Add category if using primary calendar (to identify Aladtec events)
+        categories = None
+        if user_email.lower() in self._uses_primary_calendar:
+            categories = [ALADTEC_CATEGORY]
+
         event = Event(
             subject=make_event_subject(entry),
             body=ItemBody(
@@ -432,6 +493,7 @@ class PersonalCalendarSync:
                 time_zone=TIMEZONE_NAME,
             ),
             is_reminder_on=False,
+            categories=categories,
         )
 
         try:
