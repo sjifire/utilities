@@ -909,35 +909,64 @@ class TestAllPersonnelStrategy:
         """Strategy name should be 'all-personnel'."""
         assert self.strategy.name == "all-personnel"
 
-    def test_membership_criteria_test_mode(self):
-        """In test mode, criteria should mention test users."""
+    def test_membership_criteria(self):
+        """Membership criteria should describe staff or volunteers with operational positions."""
         criteria = self.strategy.membership_criteria
-        assert "Test mode" in criteria or "agreene@sjifire.org" in criteria
+        assert "Aladtec" in criteria
+        assert "staff" in criteria.lower() or "operational" in criteria.lower()
 
-    def test_get_members_test_mode_only_specific_emails(self):
-        """In test mode, only specific test emails should be included."""
+    def test_partial_sync_is_true(self):
+        """AllPersonnelStrategy should have partial_sync=True."""
+        assert self.strategy.partial_sync is True
+
+    def test_get_members_staff_included(self):
+        """Staff members (work_group != Volunteer) should be included."""
         members = [
-            make_member(member_id="1", email="agreene@sjifire.org", positions=["Firefighter"]),
-            make_member(member_id="2", email="other@sjifire.org", positions=["Firefighter"]),
+            make_member(member_id="1", email="staff@sjifire.org", work_group="Career"),
+            make_member(member_id="2", email="volunteer@sjifire.org", work_group="Volunteer"),
         ]
         result = self.strategy.get_members(members)
         assert "all-personnel" in result
         assert len(result["all-personnel"]) == 1
-        assert result["all-personnel"][0].email == "agreene@sjifire.org"
+        assert result["all-personnel"][0].email == "staff@sjifire.org"
 
-    def test_get_members_test_mode_case_insensitive(self):
-        """Test mode email matching should be case-insensitive."""
+    def test_get_members_volunteer_with_operational_included(self):
+        """Volunteers with operational positions should be included."""
         members = [
-            make_member(member_id="1", email="AGreene@sjifire.org", positions=["Firefighter"]),
+            make_member(
+                member_id="1",
+                email="volff@sjifire.org",
+                work_group="Volunteer",
+                positions=["Firefighter"],
+            ),
         ]
         result = self.strategy.get_members(members)
+        assert "all-personnel" in result
         assert len(result["all-personnel"]) == 1
 
-    def test_get_members_test_mode_no_match(self):
-        """In test mode, non-test users should not be included."""
+    def test_get_members_volunteer_without_operational_excluded(self):
+        """Volunteers without operational positions should be excluded."""
         members = [
-            make_member(member_id="1", email="other@sjifire.org", positions=["Firefighter"]),
-            make_member(member_id="2", email="another@sjifire.org", positions=["Support"]),
+            make_member(
+                member_id="1",
+                email="admin@sjifire.org",
+                work_group="Volunteer",
+                positions=["Administrative"],
+            ),
+        ]
+        result = self.strategy.get_members(members)
+        assert "all-personnel" in result
+        assert len(result["all-personnel"]) == 0
+
+    def test_get_members_no_aladtec_record_excluded(self):
+        """Members without Aladtec record (work_group=None) should be excluded."""
+        members = [
+            make_member(
+                member_id="1",
+                email="guest@sjifire.org",
+                work_group=None,
+                positions=["Firefighter"],
+            ),
         ]
         result = self.strategy.get_members(members)
         assert "all-personnel" in result
@@ -1004,31 +1033,39 @@ class TestAllPersonnelStrategyInternalMethods:
         mock = MockMember()
         assert self.strategy._is_active(mock) is True
 
-    # _is_employee tests
+    # _has_aladtec_record tests
 
-    def test_is_employee_returns_true_for_employee_entra_user(self):
-        """_is_employee returns True for EntraUser with employee_id."""
-        user = make_entra_user(employee_id="EMP001")
-        assert self.strategy._is_employee(user) is True
+    def test_has_aladtec_record_returns_true_when_work_group_set(self):
+        """_has_aladtec_record returns True when work_group is set."""
+        member = make_member(work_group="Career")
+        assert self.strategy._has_aladtec_record(member) is True
 
-    def test_is_employee_returns_false_for_non_employee_entra_user(self):
-        """_is_employee returns False for EntraUser without employee_id."""
-        user = EntraUser(
-            id="user-1",
-            display_name="Guest User",
-            email="guest@sjifire.org",
-            upn="guest@sjifire.org",
-            first_name="Guest",
-            last_name="User",
-            employee_id=None,
-            account_enabled=True,
-        )
-        assert self.strategy._is_employee(user) is False
+    def test_has_aladtec_record_returns_true_for_volunteer(self):
+        """_has_aladtec_record returns True for Volunteer work_group."""
+        member = make_member(work_group="Volunteer")
+        assert self.strategy._has_aladtec_record(member) is True
 
-    def test_is_employee_returns_true_for_member_without_is_employee(self):
-        """_is_employee defaults to True for objects without is_employee property."""
-        member = make_member()  # Aladtec Member doesn't have is_employee
-        assert self.strategy._is_employee(member) is True
+    def test_has_aladtec_record_returns_false_when_work_group_none(self):
+        """_has_aladtec_record returns False when work_group is None."""
+        member = make_member(work_group=None)
+        assert self.strategy._has_aladtec_record(member) is False
+
+    # _is_staff tests
+
+    def test_is_staff_returns_true_for_career(self):
+        """_is_staff returns True for Career work_group."""
+        member = make_member(work_group="Career")
+        assert self.strategy._is_staff(member) is True
+
+    def test_is_staff_returns_false_for_volunteer(self):
+        """_is_staff returns False for Volunteer work_group."""
+        member = make_member(work_group="Volunteer")
+        assert self.strategy._is_staff(member) is False
+
+    def test_is_staff_returns_true_for_any_non_volunteer(self):
+        """_is_staff returns True for any non-Volunteer work_group."""
+        member = make_member(work_group="Admin")
+        assert self.strategy._is_staff(member) is True
 
     # _has_operational_position tests
 
@@ -1096,6 +1133,86 @@ class TestAllPersonnelStrategyInternalMethods:
         """_has_operational_position returns False for EntraUser with non-operational."""
         user = make_entra_user(positions="Administrative")
         assert self.strategy._has_operational_position(user) is False
+
+
+# =============================================================================
+# Test AllPersonnelStrategy Membership Report
+# =============================================================================
+
+
+class TestAllPersonnelStrategyMembershipReport:
+    """Tests for AllPersonnelStrategy.get_membership_report method."""
+
+    def setup_method(self):
+        """Create strategy instance for each test."""
+        self.strategy = AllPersonnelStrategy()
+
+    def test_report_with_no_manual_members(self):
+        """Report should show all members as auto-managed when no manual additions."""
+        target = [
+            make_entra_user(user_id="1", email="a@test.org", employee_type="Career"),
+            make_entra_user(user_id="2", email="b@test.org", employee_type="Career"),
+        ]
+        current = target.copy()
+
+        report = self.strategy.get_membership_report(current, target)
+
+        assert report is not None
+        assert "2 total members" in report
+        assert "2 from Aladtec" in report
+        assert "0 manually added" in report
+
+    def test_report_with_manual_members(self):
+        """Report should identify manually added non-Aladtec members."""
+        target = [
+            make_entra_user(user_id="1", email="a@test.org", employee_type="Career"),
+        ]
+        manual_member = make_entra_user(
+            user_id="2",
+            display_name="Manual User",
+            email="manual@test.org",
+            employee_type=None,  # No Aladtec record
+        )
+        current = [*target, manual_member]
+
+        report = self.strategy.get_membership_report(current, target)
+
+        assert report is not None
+        assert "2 total members" in report
+        assert "1 from Aladtec" in report
+        assert "1 manually added" in report
+        assert "Manual User" in report
+        assert "manual@test.org" in report
+
+    def test_report_lists_manual_members_sorted(self):
+        """Report should list manual members sorted by display name."""
+        target = []
+        manual_members = [
+            make_entra_user(
+                user_id="1", display_name="Zoe", email="z@test.org", employee_type=None
+            ),
+            make_entra_user(
+                user_id="2", display_name="Alice", email="a@test.org", employee_type=None
+            ),
+            make_entra_user(
+                user_id="3", display_name="Bob", email="b@test.org", employee_type=None
+            ),
+        ]
+        current = manual_members
+
+        report = self.strategy.get_membership_report(current, target)
+
+        # Check order: Alice, Bob, Zoe
+        alice_pos = report.find("Alice")
+        bob_pos = report.find("Bob")
+        zoe_pos = report.find("Zoe")
+        assert alice_pos < bob_pos < zoe_pos
+
+    def test_base_strategy_returns_none(self):
+        """Base GroupStrategy.get_membership_report should return None."""
+        strategy = StationStrategy()
+        report = strategy.get_membership_report([], [])
+        assert report is None
 
 
 # =============================================================================
@@ -1281,6 +1398,24 @@ class TestGroupStrategyContract:
         strategy = get_strategy(strategy_name)
         assert isinstance(strategy.automation_notice, str)
         assert "automatically managed" in strategy.automation_notice.lower()
+
+    @pytest.mark.parametrize("strategy_name", STRATEGY_NAMES)
+    def test_strategy_has_partial_sync_property(self, strategy_name):
+        """All strategies should have partial_sync property."""
+        strategy = get_strategy(strategy_name)
+        assert isinstance(strategy.partial_sync, bool)
+
+    def test_all_personnel_strategy_has_partial_sync_true(self):
+        """AllPersonnelStrategy should have partial_sync=True."""
+        strategy = get_strategy("all-personnel")
+        assert strategy.partial_sync is True
+
+    def test_other_strategies_have_partial_sync_false(self):
+        """Strategies other than all-personnel should have partial_sync=False."""
+        for name in STRATEGY_NAMES:
+            if name != "all-personnel":
+                strategy = get_strategy(name)
+                assert strategy.partial_sync is False, f"{name} should have partial_sync=False"
 
     @pytest.mark.parametrize("strategy_name", STRATEGY_NAMES)
     def test_strategy_get_members_returns_dict(self, strategy_name):

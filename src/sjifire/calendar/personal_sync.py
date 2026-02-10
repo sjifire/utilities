@@ -34,7 +34,12 @@ ALADTEC_CATEGORY = "Aladtec"
 
 # Test users who get events in their primary Calendar instead of separate calendar
 # Set to None to disable this feature, or add emails to test
-PRIMARY_CALENDAR_TEST_USERS: set[str] | None = {"agreene@sjifire.org", "schadwick@sjifire.org"}
+PRIMARY_CALENDAR_TEST_USERS: set[str] | None = {
+    "agreene@sjifire.org",
+    "schadwick@sjifire.org",
+    "kdodd@sjifire.org",
+    "ivoskamp@sjifire.org",
+}
 
 # Timezone for all operations
 TIMEZONE_NAME = "America/Los_Angeles"

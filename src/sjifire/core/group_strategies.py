@@ -10,7 +10,7 @@ Supports both Aladtec Member and EntraUser objects via the GroupMember protocol.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from sjifire.core.constants import MARINE_POSITIONS, OPERATIONAL_POSITIONS
 
@@ -100,6 +100,18 @@ class GroupStrategy(ABC):
             f"Membership criteria: {self.membership_criteria}"
         )
 
+    @property
+    def partial_sync(self) -> bool:
+        """Whether to preserve members not in source data during sync.
+
+        When True, members not found in the source data (e.g., non-Aladtec members)
+        will be preserved in the group rather than removed. This allows mixed
+        manual/automatic membership management.
+
+        Default is False (full sync - removes members not in source).
+        """
+        return False
+
     @abstractmethod
     def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Determine which members belong in which groups.
@@ -123,6 +135,25 @@ class GroupStrategy(ABC):
         Returns:
             GroupConfig with display name, mail nickname, and description
         """
+
+    def get_membership_report(
+        self,
+        current_members: list[GroupMember],
+        target_members: list[GroupMember],
+    ) -> str | None:
+        """Generate an optional membership report after sync.
+
+        Override this method to provide custom reporting for a strategy.
+        The sync manager will log the returned string if not None.
+
+        Args:
+            current_members: Current members in the group (after sync)
+            target_members: Members that matched the strategy criteria
+
+        Returns:
+            Report string to log, or None to skip reporting
+        """
+        return None
 
 
 class StationStrategy(GroupStrategy):
@@ -412,16 +443,12 @@ class AllPersonnelStrategy(GroupStrategy):
     """Strategy for All Personnel M365 group membership.
 
     Provides shared calendar (On Duty events) and email distribution.
-    Auto-manages operational employees while preserving
+    Auto-manages active employees with operational positions while preserving
     manually-added members (those not in Aladtec).
 
     This group should be created as M365 (not Exchange) to get
     the shared calendar functionality.
     """
-
-    # TEST MODE: Only include specific test users
-    # Set to None to enable full operational employee logic
-    TEST_USERS: ClassVar[set[str] | None] = {"agreene@sjifire.org"}
 
     @property
     def name(self) -> str:
@@ -431,38 +458,43 @@ class AllPersonnelStrategy(GroupStrategy):
     @property
     def membership_criteria(self) -> str:
         """Return membership criteria description."""
-        if self.TEST_USERS is not None:
-            return f"Test mode: {', '.join(sorted(self.TEST_USERS))}"
-        return "Active employees with operational positions (synced from Aladtec)"
+        return "Active Aladtec members: staff or volunteers with operational positions"
+
+    @property
+    def partial_sync(self) -> bool:
+        """Preserve manually-added members who aren't in Aladtec."""
+        return True
 
     def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Return members for the All Personnel group.
 
-        In test mode, only includes specific test users.
-        In full mode, includes all active employees with operational positions.
-        """
-        # TEST MODE: Only include specific test users
-        if self.TEST_USERS is not None:
-            eligible = [m for m in members if m.email and m.email.lower() in self.TEST_USERS]
-            return {"all-personnel": eligible}
+        Only manages users with Aladtec records (work_group set).
+        Users without Aladtec records are ignored (not added or removed).
 
-        # FULL MODE: All active employees with operational positions
+        Includes active Aladtec members who are either:
+        - Staff (work_group != Volunteer), or
+        - Volunteers with operational positions
+        """
         eligible = [
             m
             for m in members
-            if self._is_active(m) and self._is_employee(m) and self._has_operational_position(m)
+            if self._is_active(m)
+            and self._has_aladtec_record(m)
+            and (self._is_staff(m) or self._has_operational_position(m))
         ]
         return {"all-personnel": eligible}
 
     def _is_active(self, member: GroupMember) -> bool:
         """Check if member has an active account."""
-        # EntraUser has is_active property, others may not
         return getattr(member, "is_active", True)
 
-    def _is_employee(self, member: GroupMember) -> bool:
-        """Check if member is an employee (has employee_id)."""
-        # EntraUser has is_employee property, others may not
-        return getattr(member, "is_employee", True)
+    def _has_aladtec_record(self, member: GroupMember) -> bool:
+        """Check if member has an Aladtec record (work_group set from sync)."""
+        return member.work_group is not None
+
+    def _is_staff(self, member: GroupMember) -> bool:
+        """Check if member is staff (not a volunteer)."""
+        return member.work_group != "Volunteer"
 
     def _has_operational_position(self, member: GroupMember) -> bool:
         """Check if member has at least one operational position."""
@@ -477,6 +509,30 @@ class AllPersonnelStrategy(GroupStrategy):
             description="All personnel - shared calendar and email distribution.",
             enforce_calendar_visibility=True,  # Group calendar must appear in Outlook
         )
+
+    def get_membership_report(
+        self,
+        current_members: list[GroupMember],
+        target_members: list[GroupMember],
+    ) -> str | None:
+        """Report on group membership including manually-added members."""
+        target_ids = {getattr(m, "id", None) for m in target_members}
+        preserved = [m for m in current_members if getattr(m, "id", None) not in target_ids]
+        non_aladtec = [m for m in preserved if m.work_group is None]
+
+        lines = [f"Group has {len(current_members)} total members:"]
+        lines.append(f"  {len(target_members)} from Aladtec (auto-managed)")
+        lines.append(f"  {len(non_aladtec)} manually added (preserved)")
+
+        if non_aladtec:
+            lines.append("")
+            lines.append("Manually added members (non-Aladtec):")
+            lines.extend(
+                f"  - {m.display_name} ({m.email})"
+                for m in sorted(non_aladtec, key=lambda x: x.display_name or "")
+            )
+
+        return "\n".join(lines)
 
 
 # Registry of all available strategies

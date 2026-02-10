@@ -251,7 +251,7 @@ class UnifiedGroupSyncManager:
             logger.warning(f"Failed to get group members after retries: {e}")
             return set()
 
-    def _enforce_m365_group_calendar_settings(
+    async def _enforce_m365_group_calendar_settings(
         self, mail_nickname: str, dry_run: bool = False
     ) -> bool:
         """Ensure M365 group has correct Exchange settings for calendar visibility.
@@ -273,18 +273,7 @@ class UnifiedGroupSyncManager:
             return True
 
         try:
-            # Use Exchange PowerShell to set the group settings
-            result = self.exchange_client.run_command(
-                f"Set-UnifiedGroup -Identity '{email}' "
-                f"-AutoSubscribeNewMembers:$true "
-                f"-AlwaysSubscribeMembersToCalendarEvents:$true"
-            )
-            if result.returncode == 0:
-                logger.info(f"Enforced calendar settings for {email}")
-                return True
-            else:
-                logger.warning(f"Failed to set calendar settings for {email}: {result.stderr}")
-                return False
+            return await self.exchange_client.set_unified_group_calendar_settings(email)
         except Exception as e:
             logger.warning(f"Error enforcing calendar settings for {email}: {e}")
             return False
@@ -554,7 +543,33 @@ class UnifiedGroupSyncManager:
         # Enforce calendar visibility settings for groups that need it
         # (M365 group calendars don't auto-appear in Outlook without these)
         if config.enforce_calendar_visibility:
-            self._enforce_m365_group_calendar_settings(mail_nickname, dry_run)
+            await self._enforce_m365_group_calendar_settings(mail_nickname, dry_run)
+
+        # Generate membership report if strategy provides one
+        # Compute final membership state (after adds/removes)
+        # For partial sync, members not in source are preserved (not removed)
+        added_ids = should_be_ids - current_member_ids
+        if partial_sync:
+            # Partial sync: only remove members who are in source_emails
+            actually_removed_ids: set[str] = set()
+            for uid in current_member_ids - should_be_ids:
+                user = users_by_id.get(uid)
+                user_email = user.email.lower() if user and user.email else None
+                if source_emails and user_email and user_email in source_emails:
+                    actually_removed_ids.add(uid)
+            final_member_ids = (current_member_ids | added_ids) - actually_removed_ids
+        else:
+            # Full sync: all non-target members are removed
+            final_member_ids = should_be_ids | (current_member_ids & should_be_ids)
+        final_members = [users_by_id[uid] for uid in final_member_ids if uid in users_by_id]
+
+        report = strategy.get_membership_report(
+            current_members=final_members,
+            target_members=group_members,
+        )
+        if report:
+            for line in report.split("\n"):
+                logger.info(line)
 
         return GroupSyncResult(
             group_name=display_name,
@@ -727,7 +742,6 @@ class UnifiedGroupSyncManager:
         members: list[GroupMember],
         new_group_type: GroupType = GroupType.EXCHANGE,
         dry_run: bool = False,
-        partial_sync: bool = False,
     ) -> FullSyncResult:
         """Sync all groups for a strategy.
 
@@ -736,7 +750,6 @@ class UnifiedGroupSyncManager:
             members: List of members (EntraUser or Aladtec Member)
             new_group_type: Type to use for new groups (default: Exchange)
             dry_run: If True, don't make changes
-            partial_sync: If True, preserve members not in source data
 
         Returns:
             FullSyncResult with all group results
@@ -744,6 +757,9 @@ class UnifiedGroupSyncManager:
         # Get groups to sync from strategy
         strategy = get_strategy(strategy_name)
         groups_to_sync = strategy.get_members(members)
+
+        # Check if this strategy uses partial sync (preserves non-source members)
+        partial_sync = strategy.partial_sync
 
         if not groups_to_sync:
             logger.warning(f"No groups to sync for strategy: {strategy_name}")
@@ -754,13 +770,21 @@ class UnifiedGroupSyncManager:
             f"{', '.join(sorted(groups_to_sync.keys()))}"
         )
 
-        # For partial sync, collect Aladtec-synced member emails only
-        # This preserves non-Aladtec members (svc-automations, board members, etc.)
+        if partial_sync:
+            logger.info("PARTIAL SYNC - preserving non-Aladtec members")
+
+        # For partial sync, collect ALL Aladtec member emails (including disabled)
+        # Members with work_group set are from Aladtec; work_group=None means not from Aladtec
+        # This preserves non-Aladtec members (board members, guests, etc.) while removing
+        # disabled Aladtec members who no longer meet criteria
         source_emails: set[str] | None = None
         if partial_sync:
-            source_emails = {
-                m.email.lower() for m in members if m.email and getattr(m, "is_employee", True)
-            }
+            # Get all users including disabled to properly identify Aladtec members
+            all_users_for_source = await self.entra_users.get_users(include_disabled=True)
+            all_aladtec = [u for u in all_users_for_source if u.work_group is not None]
+            source_emails = {m.email.lower() for m in all_aladtec if m.email}
+            # Whitelist service accounts that should never be removed
+            source_emails.discard("svc-automations@sjifire.org")
 
         results: list[GroupSyncResult] = []
 
@@ -951,7 +975,6 @@ async def run_sync(
     strategies: list[str],
     new_group_type: GroupType = GroupType.EXCHANGE,
     dry_run: bool = False,
-    partial_sync: bool = False,
 ) -> int:
     """Run group sync for specified strategies.
 
@@ -961,7 +984,6 @@ async def run_sync(
         strategies: List of strategy names to run
         new_group_type: Type to use for new groups
         dry_run: If True, don't make changes
-        partial_sync: If True, preserve members not in source data (for mixed groups)
 
     Returns:
         Exit code
@@ -972,9 +994,6 @@ async def run_sync(
 
     if dry_run:
         logger.info("DRY RUN - no changes will be made")
-
-    if partial_sync:
-        logger.info("PARTIAL SYNC - preserving non-Aladtec members")
 
     logger.info(f"Strategies: {', '.join(strategies)}")
     logger.info(f"New group type: {new_group_type.value}")
@@ -1024,7 +1043,6 @@ async def run_sync(
                     members=members,
                     new_group_type=new_group_type,
                     dry_run=dry_run,
-                    partial_sync=partial_sync,
                 )
                 print_result(result, dry_run=dry_run)
                 total_errors += result.total_errors
@@ -1243,11 +1261,6 @@ def main() -> None:
         metavar="EMAIL",
         help="Delete a group by email (auto-detects M365 vs Exchange, backs up first)",
     )
-    parser.add_argument(
-        "--partial-sync",
-        action="store_true",
-        help="Preserve members not in Aladtec (for mixed manual/auto groups like All Personnel)",
-    )
 
     args = parser.parse_args()
 
@@ -1274,7 +1287,6 @@ def main() -> None:
             strategies=strategies,
             new_group_type=new_group_type,
             dry_run=args.dry_run,
-            partial_sync=args.partial_sync,
         )
     )
     sys.exit(exit_code)
