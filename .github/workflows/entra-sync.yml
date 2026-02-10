@@ -124,6 +124,14 @@ jobs:
             uv run ms-group-sync --all
           fi
 
+      - name: Sync email signatures
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            uv run signature-sync --dry-run
+          else
+            uv run signature-sync
+          fi
+
       - name: Upload backup artifacts
         if: ${{ inputs.dry_run != 'true' }}
         uses: actions/upload-artifact@v4
