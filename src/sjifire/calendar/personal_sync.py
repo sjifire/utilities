@@ -532,6 +532,105 @@ class PersonalCalendarSync:
             logger.error(f"Failed to delete event {event_id}: {e}")
             return False
 
+    async def get_aladtec_category_events(
+        self,
+        user_email: str,
+        calendar_id: str,
+    ) -> list[tuple[str, str, str]]:
+        """Get all events with the Aladtec category.
+
+        Returns:
+            List of (event_id, subject, start_date) tuples
+        """
+        try:
+            query_params = EventsRequestBuilder.EventsRequestBuilderGetQueryParameters(
+                top=500,
+                select=["id", "subject", "start"],
+                filter=f"categories/any(c:c eq '{ALADTEC_CATEGORY}')",
+            )
+            config = EventsRequestBuilder.EventsRequestBuilderGetRequestConfiguration(
+                query_parameters=query_params,
+            )
+
+            result = await (
+                self.client.users.by_user_id(user_email)
+                .calendars.by_calendar_id(calendar_id)
+                .events.get(request_configuration=config)
+            )
+
+            events: list[tuple[str, str, str]] = []
+            if result and result.value:
+                for event in result.value:
+                    if event.id:
+                        start_str = ""
+                        if event.start and event.start.date_time:
+                            start_str = event.start.date_time[:10]  # Just the date
+                        events.append((event.id, event.subject or "", start_str))
+
+            return events
+
+        except Exception as e:
+            logger.error(f"Failed to get Aladtec events for {user_email}: {e}")
+            return []
+
+    async def purge_aladtec_events(
+        self,
+        user_email: str,
+        dry_run: bool = False,
+    ) -> tuple[int, int]:
+        """Delete all events with Aladtec category from user's primary calendar.
+
+        Args:
+            user_email: User's email address
+            dry_run: If True, preview without making changes
+
+        Returns:
+            Tuple of (deleted_count, error_count)
+        """
+        # Get primary calendar
+        calendar_id = await self._get_primary_calendar_id(user_email)
+        if not calendar_id:
+            logger.error(f"Could not get primary calendar for {user_email}")
+            return 0, 1
+
+        # Mark as using primary calendar for category filtering
+        self._uses_primary_calendar.add(user_email.lower())
+
+        # Get all Aladtec events
+        events = await self.get_aladtec_category_events(user_email, calendar_id)
+
+        if not events:
+            logger.info(f"No Aladtec events found for {user_email}")
+            return 0, 0
+
+        logger.info(f"Found {len(events)} Aladtec events for {user_email}")
+
+        if dry_run:
+            for _event_id, subject, start_date in events:
+                logger.info(f"  Would delete: {start_date} - {subject}")
+            return len(events), 0
+
+        # Delete events
+        deleted = 0
+        errors = 0
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+
+        async def delete_with_semaphore(event_id: str) -> bool:
+            async with semaphore:
+                return await self.delete_event(user_email, calendar_id, event_id)
+
+        delete_tasks = [delete_with_semaphore(eid) for eid, _, _ in events]
+        results = await asyncio.gather(*delete_tasks)
+
+        for (_event_id, subject, start_date), success in zip(events, results, strict=True):
+            if success:
+                deleted += 1
+                logger.debug(f"  Deleted: {start_date} - {subject}")
+            else:
+                errors += 1
+
+        return deleted, errors
+
     async def sync_user(
         self,
         user_email: str,

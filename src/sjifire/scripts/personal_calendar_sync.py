@@ -157,11 +157,37 @@ def main() -> int:
         action="store_true",
         help="View existing events instead of syncing",
     )
+    parser.add_argument(
+        "--purge",
+        action="store_true",
+        help="Delete all Aladtec-categorized events from user's primary calendar",
+    )
 
     args = parser.parse_args()
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # Handle purge mode first (doesn't need --month)
+    if args.purge:
+        if not args.user:
+            parser.error("--purge requires --user")
+
+        if args.dry_run:
+            logger.info("DRY RUN - no changes will be made")
+
+        logger.info(f"Purging Aladtec events for {args.user}...")
+        sync = PersonalCalendarSync()
+
+        async def do_purge() -> int:
+            deleted, errors = await sync.purge_aladtec_events(args.user, args.dry_run)
+            if args.dry_run:
+                logger.info(f"Would delete {deleted} events")
+            else:
+                logger.info(f"Deleted {deleted} events, {errors} errors")
+            return 1 if errors else 0
+
+        return asyncio.run(do_purge())
 
     if not args.user and not args.all:
         parser.error("Either --user or --all is required")
