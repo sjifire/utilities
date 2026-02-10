@@ -600,9 +600,7 @@ class TestPurgeAladtecEvents:
     @pytest.mark.asyncio
     async def test_returns_error_when_calendar_not_found(self, sync):
         """Returns error when primary calendar cannot be retrieved."""
-        sync.client.users.by_user_id.return_value.calendar.get = AsyncMock(
-            return_value=None
-        )
+        sync.client.users.by_user_id.return_value.calendar.get = AsyncMock(return_value=None)
 
         deleted, errors = await sync.purge_aladtec_events("test@example.com", dry_run=False)
 
