@@ -51,7 +51,7 @@ class TestMakeEventSubject:
 class TestMakeEventBody:
     """Tests for make_event_body function."""
 
-    def test_includes_position(self):
+    def test_includes_position(self, mock_env_vars):
         """Body includes position."""
         entry = ScheduleEntry(
             date=date(2026, 2, 1),
@@ -64,7 +64,7 @@ class TestMakeEventBody:
         body = make_event_body(entry)
         assert "Position: Captain" in body
 
-    def test_includes_section(self):
+    def test_includes_section(self, mock_env_vars):
         """Body includes section."""
         entry = ScheduleEntry(
             date=date(2026, 2, 1),
@@ -77,7 +77,7 @@ class TestMakeEventBody:
         body = make_event_body(entry)
         assert "Section: S31" in body
 
-    def test_includes_auto_import_notice(self):
+    def test_includes_auto_import_notice(self, mock_env_vars):
         """Body includes auto-import notice."""
         entry = ScheduleEntry(
             date=date(2026, 2, 1),
