@@ -18,6 +18,7 @@ from msgraph.generated.users.item.assign_license.assign_license_post_request_bod
 )
 from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
+from sjifire.core.config import get_domain
 from sjifire.core.msgraph_client import get_graph_client
 from sjifire.core.normalize import normalize_name_part
 
@@ -152,13 +153,13 @@ class EntraUser:
 class EntraUserManager:
     """Manage users in Entra ID."""
 
-    def __init__(self, domain: str = "sjifire.org") -> None:
+    def __init__(self, domain: str | None = None) -> None:
         """Initialize the user manager.
 
         Args:
-            domain: Email domain for generating UPNs
+            domain: Email domain for generating UPNs (defaults to org config)
         """
-        self.domain = domain
+        self.domain = domain or get_domain()
         self.client: GraphServiceClient = get_graph_client()
 
     async def get_users(

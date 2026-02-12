@@ -3,6 +3,7 @@
 import logging
 from dataclasses import dataclass, field
 
+from sjifire.core.config import get_domain
 from sjifire.core.constants import MARINE_POSITIONS, OPERATIONAL_POSITIONS
 from sjifire.core.normalize import normalize_email, normalize_name, normalize_phone
 from sjifire.entra.users import EntraUser
@@ -162,29 +163,31 @@ def fields_need_update(user: EntraUser, person: ISpyFirePerson) -> list[str]:
     return differences
 
 
-def is_managed_email(email: str | None, domain: str = "sjifire.org") -> bool:
+def is_managed_email(email: str | None, domain: str | None = None) -> bool:
     """Check if email belongs to the managed domain.
 
     Args:
         email: Email address to check
-        domain: Domain to match (default: sjifire.org)
+        domain: Domain to match (default: from organization config)
 
     Returns:
         True if email ends with the managed domain
     """
     if not email:
         return False
+    if domain is None:
+        domain = get_domain()
     return email.lower().strip().endswith(f"@{domain}")
 
 
 def compare_entra_to_ispyfire(
     entra_users: list[EntraUser],
     ispyfire_people: list[ISpyFirePerson],
-    managed_domain: str = "sjifire.org",
+    managed_domain: str | None = None,
 ) -> SyncComparison:
     """Compare Entra users with iSpyFire people to determine sync actions.
 
-    Only syncs users with emails in the managed domain (default: sjifire.org).
+    Only syncs users with emails in the managed domain (from organization config).
     Users with other email domains (e.g., sanjuanems.org, apparatus accounts)
     are ignored and will not be added, updated, or removed.
 
@@ -201,8 +204,11 @@ def compare_entra_to_ispyfire(
     """
     comparison = SyncComparison(ispyfire_people=ispyfire_people)
 
+    # Use org domain if not specified
+    domain = managed_domain or get_domain()
+
     # Filter to managed domain users first
-    managed_users = [u for u in entra_users if is_managed_email(u.email, managed_domain)]
+    managed_users = [u for u in entra_users if is_managed_email(u.email, domain)]
 
     # Track users skipped due to no operational position
     for user in managed_users:
@@ -213,7 +219,7 @@ def compare_entra_to_ispyfire(
     operational_users = [u for u in managed_users if is_operational(u)]
     comparison.entra_operational = operational_users
 
-    logger.info(f"Found {len(operational_users)} operational @{managed_domain} users in Entra")
+    logger.info(f"Found {len(operational_users)} operational @{domain} users in Entra")
     if comparison.skipped_no_operational:
         logger.info(
             f"Skipped {len(comparison.skipped_no_operational)} users without operational positions"
@@ -223,7 +229,7 @@ def compare_entra_to_ispyfire(
     # Build lookup by email for iSpyFire people (only managed domain)
     ispyfire_by_email: dict[str, ISpyFirePerson] = {}
     for person in ispyfire_people:
-        if person.email and is_managed_email(person.email, managed_domain):
+        if person.email and is_managed_email(person.email, domain):
             ispyfire_by_email[normalize_email(person.email)] = person
 
     # Build lookup by name for ALL iSpyFire people (to detect duplicates with different emails)
@@ -281,7 +287,7 @@ def compare_entra_to_ispyfire(
         if (
             person.id not in matched_ispyfire_ids
             and person.is_active
-            and is_managed_email(person.email, managed_domain)
+            and is_managed_email(person.email, domain)
             and not person.is_utility
         ):
             comparison.to_remove.append(person)

@@ -107,7 +107,7 @@ def main() -> int:
     parser.add_argument(
         "--mailbox",
         required=True,
-        help="Target mailbox/group calendar (e.g., all-personnel@sjifire.org)",
+        help="Target mailbox/group calendar (e.g., all-personnel@example.org)",
     )
     parser.add_argument(
         "-v",

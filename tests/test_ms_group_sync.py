@@ -178,18 +178,18 @@ class TestDetectGroupType:
 
 
 # =============================================================================
-# _add_svc_automations_to_group Tests
+# _add_service_account_to_group Tests
 # =============================================================================
 
 
-class TestAddSvcAutomationsToGroup:
-    """Tests for _add_svc_automations_to_group method."""
+class TestAddServiceAccountToGroup:
+    """Tests for _add_service_account_to_group method."""
 
     @pytest.mark.asyncio
-    async def test_adds_svc_automations_successfully(
+    async def test_adds_service_account_successfully(
         self, manager, mock_entra_users, mock_entra_groups
     ):
-        """Successfully adds svc-automations to group."""
+        """Successfully adds service account to group."""
         mock_svc_user = MagicMock()
         mock_svc_user.id = "svc-user-id"
         mock_svc_user.email = "svc-automations@sjifire.org"
@@ -200,18 +200,18 @@ class TestAddSvcAutomationsToGroup:
         manager._entra_users = mock_entra_users
         manager._entra_groups = mock_entra_groups
 
-        result = await manager._add_svc_automations_to_group("group-id")
+        result = await manager._add_service_account_to_group("group-id")
 
         assert result is True
         mock_entra_groups.add_user_to_group.assert_called_with("group-id", "svc-user-id")
 
     @pytest.mark.asyncio
-    async def test_returns_false_when_svc_user_not_found(self, manager, mock_entra_users):
-        """Returns False when svc-automations user doesn't exist."""
+    async def test_returns_false_when_service_account_not_found(self, manager, mock_entra_users):
+        """Returns False when service account user doesn't exist."""
         mock_entra_users.get_users = AsyncMock(return_value=[])
         manager._entra_users = mock_entra_users
 
-        result = await manager._add_svc_automations_to_group("group-id")
+        result = await manager._add_service_account_to_group("group-id")
 
         assert result is False
 
@@ -230,7 +230,7 @@ class TestAddSvcAutomationsToGroup:
         manager._entra_users = mock_entra_users
         manager._entra_groups = mock_entra_groups
 
-        result = await manager._add_svc_automations_to_group("group-id")
+        result = await manager._add_service_account_to_group("group-id")
 
         assert result is True
         assert mock_entra_groups.add_user_to_group.call_count == 3
@@ -250,7 +250,7 @@ class TestAddSvcAutomationsToGroup:
         manager._entra_users = mock_entra_users
         manager._entra_groups = mock_entra_groups
 
-        result = await manager._add_svc_automations_to_group("group-id")
+        result = await manager._add_service_account_to_group("group-id")
 
         assert result is False
         # Should have retried 5 times (max attempts)
@@ -390,7 +390,7 @@ class TestSyncM365Group:
         mock_entra_groups.get_group_members = AsyncMock(return_value=[])
         mock_entra_groups.add_user_to_group = AsyncMock(return_value=True)
 
-        # Mock svc-automations user for auto-add
+        # Mock service account user for auto-add
         mock_svc = MagicMock()
         mock_svc.id = "svc-id"
         mock_svc.email = "svc-automations@sjifire.org"

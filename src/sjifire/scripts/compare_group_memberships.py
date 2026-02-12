@@ -6,6 +6,7 @@ import logging
 from collections import defaultdict
 
 from sjifire.aladtec.member_scraper import AladtecMemberScraper
+from sjifire.core.config import get_domain
 from sjifire.core.group_strategies import (
     STRATEGY_CLASSES,
     GroupStrategy,
@@ -23,10 +24,11 @@ STRATEGIES: dict[str, type[GroupStrategy]] = STRATEGY_CLASSES
 
 async def compare_memberships(
     strategy_names: list[str],
-    domain: str = "sjifire.org",
+    domain: str | None = None,
     verbose: bool = False,
 ) -> None:
     """Compare expected vs actual group memberships using sync strategies."""
+    domain = domain or get_domain()
     logger.info("=" * 60)
     logger.info("Group Membership Comparison")
     logger.info("=" * 60)

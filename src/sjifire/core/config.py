@@ -32,30 +32,30 @@ def get_graph_credentials() -> tuple[str, str, str]:
     return tenant_id, client_id, client_secret
 
 
-def get_svc_automations_credentials() -> tuple[str, str]:
-    """Get svc-automations service account credentials for delegated auth.
+def get_service_account_credentials() -> tuple[str, str]:
+    """Get service account credentials for delegated auth.
 
+    The service account email is configured in organization.json (service_email field).
     Required for M365 group calendar operations because application
     permissions don't support group calendar writes.
 
     Returns:
-        Tuple of (username, password)
+        Tuple of (email, password)
 
     Raises:
         ValueError: If credentials are not set
     """
     load_dotenv()
 
-    username = os.getenv("SVC_AUTOMATIONS_USERNAME")
-    password = os.getenv("SVC_AUTOMATIONS_PASSWORD")
+    email = os.getenv("SERVICE_EMAIL")
+    password = os.getenv("SERVICE_PASSWORD")
 
-    if not username or not password:
+    if not email or not password:
         raise ValueError(
-            "svc-automations credentials not set. Required: "
-            "SVC_AUTOMATIONS_USERNAME, SVC_AUTOMATIONS_PASSWORD"
+            "Service account credentials not set. Required: SERVICE_EMAIL, SERVICE_PASSWORD"
         )
 
-    return username, password
+    return email, password
 
 
 @dataclass
@@ -80,7 +80,7 @@ def get_exchange_credentials() -> ExchangeCredentials:
     Environment variables:
         EXCHANGE_TENANT_ID: Tenant ID (falls back to MS_GRAPH_TENANT_ID)
         EXCHANGE_CLIENT_ID: App client ID (falls back to MS_GRAPH_CLIENT_ID)
-        EXCHANGE_ORGANIZATION: Organization domain (default: sjifire.org)
+        EXCHANGE_ORGANIZATION: Organization domain (falls back to org config)
         EXCHANGE_CERTIFICATE_THUMBPRINT: Certificate thumbprint (Windows)
         EXCHANGE_CERTIFICATE_PATH: Path to .pfx certificate file
         EXCHANGE_CERTIFICATE_PASSWORD: Password for .pfx file
@@ -103,7 +103,10 @@ def get_exchange_credentials() -> ExchangeCredentials:
             "EXCHANGE_TENANT_ID/MS_GRAPH_TENANT_ID and EXCHANGE_CLIENT_ID/MS_GRAPH_CLIENT_ID"
         )
 
-    organization = os.getenv("EXCHANGE_ORGANIZATION", "sjifire.org")
+    # Default to org domain from config if not set in environment
+    organization = os.getenv("EXCHANGE_ORGANIZATION")
+    if not organization:
+        organization = load_org_config().domain
     thumbprint = os.getenv("EXCHANGE_CERTIFICATE_THUMBPRINT")
     cert_path = os.getenv("EXCHANGE_CERTIFICATE_PATH")
     cert_password = os.getenv("EXCHANGE_CERTIFICATE_PASSWORD")
@@ -143,12 +146,17 @@ class DispatchConfig:
 
 
 @dataclass
-class EntraSyncConfig:
-    """Configuration for Aladtec to Entra ID sync."""
+class OrgConfig:
+    """Organization configuration."""
 
     company_name: str
     domain: str
+    service_email: str
     skip_emails: list[str] = field(default_factory=list)
+
+
+# Alias for backwards compatibility
+EntraSyncConfig = OrgConfig
 
 
 def get_project_root() -> Path:
@@ -190,14 +198,14 @@ def load_dispatch_config(require_mailbox: bool = True) -> DispatchConfig:
     )
 
 
-def load_entra_sync_config() -> EntraSyncConfig:
-    """Load Entra sync configuration from config file.
+def load_org_config() -> OrgConfig:
+    """Load organization configuration from config file.
 
     Returns:
-        EntraSyncConfig with company_name and domain
+        OrgConfig with company_name, domain, and service_email
     """
     project_root = get_project_root()
-    config_path = project_root / "config" / "entra_sync.json"
+    config_path = project_root / "config" / "organization.json"
 
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -205,8 +213,38 @@ def load_entra_sync_config() -> EntraSyncConfig:
     with config_path.open() as f:
         config_data = json.load(f)
 
-    return EntraSyncConfig(
+    return OrgConfig(
         company_name=config_data["company_name"],
-        domain=config_data.get("domain", "sjifire.org"),
+        domain=config_data["domain"],
+        service_email=config_data["service_email"],
         skip_emails=config_data.get("skip_emails", []),
     )
+
+
+# Alias for backwards compatibility
+load_entra_sync_config = load_org_config
+
+
+# Cached config instance
+_org_config: OrgConfig | None = None
+
+
+def get_org_config() -> OrgConfig:
+    """Get cached organization config.
+
+    Loads config once and caches it for subsequent calls.
+    """
+    global _org_config
+    if _org_config is None:
+        _org_config = load_org_config()
+    return _org_config
+
+
+def get_domain() -> str:
+    """Get organization domain from config."""
+    return get_org_config().domain
+
+
+def get_service_email() -> str:
+    """Get service account email from config."""
+    return get_org_config().service_email

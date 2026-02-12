@@ -29,6 +29,7 @@ from tenacity import (
 )
 
 from sjifire.core.backup import backup_entra_groups, backup_mail_groups
+from sjifire.core.config import get_domain, get_service_email
 from sjifire.core.group_strategies import (
     STRATEGY_NAMES,
     GroupMember,
@@ -119,9 +120,9 @@ class UnifiedGroupSyncManager:
     Uses Entra ID users as the source of truth for membership data.
     """
 
-    def __init__(self, domain: str = "sjifire.org") -> None:
+    def __init__(self, domain: str | None = None) -> None:
         """Initialize the sync manager."""
-        self.domain = domain
+        self.domain = domain or get_domain()
         self._entra_groups: EntraGroupManager | None = None
         self._entra_users: EntraUserManager | None = None
         self._exchange_client: ExchangeOnlineClient | None = None
@@ -151,25 +152,25 @@ class UnifiedGroupSyncManager:
     async def get_entra_users(self) -> list[EntraUser]:
         """Get Entra users (cached).
 
-        Returns active users with @sjifire.org email addresses. This filters
+        Returns active users with organization email addresses. This filters
         out guest accounts and non-human accounts while including members
         who may not have employee IDs set.
         """
         if self._entra_users_cache is None:
             all_users = await self.entra_users.get_users(include_disabled=False)
-            # Filter to only sjifire.org domain (excludes guests, external accounts)
+            # Filter to organization domain (excludes guests, external accounts)
             self._entra_users_cache = [
                 u for u in all_users if u.email and u.email.lower().endswith(f"@{self.domain}")
             ]
             logger.info(f"Loaded {len(self._entra_users_cache)} Entra users for group sync")
         return self._entra_users_cache
 
-    async def _add_svc_automations_to_group(self, group_id: str) -> bool:
-        """Add svc-automations to an M365 group for delegated calendar auth.
+    async def _add_service_account_to_group(self, group_id: str) -> bool:
+        """Add service account to an M365 group for delegated calendar auth.
 
-        The svc-automations service account needs to be a member of any M365 group
-        where we want to write calendar events, because application permissions
-        don't support group calendar writes.
+        The service account (configured in organization.json) needs to be a member
+        of any M365 group where we want to write calendar events, because application
+        permissions don't support group calendar writes.
 
         Uses retry logic to handle M365 group provisioning delays (group may not
         be immediately available after creation).
@@ -180,12 +181,12 @@ class UnifiedGroupSyncManager:
         Returns:
             True if added successfully or already a member
         """
-        svc_email = "svc-automations@sjifire.org"
+        svc_email = get_service_email()
 
-        # Find svc-automations user (do this once, outside retry)
+        # Find service account user (do this once, outside retry)
         all_users = await self.entra_users.get_users(include_disabled=True)
         svc_user = next(
-            (u for u in all_users if u.email and u.email.lower() == svc_email),
+            (u for u in all_users if u.email and u.email.lower() == svc_email.lower()),
             None,
         )
 
@@ -289,7 +290,7 @@ class UnifiedGroupSyncManager:
         group has 'Unified' in group_types (M365) vs mail+security enabled (Exchange).
 
         Args:
-            email: Full email address (e.g., "station31@sjifire.org")
+            email: Full email address (e.g., "station31@example.org")
             mail_nickname: Mail nickname (e.g., "station31")
 
         Returns:
@@ -456,9 +457,9 @@ class UnifiedGroupSyncManager:
                 if group:
                     logger.info(f"Created M365 group: {display_name}")
                     newly_created = True
-                    # Add svc-automations as member (required for delegated calendar auth)
+                    # Add service account as member (required for delegated calendar auth)
                     # Uses retry logic to handle provisioning delay
-                    await self._add_svc_automations_to_group(group.id)
+                    await self._add_service_account_to_group(group.id)
                 else:
                     return GroupSyncResult(
                         group_name=display_name,
@@ -628,7 +629,7 @@ class UnifiedGroupSyncManager:
                     display_name=display_name,
                     alias=alias,
                     primary_smtp_address=email,
-                    managed_by="svc-automations@sjifire.org",
+                    managed_by=get_service_email(),
                 )
                 if not group:
                     return GroupSyncResult(
@@ -689,7 +690,7 @@ class UnifiedGroupSyncManager:
         result = await self.exchange_client.sync_group(
             identity=email,
             description=strategy.automation_notice,
-            managed_by="svc-automations@sjifire.org",
+            managed_by=get_service_email(),
             target_members=target_emails,
         )
 
@@ -784,7 +785,7 @@ class UnifiedGroupSyncManager:
             all_aladtec = [u for u in all_users_for_source if u.work_group is not None]
             source_emails = {m.email.lower() for m in all_aladtec if m.email}
             # Whitelist service accounts that should never be removed
-            source_emails.discard("svc-automations@sjifire.org")
+            source_emails.discard(get_service_email().lower())
 
         results: list[GroupSyncResult] = []
 
@@ -875,7 +876,7 @@ async def backup_groups(
     strategies: list[str],
     entra_groups: EntraGroupManager,
     exchange_client: ExchangeOnlineClient,
-    domain: str = "sjifire.org",
+    domain: str | None = None,
 ) -> None:
     """Backup all groups that will be synced.
 
@@ -883,8 +884,10 @@ async def backup_groups(
         strategies: List of strategy names being synced
         entra_groups: EntraGroupManager instance
         exchange_client: ExchangeOnlineClient instance
-        domain: Domain for email addresses
+        domain: Domain for email addresses (default: from organization config)
     """
+    if domain is None:
+        domain = get_domain()
     logger.info("")
     logger.info("Creating backup of existing groups...")
 

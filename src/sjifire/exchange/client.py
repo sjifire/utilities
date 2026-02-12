@@ -29,7 +29,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from sjifire.core.config import get_exchange_credentials
+from sjifire.core.config import get_domain, get_exchange_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -413,7 +413,7 @@ class ExchangeOnlineClient:
         self,
         identity: str,
         aliases: list[str],
-        domain: str = "sjifire.org",
+        domain: str | None = None,
     ) -> bool:
         """Set email aliases for a distribution group.
 
@@ -423,13 +423,16 @@ class ExchangeOnlineClient:
         Args:
             identity: Group name, alias, or email address
             aliases: List of alias names without domain (e.g., ["ff", "firefighter"])
-            domain: Domain for the aliases
+            domain: Domain for the aliases (default: from organization config)
 
         Returns:
             True if successful
         """
         if not aliases:
             return True
+
+        if domain is None:
+            domain = get_domain()
 
         # Build the EmailAddresses array
         # Format: @{Add="smtp:alias1@domain","smtp:alias2@domain"}

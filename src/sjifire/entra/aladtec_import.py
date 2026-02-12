@@ -139,7 +139,7 @@ class AladtecImporter:
             dry_run: If True, don't make changes
             disable_inactive: If True, disable inactive member accounts
         """
-        # Skip members without sjifire.org email
+        # Skip members without business domain email
         if not member.email or not member.email.endswith(f"@{self.domain}"):
             result.skipped.append(
                 {
