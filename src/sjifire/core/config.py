@@ -1,6 +1,5 @@
 """Configuration loading utilities."""
 
-import contextlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -59,10 +58,6 @@ def get_service_account_credentials() -> tuple[str, str]:
     return email, password
 
 
-# Backwards compatibility alias
-get_svc_automations_credentials = get_service_account_credentials
-
-
 @dataclass
 class ExchangeCredentials:
     """Credentials for Exchange Online PowerShell authentication."""
@@ -85,7 +80,7 @@ def get_exchange_credentials() -> ExchangeCredentials:
     Environment variables:
         EXCHANGE_TENANT_ID: Tenant ID (falls back to MS_GRAPH_TENANT_ID)
         EXCHANGE_CLIENT_ID: App client ID (falls back to MS_GRAPH_CLIENT_ID)
-        EXCHANGE_ORGANIZATION: Organization domain (default: sjifire.org)
+        EXCHANGE_ORGANIZATION: Organization domain (falls back to org config)
         EXCHANGE_CERTIFICATE_THUMBPRINT: Certificate thumbprint (Windows)
         EXCHANGE_CERTIFICATE_PATH: Path to .pfx certificate file
         EXCHANGE_CERTIFICATE_PASSWORD: Password for .pfx file
@@ -109,10 +104,9 @@ def get_exchange_credentials() -> ExchangeCredentials:
         )
 
     # Default to org domain from config if not set in environment
-    default_org = "sjifire.org"
-    with contextlib.suppress(FileNotFoundError):
-        default_org = load_org_config().domain
-    organization = os.getenv("EXCHANGE_ORGANIZATION", default_org)
+    organization = os.getenv("EXCHANGE_ORGANIZATION")
+    if not organization:
+        organization = load_org_config().domain
     thumbprint = os.getenv("EXCHANGE_CERTIFICATE_THUMBPRINT")
     cert_path = os.getenv("EXCHANGE_CERTIFICATE_PATH")
     cert_password = os.getenv("EXCHANGE_CERTIFICATE_PASSWORD")
