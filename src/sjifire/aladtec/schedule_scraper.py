@@ -121,7 +121,7 @@ class AladtecScheduleScraper(AladtecClient):
         nav_date = start_date.strftime("%b %Y")  # e.g., "Feb 2026"
 
         # POST to navigate to the month (required before each fetch for consistency)
-        self.client.post(
+        self.post(
             f"{self.base_url}/index.php",
             params={"action": "manage_work_view_ajax"},
             data={
@@ -133,7 +133,7 @@ class AladtecScheduleScraper(AladtecClient):
         )
 
         # Now fetch the AJAX data
-        response = self.client.get(
+        response = self.get(
             f"{self.base_url}/index.php",
             params={
                 "action": "manage_work_view_ajax",
@@ -260,6 +260,14 @@ class AladtecScheduleScraper(AladtecClient):
             for row in div.find_all("tr", class_="calendar-event"):
                 title = row.get("title", "")
                 if not title:
+                    continue
+
+                # Skip unfilled/open slots - they have "ust" class or "open-shift" in child elements
+                row_classes = row.get("class", [])
+                if "ust" in row_classes:
+                    continue
+                # Also check for open-shift class in name/time cells
+                if row.find(class_="open-shift"):
                     continue
 
                 # Parse the title format:

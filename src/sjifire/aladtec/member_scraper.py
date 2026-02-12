@@ -81,7 +81,7 @@ class AladtecMemberScraper(AladtecClient):
             "pager": "100",
         }
 
-        response = self.client.get(member_list_url, params=layout_params)
+        response = self.get(member_list_url, params=layout_params)
         if response.status_code != 200:
             logger.error(f"Failed to load member list: {response.status_code}")
             return []
@@ -94,7 +94,7 @@ class AladtecMemberScraper(AladtecClient):
             "export_mode": "1",
         }
 
-        response = self.client.get(member_list_url, params=export_params)
+        response = self.get(member_list_url, params=export_params)
 
         if response.status_code != 200:
             logger.error(f"Failed to get CSV export: {response.status_code}")
@@ -144,7 +144,7 @@ class AladtecMemberScraper(AladtecClient):
             "pager": "100",
         }
 
-        response = self.client.get(member_list_url, params=layout_params)
+        response = self.get(member_list_url, params=layout_params)
         if response.status_code != 200:
             logger.error(f"Failed to load inactive member list: {response.status_code}")
             return []
@@ -155,7 +155,7 @@ class AladtecMemberScraper(AladtecClient):
             "export_mode": "1",
         }
 
-        response = self.client.get(member_list_url, params=export_params)
+        response = self.get(member_list_url, params=export_params)
         if response.status_code != 200:
             logger.error(f"Failed to export inactive members: {response.status_code}")
             return []
@@ -442,7 +442,7 @@ class AladtecMemberScraper(AladtecClient):
 
         import json
 
-        response = self.client.get(
+        response = self.get(
             f"{self.base_url}/index.php",
             params={
                 "action": "manage_member_roster_qactions",
@@ -486,7 +486,7 @@ class AladtecMemberScraper(AladtecClient):
         if not self.client:
             return None
 
-        response = self.client.get(
+        response = self.get(
             f"{self.base_url}/index.php",
             params={
                 "action": "manage_members_view_member_information",
@@ -634,7 +634,7 @@ class AladtecMemberScraper(AladtecClient):
 
         # Try to find and click "All Items" filter, then scrape
         members_url = f"{self.base_url}/members"
-        response = self.client.get(members_url, params={"filter": "all"})
+        response = self.get(members_url, params={"filter": "all"})
 
         if response.status_code != 200:
             logger.error("Failed to load members page")

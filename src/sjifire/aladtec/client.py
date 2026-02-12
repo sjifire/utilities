@@ -55,6 +55,7 @@ class AladtecClient:
         self.base_url, self.username, self.password = get_aladtec_credentials()
         self._timeout = timeout
         self.client: httpx.Client | None = None
+        self._request_count = 0
 
     def __enter__(self) -> Self:
         """Enter context manager - create HTTP client."""
@@ -65,10 +66,29 @@ class AladtecClient:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context manager - close HTTP client."""
+        """Exit context manager - close HTTP client and log request count."""
         if self.client:
+            if self._request_count > 0:
+                logger.info(f"Aladtec API calls: {self._request_count}")
             self.client.close()
             self.client = None
+
+    @property
+    def request_count(self) -> int:
+        """Get the number of HTTP requests made to Aladtec."""
+        return self._request_count
+
+    def get(self, url: str, **kwargs) -> httpx.Response:
+        """Make a GET request and track the call count."""
+        client = self._require_client()
+        self._request_count += 1
+        return client.get(url, **kwargs)
+
+    def post(self, url: str, **kwargs) -> httpx.Response:
+        """Make a POST request and track the call count."""
+        client = self._require_client()
+        self._request_count += 1
+        return client.post(url, **kwargs)
 
     def _require_client(self) -> httpx.Client:
         """Get HTTP client or raise if not in context manager.
@@ -89,12 +109,10 @@ class AladtecClient:
         Returns:
             True if login successful, False otherwise
         """
-        client = self._require_client()
-
         logger.info(f"Logging in to {self.base_url}")
 
         # Get the login page first to establish session
-        response = client.get(f"{self.base_url}/")
+        response = self.get(f"{self.base_url}/")
 
         if response.status_code != 200:
             logger.error(f"Failed to load login page: {response.status_code}")
@@ -107,7 +125,7 @@ class AladtecClient:
 
         # Submit login
         login_url = f"{self.base_url}/index.php?action=login"
-        response = client.post(login_url, data=form_data)
+        response = self.post(login_url, data=form_data)
 
         # Check if login succeeded - look for dashboard elements or schedule
         if "schedule" in response.text.lower() or "dashboard" in response.text.lower():
