@@ -8,6 +8,7 @@ import pytest
 from sjifire.aladtec.schedule_scraper import ScheduleEntry
 from sjifire.calendar.personal_sync import (
     ALADTEC_CATEGORY,
+    ExistingEvent,
     PersonalCalendarSync,
     make_event_body,
     make_event_subject,
@@ -606,3 +607,267 @@ class TestPurgeAladtecEvents:
 
         assert deleted == 0
         assert errors == 1
+
+
+# =============================================================================
+# sync_user Logic Tests
+# =============================================================================
+
+
+class TestSyncUserLogic:
+    """Tests for sync_user create/update/delete logic."""
+
+    @pytest.fixture
+    def mock_env_vars(self):
+        """Mock environment variables for Graph API credentials."""
+        with patch.dict(
+            "os.environ",
+            {
+                "MS_GRAPH_TENANT_ID": "test-tenant",
+                "MS_GRAPH_CLIENT_ID": "test-client",
+                "MS_GRAPH_CLIENT_SECRET": "test-secret",
+            },
+        ):
+            yield
+
+    @pytest.fixture
+    def sync(self, mock_env_vars):
+        """Create PersonalCalendarSync with mocked client."""
+        with (
+            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+        ):
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            sync = PersonalCalendarSync()
+            sync.client = mock_client
+            return sync
+
+    @pytest.fixture
+    def sample_entry(self):
+        """Sample schedule entry for testing."""
+        return ScheduleEntry(
+            date=date(2026, 2, 15),
+            section="S31",
+            position="Captain",
+            name="John Doe",
+            start_time="08:00",
+            end_time="18:00",
+        )
+
+    def _setup_sync_mocks(self, sync, existing_events: dict[str, ExistingEvent] | None = None):
+        """Set up common mocks for sync_user tests."""
+        # Mock calendar retrieval
+        mock_calendar = MagicMock()
+        mock_calendar.id = "calendar-123"
+        sync.client.users.by_user_id.return_value.calendar.get = AsyncMock(
+            return_value=mock_calendar
+        )
+
+        # Mark as using primary calendar
+        sync._uses_primary_calendar.add("test@example.com")
+
+        # Mock ensure_aladtec_category
+        sync.client.users.by_user_id.return_value.outlook.master_categories.get = AsyncMock(
+            return_value=MagicMock(value=[MagicMock(display_name=ALADTEC_CATEGORY)])
+        )
+
+        # Mock get_existing_events by patching the method
+        if existing_events is None:
+            existing_events = {}
+        sync.get_existing_events = AsyncMock(return_value=existing_events)
+
+        # Mock create/update/delete
+        sync.create_event = AsyncMock(return_value=True)
+        sync.update_event = AsyncMock(return_value=True)
+        sync.delete_event = AsyncMock(return_value=True)
+
+    @pytest.mark.asyncio
+    async def test_skips_existing_event_with_matching_key(self, sync, sample_entry):
+        """Event already in calendar with same key and body is not recreated (idempotent)."""
+        # Create existing event with matching key and body
+        subject = make_event_subject(sample_entry)
+        body = make_event_body(sample_entry)
+        key = f"{sample_entry.date}|{subject}|08:00|18:00"
+        existing = {key: ExistingEvent(event_id="existing-event-id", body=body)}
+
+        self._setup_sync_mocks(sync, existing)
+
+        result = await sync.sync_user(
+            "test@example.com",
+            [sample_entry],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            dry_run=False,
+        )
+
+        # Should not create, update, or delete anything
+        assert result.events_created == 0
+        assert result.events_updated == 0
+        assert result.events_deleted == 0
+        sync.create_event.assert_not_called()
+        sync.update_event.assert_not_called()
+        sync.delete_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_deletes_event_no_longer_in_schedule(self, sync):
+        """Event in calendar but removed from schedule gets deleted (trade scenario)."""
+        # Existing event for Feb 15 shift that was traded away
+        key = "2026-02-15|S31 - Captain|08:00|18:00"
+        existing = {key: ExistingEvent(event_id="old-event-id", body="Old shift body")}
+
+        self._setup_sync_mocks(sync, existing)
+
+        # Sync with empty schedule (user traded their shift)
+        result = await sync.sync_user(
+            "test@example.com",
+            [],  # No entries - shift was traded away
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            dry_run=False,
+        )
+
+        # Should delete the old event
+        assert result.events_deleted == 1
+        assert result.events_created == 0
+        sync.delete_event.assert_called_once_with(
+            "test@example.com", "calendar-123", "old-event-id"
+        )
+
+    @pytest.mark.asyncio
+    async def test_creates_event_not_in_calendar(self, sync, sample_entry):
+        """New schedule entry creates calendar event."""
+        # No existing events
+        self._setup_sync_mocks(sync, existing_events={})
+
+        result = await sync.sync_user(
+            "test@example.com",
+            [sample_entry],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            dry_run=False,
+        )
+
+        # Should create the new event
+        assert result.events_created == 1
+        assert result.events_deleted == 0
+        sync.create_event.assert_called_once()
+        call_args = sync.create_event.call_args
+        assert call_args[0][0] == "test@example.com"
+        assert call_args[0][1] == "calendar-123"
+        assert call_args[0][2] == sample_entry
+
+    @pytest.mark.asyncio
+    async def test_updates_event_when_body_changes(self, sync, sample_entry):
+        """Existing event with changed body gets updated."""
+        # Create existing event with matching key but different body
+        subject = make_event_subject(sample_entry)
+        key = f"{sample_entry.date}|{subject}|08:00|18:00"
+        existing = {key: ExistingEvent(event_id="existing-event-id", body="Old body content")}
+
+        self._setup_sync_mocks(sync, existing)
+
+        result = await sync.sync_user(
+            "test@example.com",
+            [sample_entry],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            dry_run=False,
+        )
+
+        # Should update the event (body changed)
+        assert result.events_updated == 1
+        assert result.events_created == 0
+        assert result.events_deleted == 0
+        sync.update_event.assert_called_once()
+        call_args = sync.update_event.call_args
+        assert call_args[0][0] == "test@example.com"
+        assert call_args[0][1] == "calendar-123"
+        assert call_args[0][2] == "existing-event-id"
+        assert call_args[0][3] == sample_entry
+
+    @pytest.mark.asyncio
+    async def test_trade_scenario_delete_old_create_new(self, sync):
+        """Trade scenario: old shift deleted, new shift on different date created."""
+        # Old shift on Feb 15 (traded away)
+        old_key = "2026-02-15|S31 - Captain|08:00|18:00"
+        existing = {old_key: ExistingEvent(event_id="old-event-id", body="Old shift")}
+
+        self._setup_sync_mocks(sync, existing)
+
+        # New shift on Feb 20 (received from trade)
+        new_entry = ScheduleEntry(
+            date=date(2026, 2, 20),
+            section="S32",
+            position="Firefighter",
+            name="John Doe",
+            start_time="08:00",
+            end_time="18:00",
+        )
+
+        result = await sync.sync_user(
+            "test@example.com",
+            [new_entry],  # Only the new shift, old one is gone
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            dry_run=False,
+        )
+
+        # Should delete old and create new
+        assert result.events_deleted == 1
+        assert result.events_created == 1
+        sync.delete_event.assert_called_once_with(
+            "test@example.com", "calendar-123", "old-event-id"
+        )
+        sync.create_event.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_force_updates_even_when_body_matches(self, sync, sample_entry):
+        """Force flag updates events even when body hasn't changed."""
+        # Create existing event with matching key and body
+        subject = make_event_subject(sample_entry)
+        body = make_event_body(sample_entry)
+        key = f"{sample_entry.date}|{subject}|08:00|18:00"
+        existing = {key: ExistingEvent(event_id="existing-event-id", body=body)}
+
+        self._setup_sync_mocks(sync, existing)
+
+        result = await sync.sync_user(
+            "test@example.com",
+            [sample_entry],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            dry_run=False,
+            force=True,  # Force update
+        )
+
+        # Should update even though body matches
+        assert result.events_updated == 1
+        assert result.events_created == 0
+        sync.update_event.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_reports_changes_without_api_calls(self, sync, sample_entry):
+        """Dry run reports what would happen without making API calls."""
+        # Existing event to delete
+        old_key = "2026-02-10|S31 - Lieutenant|08:00|18:00"
+        existing = {old_key: ExistingEvent(event_id="old-event-id", body="Old shift")}
+
+        self._setup_sync_mocks(sync, existing)
+
+        result = await sync.sync_user(
+            "test@example.com",
+            [sample_entry],  # New entry to create
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+            dry_run=True,
+        )
+
+        # Should report changes
+        assert result.events_created == 1
+        assert result.events_deleted == 1
+
+        # But no API calls should be made
+        sync.create_event.assert_not_called()
+        sync.delete_event.assert_not_called()
+        sync.update_event.assert_not_called()
