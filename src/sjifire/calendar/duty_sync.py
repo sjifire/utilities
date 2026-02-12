@@ -221,18 +221,22 @@ def is_filled_entry(entry: ScheduleEntry) -> bool:
 
 
 def normalize_html_for_comparison(html: str) -> str:
-    """Normalize HTML for comparison by removing variable whitespace.
+    """Extract plain text from HTML for comparison.
 
-    Outlook/Graph API may add or modify whitespace when storing HTML.
-    This normalizes both the new and existing HTML for comparison.
+    Outlook/Graph API modifies HTML formatting (wraps in html/body tags,
+    adds tbody, changes CSS spacing). Comparing raw HTML is fragile.
+    Instead, extract just the text content and normalize whitespace.
     """
+    from bs4 import BeautifulSoup
+
+    # Parse HTML and extract text content only
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text(separator=" ")
+
+    # Normalize whitespace (collapse multiple spaces, strip)
     import re as regex
 
-    # Remove all newlines and collapse multiple spaces
-    normalized = regex.sub(r"\s+", " ", html)
-    # Remove spaces around HTML tags
-    normalized = regex.sub(r"\s*<", "<", normalized)
-    normalized = regex.sub(r">\s*", ">", normalized)
+    normalized = regex.sub(r"\s+", " ", text)
     return normalized.strip()
 
 
@@ -1007,8 +1011,7 @@ class DutyCalendarSync:
 
             # Extract just the event IDs from tuples (id, body)
             events_to_delete = {
-                event_date: event_id
-                for event_date, (event_id, _) in existing_by_date.items()
+                event_date: event_id for event_date, (event_id, _) in existing_by_date.items()
             }
 
             if dry_run:
