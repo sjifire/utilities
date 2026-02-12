@@ -114,25 +114,6 @@ class TestNormalizeBodyForComparison:
 # =============================================================================
 
 
-class TestShouldUsePrimaryCalendar:
-    """Tests for _should_use_primary_calendar method."""
-
-    @pytest.fixture
-    def sync(self, mock_env_vars):
-        """Create PersonalCalendarSync instance."""
-        with (
-            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.personal_sync.GraphServiceClient"),
-        ):
-            return PersonalCalendarSync()
-
-    def test_always_returns_true(self, sync):
-        """All users use primary calendar with Aladtec category."""
-        assert sync._should_use_primary_calendar("test@example.com") is True
-        assert sync._should_use_primary_calendar("other@example.com") is True
-        assert sync._should_use_primary_calendar("anyone@example.com") is True
-
-
 class TestEnsureAladtecCategory:
     """Tests for ensure_aladtec_category method."""
 

@@ -144,16 +144,18 @@ The sync:
 ```bash
 uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --dry-run
 uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026"
-uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --force
+uv run personal-calendar-sync --all --months 4
+uv run personal-calendar-sync --user user@sjifire.org --purge --dry-run
 ```
 
 The sync:
-- Creates an "Aladtec Schedule" calendar in the user's mailbox (if not exists)
-- Stores the calendar ID in extensionAttribute5 for reuse
+- Adds events to user's **primary calendar** with orange "Aladtec" category
+- Creates the Aladtec category in each user's Outlook automatically
 - Creates events matching actual shift times (supports partial shifts)
+- Skips entries with empty position (e.g., Trades)
 - Compares existing events to avoid unnecessary updates
 - Use `--force` to update all events regardless of content changes
-- Events marked as auto-synced (changes will be overwritten)
+- Use `--purge` to delete all Aladtec-categorized events
 
 ### Aladtec Tools
 
@@ -206,12 +208,6 @@ EXCHANGE_CERTIFICATE_PASSWORD=your-cert-password  # empty for Key Vault certs
 **Analyze group mappings:**
 ```bash
 uv run analyze-mappings                # Analyze position-to-group mappings
-```
-
-**Create security groups:**
-```bash
-uv run create-security-groups          # Create security groups from config
-uv run create-security-groups --dry-run
 ```
 
 ## Configuration

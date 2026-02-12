@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo
 from azure.identity import ClientSecretCredential
 from msgraph import GraphServiceClient
 from msgraph.generated.models.body_type import BodyType
-from msgraph.generated.models.calendar import Calendar
 from msgraph.generated.models.date_time_time_zone import DateTimeTimeZone
 from msgraph.generated.models.event import Event
 from msgraph.generated.models.item_body import ItemBody
@@ -22,12 +21,6 @@ from sjifire.calendar.models import get_aladtec_url
 from sjifire.core.config import get_graph_credentials
 
 logger = logging.getLogger(__name__)
-
-# Calendar name in each user's mailbox
-CALENDAR_NAME = "Aladtec Schedule"
-
-# Entra extension attribute to store calendar ID (survives renames)
-CALENDAR_ID_ATTRIBUTE = "extension_attribute5"
 
 # Category for Aladtec events in primary calendar
 ALADTEC_CATEGORY = "Aladtec"
@@ -117,10 +110,6 @@ class PersonalCalendarSync:
         self._calendar_cache: dict[str, str] = {}  # user_email -> calendar_id
         self._uses_primary_calendar: set[str] = set()  # users using primary calendar
 
-    def _should_use_primary_calendar(self, user_email: str) -> bool:
-        """All users use primary calendar with Aladtec category."""
-        return True
-
     async def ensure_aladtec_category(self, user_email: str) -> bool:
         """Ensure the Aladtec category exists in user's master category list.
 
@@ -165,87 +154,8 @@ class PersonalCalendarSync:
             logger.error(f"Failed to get primary calendar for {user_email}: {e}")
         return None
 
-    async def _get_stored_calendar_id(self, user_email: str) -> str | None:
-        """Get stored calendar ID from user's Entra extension attribute.
-
-        Returns:
-            Calendar ID or None if not stored
-        """
-        try:
-            from msgraph.generated.users.item.user_item_request_builder import (
-                UserItemRequestBuilder,
-            )
-
-            query_params = UserItemRequestBuilder.UserItemRequestBuilderGetQueryParameters(
-                select=["id", "onPremisesExtensionAttributes"],
-            )
-            config = UserItemRequestBuilder.UserItemRequestBuilderGetRequestConfiguration(
-                query_parameters=query_params,
-            )
-            user = await self.client.users.by_user_id(user_email).get(request_configuration=config)
-            if user and user.on_premises_extension_attributes:
-                cal_id = getattr(
-                    user.on_premises_extension_attributes,
-                    CALENDAR_ID_ATTRIBUTE,
-                    None,
-                )
-                if cal_id and str(cal_id).strip():
-                    return str(cal_id).strip()
-        except Exception as e:
-            logger.debug(f"Could not get stored calendar ID for {user_email}: {e}")
-        return None
-
-    async def _store_calendar_id(self, user_email: str, calendar_id: str) -> bool:
-        """Store calendar ID in user's Entra extension attribute.
-
-        Returns:
-            True if successful
-        """
-        if not calendar_id or not calendar_id.strip():
-            return False
-        try:
-            from msgraph.generated.models.on_premises_extension_attributes import (
-                OnPremisesExtensionAttributes,
-            )
-            from msgraph.generated.models.user import User
-
-            ext_attrs = OnPremisesExtensionAttributes()
-            setattr(ext_attrs, CALENDAR_ID_ATTRIBUTE, calendar_id)
-
-            update = User(on_premises_extension_attributes=ext_attrs)
-            await self.client.users.by_user_id(user_email).patch(update)
-            logger.debug(f"Stored calendar ID for {user_email}")
-            return True
-        except Exception as e:
-            # Log at debug level - this is expected to fail for some users
-            logger.debug(f"Could not store calendar ID for {user_email}: {e}")
-            return False
-
-    async def _calendar_exists(self, user_email: str, calendar_id: str) -> bool:
-        """Check if a calendar exists.
-
-        Returns:
-            True if calendar exists
-        """
-        if not calendar_id or not calendar_id.strip():
-            return False
-        try:
-            cal = await (
-                self.client.users.by_user_id(user_email).calendars.by_calendar_id(calendar_id).get()
-            )
-            return cal is not None and cal.id is not None
-        except Exception:
-            return False
-
     async def get_or_create_calendar(self, user_email: str) -> str | None:
-        """Get or create the Aladtec Schedule calendar for a user.
-
-        For test users in PRIMARY_CALENDAR_TEST_USERS, returns the primary calendar
-        and events will be tagged with the Aladtec category.
-
-        For other users, creates/finds a dedicated "Aladtec Schedule" calendar.
-        Uses Entra extension attribute to store calendar ID, which survives
-        renames. Falls back to name matching for backwards compatibility.
+        """Get the user's primary calendar for Aladtec events.
 
         Returns:
             Calendar ID or None if failed
@@ -254,64 +164,11 @@ class PersonalCalendarSync:
         if user_email in self._calendar_cache:
             return self._calendar_cache[user_email]
 
-        # Check if user should use primary calendar
-        if self._should_use_primary_calendar(user_email):
-            calendar_id = await self._get_primary_calendar_id(user_email)
-            if calendar_id:
-                self._calendar_cache[user_email] = calendar_id
-                self._uses_primary_calendar.add(user_email.lower())
-                logger.debug(f"Using primary calendar for {user_email}")
-                return calendar_id
-            else:
-                logger.warning(f"Failed to get primary calendar for {user_email}, falling back")
-
-        try:
-            # First, check for stored calendar ID in Entra
-            stored_id = await self._get_stored_calendar_id(user_email)
-            if stored_id and await self._calendar_exists(user_email, stored_id):
-                self._calendar_cache[user_email] = stored_id
-                logger.debug(f"Found calendar by stored ID for {user_email}")
-                return stored_id
-
-            # Fall back to name-based lookup
-            result = await self.client.users.by_user_id(user_email).calendars.get()
-
-            if result and result.value:
-                for cal in result.value:
-                    if cal.name == CALENDAR_NAME and cal.id:
-                        self._calendar_cache[user_email] = cal.id
-                        # Store ID for future lookups (if not already stored)
-                        if not stored_id:
-                            logger.info(
-                                f"Found existing '{CALENDAR_NAME}' calendar for {user_email}, "
-                                "storing ID in extensionAttribute5"
-                            )
-                            success = await self._store_calendar_id(user_email, cal.id)
-                            if not success:
-                                logger.warning(
-                                    f"Could not store calendar ID for {user_email} - "
-                                    "calendar will be looked up by name on each sync"
-                                )
-                        return cal.id
-
-            # Create new calendar
-            new_calendar = Calendar(name=CALENDAR_NAME)
-            created = await self.client.users.by_user_id(user_email).calendars.post(new_calendar)
-
-            if created and created.id:
-                self._calendar_cache[user_email] = created.id
-                logger.info(f"Created '{CALENDAR_NAME}' calendar for {user_email}")
-                # Store ID for future lookups
-                success = await self._store_calendar_id(user_email, created.id)
-                if not success:
-                    logger.warning(
-                        f"Could not store calendar ID for {user_email} - "
-                        "calendar will be looked up by name on each sync"
-                    )
-                return created.id
-
-        except Exception as e:
-            logger.error(f"Failed to get/create calendar for {user_email}: {e}")
+        calendar_id = await self._get_primary_calendar_id(user_email)
+        if calendar_id:
+            self._calendar_cache[user_email] = calendar_id
+            self._uses_primary_calendar.add(user_email.lower())
+            return calendar_id
 
         return None
 

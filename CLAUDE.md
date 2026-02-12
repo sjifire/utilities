@@ -37,7 +37,6 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - `extensionAttribute2`: EVIP expiration date
 - `extensionAttribute3`: Positions (comma-delimited scheduling positions)
 - `extensionAttribute4`: Schedules (comma-delimited schedule visibility from Aladtec)
-- `extensionAttribute5`: Personal calendar ID (for personal Aladtec schedule sync)
 
 ### iSpyFire
 - Incident response and paging system
@@ -55,12 +54,12 @@ Two types of calendar sync from Aladtec schedules to Outlook:
 - Overwrites all events in the target date range
 
 **Personal Calendar Sync** (`personal-calendar-sync`):
-- Syncs individual's Aladtec shifts to their personal Outlook calendar
+- Syncs individual's Aladtec shifts to their **primary** Outlook calendar
+- Events tagged with orange "Aladtec" category (auto-created in each user's Outlook)
 - Creates events matching shift start/end times (supports partial shifts like 19:00-20:00)
-- Uses extensionAttribute5 to store "Aladtec Schedule" calendar ID per user
+- Skips entries with empty position (e.g., Trades)
 - Compares events by key: `{date}|{subject}|{start_time}|{end_time}`
-- Normalizes body content for comparison (Exchange converts plain text to HTML)
-- Supports `--force` flag to update all events regardless of content changes
+- Supports `--force` to update all events, `--purge` to delete all Aladtec events
 
 ### Rank Hierarchy
 Ranks are extracted from Title or Employee Type fields:
@@ -204,8 +203,8 @@ uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026"
 ### Personal calendar sync (individual schedules)
 ```bash
 uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --dry-run
-uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026"
-uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --force  # Update all events
+uv run personal-calendar-sync --all --months 4              # Sync all users for 4 months
+uv run personal-calendar-sync --user user@sjifire.org --purge  # Delete all Aladtec events
 ```
 
 ### Group sync details

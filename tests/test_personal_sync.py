@@ -5,8 +5,6 @@ from unittest.mock import patch
 
 from sjifire.aladtec.schedule_scraper import ScheduleEntry
 from sjifire.calendar.personal_sync import (
-    CALENDAR_ID_ATTRIBUTE,
-    CALENDAR_NAME,
     ExistingEvent,
     PersonalSyncResult,
     make_event_body,
@@ -152,18 +150,6 @@ class TestPersonalCalendarSyncInit:
             tenant_id="tenant", client_id="client", client_secret="secret"
         )
         assert sync._calendar_cache == {}
-
-
-class TestConstants:
-    """Tests for module constants."""
-
-    def test_calendar_name(self):
-        """Calendar name is set correctly."""
-        assert CALENDAR_NAME == "Aladtec Schedule"
-
-    def test_calendar_id_attribute(self):
-        """Extension attribute name uses snake_case for SDK."""
-        assert CALENDAR_ID_ATTRIBUTE == "extension_attribute5"
 
 
 class TestNormalizeBodyForComparison:
