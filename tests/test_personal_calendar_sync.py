@@ -631,7 +631,16 @@ class TestSyncUserLogic:
             yield
 
     @pytest.fixture
-    def sync(self, mock_env_vars):
+    def mock_aladtec_url(self):
+        """Mock get_aladtec_url for make_event_body calls."""
+        with patch(
+            "sjifire.calendar.personal_sync.get_aladtec_url",
+            return_value="https://aladtec.example.com",
+        ):
+            yield
+
+    @pytest.fixture
+    def sync(self, mock_env_vars, mock_aladtec_url):
         """Create PersonalCalendarSync with mocked client."""
         with (
             patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
