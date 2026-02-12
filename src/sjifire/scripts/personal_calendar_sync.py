@@ -5,9 +5,9 @@ Creates an "Aladtec Schedule" calendar in each user's mailbox with their
 scheduled shifts from Aladtec. This is a one-way sync (Aladtec -> M365).
 
 Usage:
-    uv run personal-calendar-sync --user agreene@sjifire.org --month "Feb 2026"
+    uv run personal-calendar-sync --user user@example.org --month "Feb 2026"
     uv run personal-calendar-sync --all --month "Feb 2026" --dry-run
-    uv run personal-calendar-sync --inspect --user agreene@sjifire.org --month "Feb 2026"
+    uv run personal-calendar-sync --inspect --user user@example.org --month "Feb 2026"
 """
 
 import argparse

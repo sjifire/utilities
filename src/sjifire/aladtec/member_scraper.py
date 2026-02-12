@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 
 from sjifire.aladtec.client import AladtecClient
 from sjifire.aladtec.models import Member
+from sjifire.core.config import get_domain
 from sjifire.core.normalize import format_phone, validate_email
 
 logger = logging.getLogger(__name__)
@@ -38,9 +39,14 @@ def clean_title(title: str | None) -> str | None:
 class AladtecMemberScraper(AladtecClient):
     """Scraper for Aladtec member database using CSV export."""
 
-    def __init__(self) -> None:
-        """Initialize the scraper with credentials from environment."""
+    def __init__(self, domain: str | None = None) -> None:
+        """Initialize the scraper with credentials from environment.
+
+        Args:
+            domain: Email domain for identifying business emails (defaults to org config)
+        """
         super().__init__(timeout=30.0)
+        self.domain = domain or get_domain()
 
     def get_members(
         self,
@@ -222,7 +228,7 @@ class AladtecMemberScraper(AladtecClient):
             if email_raw:
                 emails = [e.strip() for e in email_raw.split(",") if e.strip()]
                 for e in emails:
-                    if e.endswith("@sjifire.org"):
+                    if e.endswith(f"@{self.domain}"):
                         if not email:
                             email = e
                     else:
@@ -341,7 +347,7 @@ class AladtecMemberScraper(AladtecClient):
         if not first_name or not last_name:
             return None
 
-        # Email - parse business (@sjifire.org) and personal emails
+        # Email - parse business (business domain) and personal emails
         email_raw = get_field("email", "e-mail", "email address", "emails")
         email = None
         personal_email = None
@@ -350,7 +356,7 @@ class AladtecMemberScraper(AladtecClient):
             # Split multiple emails (comma-separated in Aladtec)
             emails = [e.strip() for e in email_raw.split(",") if e.strip()]
             for e in emails:
-                if e.endswith("@sjifire.org"):
+                if e.endswith(f"@{self.domain}"):
                     if not email:  # Take first business email
                         email = e
                 else:
@@ -690,14 +696,14 @@ class AladtecMemberScraper(AladtecClient):
                 link = cell.find("a", href=lambda h: h and "mailto:" in h)
                 if link:
                     found_email = link.get("href", "").replace("mailto:", "")
-                    if found_email.endswith("@sjifire.org"):
+                    if found_email.endswith(f"@{self.domain}"):
                         if not email:
                             email = found_email
                     elif not personal_email:
                         personal_email = found_email
                 text = cell.get_text(strip=True)
                 if "@" in text:
-                    if text.endswith("@sjifire.org"):
+                    if text.endswith(f"@{self.domain}"):
                         if not email:
                             email = text
                     elif not personal_email:

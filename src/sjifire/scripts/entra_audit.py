@@ -157,7 +157,7 @@ def compare_systems(
     for member in aladtec_members:
         found = False
 
-        # Match by sjifire.org email
+        # Match by business email
         if member.email and (
             member.email.lower() in entra_emails or member.email.lower() in entra_upns
         ):

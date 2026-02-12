@@ -152,13 +152,13 @@ class UnifiedGroupSyncManager:
     async def get_entra_users(self) -> list[EntraUser]:
         """Get Entra users (cached).
 
-        Returns active users with @sjifire.org email addresses. This filters
+        Returns active users with organization email addresses. This filters
         out guest accounts and non-human accounts while including members
         who may not have employee IDs set.
         """
         if self._entra_users_cache is None:
             all_users = await self.entra_users.get_users(include_disabled=False)
-            # Filter to only sjifire.org domain (excludes guests, external accounts)
+            # Filter to organization domain (excludes guests, external accounts)
             self._entra_users_cache = [
                 u for u in all_users if u.email and u.email.lower().endswith(f"@{self.domain}")
             ]
@@ -290,7 +290,7 @@ class UnifiedGroupSyncManager:
         group has 'Unified' in group_types (M365) vs mail+security enabled (Exchange).
 
         Args:
-            email: Full email address (e.g., "station31@sjifire.org")
+            email: Full email address (e.g., "station31@example.org")
             mail_nickname: Mail nickname (e.g., "station31")
 
         Returns:
