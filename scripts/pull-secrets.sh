@@ -44,6 +44,15 @@ fi
 # Clear or create .env file
 > "$OUTPUT_FILE"
 
+# Map Key Vault secret names to env var names (for renamed secrets)
+map_secret_name() {
+    case "$1" in
+        SVC_AUTOMATIONS_USERNAME) echo "SERVICE_EMAIL" ;;
+        SVC_AUTOMATIONS_PASSWORD) echo "SERVICE_PASSWORD" ;;
+        *) echo "$1" ;;
+    esac
+}
+
 # Fetch each secret
 for name in $SECRETS; do
     echo -n "  $name... "
@@ -51,6 +60,8 @@ for name in $SECRETS; do
     if [ $? -eq 0 ] && [ -n "$value" ]; then
         # Convert hyphens to underscores for env var name
         env_name=$(echo "$name" | tr '-' '_')
+        # Apply mapping for renamed secrets
+        env_name=$(map_secret_name "$env_name")
         echo "${env_name}=${value}" >> "$OUTPUT_FILE"
         echo -e "${GREEN}OK${NC}"
     else
