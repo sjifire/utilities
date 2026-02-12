@@ -132,6 +132,7 @@ uv run ispyfire-admin deactivate user@sjifire.org # Logout devices and deactivat
 ```bash
 uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026" --dry-run
 uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026"
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --months 4 --save-schedule /tmp/schedule.json
 ```
 
 The sync:
@@ -139,12 +140,14 @@ The sync:
 - Creates all-day "On Duty" events for each filled position
 - Clears existing events in the target date range before creating new ones
 - Events include position, section, and Aladtec reference link
+- Use `--save-schedule` to cache schedule data for personal-calendar-sync
 
 **Personal calendar sync (individual schedules to user calendars):**
 ```bash
 uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --dry-run
 uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026"
 uv run personal-calendar-sync --all --months 4
+uv run personal-calendar-sync --all --months 4 --load-schedule /tmp/schedule.json
 uv run personal-calendar-sync --user user@sjifire.org --purge --dry-run
 ```
 
@@ -156,6 +159,7 @@ The sync:
 - Compares existing events to avoid unnecessary updates
 - Use `--force` to update all events regardless of content changes
 - Use `--purge` to delete all Aladtec-categorized events
+- Use `--load-schedule` to skip Aladtec fetch and use cached schedule data
 
 ### Aladtec Tools
 

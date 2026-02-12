@@ -52,6 +52,7 @@ Two types of calendar sync from Aladtec schedules to Outlook:
 - Syncs "On Duty" events to a shared mailbox/group calendar
 - Creates all-day events for each filled position per day
 - Overwrites all events in the target date range
+- `--save-schedule PATH` caches fetched schedule to JSON for reuse
 
 **Personal Calendar Sync** (`personal-calendar-sync`):
 - Syncs individual's Aladtec shifts to their **primary** Outlook calendar
@@ -59,7 +60,15 @@ Two types of calendar sync from Aladtec schedules to Outlook:
 - Creates events matching shift start/end times (supports partial shifts like 19:00-20:00)
 - Skips entries with empty position (e.g., Trades)
 - Compares events by key: `{date}|{subject}|{start_time}|{end_time}`
-- Supports `--force` to update all events, `--purge` to delete all Aladtec events
+- `--force` updates all events, `--purge` deletes all Aladtec events
+- `--load-schedule PATH` uses cached schedule instead of fetching from Aladtec
+
+**Schedule Caching** (reduces Aladtec API calls):
+```bash
+# Duty sync saves schedule, personal sync reuses it
+uv run duty-calendar-sync --mailbox group@sjifire.org --months 4 --save-schedule /tmp/schedule.json
+uv run personal-calendar-sync --all --months 4 --load-schedule /tmp/schedule.json
+```
 
 ### Rank Hierarchy
 Ranks are extracted from Title or Employee Type fields:
