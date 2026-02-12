@@ -27,8 +27,8 @@ from sjifire.aladtec.schedule_scraper import DaySchedule, ScheduleEntry
 from sjifire.calendar.models import AllDayDutyEvent, CrewMember, SyncResult
 from sjifire.core.config import (
     get_graph_credentials,
+    get_service_account_credentials,
     get_service_email,
-    get_svc_automations_credentials,
 )
 
 logger = logging.getLogger(__name__)
@@ -257,7 +257,7 @@ class DutyCalendarSync:
         Note:
             For M365 group calendars, delegated auth (username/password) is required
             because application permissions don't support group calendar writes.
-            The svc-automations account is used for delegated auth.
+            The service account (configured in organization.json) is used for delegated auth.
         """
         self.mailbox = mailbox or get_service_email()
         self._tenant_id, self._client_id, self._client_secret = get_graph_credentials()
@@ -277,7 +277,7 @@ class DutyCalendarSync:
     async def _detect_if_group(self) -> bool:
         """Detect if the mailbox is an M365 group and cache the group ID.
 
-        If it's a group, switches to delegated auth using svc-automations credentials
+        If it's a group, switches to delegated auth using service account credentials
         because application permissions don't support group calendar writes.
 
         Returns:
@@ -317,7 +317,7 @@ class DutyCalendarSync:
         return False
 
     def _setup_delegated_client(self) -> None:
-        """Set up delegated auth client using svc-automations credentials.
+        """Set up delegated auth client using service account credentials.
 
         Required for M365 group calendar operations because application
         permissions don't support group calendar writes. Uses ROPC flow
@@ -327,7 +327,7 @@ class DutyCalendarSync:
             return
 
         try:
-            username, password = get_svc_automations_credentials()
+            username, password = get_service_account_credentials()
             delegated_credential = ROPCCredential(
                 tenant_id=self._tenant_id,
                 client_id=self._client_id,
@@ -341,7 +341,8 @@ class DutyCalendarSync:
             logger.error(f"Failed to set up delegated auth: {e}")
             raise RuntimeError(
                 "Delegated auth required for M365 group calendars. "
-                "Ensure SVC_AUTOMATIONS_USERNAME and SVC_AUTOMATIONS_PASSWORD are set."
+                "Ensure service account credentials are set in environment "
+                "(SVC_AUTOMATIONS_USERNAME and SVC_AUTOMATIONS_PASSWORD)."
             ) from e
 
     def _get_client_for_calendar(self) -> GraphServiceClient:

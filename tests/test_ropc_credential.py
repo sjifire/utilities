@@ -294,8 +294,8 @@ class TestDetectIfGroup:
         mock_client_instance = mock_graph_client.return_value
         mock_client_instance.groups.get = AsyncMock(return_value=mock_result)
 
-        # Mock the svc-automations credentials and ROPCCredential for delegated client setup
-        with patch("sjifire.calendar.duty_sync.get_svc_automations_credentials") as mock_svc:
+        # Mock the service account credentials and ROPCCredential for delegated client setup
+        with patch("sjifire.calendar.duty_sync.get_service_account_credentials") as mock_svc:
             mock_svc.return_value = ("svc@test.org", "password")
             with patch("sjifire.calendar.duty_sync.ROPCCredential"):
                 result = await sync._detect_if_group()
@@ -387,7 +387,7 @@ class TestDetectIfGroup:
         mock_client_instance = mock_graph_client.return_value
         mock_client_instance.groups.get = AsyncMock(return_value=mock_result)
 
-        with patch("sjifire.calendar.duty_sync.get_svc_automations_credentials") as mock_svc:
+        with patch("sjifire.calendar.duty_sync.get_service_account_credentials") as mock_svc:
             mock_svc.return_value = ("svc@test.org", "password")
             with patch("sjifire.calendar.duty_sync.ROPCCredential"):
                 await sync._detect_if_group()

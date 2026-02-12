@@ -33,9 +33,10 @@ def get_graph_credentials() -> tuple[str, str, str]:
     return tenant_id, client_id, client_secret
 
 
-def get_svc_automations_credentials() -> tuple[str, str]:
-    """Get svc-automations service account credentials for delegated auth.
+def get_service_account_credentials() -> tuple[str, str]:
+    """Get service account credentials for delegated auth.
 
+    The service account name is configured in organization.json (service_account field).
     Required for M365 group calendar operations because application
     permissions don't support group calendar writes.
 
@@ -52,11 +53,15 @@ def get_svc_automations_credentials() -> tuple[str, str]:
 
     if not username or not password:
         raise ValueError(
-            "svc-automations credentials not set. Required: "
+            "Service account credentials not set. Required: "
             "SVC_AUTOMATIONS_USERNAME, SVC_AUTOMATIONS_PASSWORD"
         )
 
     return username, password
+
+
+# Backwards compatibility alias
+get_svc_automations_credentials = get_service_account_credentials
 
 
 @dataclass
@@ -153,13 +158,8 @@ class OrgConfig:
 
     company_name: str
     domain: str
-    service_account: str
+    service_email: str
     skip_emails: list[str] = field(default_factory=list)
-
-    @property
-    def service_email(self) -> str:
-        """Get full service account email."""
-        return f"{self.service_account}@{self.domain}"
 
 
 # Alias for backwards compatibility
@@ -209,7 +209,7 @@ def load_org_config() -> OrgConfig:
     """Load organization configuration from config file.
 
     Returns:
-        OrgConfig with company_name, domain, and service_account
+        OrgConfig with company_name, domain, and service_email
     """
     project_root = get_project_root()
     config_path = project_root / "config" / "organization.json"
@@ -222,8 +222,8 @@ def load_org_config() -> OrgConfig:
 
     return OrgConfig(
         company_name=config_data["company_name"],
-        domain=config_data.get("domain", "sjifire.org"),
-        service_account=config_data.get("service_account", "svc-automations"),
+        domain=config_data["domain"],
+        service_email=config_data["service_email"],
         skip_emails=config_data.get("skip_emails", []),
     )
 

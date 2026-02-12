@@ -165,12 +165,12 @@ class UnifiedGroupSyncManager:
             logger.info(f"Loaded {len(self._entra_users_cache)} Entra users for group sync")
         return self._entra_users_cache
 
-    async def _add_svc_automations_to_group(self, group_id: str) -> bool:
-        """Add svc-automations to an M365 group for delegated calendar auth.
+    async def _add_service_account_to_group(self, group_id: str) -> bool:
+        """Add service account to an M365 group for delegated calendar auth.
 
-        The svc-automations service account needs to be a member of any M365 group
-        where we want to write calendar events, because application permissions
-        don't support group calendar writes.
+        The service account (configured in organization.json) needs to be a member
+        of any M365 group where we want to write calendar events, because application
+        permissions don't support group calendar writes.
 
         Uses retry logic to handle M365 group provisioning delays (group may not
         be immediately available after creation).
@@ -183,7 +183,7 @@ class UnifiedGroupSyncManager:
         """
         svc_email = get_service_email()
 
-        # Find svc-automations user (do this once, outside retry)
+        # Find service account user (do this once, outside retry)
         all_users = await self.entra_users.get_users(include_disabled=True)
         svc_user = next(
             (u for u in all_users if u.email and u.email.lower() == svc_email.lower()),
@@ -457,9 +457,9 @@ class UnifiedGroupSyncManager:
                 if group:
                     logger.info(f"Created M365 group: {display_name}")
                     newly_created = True
-                    # Add svc-automations as member (required for delegated calendar auth)
+                    # Add service account as member (required for delegated calendar auth)
                     # Uses retry logic to handle provisioning delay
-                    await self._add_svc_automations_to_group(group.id)
+                    await self._add_service_account_to_group(group.id)
                 else:
                     return GroupSyncResult(
                         group_name=display_name,

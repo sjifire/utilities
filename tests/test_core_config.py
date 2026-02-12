@@ -128,7 +128,7 @@ class TestLoadEntraSyncConfig:
                 {
                     "company_name": "Test Fire Dept",
                     "domain": "test.org",
-                    "service_account": "svc-test",
+                    "service_email": "svc-test@test.org",
                 }
             )
         )
@@ -147,7 +147,7 @@ class TestLoadEntraSyncConfig:
                 {
                     "company_name": "Test Fire Dept",
                     "domain": "testfire.org",
-                    "service_account": "svc-test",
+                    "service_email": "svc-test@testfire.org",
                 }
             )
         )
@@ -157,16 +157,17 @@ class TestLoadEntraSyncConfig:
 
         assert config.domain == "testfire.org"
 
-    def test_default_domain_when_missing(self, tmp_path):
+    def test_raises_when_required_fields_missing(self, tmp_path):
         config_dir = tmp_path / "config"
         config_dir.mkdir()
         config_file = config_dir / "organization.json"
         config_file.write_text(json.dumps({"company_name": "Test Fire Dept"}))
 
-        with patch("sjifire.core.config.get_project_root", return_value=tmp_path):
-            config = load_entra_sync_config()
-
-        assert config.domain == "sjifire.org"
+        with (
+            patch("sjifire.core.config.get_project_root", return_value=tmp_path),
+            pytest.raises(KeyError),
+        ):
+            load_entra_sync_config()
 
     def test_raises_when_file_missing(self, tmp_path):
         config_dir = tmp_path / "config"
@@ -179,7 +180,7 @@ class TestLoadEntraSyncConfig:
         ):
             load_entra_sync_config()
 
-    def test_service_email_property(self, tmp_path):
+    def test_loads_service_email(self, tmp_path):
         config_dir = tmp_path / "config"
         config_dir.mkdir()
         config_file = config_dir / "organization.json"
@@ -188,7 +189,7 @@ class TestLoadEntraSyncConfig:
                 {
                     "company_name": "Test Fire Dept",
                     "domain": "testfire.org",
-                    "service_account": "svc-automations",
+                    "service_email": "svc-automations@testfire.org",
                 }
             )
         )
