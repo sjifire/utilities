@@ -6,6 +6,7 @@ from typing import Self
 
 from dotenv import load_dotenv
 from neris_api_client import Config, GrantType, NerisApiClient
+from neris_api_client.models import TypeIncidentStatusPayloadValue
 
 logger = logging.getLogger(__name__)
 
@@ -140,3 +141,125 @@ class NerisClient:
 
         logger.info(f"Fetched {len(all_incidents)} total incidents")
         return all_incidents
+
+    def get_pending_incidents(self, *, neris_id: str | None = None) -> list[dict]:
+        """Fetch all incidents awaiting approval.
+
+        Args:
+            neris_id: Entity ID (defaults to configured entity)
+        """
+        return self.get_all_incidents(neris_id=neris_id, status=["PENDING_APPROVAL"])
+
+    def get_incident(
+        self,
+        neris_id_incident: str,
+        *,
+        neris_id: str | None = None,
+    ) -> dict | None:
+        """Fetch a single incident by its NERIS ID.
+
+        Args:
+            neris_id_incident: Full incident NERIS ID (e.g. FD53055879|26SJ0020|1770457554)
+            neris_id: Entity ID (defaults to configured entity)
+
+        Returns:
+            Incident dict, or None if not found
+        """
+        neris_id = neris_id or self.entity_id
+        # The API has no single-incident GET; filter the list by incident_number
+        # The incident_number is the middle segment of the compound NERIS ID
+        parts = neris_id_incident.split("|")
+        if len(parts) != 3:
+            logger.error(f"Invalid incident NERIS ID format: {neris_id_incident}")
+            return None
+
+        incident_number = parts[1]
+        result = self.api.list_incidents(
+            neris_id_entity=neris_id,
+            incident_number=incident_number,
+            page_size=1,
+        )
+        incidents = result.get("incidents", [])
+        if not incidents:
+            logger.warning(f"Incident not found: {neris_id_incident}")
+            return None
+        return incidents[0]
+
+    def patch_incident(
+        self,
+        neris_id_incident: str,
+        properties: dict,
+        *,
+        neris_id: str | None = None,
+    ) -> dict:
+        """Update specific fields on an incident.
+
+        Uses the NERIS patch format::
+
+            client.patch_incident("FD53055879|26SJ0020|1770457554", {
+                "base": {
+                    "outcome_narrative": {
+                        "action": "set",
+                        "value": "Updated narrative text"
+                    }
+                }
+            })
+
+        Args:
+            neris_id_incident: Full incident NERIS ID
+            properties: Patch properties dict (field -> action)
+            neris_id: Entity ID (defaults to configured entity)
+
+        Returns:
+            Updated incident response
+        """
+        neris_id = neris_id or self.entity_id
+        body = {
+            "neris_id": neris_id_incident,
+            "action": "patch",
+            "properties": properties,
+        }
+        logger.info(f"Patching incident {neris_id_incident}")
+        return self.api.patch_incident(neris_id, neris_id_incident, body)
+
+    def approve_incident(
+        self,
+        neris_id_incident: str,
+        *,
+        neris_id: str | None = None,
+    ) -> dict:
+        """Approve an incident (transition from PENDING_APPROVAL to APPROVED).
+
+        Args:
+            neris_id_incident: Full incident NERIS ID
+            neris_id: Entity ID (defaults to configured entity)
+
+        Returns:
+            Updated incident response
+        """
+        neris_id = neris_id or self.entity_id
+        logger.info(f"Approving incident {neris_id_incident}")
+        return self.api.update_incident_status(
+            neris_id, neris_id_incident, TypeIncidentStatusPayloadValue.APPROVED
+        )
+
+    def reject_incident(
+        self,
+        neris_id_incident: str,
+        *,
+        neris_id: str | None = None,
+    ) -> dict:
+        """Reject an incident.
+
+        Args:
+            neris_id_incident: Full incident NERIS ID
+            neris_id: Entity ID (defaults to configured entity)
+
+        Returns:
+            Updated incident response
+        """
+        neris_id = neris_id or self.entity_id
+        logger.info(f"Rejecting incident {neris_id_incident}")
+        return self.api.update_incident_status(
+            neris_id, neris_id_incident, TypeIncidentStatusPayloadValue.REJECTED
+        )

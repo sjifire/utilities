@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from neris_api_client.models import TypeIncidentStatusPayloadValue
 
 from sjifire.neris.client import ENTITY_ID, NerisClient, get_neris_credentials
 
@@ -314,3 +315,207 @@ class TestGetAllIncidents:
 
         assert result == []
         assert mock_api.list_incidents.call_count == 1
+
+
+class TestGetPendingIncidents:
+    """Tests for get_pending_incidents method."""
+
+    def test_filters_by_pending_approval(self, mock_credentials, mock_api):
+        mock_api.list_incidents.return_value = {
+            "incidents": [{"neris_id": "inc1"}],
+            "next_cursor": None,
+        }
+
+        with NerisClient() as client:
+            result = client.get_pending_incidents()
+
+        assert len(result) == 1
+        mock_api.list_incidents.assert_called_once_with(
+            neris_id_entity=ENTITY_ID,
+            page_size=100,
+            cursor=None,
+            status=["PENDING_APPROVAL"],
+        )
+
+    def test_custom_entity_id(self, mock_credentials, mock_api):
+        mock_api.list_incidents.return_value = {
+            "incidents": [],
+            "next_cursor": None,
+        }
+
+        with NerisClient() as client:
+            client.get_pending_incidents(neris_id="FD99999999")
+
+        mock_api.list_incidents.assert_called_once_with(
+            neris_id_entity="FD99999999",
+            page_size=100,
+            cursor=None,
+            status=["PENDING_APPROVAL"],
+        )
+
+
+SAMPLE_NERIS_ID = f"{ENTITY_ID}|26SJ0020|1770457554"
+
+
+class TestGetIncident:
+    """Tests for get_incident method."""
+
+    def test_get_incident_found(self, mock_credentials, mock_api):
+        mock_api.list_incidents.return_value = {
+            "incidents": [{"neris_id": SAMPLE_NERIS_ID}],
+        }
+
+        with NerisClient() as client:
+            result = client.get_incident(SAMPLE_NERIS_ID)
+
+        assert result is not None
+        assert result["neris_id"] == SAMPLE_NERIS_ID
+        mock_api.list_incidents.assert_called_once_with(
+            neris_id_entity=ENTITY_ID,
+            incident_number="26SJ0020",
+            page_size=1,
+        )
+
+    def test_get_incident_not_found(self, mock_credentials, mock_api):
+        mock_api.list_incidents.return_value = {"incidents": []}
+
+        with NerisClient() as client:
+            result = client.get_incident(SAMPLE_NERIS_ID)
+
+        assert result is None
+
+    def test_get_incident_invalid_id_format(self, mock_credentials, mock_api):
+        with NerisClient() as client:
+            result = client.get_incident("bad-format")
+
+        assert result is None
+        mock_api.list_incidents.assert_not_called()
+
+    def test_get_incident_custom_entity(self, mock_credentials, mock_api):
+        custom_id = "FD99999999|INC001|1234567890"
+        mock_api.list_incidents.return_value = {
+            "incidents": [{"neris_id": custom_id}],
+        }
+
+        with NerisClient() as client:
+            result = client.get_incident(custom_id, neris_id="FD99999999")
+
+        assert result is not None
+        mock_api.list_incidents.assert_called_once_with(
+            neris_id_entity="FD99999999",
+            incident_number="INC001",
+            page_size=1,
+        )
+
+
+class TestPatchIncident:
+    """Tests for patch_incident method."""
+
+    def test_patch_incident_builds_correct_body(self, mock_credentials, mock_api):
+        mock_api.patch_incident.return_value = {"neris_id": SAMPLE_NERIS_ID}
+
+        properties = {
+            "base": {
+                "outcome_narrative": {
+                    "action": "set",
+                    "value": "Updated narrative",
+                }
+            }
+        }
+
+        with NerisClient() as client:
+            result = client.patch_incident(SAMPLE_NERIS_ID, properties)
+
+        assert result["neris_id"] == SAMPLE_NERIS_ID
+        mock_api.patch_incident.assert_called_once_with(
+            ENTITY_ID,
+            SAMPLE_NERIS_ID,
+            {
+                "neris_id": SAMPLE_NERIS_ID,
+                "action": "patch",
+                "properties": properties,
+            },
+        )
+
+    def test_patch_incident_custom_entity(self, mock_credentials, mock_api):
+        custom_id = "FD99999999|INC001|1234567890"
+        mock_api.patch_incident.return_value = {"neris_id": custom_id}
+
+        with NerisClient() as client:
+            client.patch_incident(custom_id, {"base": {}}, neris_id="FD99999999")
+
+        mock_api.patch_incident.assert_called_once_with(
+            "FD99999999",
+            custom_id,
+            {
+                "neris_id": custom_id,
+                "action": "patch",
+                "properties": {"base": {}},
+            },
+        )
+
+
+class TestApproveIncident:
+    """Tests for approve_incident method."""
+
+    def test_approve_calls_update_status_with_approved(self, mock_credentials, mock_api):
+        mock_api.update_incident_status.return_value = {
+            "neris_id": SAMPLE_NERIS_ID,
+            "incident_status": {"status": "APPROVED"},
+        }
+
+        with NerisClient() as client:
+            result = client.approve_incident(SAMPLE_NERIS_ID)
+
+        assert result["incident_status"]["status"] == "APPROVED"
+        mock_api.update_incident_status.assert_called_once_with(
+            ENTITY_ID,
+            SAMPLE_NERIS_ID,
+            TypeIncidentStatusPayloadValue.APPROVED,
+        )
+
+    def test_approve_custom_entity(self, mock_credentials, mock_api):
+        custom_id = "FD99999999|INC001|1234567890"
+        mock_api.update_incident_status.return_value = {"neris_id": custom_id}
+
+        with NerisClient() as client:
+            client.approve_incident(custom_id, neris_id="FD99999999")
+
+        mock_api.update_incident_status.assert_called_once_with(
+            "FD99999999",
+            custom_id,
+            TypeIncidentStatusPayloadValue.APPROVED,
+        )
+
+
+class TestRejectIncident:
+    """Tests for reject_incident method."""
+
+    def test_reject_calls_update_status_with_rejected(self, mock_credentials, mock_api):
+        mock_api.update_incident_status.return_value = {
+            "neris_id": SAMPLE_NERIS_ID,
+            "incident_status": {"status": "REJECTED"},
+        }
+
+        with NerisClient() as client:
+            result = client.reject_incident(SAMPLE_NERIS_ID)
+
+        assert result["incident_status"]["status"] == "REJECTED"
+        mock_api.update_incident_status.assert_called_once_with(
+            ENTITY_ID,
+            SAMPLE_NERIS_ID,
+            TypeIncidentStatusPayloadValue.REJECTED,
+        )
+
+    def test_reject_custom_entity(self, mock_credentials, mock_api):
+        custom_id = "FD99999999|INC001|1234567890"
+        mock_api.update_incident_status.return_value = {"neris_id": custom_id}
+
+        with NerisClient() as client:
+            client.reject_incident(custom_id, neris_id="FD99999999")
+
+        mock_api.update_incident_status.assert_called_once_with(
+            "FD99999999",
+            custom_id,
+            TypeIncidentStatusPayloadValue.REJECTED,
+        )
