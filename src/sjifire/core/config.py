@@ -1,5 +1,6 @@
 """Configuration loading utilities."""
 
+import contextlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -103,7 +104,11 @@ def get_exchange_credentials() -> ExchangeCredentials:
             "EXCHANGE_TENANT_ID/MS_GRAPH_TENANT_ID and EXCHANGE_CLIENT_ID/MS_GRAPH_CLIENT_ID"
         )
 
-    organization = os.getenv("EXCHANGE_ORGANIZATION", "sjifire.org")
+    # Default to org domain from config if not set in environment
+    default_org = "sjifire.org"
+    with contextlib.suppress(FileNotFoundError):
+        default_org = load_org_config().domain
+    organization = os.getenv("EXCHANGE_ORGANIZATION", default_org)
     thumbprint = os.getenv("EXCHANGE_CERTIFICATE_THUMBPRINT")
     cert_path = os.getenv("EXCHANGE_CERTIFICATE_PATH")
     cert_password = os.getenv("EXCHANGE_CERTIFICATE_PASSWORD")
@@ -143,12 +148,22 @@ class DispatchConfig:
 
 
 @dataclass
-class EntraSyncConfig:
-    """Configuration for Aladtec to Entra ID sync."""
+class OrgConfig:
+    """Organization configuration."""
 
     company_name: str
     domain: str
+    service_account: str
     skip_emails: list[str] = field(default_factory=list)
+
+    @property
+    def service_email(self) -> str:
+        """Get full service account email."""
+        return f"{self.service_account}@{self.domain}"
+
+
+# Alias for backwards compatibility
+EntraSyncConfig = OrgConfig
 
 
 def get_project_root() -> Path:
@@ -190,14 +205,14 @@ def load_dispatch_config(require_mailbox: bool = True) -> DispatchConfig:
     )
 
 
-def load_entra_sync_config() -> EntraSyncConfig:
-    """Load Entra sync configuration from config file.
+def load_org_config() -> OrgConfig:
+    """Load organization configuration from config file.
 
     Returns:
-        EntraSyncConfig with company_name and domain
+        OrgConfig with company_name, domain, and service_account
     """
     project_root = get_project_root()
-    config_path = project_root / "config" / "entra_sync.json"
+    config_path = project_root / "config" / "organization.json"
 
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -205,8 +220,38 @@ def load_entra_sync_config() -> EntraSyncConfig:
     with config_path.open() as f:
         config_data = json.load(f)
 
-    return EntraSyncConfig(
+    return OrgConfig(
         company_name=config_data["company_name"],
         domain=config_data.get("domain", "sjifire.org"),
+        service_account=config_data.get("service_account", "svc-automations"),
         skip_emails=config_data.get("skip_emails", []),
     )
+
+
+# Alias for backwards compatibility
+load_entra_sync_config = load_org_config
+
+
+# Cached config instance
+_org_config: OrgConfig | None = None
+
+
+def get_org_config() -> OrgConfig:
+    """Get cached organization config.
+
+    Loads config once and caches it for subsequent calls.
+    """
+    global _org_config
+    if _org_config is None:
+        _org_config = load_org_config()
+    return _org_config
+
+
+def get_domain() -> str:
+    """Get organization domain from config."""
+    return get_org_config().domain
+
+
+def get_service_email() -> str:
+    """Get service account email from config."""
+    return get_org_config().service_email

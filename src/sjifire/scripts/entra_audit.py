@@ -10,6 +10,7 @@ from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
 from sjifire.aladtec.member_scraper import AladtecMemberScraper
 from sjifire.aladtec.models import Member
+from sjifire.core.config import get_domain
 from sjifire.core.msgraph_client import get_graph_client
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -25,9 +26,10 @@ def check_missing_data(members: list[Member]) -> dict[str, list[Member]]:
     Returns:
         Dict mapping issue type to list of affected members
     """
+    domain = get_domain()
     issues: dict[str, list[Member]] = {
         "no_positions": [],
-        "no_sjifire_email": [],
+        "no_org_email": [],
         "no_employee_id": [],
         "inactive": [],
     }
@@ -37,9 +39,9 @@ def check_missing_data(members: list[Member]) -> dict[str, list[Member]]:
         if not member.positions:
             issues["no_positions"].append(member)
 
-        # Check for missing sjifire.org email
-        if not member.email or not member.email.endswith("@sjifire.org"):
-            issues["no_sjifire_email"].append(member)
+        # Check for missing org domain email
+        if not member.email or not member.email.endswith(f"@{domain}"):
+            issues["no_org_email"].append(member)
 
         # Check for missing employee ID
         if not member.employee_id:
@@ -121,7 +123,7 @@ def compare_systems(
     """Compare Aladtec members with Entra ID users.
 
     Matches by:
-    1. sjifire.org email address
+    1. Organization domain email address
     2. Employee ID (if available)
     3. First + Last name (fallback)
 
@@ -134,6 +136,7 @@ def compare_systems(
     Returns:
         Tuple of (members_not_in_entra, entra_users_not_in_aladtec)
     """
+    domain = get_domain()
     # Build lookup sets for Entra users
     entra_emails = {u["email"].lower() for u in entra_users if u.get("email")}
     entra_upns = {u["upn"].lower() for u in entra_users if u.get("upn")}
@@ -171,12 +174,12 @@ def compare_systems(
         if not found:
             members_not_in_entra.append(member)
 
-    # Find Entra users not in Aladtec (only sjifire.org accounts, exclude shared mailboxes)
+    # Find Entra users not in Aladtec (only org domain accounts, exclude shared mailboxes)
     entra_not_in_aladtec = []
     for user in entra_users:
-        # Only check sjifire.org accounts
+        # Only check org domain accounts
         upn = user.get("upn", "")
-        if not upn or not upn.endswith("@sjifire.org"):
+        if not upn or not upn.endswith(f"@{domain}"):
             continue
 
         # Skip shared mailboxes (no givenName/surname)
@@ -260,9 +263,10 @@ async def run_audit(skip_entra: bool = False) -> int:
         lambda m: f"{m.display_name}",
     )
 
+    domain = get_domain()
     print_section(
-        "Members without @sjifire.org email",
-        issues["no_sjifire_email"],
+        f"Members without @{domain} email",
+        issues["no_org_email"],
         lambda m: f"{m.display_name} ({m.email or 'no email'})",
     )
 
@@ -289,9 +293,9 @@ async def run_audit(skip_entra: bool = False) -> int:
             entra_users = await get_entra_users()
             logger.info(f"Found {len(entra_users)} users in Entra ID")
 
-            # Filter to just sjifire.org accounts for reporting
-            sjifire_users = [u for u in entra_users if u.get("upn", "").endswith("@sjifire.org")]
-            logger.info(f"Found {len(sjifire_users)} @sjifire.org accounts in Entra ID")
+            # Filter to just org domain accounts for reporting
+            org_users = [u for u in entra_users if u.get("upn", "").endswith(f"@{domain}")]
+            logger.info(f"Found {len(org_users)} @{domain} accounts in Entra ID")
 
             members_not_in_entra, entra_not_in_aladtec = compare_systems(members, entra_users)
 
@@ -302,7 +306,7 @@ async def run_audit(skip_entra: bool = False) -> int:
             )
 
             print_section(
-                "Entra ID users NOT in Aladtec (@sjifire.org only)",
+                f"Entra ID users NOT in Aladtec (@{domain} only)",
                 entra_not_in_aladtec,
                 lambda u: f"{u['display_name']} ({u['upn']})",
             )
@@ -316,9 +320,9 @@ async def run_audit(skip_entra: bool = False) -> int:
 
                 entra_to_deactivate = []
                 for u in entra_users:
-                    # Only check sjifire.org accounts
+                    # Only check org domain accounts
                     upn = u.get("upn", "")
-                    if not upn or not upn.endswith("@sjifire.org"):
+                    if not upn or not upn.endswith(f"@{domain}"):
                         continue
 
                     # Match by email
@@ -349,7 +353,7 @@ async def run_audit(skip_entra: bool = False) -> int:
     print(f"  Active members: {len([m for m in members if m.is_active])}")
     print(f"  Inactive members: {len(issues['inactive'])}")
     print(f"  Missing positions: {len(issues['no_positions'])}")
-    print(f"  Missing @sjifire.org email: {len(issues['no_sjifire_email'])}")
+    print(f"  Missing @{domain} email: {len(issues['no_org_email'])}")
     print(f"  Missing employee ID: {len(issues['no_employee_id'])}")
 
     return 0

@@ -29,6 +29,7 @@ from tenacity import (
 )
 
 from sjifire.core.backup import backup_entra_groups, backup_mail_groups
+from sjifire.core.config import get_domain, get_service_email
 from sjifire.core.group_strategies import (
     STRATEGY_NAMES,
     GroupMember,
@@ -119,9 +120,9 @@ class UnifiedGroupSyncManager:
     Uses Entra ID users as the source of truth for membership data.
     """
 
-    def __init__(self, domain: str = "sjifire.org") -> None:
+    def __init__(self, domain: str | None = None) -> None:
         """Initialize the sync manager."""
-        self.domain = domain
+        self.domain = domain or get_domain()
         self._entra_groups: EntraGroupManager | None = None
         self._entra_users: EntraUserManager | None = None
         self._exchange_client: ExchangeOnlineClient | None = None
@@ -180,12 +181,12 @@ class UnifiedGroupSyncManager:
         Returns:
             True if added successfully or already a member
         """
-        svc_email = "svc-automations@sjifire.org"
+        svc_email = get_service_email()
 
         # Find svc-automations user (do this once, outside retry)
         all_users = await self.entra_users.get_users(include_disabled=True)
         svc_user = next(
-            (u for u in all_users if u.email and u.email.lower() == svc_email),
+            (u for u in all_users if u.email and u.email.lower() == svc_email.lower()),
             None,
         )
 
@@ -628,7 +629,7 @@ class UnifiedGroupSyncManager:
                     display_name=display_name,
                     alias=alias,
                     primary_smtp_address=email,
-                    managed_by="svc-automations@sjifire.org",
+                    managed_by=get_service_email(),
                 )
                 if not group:
                     return GroupSyncResult(
@@ -689,7 +690,7 @@ class UnifiedGroupSyncManager:
         result = await self.exchange_client.sync_group(
             identity=email,
             description=strategy.automation_notice,
-            managed_by="svc-automations@sjifire.org",
+            managed_by=get_service_email(),
             target_members=target_emails,
         )
 
@@ -784,7 +785,7 @@ class UnifiedGroupSyncManager:
             all_aladtec = [u for u in all_users_for_source if u.work_group is not None]
             source_emails = {m.email.lower() for m in all_aladtec if m.email}
             # Whitelist service accounts that should never be removed
-            source_emails.discard("svc-automations@sjifire.org")
+            source_emails.discard(get_service_email().lower())
 
         results: list[GroupSyncResult] = []
 
@@ -875,7 +876,7 @@ async def backup_groups(
     strategies: list[str],
     entra_groups: EntraGroupManager,
     exchange_client: ExchangeOnlineClient,
-    domain: str = "sjifire.org",
+    domain: str | None = None,
 ) -> None:
     """Backup all groups that will be synced.
 
@@ -883,8 +884,10 @@ async def backup_groups(
         strategies: List of strategy names being synced
         entra_groups: EntraGroupManager instance
         exchange_client: ExchangeOnlineClient instance
-        domain: Domain for email addresses
+        domain: Domain for email addresses (default: from organization config)
     """
+    if domain is None:
+        domain = get_domain()
     logger.info("")
     logger.info("Creating backup of existing groups...")
 

@@ -1,6 +1,7 @@
 {
   "company_name": "San Juan Island Fire & Rescue",
   "domain": "sjifire.org",
+  "service_account": "svc-automations",
   "skip_emails": [
     "aladtec.admin@sjifire.org",
     "api@sjifire.org"

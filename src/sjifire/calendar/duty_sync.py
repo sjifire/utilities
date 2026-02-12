@@ -25,7 +25,11 @@ from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
 from sjifire.aladtec.schedule_scraper import DaySchedule, ScheduleEntry
 from sjifire.calendar.models import AllDayDutyEvent, CrewMember, SyncResult
-from sjifire.core.config import get_graph_credentials, get_svc_automations_credentials
+from sjifire.core.config import (
+    get_graph_credentials,
+    get_service_email,
+    get_svc_automations_credentials,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -243,18 +247,19 @@ def normalize_html_for_comparison(html: str) -> str:
 class DutyCalendarSync:
     """Sync on-duty schedule to M365 shared calendar or group calendar."""
 
-    def __init__(self, mailbox: str = "svc-automations@sjifire.org") -> None:
+    def __init__(self, mailbox: str | None = None) -> None:
         """Initialize with Graph API credentials.
 
         Args:
             mailbox: Email address of the shared mailbox or M365 group calendar
+                     (default: service account email from organization config)
 
         Note:
             For M365 group calendars, delegated auth (username/password) is required
             because application permissions don't support group calendar writes.
             The svc-automations account is used for delegated auth.
         """
-        self.mailbox = mailbox
+        self.mailbox = mailbox or get_service_email()
         self._tenant_id, self._client_id, self._client_secret = get_graph_credentials()
 
         # Start with app-only credential for initial detection

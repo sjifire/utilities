@@ -117,13 +117,21 @@ class TestGetGraphCredentials:
 
 
 class TestLoadEntraSyncConfig:
-    """Tests for load_entra_sync_config function."""
+    """Tests for load_entra_sync_config/load_org_config function."""
 
     def test_loads_company_name(self, tmp_path):
         config_dir = tmp_path / "config"
         config_dir.mkdir()
-        config_file = config_dir / "entra_sync.json"
-        config_file.write_text(json.dumps({"company_name": "Test Fire Dept", "domain": "test.org"}))
+        config_file = config_dir / "organization.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "company_name": "Test Fire Dept",
+                    "domain": "test.org",
+                    "service_account": "svc-test",
+                }
+            )
+        )
 
         with patch("sjifire.core.config.get_project_root", return_value=tmp_path):
             config = load_entra_sync_config()
@@ -133,9 +141,15 @@ class TestLoadEntraSyncConfig:
     def test_loads_domain(self, tmp_path):
         config_dir = tmp_path / "config"
         config_dir.mkdir()
-        config_file = config_dir / "entra_sync.json"
+        config_file = config_dir / "organization.json"
         config_file.write_text(
-            json.dumps({"company_name": "Test Fire Dept", "domain": "testfire.org"})
+            json.dumps(
+                {
+                    "company_name": "Test Fire Dept",
+                    "domain": "testfire.org",
+                    "service_account": "svc-test",
+                }
+            )
         )
 
         with patch("sjifire.core.config.get_project_root", return_value=tmp_path):
@@ -146,7 +160,7 @@ class TestLoadEntraSyncConfig:
     def test_default_domain_when_missing(self, tmp_path):
         config_dir = tmp_path / "config"
         config_dir.mkdir()
-        config_file = config_dir / "entra_sync.json"
+        config_file = config_dir / "organization.json"
         config_file.write_text(json.dumps({"company_name": "Test Fire Dept"}))
 
         with patch("sjifire.core.config.get_project_root", return_value=tmp_path):
@@ -164,3 +178,22 @@ class TestLoadEntraSyncConfig:
             pytest.raises(FileNotFoundError),
         ):
             load_entra_sync_config()
+
+    def test_service_email_property(self, tmp_path):
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        config_file = config_dir / "organization.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "company_name": "Test Fire Dept",
+                    "domain": "testfire.org",
+                    "service_account": "svc-automations",
+                }
+            )
+        )
+
+        with patch("sjifire.core.config.get_project_root", return_value=tmp_path):
+            config = load_entra_sync_config()
+
+        assert config.service_email == "svc-automations@testfire.org"

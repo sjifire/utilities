@@ -36,6 +36,7 @@ def importer(mock_config):
         mock_load.return_value = EntraSyncConfig(
             company_name="Test Fire Department",
             domain="testfire.org",
+            service_account="svc-test",
         )
         # Also mock the EntraUserManager to avoid API calls
         with patch("sjifire.entra.aladtec_import.EntraUserManager"):
@@ -950,6 +951,7 @@ class TestImporterConfig:
             mock_load.return_value = EntraSyncConfig(
                 company_name="Custom Fire Dept",
                 domain="custom.org",
+                service_account="svc-test",
             )
             with patch("sjifire.entra.aladtec_import.EntraUserManager"):
                 importer = AladtecImporter()
@@ -964,6 +966,7 @@ class TestImporterConfig:
             mock_load.return_value = EntraSyncConfig(
                 company_name="Config Company",
                 domain="config.org",
+                service_account="svc-test",
             )
             with patch("sjifire.entra.aladtec_import.EntraUserManager"):
                 importer = AladtecImporter(
