@@ -29,17 +29,8 @@ CALENDAR_NAME = "Aladtec Schedule"
 # Entra extension attribute to store calendar ID (survives renames)
 CALENDAR_ID_ATTRIBUTE = "extension_attribute5"
 
-# Category for Aladtec events (when using primary calendar)
+# Category for Aladtec events in primary calendar
 ALADTEC_CATEGORY = "Aladtec"
-
-# Test users who get events in their primary Calendar instead of separate calendar
-# Set to None to disable this feature, or add emails to test
-PRIMARY_CALENDAR_TEST_USERS: set[str] | None = {
-    "agreene@sjifire.org",
-    "schadwick@sjifire.org",
-    "kdodd@sjifire.org",
-    "ivoskamp@sjifire.org",
-}
 
 # Timezone for all operations
 TIMEZONE_NAME = "America/Los_Angeles"
@@ -127,10 +118,41 @@ class PersonalCalendarSync:
         self._uses_primary_calendar: set[str] = set()  # users using primary calendar
 
     def _should_use_primary_calendar(self, user_email: str) -> bool:
-        """Check if user should use primary calendar instead of separate Aladtec calendar."""
-        if PRIMARY_CALENDAR_TEST_USERS is None:
+        """All users use primary calendar with Aladtec category."""
+        return True
+
+    async def ensure_aladtec_category(self, user_email: str) -> bool:
+        """Ensure the Aladtec category exists in user's master category list.
+
+        Creates the category with orange color if it doesn't exist.
+        This makes the category visible in Outlook's category picker.
+
+        Returns:
+            True if category exists or was created successfully
+        """
+        try:
+            # Get existing categories
+            result = await self.client.users.by_user_id(user_email).outlook.master_categories.get()
+
+            # Check if Aladtec already exists
+            if result and result.value:
+                for cat in result.value:
+                    if cat.display_name == ALADTEC_CATEGORY:
+                        return True  # Already exists
+
+            # Create the category with orange color
+            from msgraph.generated.models.outlook_category import OutlookCategory
+
+            new_cat = OutlookCategory(
+                display_name=ALADTEC_CATEGORY,
+                color="preset6",  # Orange
+            )
+            await self.client.users.by_user_id(user_email).outlook.master_categories.post(new_cat)
+            logger.info(f"Created Aladtec category for {user_email}")
+            return True
+        except Exception as e:
+            logger.warning(f"Could not create Aladtec category for {user_email}: {e}")
             return False
-        return user_email.lower() in {u.lower() for u in PRIMARY_CALENDAR_TEST_USERS}
 
     async def _get_primary_calendar_id(self, user_email: str) -> str | None:
         """Get the user's primary (default) calendar ID."""
@@ -238,7 +260,7 @@ class PersonalCalendarSync:
             if calendar_id:
                 self._calendar_cache[user_email] = calendar_id
                 self._uses_primary_calendar.add(user_email.lower())
-                logger.info(f"Using primary calendar for {user_email} (test mode)")
+                logger.debug(f"Using primary calendar for {user_email}")
                 return calendar_id
             else:
                 logger.warning(f"Failed to get primary calendar for {user_email}, falling back")
@@ -660,6 +682,9 @@ class PersonalCalendarSync:
         if not calendar_id:
             result.errors.append("Failed to get/create calendar")
             return result
+
+        # Ensure Aladtec category exists in user's category list
+        await self.ensure_aladtec_category(user_email)
 
         # Get existing events
         existing = await self.get_existing_events(user_email, calendar_id, start_date, end_date)

@@ -307,9 +307,15 @@ def main() -> int:
     # Step 3: Group entries by user
     entries_by_email: dict[str, list[ScheduleEntry]] = {}
     unmatched_names: set[str] = set()
+    skipped_empty_position = 0
 
     for day in schedules:
         for entry in day.entries:
+            # Skip entries with empty position (e.g., Trades)
+            if not entry.position or not entry.position.strip():
+                skipped_empty_position += 1
+                continue
+
             email = match_schedule_name_to_email(entry.name, members)
             if email:
                 if email not in entries_by_email:
@@ -317,6 +323,9 @@ def main() -> int:
                 entries_by_email[email].append(entry)
             else:
                 unmatched_names.add(entry.name)
+
+    if skipped_empty_position:
+        logger.info(f"Skipped {skipped_empty_position} entries with empty position (e.g., Trades)")
 
     if unmatched_names:
         logger.warning(f"Could not match {len(unmatched_names)} names to emails")

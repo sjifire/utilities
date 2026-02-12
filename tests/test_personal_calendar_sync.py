@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sjifire.aladtec.schedule_scraper import ScheduleEntry
-from sjifire.calendar import personal_sync
 from sjifire.calendar.personal_sync import (
     ALADTEC_CATEGORY,
     PersonalCalendarSync,
@@ -127,26 +126,75 @@ class TestShouldUsePrimaryCalendar:
         ):
             return PersonalCalendarSync()
 
-    def test_returns_true_for_test_user(self, sync):
-        """Returns True for users in PRIMARY_CALENDAR_TEST_USERS."""
-        with patch.object(personal_sync, "PRIMARY_CALENDAR_TEST_USERS", {"test@example.com"}):
-            assert sync._should_use_primary_calendar("test@example.com") is True
+    def test_always_returns_true(self, sync):
+        """All users use primary calendar with Aladtec category."""
+        assert sync._should_use_primary_calendar("test@example.com") is True
+        assert sync._should_use_primary_calendar("other@example.com") is True
+        assert sync._should_use_primary_calendar("anyone@example.com") is True
 
-    def test_returns_false_for_non_test_user(self, sync):
-        """Returns False for users not in PRIMARY_CALENDAR_TEST_USERS."""
-        with patch.object(personal_sync, "PRIMARY_CALENDAR_TEST_USERS", {"test@example.com"}):
-            assert sync._should_use_primary_calendar("other@example.com") is False
 
-    def test_case_insensitive_match(self, sync):
-        """Matching is case insensitive."""
-        with patch.object(personal_sync, "PRIMARY_CALENDAR_TEST_USERS", {"Test@Example.com"}):
-            assert sync._should_use_primary_calendar("test@example.com") is True
-            assert sync._should_use_primary_calendar("TEST@EXAMPLE.COM") is True
+class TestEnsureAladtecCategory:
+    """Tests for ensure_aladtec_category method."""
 
-    def test_returns_false_when_disabled(self, sync):
-        """Returns False when PRIMARY_CALENDAR_TEST_USERS is None."""
-        with patch.object(personal_sync, "PRIMARY_CALENDAR_TEST_USERS", None):
-            assert sync._should_use_primary_calendar("test@example.com") is False
+    @pytest.fixture
+    def sync(self, mock_env_vars):
+        """Create PersonalCalendarSync with mocked client."""
+        with (
+            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+        ):
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            sync = PersonalCalendarSync()
+            sync.client = mock_client
+            return sync
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_category_exists(self, sync):
+        """Returns True if Aladtec category already exists."""
+        mock_category = MagicMock()
+        mock_category.display_name = ALADTEC_CATEGORY
+
+        mock_result = MagicMock()
+        mock_result.value = [mock_category]
+
+        sync.client.users.by_user_id.return_value.outlook.master_categories.get = AsyncMock(
+            return_value=mock_result
+        )
+
+        result = await sync.ensure_aladtec_category("test@example.com")
+
+        assert result is True
+        # Should not call post since category exists
+        sync.client.users.by_user_id.return_value.outlook.master_categories.post.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_creates_category_when_missing(self, sync):
+        """Creates Aladtec category if it doesn't exist."""
+        mock_result = MagicMock()
+        mock_result.value = []  # No categories
+
+        sync.client.users.by_user_id.return_value.outlook.master_categories.get = AsyncMock(
+            return_value=mock_result
+        )
+        sync.client.users.by_user_id.return_value.outlook.master_categories.post = AsyncMock()
+
+        result = await sync.ensure_aladtec_category("test@example.com")
+
+        assert result is True
+        # Should call post to create category
+        sync.client.users.by_user_id.return_value.outlook.master_categories.post.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_error(self, sync):
+        """Returns False if API call fails."""
+        sync.client.users.by_user_id.return_value.outlook.master_categories.get = AsyncMock(
+            side_effect=Exception("API error")
+        )
+
+        result = await sync.ensure_aladtec_category("test@example.com")
+
+        assert result is False
 
 
 class TestGetPrimaryCalendarId:
@@ -206,8 +254,8 @@ class TestGetOrCreateCalendarPrimaryMode:
             return sync
 
     @pytest.mark.asyncio
-    async def test_uses_primary_calendar_for_test_user(self, sync):
-        """Test users get primary calendar instead of separate Aladtec calendar."""
+    async def test_all_users_get_primary_calendar(self, sync):
+        """All users get primary calendar with Aladtec category."""
         mock_calendar = MagicMock()
         mock_calendar.id = "primary-calendar-id"
 
@@ -215,39 +263,10 @@ class TestGetOrCreateCalendarPrimaryMode:
             return_value=mock_calendar
         )
 
-        with patch.object(personal_sync, "PRIMARY_CALENDAR_TEST_USERS", {"test@example.com"}):
-            result = await sync.get_or_create_calendar("test@example.com")
+        result = await sync.get_or_create_calendar("test@example.com")
 
         assert result == "primary-calendar-id"
         assert "test@example.com" in sync._uses_primary_calendar
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_separate_calendar(self, sync):
-        """Non-test users get separate Aladtec Schedule calendar."""
-        # Mock getting calendars (no Aladtec Schedule exists)
-        mock_result = MagicMock()
-        mock_result.value = []
-
-        # Mock creating new calendar
-        mock_created = MagicMock()
-        mock_created.id = "new-aladtec-calendar-id"
-
-        sync.client.users.by_user_id.return_value.calendars.get = AsyncMock(
-            return_value=mock_result
-        )
-        sync.client.users.by_user_id.return_value.calendars.post = AsyncMock(
-            return_value=mock_created
-        )
-
-        with (
-            patch.object(personal_sync, "PRIMARY_CALENDAR_TEST_USERS", {"other@example.com"}),
-            patch.object(sync, "_get_stored_calendar_id", new=AsyncMock(return_value=None)),
-            patch.object(sync, "_store_calendar_id", new=AsyncMock(return_value=True)),
-        ):
-            result = await sync.get_or_create_calendar("test@example.com")
-
-        assert result == "new-aladtec-calendar-id"
-        assert "test@example.com" not in sync._uses_primary_calendar
 
 
 class TestCreateEventWithCategory:
