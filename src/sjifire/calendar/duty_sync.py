@@ -220,6 +220,22 @@ def is_filled_entry(entry: ScheduleEntry) -> bool:
     return not is_unfilled_position(entry)
 
 
+def normalize_html_for_comparison(html: str) -> str:
+    """Normalize HTML for comparison by removing variable whitespace.
+
+    Outlook/Graph API may add or modify whitespace when storing HTML.
+    This normalizes both the new and existing HTML for comparison.
+    """
+    import re as regex
+
+    # Remove all newlines and collapse multiple spaces
+    normalized = regex.sub(r"\s+", " ", html)
+    # Remove spaces around HTML tags
+    normalized = regex.sub(r"\s*<", "<", normalized)
+    normalized = regex.sub(r">\s*", ">", normalized)
+    return normalized.strip()
+
+
 class DutyCalendarSync:
     """Sync on-duty schedule to M365 shared calendar or group calendar."""
 
@@ -548,11 +564,11 @@ class DutyCalendarSync:
         self,
         start_date: date,
         end_date: date,
-    ) -> dict[date, str]:
+    ) -> dict[date, tuple[str, str]]:
         """Fetch existing On Duty events from the calendar.
 
         Returns:
-            Dict mapping event date to event ID
+            Dict mapping event date to (event_id, body_content) tuple
         """
         # Extend end date to capture full range
         start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=TIMEZONE)
@@ -573,7 +589,7 @@ class DutyCalendarSync:
                         end_date_time=end_dt.isoformat(),
                         filter="startswith(subject, 'On Duty')",
                         top=500,
-                        select=["id", "subject", "start", "end", "isAllDay"],
+                        select=["id", "subject", "start", "end", "isAllDay", "body"],
                     )
                 )
                 # fmt: off
@@ -593,7 +609,7 @@ class DutyCalendarSync:
                         end_date_time=end_dt.isoformat(),
                         filter="startswith(subject, 'On Duty')",
                         top=500,
-                        select=["id", "subject", "start", "end", "isAllDay"],
+                        select=["id", "subject", "start", "end", "isAllDay", "body"],
                     )
                 )
                 config = (
@@ -608,14 +624,18 @@ class DutyCalendarSync:
             logger.error(f"Failed to fetch existing events: {e}")
             return {}
 
-        events_by_date: dict[date, str] = {}
+        events_by_date: dict[date, tuple[str, str]] = {}
 
         if result and result.value:
             for item in result.value:
                 # Parse start date
                 event_date = self._parse_graph_date(item.start)
                 if event_date and item.id:
-                    events_by_date[event_date] = item.id
+                    # Extract body content (default to empty string if not present)
+                    body_content = ""
+                    if item.body and item.body.content:
+                        body_content = item.body.content
+                    events_by_date[event_date] = (item.id, body_content)
 
         logger.debug(f"Found {len(events_by_date)} existing On Duty events")
         return events_by_date
@@ -865,21 +885,32 @@ class DutyCalendarSync:
         """Sync all-day events to calendar, updating/creating/deleting as needed."""
         result = SyncResult()
 
-        # Get existing events (date -> event_id mapping)
+        # Get existing events (date -> (event_id, body) mapping)
         existing_by_date = await self.get_existing_events(start_date, end_date)
 
         # Separate events into create vs update lists
         events_to_create: list[AllDayDutyEvent] = []
         events_to_update: list[AllDayDutyEvent] = []
+        unchanged_count = 0
 
         for new_event in new_events:
             event_date = new_event.event_date
-            existing_id = existing_by_date.get(event_date)
+            existing = existing_by_date.get(event_date)
 
-            if existing_id:
-                # Update existing event
+            if existing:
+                existing_id, existing_body = existing
                 new_event.event_id = existing_id
-                events_to_update.append(new_event)
+
+                # Compare normalized HTML to detect actual changes
+                new_body_normalized = normalize_html_for_comparison(new_event.body_html)
+                existing_body_normalized = normalize_html_for_comparison(existing_body)
+
+                if new_body_normalized == existing_body_normalized:
+                    # No changes needed
+                    unchanged_count += 1
+                else:
+                    # Content changed, need to update
+                    events_to_update.append(new_event)
             else:
                 # Create new event
                 events_to_create.append(new_event)
@@ -889,10 +920,13 @@ class DutyCalendarSync:
             logger.info(f"Creating {len(events_to_create)} events...")
         if events_to_update:
             logger.info(f"Updating {len(events_to_update)} events...")
+        if unchanged_count:
+            logger.info(f"Skipping {unchanged_count} unchanged events")
 
         if dry_run:
             result.events_created = len(events_to_create)
             result.events_updated = len(events_to_update)
+            result.events_unchanged = unchanged_count
         else:
             # Create events in parallel
             if events_to_create:
@@ -905,6 +939,8 @@ class DutyCalendarSync:
                 updated, update_errors = await self.update_events_batch(events_to_update)
                 result.events_updated = updated
                 result.errors.extend(update_errors)
+
+            result.events_unchanged = unchanged_count
 
         # Note: We intentionally do NOT delete orphaned events.
         # If Aladtec returns incomplete data, we don't want to lose valid events.
@@ -969,13 +1005,19 @@ class DutyCalendarSync:
 
             logger.info(f"Found {len(existing_by_date)} On Duty events to delete")
 
+            # Extract just the event IDs from tuples (id, body)
+            events_to_delete = {
+                event_date: event_id
+                for event_date, (event_id, _) in existing_by_date.items()
+            }
+
             if dry_run:
-                for event_date in sorted(existing_by_date.keys()):
+                for event_date in sorted(events_to_delete.keys()):
                     logger.info(f"Would delete event for {event_date}")
-                result.events_deleted = len(existing_by_date)
+                result.events_deleted = len(events_to_delete)
             else:
-                logger.info(f"Deleting {len(existing_by_date)} events...")
-                deleted, errors = await self.delete_events_batch(existing_by_date)
+                logger.info(f"Deleting {len(events_to_delete)} events...")
+                deleted, errors = await self.delete_events_batch(events_to_delete)
                 result.events_deleted = deleted
                 result.errors.extend(errors)
 

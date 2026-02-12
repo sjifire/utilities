@@ -628,11 +628,13 @@ class TestDutyCalendarSyncGraphAPI:
 
     @pytest.mark.asyncio
     async def test_get_existing_events_returns_dict(self, calendar_sync):
-        """Get existing events returns date to ID mapping."""
+        """Get existing events returns date to (ID, body) mapping."""
         mock_event = MagicMock()
         mock_event.id = "event-123"
         mock_event.start = MagicMock()
         mock_event.start.date_time = "2026-02-01T00:00:00"
+        mock_event.body = MagicMock()
+        mock_event.body.content = "<html>test body</html>"
 
         mock_result = MagicMock()
         mock_result.value = [mock_event]
@@ -644,7 +646,9 @@ class TestDutyCalendarSyncGraphAPI:
         result = await calendar_sync.get_existing_events(date(2026, 2, 1), date(2026, 2, 28))
 
         assert date(2026, 2, 1) in result
-        assert result[date(2026, 2, 1)] == "event-123"
+        event_id, body = result[date(2026, 2, 1)]
+        assert event_id == "event-123"
+        assert body == "<html>test body</html>"
 
     @pytest.mark.asyncio
     async def test_get_existing_events_handles_error(self, calendar_sync):
@@ -881,12 +885,12 @@ class TestDutyCalendarSyncSyncEvents:
 
     @pytest.mark.asyncio
     async def test_sync_events_updates_existing(self, calendar_sync, sample_events):
-        """Sync updates events that exist."""
-        # All events exist
+        """Sync updates events when body content differs."""
+        # All events exist with different body content
         calendar_sync.get_existing_events = AsyncMock(
             return_value={
-                date(2026, 2, 1): "id-1",
-                date(2026, 2, 2): "id-2",
+                date(2026, 2, 1): ("id-1", "<html>old body 1</html>"),
+                date(2026, 2, 2): ("id-2", "<html>old body 2</html>"),
             }
         )
         calendar_sync.create_events_batch = AsyncMock(return_value=(0, []))
@@ -897,6 +901,26 @@ class TestDutyCalendarSyncSyncEvents:
         assert result.events_created == 0
         assert result.events_updated == 2
         calendar_sync.update_events_batch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_sync_events_skips_unchanged(self, calendar_sync, sample_events):
+        """Sync skips events when body content is identical."""
+        # Mock existing events with same body as new events
+        calendar_sync.get_existing_events = AsyncMock(
+            return_value={
+                date(2026, 2, 1): ("id-1", sample_events[0].body_html),
+                date(2026, 2, 2): ("id-2", sample_events[1].body_html),
+            }
+        )
+        calendar_sync.create_events_batch = AsyncMock(return_value=(0, []))
+        calendar_sync.update_events_batch = AsyncMock(return_value=(0, []))
+
+        result = await calendar_sync.sync_events(sample_events, date(2026, 2, 1), date(2026, 2, 28))
+
+        assert result.events_created == 0
+        assert result.events_updated == 0
+        assert result.events_unchanged == 2
+        calendar_sync.update_events_batch.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_sync_events_dry_run(self, calendar_sync, sample_events):
@@ -945,8 +969,8 @@ class TestDutyCalendarSyncDeleteDateRange:
             "get_existing_events",
             new=AsyncMock(
                 return_value={
-                    date(2026, 2, 1): "id-1",
-                    date(2026, 2, 2): "id-2",
+                    date(2026, 2, 1): ("id-1", "body1"),
+                    date(2026, 2, 2): ("id-2", "body2"),
                 }
             ),
         ):
@@ -964,8 +988,8 @@ class TestDutyCalendarSyncDeleteDateRange:
                 "get_existing_events",
                 new=AsyncMock(
                     return_value={
-                        date(2026, 2, 1): "id-1",
-                        date(2026, 2, 2): "id-2",
+                        date(2026, 2, 1): ("id-1", "body1"),
+                        date(2026, 2, 2): ("id-2", "body2"),
                     }
                 ),
             ),

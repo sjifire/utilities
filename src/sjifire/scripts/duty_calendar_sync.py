@@ -184,7 +184,7 @@ def main() -> int:
 
             print(f"\nFound events on {len(events)} days:\n")
             for event_date in sorted(events.keys()):
-                event_id = events[event_date]
+                event_id, _ = events[event_date]  # Unpack tuple (id, body)
                 # Show date and that an event exists (ID is just for reference)
                 print(f"  {event_date}: On Duty (id: {event_id[:8]}...)")
 
