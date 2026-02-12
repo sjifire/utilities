@@ -342,7 +342,7 @@ class DutyCalendarSync:
             raise RuntimeError(
                 "Delegated auth required for M365 group calendars. "
                 "Ensure service account credentials are set in environment "
-                "(SVC_AUTOMATIONS_USERNAME and SVC_AUTOMATIONS_PASSWORD)."
+                "(SERVICE_EMAIL and SERVICE_PASSWORD)."
             ) from e
 
     def _get_client_for_calendar(self) -> GraphServiceClient:

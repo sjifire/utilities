@@ -36,28 +36,27 @@ def get_graph_credentials() -> tuple[str, str, str]:
 def get_service_account_credentials() -> tuple[str, str]:
     """Get service account credentials for delegated auth.
 
-    The service account name is configured in organization.json (service_account field).
+    The service account email is configured in organization.json (service_email field).
     Required for M365 group calendar operations because application
     permissions don't support group calendar writes.
 
     Returns:
-        Tuple of (username, password)
+        Tuple of (email, password)
 
     Raises:
         ValueError: If credentials are not set
     """
     load_dotenv()
 
-    username = os.getenv("SVC_AUTOMATIONS_USERNAME")
-    password = os.getenv("SVC_AUTOMATIONS_PASSWORD")
+    email = os.getenv("SERVICE_EMAIL")
+    password = os.getenv("SERVICE_PASSWORD")
 
-    if not username or not password:
+    if not email or not password:
         raise ValueError(
-            "Service account credentials not set. Required: "
-            "SVC_AUTOMATIONS_USERNAME, SVC_AUTOMATIONS_PASSWORD"
+            "Service account credentials not set. Required: SERVICE_EMAIL, SERVICE_PASSWORD"
         )
 
-    return username, password
+    return email, password
 
 
 # Backwards compatibility alias
