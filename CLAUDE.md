@@ -75,30 +75,32 @@ Display names are prefixed with shortened rank (e.g., "Chief John Smith" for "Ba
 ```
 src/sjifire/
 ├── aladtec/
-│   ├── models.py      # Member dataclass with rank/display_rank properties
-│   └── scraper.py     # Web scraper, handles login, CSV export, position enrichment
+│   ├── client.py          # HTTP client with login/session management
+│   ├── member_scraper.py  # Web scraper for member CSV export
+│   ├── models.py          # Member dataclass with rank/display_rank properties
+│   └── schedule_scraper.py # Schedule scraper for calendar data
 ├── core/
-│   ├── backup.py      # JSON backup before sync operations
-│   ├── config.py      # EntraSyncConfig, credentials from .env
-│   ├── constants.py   # Shared constants (OPERATIONAL_POSITIONS, RANK_HIERARCHY)
-│   └── msgraph_client.py  # Azure credential setup
+│   ├── backup.py          # JSON backup before sync operations
+│   ├── config.py          # EntraSyncConfig, credentials from .env
+│   ├── constants.py       # Shared constants (OPERATIONAL_POSITIONS, RANK_HIERARCHY)
+│   ├── group_strategies.py # GroupStrategy classes for group membership rules
+│   ├── msgraph_client.py  # Azure credential setup
+│   └── normalize.py       # Name normalization utilities
 ├── entra/
 │   ├── aladtec_import.py  # User sync logic, handles matching/create/update
-│   ├── group_sync.py  # Group sync strategies and GroupSyncManager
-│   ├── groups.py      # EntraGroupManager for M365 group operations
-│   └── users.py       # EntraUserManager for Graph API calls
+│   ├── groups.py          # EntraGroupManager for M365 group operations
+│   └── users.py           # EntraUserManager for Graph API calls
 ├── exchange/
-│   ├── client.py      # PowerShell-based Exchange Online client
-│   └── group_sync.py  # Mail-enabled security group sync strategies
+│   └── client.py          # PowerShell-based Exchange Online client
 ├── ispyfire/
-│   ├── client.py      # API client with tenacity retry for rate limiting
-│   ├── models.py      # ISpyFirePerson dataclass
-│   └── sync.py        # Sync logic, comparison, filtering
+│   ├── client.py          # API client with tenacity retry for rate limiting
+│   ├── models.py          # ISpyFirePerson dataclass
+│   └── sync.py            # Sync logic, comparison, filtering
 ├── calendar/
 │   ├── models.py          # OnDutyEvent, SyncResult dataclasses
 │   ├── duty_sync.py       # DutyCalendarSync for shared mailbox (On Duty events)
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
-└── scripts/           # CLI entry points
+└── scripts/               # CLI entry points
 ```
 
 ### Group Sync Strategy Pattern

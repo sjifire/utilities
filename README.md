@@ -317,25 +317,27 @@ uv run pytest --cov=sjifire --cov-report=html  # HTML coverage report
 ```
 src/sjifire/
 ├── aladtec/           # Aladtec integration
-│   ├── models.py      # Member data model
-│   └── scraper.py     # Web scraper for CSV export
+│   ├── client.py          # HTTP client with login/session management
+│   ├── member_scraper.py  # Web scraper for member CSV export
+│   ├── models.py          # Member data model
+│   └── schedule_scraper.py # Schedule scraper for calendar data
 ├── core/              # Shared utilities
-│   ├── backup.py      # Backup utilities for users and groups
-│   ├── config.py      # Configuration loading
-│   ├── constants.py   # Position constants (OPERATIONAL_POSITIONS, etc.)
-│   └── msgraph_client.py  # MS Graph client
+│   ├── backup.py          # Backup utilities for users and groups
+│   ├── config.py          # Configuration loading
+│   ├── constants.py       # Position constants (OPERATIONAL_POSITIONS, etc.)
+│   ├── group_strategies.py # Group sync strategy classes
+│   ├── msgraph_client.py  # MS Graph client
+│   └── normalize.py       # Name normalization utilities
 ├── entra/             # Entra ID integration
 │   ├── aladtec_import.py  # Aladtec to Entra user sync logic
-│   ├── group_sync.py  # Group sync strategies and manager
-│   ├── groups.py      # Group management (create, update, members)
-│   └── users.py       # User management
+│   ├── groups.py          # Group management (create, update, members)
+│   └── users.py           # User management
 ├── exchange/          # Exchange Online integration
-│   ├── client.py      # PowerShell-based Exchange client
-│   └── group_sync.py  # Mail-enabled security group sync
+│   └── client.py          # PowerShell-based Exchange client
 ├── ispyfire/          # iSpyFire integration
-│   ├── client.py      # API client for iSpyFire
-│   ├── models.py      # ISpyFirePerson data model
-│   └── sync.py        # Sync logic and comparison
+│   ├── client.py          # API client for iSpyFire
+│   ├── models.py          # ISpyFirePerson data model
+│   └── sync.py            # Sync logic and comparison
 ├── calendar/          # Calendar sync
 │   ├── models.py          # OnDutyEvent, SyncResult dataclasses
 │   ├── duty_sync.py       # DutyCalendarSync for shared mailbox
@@ -343,13 +345,13 @@ src/sjifire/
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
-    ├── duty_calendar_sync.py        # Duty calendar sync CLI
-    ├── compare_group_memberships.py # Compare group memberships
+    ├── compare_group_memberships.py
+    ├── duty_calendar_sync.py
     ├── entra_audit.py
-    ├── entra_user_sync.py           # User sync CLI
-    ├── ispyfire_admin.py            # iSpyFire admin CLI
-    ├── ispyfire_sync.py             # iSpyFire sync CLI
-    ├── m365_group_scan.py           # M365 group scanning
-    ├── ms_group_sync.py             # M365/Exchange group sync CLI
-    └── personal_calendar_sync.py    # Personal calendar sync CLI
+    ├── entra_user_sync.py
+    ├── ispyfire_admin.py
+    ├── ispyfire_sync.py
+    ├── m365_group_scan.py
+    ├── ms_group_sync.py
+    └── personal_calendar_sync.py
 ```
