@@ -126,6 +126,41 @@ uv run ispyfire-admin activate user@sjifire.org   # Reactivate and send password
 uv run ispyfire-admin deactivate user@sjifire.org # Logout devices and deactivate
 ```
 
+### Calendar Sync
+
+**Duty calendar sync (On Duty events to shared group calendar):**
+```bash
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026" --dry-run
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026"
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --months 4 --save-schedule /tmp/schedule.json
+```
+
+The sync:
+- Fetches schedule data from Aladtec for the specified month
+- Creates all-day "On Duty" events for each filled position
+- Clears existing events in the target date range before creating new ones
+- Events include position, section, and Aladtec reference link
+- Use `--save-schedule` to cache schedule data for personal-calendar-sync
+
+**Personal calendar sync (individual schedules to user calendars):**
+```bash
+uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --dry-run
+uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026"
+uv run personal-calendar-sync --all --months 4
+uv run personal-calendar-sync --all --months 4 --load-schedule /tmp/schedule.json
+uv run personal-calendar-sync --user user@sjifire.org --purge --dry-run
+```
+
+The sync:
+- Adds events to user's **primary calendar** with orange "Aladtec" category
+- Creates the Aladtec category in each user's Outlook automatically
+- Creates events matching actual shift times (supports partial shifts)
+- Skips entries with empty position (e.g., Trades)
+- Compares existing events to avoid unnecessary updates
+- Use `--force` to update all events regardless of content changes
+- Use `--purge` to delete all Aladtec-categorized events
+- Use `--load-schedule` to skip Aladtec fetch and use cached schedule data
+
 ### Aladtec Tools
 
 **List members:**
@@ -177,12 +212,6 @@ EXCHANGE_CERTIFICATE_PASSWORD=your-cert-password  # empty for Key Vault certs
 **Analyze group mappings:**
 ```bash
 uv run analyze-mappings                # Analyze position-to-group mappings
-```
-
-**Create security groups:**
-```bash
-uv run create-security-groups          # Create security groups from config
-uv run create-security-groups --dry-run
 ```
 
 ## Configuration
@@ -292,33 +321,41 @@ uv run pytest --cov=sjifire --cov-report=html  # HTML coverage report
 ```
 src/sjifire/
 ├── aladtec/           # Aladtec integration
-│   ├── models.py      # Member data model
-│   └── scraper.py     # Web scraper for CSV export
+│   ├── client.py          # HTTP client with login/session management
+│   ├── member_scraper.py  # Web scraper for member CSV export
+│   ├── models.py          # Member data model
+│   └── schedule_scraper.py # Schedule scraper for calendar data
 ├── core/              # Shared utilities
-│   ├── backup.py      # Backup utilities for users and groups
-│   ├── config.py      # Configuration loading
-│   ├── constants.py   # Position constants (OPERATIONAL_POSITIONS, etc.)
-│   └── msgraph_client.py  # MS Graph client
+│   ├── backup.py          # Backup utilities for users and groups
+│   ├── config.py          # Configuration loading
+│   ├── constants.py       # Position constants (OPERATIONAL_POSITIONS, etc.)
+│   ├── group_strategies.py # Group sync strategy classes
+│   ├── msgraph_client.py  # MS Graph client
+│   └── normalize.py       # Name normalization utilities
 ├── entra/             # Entra ID integration
 │   ├── aladtec_import.py  # Aladtec to Entra user sync logic
-│   ├── group_sync.py  # Group sync strategies and manager
-│   ├── groups.py      # Group management (create, update, members)
-│   └── users.py       # User management
+│   ├── groups.py          # Group management (create, update, members)
+│   └── users.py           # User management
 ├── exchange/          # Exchange Online integration
-│   ├── client.py      # PowerShell-based Exchange client
-│   └── group_sync.py  # Mail-enabled security group sync
+│   └── client.py          # PowerShell-based Exchange client
 ├── ispyfire/          # iSpyFire integration
-│   ├── client.py      # API client for iSpyFire
-│   ├── models.py      # ISpyFirePerson data model
-│   └── sync.py        # Sync logic and comparison
+│   ├── client.py          # API client for iSpyFire
+│   ├── models.py          # ISpyFirePerson data model
+│   └── sync.py            # Sync logic and comparison
+├── calendar/          # Calendar sync
+│   ├── models.py          # OnDutyEvent, SyncResult dataclasses
+│   ├── duty_sync.py       # DutyCalendarSync for shared mailbox
+│   └── personal_sync.py   # PersonalCalendarSync for user calendars
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
-    ├── create_security_groups.py
+    ├── compare_group_memberships.py
+    ├── duty_calendar_sync.py
     ├── entra_audit.py
-    ├── entra_group_sync.py  # M365 group sync CLI
-    ├── entra_user_sync.py   # User sync CLI
-    ├── ispyfire_admin.py    # iSpyFire admin CLI (activate/deactivate)
-    ├── ispyfire_sync.py     # iSpyFire sync CLI
-    └── mail_group_sync.py   # Mail-enabled security group sync CLI
+    ├── entra_user_sync.py
+    ├── ispyfire_admin.py
+    ├── ispyfire_sync.py
+    ├── m365_group_scan.py
+    ├── ms_group_sync.py
+    └── personal_calendar_sync.py
 ```

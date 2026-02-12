@@ -6,6 +6,7 @@ from sjifire.aladtec.models import Member
 from sjifire.core.group_strategies import (
     STRATEGY_CLASSES,
     STRATEGY_NAMES,
+    AllPersonnelStrategy,
     ApparatusOperatorStrategy,
     FirefighterStrategy,
     GroupConfig,
@@ -61,6 +62,8 @@ def make_entra_user(
     office_location: str | None = None,  # "Station XX" format
     employee_type: str | None = None,  # work_group
     evip: str | None = None,  # extension_attribute2
+    account_enabled: bool = True,
+    employee_id: str | None = "EMP001",
 ) -> EntraUser:
     """Helper to create test EntraUser objects with defaults."""
     return EntraUser(
@@ -70,8 +73,8 @@ def make_entra_user(
         last_name=display_name.split()[-1] if display_name else None,
         email=email,
         upn=email,
-        employee_id="EMP001",
-        account_enabled=True,
+        employee_id=employee_id,
+        account_enabled=account_enabled,
         office_location=office_location,
         employee_type=employee_type,
         extension_attribute2=evip,
@@ -100,6 +103,7 @@ class TestStrategyRegistry:
             "volunteers",
             "staff",
             "mobe",
+            "all-personnel",
         }
         assert set(STRATEGY_CLASSES.keys()) == expected
 
@@ -154,6 +158,23 @@ class TestGroupConfig:
             mail_nickname="testgroup",
         )
         assert config.description is None
+
+    def test_group_config_enforce_calendar_visibility_default_false(self):
+        """enforce_calendar_visibility should default to False."""
+        config = GroupConfig(
+            display_name="Test Group",
+            mail_nickname="testgroup",
+        )
+        assert config.enforce_calendar_visibility is False
+
+    def test_group_config_enforce_calendar_visibility_can_be_set(self):
+        """enforce_calendar_visibility can be set to True."""
+        config = GroupConfig(
+            display_name="Test Group",
+            mail_nickname="testgroup",
+            enforce_calendar_visibility=True,
+        )
+        assert config.enforce_calendar_visibility is True
 
 
 # =============================================================================
@@ -877,6 +898,323 @@ class TestMobeScheduleStrategy:
         assert "mobilization" in config.description.lower()
 
 
+class TestAllPersonnelStrategy:
+    """Tests for AllPersonnelStrategy - all personnel with operational positions."""
+
+    def setup_method(self):
+        """Create strategy instance for each test."""
+        self.strategy = AllPersonnelStrategy()
+
+    def test_name(self):
+        """Strategy name should be 'all-personnel'."""
+        assert self.strategy.name == "all-personnel"
+
+    def test_membership_criteria(self):
+        """Membership criteria should describe staff or volunteers with operational positions."""
+        criteria = self.strategy.membership_criteria
+        assert "Aladtec" in criteria
+        assert "staff" in criteria.lower() or "operational" in criteria.lower()
+
+    def test_partial_sync_is_true(self):
+        """AllPersonnelStrategy should have partial_sync=True."""
+        assert self.strategy.partial_sync is True
+
+    def test_get_members_staff_included(self):
+        """Staff members (work_group != Volunteer) should be included."""
+        members = [
+            make_member(member_id="1", email="staff@sjifire.org", work_group="Career"),
+            make_member(member_id="2", email="volunteer@sjifire.org", work_group="Volunteer"),
+        ]
+        result = self.strategy.get_members(members)
+        assert "all-personnel" in result
+        assert len(result["all-personnel"]) == 1
+        assert result["all-personnel"][0].email == "staff@sjifire.org"
+
+    def test_get_members_volunteer_with_operational_included(self):
+        """Volunteers with operational positions should be included."""
+        members = [
+            make_member(
+                member_id="1",
+                email="volff@sjifire.org",
+                work_group="Volunteer",
+                positions=["Firefighter"],
+            ),
+        ]
+        result = self.strategy.get_members(members)
+        assert "all-personnel" in result
+        assert len(result["all-personnel"]) == 1
+
+    def test_get_members_volunteer_without_operational_excluded(self):
+        """Volunteers without operational positions should be excluded."""
+        members = [
+            make_member(
+                member_id="1",
+                email="admin@sjifire.org",
+                work_group="Volunteer",
+                positions=["Administrative"],
+            ),
+        ]
+        result = self.strategy.get_members(members)
+        assert "all-personnel" in result
+        assert len(result["all-personnel"]) == 0
+
+    def test_get_members_no_aladtec_record_excluded(self):
+        """Members without Aladtec record (work_group=None) should be excluded."""
+        members = [
+            make_member(
+                member_id="1",
+                email="guest@sjifire.org",
+                work_group=None,
+                positions=["Firefighter"],
+            ),
+        ]
+        result = self.strategy.get_members(members)
+        assert "all-personnel" in result
+        assert len(result["all-personnel"]) == 0
+
+    def test_get_config(self):
+        """get_config should return proper GroupConfig."""
+        config = self.strategy.get_config("all-personnel")
+        assert config.display_name == "All Personnel"
+        assert config.mail_nickname == "all-personnel"
+        assert "calendar" in config.description.lower() or "email" in config.description.lower()
+
+    def test_get_config_enforce_calendar_visibility(self):
+        """get_config should set enforce_calendar_visibility=True for M365 calendar visibility."""
+        config = self.strategy.get_config("all-personnel")
+        assert config.enforce_calendar_visibility is True
+
+
+# =============================================================================
+# AllPersonnelStrategy Internal Methods Tests
+# =============================================================================
+
+
+class TestAllPersonnelStrategyInternalMethods:
+    """Tests for AllPersonnelStrategy internal helper methods."""
+
+    def setup_method(self):
+        """Create strategy instance for each test."""
+        self.strategy = AllPersonnelStrategy()
+
+    # _is_active tests
+
+    def test_is_active_returns_true_for_active_entra_user(self):
+        """_is_active returns True for active EntraUser."""
+        user = make_entra_user(account_enabled=True)
+        assert self.strategy._is_active(user) is True
+
+    def test_is_active_returns_false_for_disabled_entra_user(self):
+        """_is_active returns False for disabled EntraUser."""
+        user = make_entra_user(
+            display_name="Disabled User",
+            email="disabled@sjifire.org",
+            account_enabled=False,
+        )
+        assert self.strategy._is_active(user) is False
+
+    def test_is_active_returns_true_for_member_without_is_active(self):
+        """_is_active defaults to True for objects without is_active property."""
+        member = make_member()  # Aladtec Member doesn't have is_active
+        assert self.strategy._is_active(member) is True
+
+    def test_is_active_returns_true_when_attribute_missing(self):
+        """_is_active defaults to True when attribute is missing."""
+
+        class MockMember:
+            email = "test@sjifire.org"
+            display_name = "Test"
+            positions = ["Firefighter"]  # noqa: RUF012
+            schedules = []  # noqa: RUF012
+            evip = None
+            work_group = None
+            station_number = None
+
+        mock = MockMember()
+        assert self.strategy._is_active(mock) is True
+
+    # _has_aladtec_record tests
+
+    def test_has_aladtec_record_returns_true_when_work_group_set(self):
+        """_has_aladtec_record returns True when work_group is set."""
+        member = make_member(work_group="Career")
+        assert self.strategy._has_aladtec_record(member) is True
+
+    def test_has_aladtec_record_returns_true_for_volunteer(self):
+        """_has_aladtec_record returns True for Volunteer work_group."""
+        member = make_member(work_group="Volunteer")
+        assert self.strategy._has_aladtec_record(member) is True
+
+    def test_has_aladtec_record_returns_false_when_work_group_none(self):
+        """_has_aladtec_record returns False when work_group is None."""
+        member = make_member(work_group=None)
+        assert self.strategy._has_aladtec_record(member) is False
+
+    # _is_staff tests
+
+    def test_is_staff_returns_true_for_career(self):
+        """_is_staff returns True for Career work_group."""
+        member = make_member(work_group="Career")
+        assert self.strategy._is_staff(member) is True
+
+    def test_is_staff_returns_false_for_volunteer(self):
+        """_is_staff returns False for Volunteer work_group."""
+        member = make_member(work_group="Volunteer")
+        assert self.strategy._is_staff(member) is False
+
+    def test_is_staff_returns_true_for_any_non_volunteer(self):
+        """_is_staff returns True for any non-Volunteer work_group."""
+        member = make_member(work_group="Admin")
+        assert self.strategy._is_staff(member) is True
+
+    # _has_operational_position tests
+
+    def test_has_operational_position_firefighter(self):
+        """_has_operational_position returns True for Firefighter."""
+        member = make_member(positions=["Firefighter"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_apparatus_operator(self):
+        """_has_operational_position returns True for Apparatus Operator."""
+        member = make_member(positions=["Apparatus Operator"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_support(self):
+        """_has_operational_position returns True for Support."""
+        member = make_member(positions=["Support"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_wildland_firefighter(self):
+        """_has_operational_position returns True for Wildland Firefighter."""
+        member = make_member(positions=["Wildland Firefighter"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_marine_pilot(self):
+        """_has_operational_position returns True for Marine: Pilot."""
+        member = make_member(positions=["Marine: Pilot"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_marine_mate(self):
+        """_has_operational_position returns True for Marine: Mate."""
+        member = make_member(positions=["Marine: Mate"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_deckhand(self):
+        """_has_operational_position returns True for Marine: Deckhand."""
+        member = make_member(positions=["Marine: Deckhand"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_returns_false_for_non_operational(self):
+        """_has_operational_position returns False for non-operational positions."""
+        member = make_member(positions=["Administrative"])
+        assert self.strategy._has_operational_position(member) is False
+
+    def test_has_operational_position_returns_false_for_empty_positions(self):
+        """_has_operational_position returns False for empty positions."""
+        member = make_member(positions=[])
+        assert self.strategy._has_operational_position(member) is False
+
+    def test_has_operational_position_returns_false_for_none_positions(self):
+        """_has_operational_position returns False for None positions."""
+        member = make_member(positions=None)
+        assert self.strategy._has_operational_position(member) is False
+
+    def test_has_operational_position_multiple_with_one_operational(self):
+        """_has_operational_position returns True if any position is operational."""
+        member = make_member(positions=["Administrative", "Firefighter"])
+        assert self.strategy._has_operational_position(member) is True
+
+    def test_has_operational_position_works_with_entra_user(self):
+        """_has_operational_position works with EntraUser objects."""
+        user = make_entra_user(positions="Firefighter,Support")
+        assert self.strategy._has_operational_position(user) is True
+
+    def test_has_operational_position_entra_user_non_operational(self):
+        """_has_operational_position returns False for EntraUser with non-operational."""
+        user = make_entra_user(positions="Administrative")
+        assert self.strategy._has_operational_position(user) is False
+
+
+# =============================================================================
+# Test AllPersonnelStrategy Membership Report
+# =============================================================================
+
+
+class TestAllPersonnelStrategyMembershipReport:
+    """Tests for AllPersonnelStrategy.get_membership_report method."""
+
+    def setup_method(self):
+        """Create strategy instance for each test."""
+        self.strategy = AllPersonnelStrategy()
+
+    def test_report_with_no_manual_members(self):
+        """Report should show all members as auto-managed when no manual additions."""
+        target = [
+            make_entra_user(user_id="1", email="a@test.org", employee_type="Career"),
+            make_entra_user(user_id="2", email="b@test.org", employee_type="Career"),
+        ]
+        current = target.copy()
+
+        report = self.strategy.get_membership_report(current, target)
+
+        assert report is not None
+        assert "2 total members" in report
+        assert "2 from Aladtec" in report
+        assert "0 manually added" in report
+
+    def test_report_with_manual_members(self):
+        """Report should identify manually added non-Aladtec members."""
+        target = [
+            make_entra_user(user_id="1", email="a@test.org", employee_type="Career"),
+        ]
+        manual_member = make_entra_user(
+            user_id="2",
+            display_name="Manual User",
+            email="manual@test.org",
+            employee_type=None,  # No Aladtec record
+        )
+        current = [*target, manual_member]
+
+        report = self.strategy.get_membership_report(current, target)
+
+        assert report is not None
+        assert "2 total members" in report
+        assert "1 from Aladtec" in report
+        assert "1 manually added" in report
+        assert "Manual User" in report
+        assert "manual@test.org" in report
+
+    def test_report_lists_manual_members_sorted(self):
+        """Report should list manual members sorted by display name."""
+        target = []
+        manual_members = [
+            make_entra_user(
+                user_id="1", display_name="Zoe", email="z@test.org", employee_type=None
+            ),
+            make_entra_user(
+                user_id="2", display_name="Alice", email="a@test.org", employee_type=None
+            ),
+            make_entra_user(
+                user_id="3", display_name="Bob", email="b@test.org", employee_type=None
+            ),
+        ]
+        current = manual_members
+
+        report = self.strategy.get_membership_report(current, target)
+
+        # Check order: Alice, Bob, Zoe
+        alice_pos = report.find("Alice")
+        bob_pos = report.find("Bob")
+        zoe_pos = report.find("Zoe")
+        assert alice_pos < bob_pos < zoe_pos
+
+    def test_base_strategy_returns_none(self):
+        """Base GroupStrategy.get_membership_report should return None."""
+        strategy = StationStrategy()
+        report = strategy.get_membership_report([], [])
+        assert report is None
+
+
 # =============================================================================
 # Test GroupMember Protocol and EntraUser Compatibility
 # =============================================================================
@@ -1060,6 +1398,24 @@ class TestGroupStrategyContract:
         strategy = get_strategy(strategy_name)
         assert isinstance(strategy.automation_notice, str)
         assert "automatically managed" in strategy.automation_notice.lower()
+
+    @pytest.mark.parametrize("strategy_name", STRATEGY_NAMES)
+    def test_strategy_has_partial_sync_property(self, strategy_name):
+        """All strategies should have partial_sync property."""
+        strategy = get_strategy(strategy_name)
+        assert isinstance(strategy.partial_sync, bool)
+
+    def test_all_personnel_strategy_has_partial_sync_true(self):
+        """AllPersonnelStrategy should have partial_sync=True."""
+        strategy = get_strategy("all-personnel")
+        assert strategy.partial_sync is True
+
+    def test_other_strategies_have_partial_sync_false(self):
+        """Strategies other than all-personnel should have partial_sync=False."""
+        for name in STRATEGY_NAMES:
+            if name != "all-personnel":
+                strategy = get_strategy(name)
+                assert strategy.partial_sync is False, f"{name} should have partial_sync=False"
 
     @pytest.mark.parametrize("strategy_name", STRATEGY_NAMES)
     def test_strategy_get_members_returns_dict(self, strategy_name):

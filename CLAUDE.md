@@ -45,6 +45,31 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - `isUtility` flag marks service/apparatus accounts (skip from auto-removal)
 - Device logout requires two steps: logout push notifications, then remove devices
 
+### Calendar Sync
+Two types of calendar sync from Aladtec schedules to Outlook:
+
+**Duty Calendar Sync** (`duty-calendar-sync`):
+- Syncs "On Duty" events to a shared mailbox/group calendar
+- Creates all-day events for each filled position per day
+- Overwrites all events in the target date range
+- `--save-schedule PATH` caches fetched schedule to JSON for reuse
+
+**Personal Calendar Sync** (`personal-calendar-sync`):
+- Syncs individual's Aladtec shifts to their **primary** Outlook calendar
+- Events tagged with orange "Aladtec" category (auto-created in each user's Outlook)
+- Creates events matching shift start/end times (supports partial shifts like 19:00-20:00)
+- Skips entries with empty position (e.g., Trades)
+- Compares events by key: `{date}|{subject}|{start_time}|{end_time}`
+- `--force` updates all events, `--purge` deletes all Aladtec events
+- `--load-schedule PATH` uses cached schedule instead of fetching from Aladtec
+
+**Schedule Caching** (reduces Aladtec API calls):
+```bash
+# Duty sync saves schedule, personal sync reuses it
+uv run duty-calendar-sync --mailbox group@sjifire.org --months 4 --save-schedule /tmp/schedule.json
+uv run personal-calendar-sync --all --months 4 --load-schedule /tmp/schedule.json
+```
+
 ### Rank Hierarchy
 Ranks are extracted from Title or Employee Type fields:
 ```
@@ -59,26 +84,32 @@ Display names are prefixed with shortened rank (e.g., "Chief John Smith" for "Ba
 ```
 src/sjifire/
 ├── aladtec/
-│   ├── models.py      # Member dataclass with rank/display_rank properties
-│   └── scraper.py     # Web scraper, handles login, CSV export, position enrichment
+│   ├── client.py          # HTTP client with login/session management
+│   ├── member_scraper.py  # Web scraper for member CSV export
+│   ├── models.py          # Member dataclass with rank/display_rank properties
+│   └── schedule_scraper.py # Schedule scraper for calendar data
 ├── core/
-│   ├── backup.py      # JSON backup before sync operations
-│   ├── config.py      # EntraSyncConfig, credentials from .env
-│   ├── constants.py   # Shared constants (OPERATIONAL_POSITIONS, RANK_HIERARCHY)
-│   └── msgraph_client.py  # Azure credential setup
+│   ├── backup.py          # JSON backup before sync operations
+│   ├── config.py          # EntraSyncConfig, credentials from .env
+│   ├── constants.py       # Shared constants (OPERATIONAL_POSITIONS, RANK_HIERARCHY)
+│   ├── group_strategies.py # GroupStrategy classes for group membership rules
+│   ├── msgraph_client.py  # Azure credential setup
+│   └── normalize.py       # Name normalization utilities
 ├── entra/
 │   ├── aladtec_import.py  # User sync logic, handles matching/create/update
-│   ├── group_sync.py  # Group sync strategies and GroupSyncManager
-│   ├── groups.py      # EntraGroupManager for M365 group operations
-│   └── users.py       # EntraUserManager for Graph API calls
+│   ├── groups.py          # EntraGroupManager for M365 group operations
+│   └── users.py           # EntraUserManager for Graph API calls
 ├── exchange/
-│   ├── client.py      # PowerShell-based Exchange Online client
-│   └── group_sync.py  # Mail-enabled security group sync strategies
+│   └── client.py          # PowerShell-based Exchange Online client
 ├── ispyfire/
-│   ├── client.py      # API client with tenacity retry for rate limiting
-│   ├── models.py      # ISpyFirePerson dataclass
-│   └── sync.py        # Sync logic, comparison, filtering
-└── scripts/           # CLI entry points
+│   ├── client.py          # API client with tenacity retry for rate limiting
+│   ├── models.py          # ISpyFirePerson dataclass
+│   └── sync.py            # Sync logic, comparison, filtering
+├── calendar/
+│   ├── models.py          # OnDutyEvent, SyncResult dataclasses
+│   ├── duty_sync.py       # DutyCalendarSync for shared mailbox (On Duty events)
+│   └── personal_sync.py   # PersonalCalendarSync for user calendars
+└── scripts/               # CLI entry points
 ```
 
 ### Group Sync Strategy Pattern
@@ -174,6 +205,19 @@ uv run ispyfire-admin activate user@sjifire.org
 uv run ispyfire-admin deactivate user@sjifire.org
 ```
 
+### Duty calendar sync (On Duty events)
+```bash
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026" --dry-run
+uv run duty-calendar-sync --mailbox all-personnel@sjifire.org --month "Feb 2026"
+```
+
+### Personal calendar sync (individual schedules)
+```bash
+uv run personal-calendar-sync --user user@sjifire.org --month "Feb 2026" --dry-run
+uv run personal-calendar-sync --all --months 4              # Sync all users for 4 months
+uv run personal-calendar-sync --user user@sjifire.org --purge  # Delete all Aladtec events
+```
+
 ### Group sync details
 The `ms-group-sync` command uses Entra ID as the source of truth for membership data:
 - **Data source**: Entra ID users (synced from Aladtec via `entra-user-sync`)
@@ -220,5 +264,6 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ci.yml`: Lint + test on PR/push
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Sync every 30 minutes (Entra to iSpyFire), uploads backup artifacts
+- `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
 
 All workflows authenticate via OIDC and fetch secrets from Key Vault (no GitHub secrets required).

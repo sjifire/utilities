@@ -5,7 +5,7 @@ import asyncio
 import logging
 from collections import defaultdict
 
-from sjifire.aladtec.scraper import AladtecScraper
+from sjifire.aladtec.member_scraper import AladtecMemberScraper
 from sjifire.core.group_strategies import (
     STRATEGY_CLASSES,
     GroupStrategy,
@@ -37,7 +37,7 @@ async def compare_memberships(
     logger.info("Fetching Aladtec members...")
 
     try:
-        with AladtecScraper() as scraper:
+        with AladtecMemberScraper() as scraper:
             if not scraper.login():
                 logger.error("Failed to log in to Aladtec")
                 return

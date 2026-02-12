@@ -903,6 +903,63 @@ class ExchangeOnlineClient:
         result["errors"] = permanent_errors
         return result
 
+    async def set_unified_group_welcome_message(self, identity: str, enabled: bool) -> bool:
+        """Enable or disable welcome messages for a unified (M365) group.
+
+        Args:
+            identity: Group email or name
+            enabled: True to enable welcome messages, False to disable
+
+        Returns:
+            True if successful
+        """
+        enabled_str = "$true" if enabled else "$false"
+        cmd = f"Set-UnifiedGroup -Identity '{identity}' "
+        cmd += f"-UnifiedGroupWelcomeMessageEnabled:{enabled_str}"
+        commands = [cmd]
+
+        result = await asyncio.to_thread(self._run_powershell, commands, parse_json=False)
+
+        if result is None:
+            logger.error(f"Failed to set welcome message for {identity}")
+            return False
+
+        status = "enabled" if enabled else "disabled"
+        logger.info(f"Welcome messages {status} for {identity}")
+        return True
+
+    async def set_unified_group_calendar_settings(
+        self,
+        identity: str,
+        auto_subscribe: bool = True,
+        always_subscribe_calendar: bool = True,
+    ) -> bool:
+        """Set calendar visibility settings for a unified (M365) group.
+
+        Args:
+            identity: Group email or name
+            auto_subscribe: Auto-subscribe new members to group updates
+            always_subscribe_calendar: Always subscribe members to calendar events
+
+        Returns:
+            True if successful
+        """
+        auto_str = "$true" if auto_subscribe else "$false"
+        always_str = "$true" if always_subscribe_calendar else "$false"
+        cmd = f"Set-UnifiedGroup -Identity '{identity}' "
+        cmd += f"-AutoSubscribeNewMembers:{auto_str} "
+        cmd += f"-AlwaysSubscribeMembersToCalendarEvents:{always_str}"
+        commands = [cmd]
+
+        result = await asyncio.to_thread(self._run_powershell, commands, parse_json=False)
+
+        if result is None:
+            logger.error(f"Failed to set calendar settings for {identity}")
+            return False
+
+        logger.info(f"Calendar auto-subscribe settings applied for {identity}")
+        return True
+
     async def close(self) -> None:
         """Close the client (no-op for subprocess approach)."""
         pass

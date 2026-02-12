@@ -11,6 +11,7 @@ dependencies = [
     "httpx>=0.28.0",
     "msgraph-sdk>=1.12.0",
     "phonenumbers>=9.0.22",
+    "python-dateutil>=2.9.0",
     "python-dotenv>=1.0.0",
     "tenacity>=9.1.2",
 ]
@@ -25,6 +26,8 @@ ispyfire-admin = "sjifire.scripts.ispyfire_admin:main"
 analyze-mappings = "sjifire.scripts.analyze_mappings:main"
 compare-groups = "sjifire.scripts.compare_group_memberships:main"
 m365-group-scan = "sjifire.scripts.m365_group_scan:main"
+duty-calendar-sync = "sjifire.scripts.duty_calendar_sync:main"
+personal-calendar-sync = "sjifire.scripts.personal_calendar_sync:main"
 
 [dependency-groups]
 dev = [
@@ -74,7 +77,7 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 "src/sjifire/scripts/*.py" = ["T201"]  # CLI scripts use print for output
 "scripts/*.py" = ["T201"]  # Utility scripts use print for output
-"tests/**/*.py" = ["S101", "S105", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords, skip docstrings, allow long lines
+"tests/**/*.py" = ["S101", "S105", "S106", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords, skip docstrings, allow long lines
 
 [tool.ruff.format]
 quote-style = "double"

@@ -8,6 +8,7 @@
   "extension_attributes": {
     "extensionAttribute1": "Rank (Captain, Lieutenant, Chief, etc.)",
     "extensionAttribute2": "EVIP Expiration Date",
-    "extensionAttribute3": "Positions (comma-delimited scheduling positions)"
+    "extensionAttribute3": "Positions (comma-delimited scheduling positions)",
+    "extensionAttribute4": "Schedules (comma-delimited schedule visibility from Aladtec)"
   }
 }
