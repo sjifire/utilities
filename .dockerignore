@@ -12,7 +12,12 @@ __pycache__
 
 # Dev/CI files
 tests/
-docs/
+docs/*
+!docs/dashboard-prototype.jsx
+!docs/mcp-start-session.md
+!docs/neris
+docs/neris/*
+!docs/neris/claude-project-instructions.md
 scripts/
 ESO/
 .github/

@@ -44,11 +44,20 @@ Create a React artifact using the design template below as a starting point.
 Replace the hardcoded sample data with the live data you fetched.
 
 Key rules:
+- Show "Last Updated: {time}" in the header using the timestamp from `get_dashboard()` — \
+include a subtle "ask Claude to refresh" hint below it so users know they can request fresh data
 - The "Duty Officer" stat card should show the **Chief Officer** section crew member
 - The crew list should NOT include Administration or Time Off sections
 - Each dispatch call should show whether it has an incident report (from the `report` field)
+- On the Overview tab, each recent call should show a small report status indicator: \
+green checkmark for calls with reports, amber "No report" for calls missing one
 - The Reporting tab should show in-progress reports and calls missing reports
-- Use the SJI Fire logo: https://res.cloudinary.com/san-juan-fire-district-3/image/fetch/f_auto/https://www.sjifire.org/assets/sjifire-logo-clear.png
+- In the Reporting tab, calls without reports should have a "Start Report" button instead of \
+a passive badge — when clicked, it shows a hint: "Ask Claude: Start a report for {dispatch_id}"
+- Display the SJI Fire logo in the upper-left corner of the header, next to the title \
+— include an onError fallback so the header still looks good if the image fails to load
+- Logo URL: https://res.cloudinary.com/san-juan-fire-district-3\
+/image/fetch/f_auto/https://www.sjifire.org/assets/sjifire-logo-clear.png
 
 **Design template** (adapt with live data):
 
@@ -60,6 +69,16 @@ The dashboard has 4 tabs: Overview, Recent Calls, On Duty, Reporting.
 - Monospace font for dispatch IDs and times
 
 See the `sjifire://dashboard-prototype` resource for the full React component to use as a template.
+
+**Refreshing the dashboard:**
+When the user asks to refresh the dashboard (e.g., "refresh", "update", "get latest"), \
+re-call `get_dashboard` and `list_incidents` and regenerate the artifact with fresh data. \
+Keep the same layout — just swap in the new data.
+
+**Starting a report from the dashboard:**
+When the user clicks a "Start Report" button or mentions a dispatch ID they want to report on, \
+switch to the incident reporting workflow: call `get_dispatch_call` for that ID and begin \
+creating an incident report. You do not need to re-ask which call — use the dispatch ID provided.
 """
 
     @mcp.prompt(
@@ -77,7 +96,10 @@ You are helping an SJI Fire & Rescue officer or firefighter complete a NERIS \
 incident report. Follow this workflow:
 
 **Step 1 — Identify the call**
-- Ask which dispatch call to report on, or use `get_open_dispatch_calls` to find active calls
+- If the user provides a dispatch ID directly (e.g., from the dashboard "Start Report" button), \
+skip to Step 2 — fetch that call with `get_dispatch_call` immediately
+- Otherwise, ask which dispatch call to report on, or use \
+`get_open_dispatch_calls` to find active calls
 - Use `search_dispatch_calls` or `list_dispatch_calls` if the user gives a date range
 - Fetch full call details with `get_dispatch_call`
 

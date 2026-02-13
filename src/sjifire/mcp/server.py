@@ -141,8 +141,9 @@ mcp.tool()(schedule_tools.get_on_duty_crew)
 mcp.tool()(neris_tools.list_neris_value_sets)
 mcp.tool()(neris_tools.get_neris_values)
 
-# Register dashboard tool
+# Register dashboard tools
 mcp.tool()(dashboard.get_dashboard)
+mcp.tool()(dashboard.start_session)
 
 # Register dispatch tools
 mcp.tool()(dispatch_tools.list_dispatch_calls)

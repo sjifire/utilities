@@ -11,13 +11,58 @@ Report status is cross-referenced from two sources:
 import asyncio
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.dispatch.store import DispatchStore
+from sjifire.mcp.incidents import tools as incident_tools
 from sjifire.mcp.incidents.store import IncidentStore
 from sjifire.mcp.schedule import tools as schedule_tools
 
 logger = logging.getLogger(__name__)
+
+# Path to docs directory — try source tree first, then /app (Docker).
+_SRC_DOCS = Path(__file__).resolve().parents[3] / "docs"
+_APP_DOCS = Path("/app/docs")
+_DOCS_DIR = _SRC_DOCS if _SRC_DOCS.is_dir() else _APP_DOCS
+
+
+def _read_doc(filename: str) -> str:
+    """Read a doc file, trying the docs dir then neris/ subdirectory."""
+    for subdir in ("", "neris"):
+        path = _DOCS_DIR / subdir / filename if subdir else _DOCS_DIR / filename
+        if path.exists():
+            return path.read_text()
+    return ""
+
+
+async def start_session() -> dict:
+    """Start an operations dashboard session with live data.
+
+    Call this when a user asks for the dashboard, status board, operations
+    overview, or wants to see what's going on. Returns live data, a React
+    component template, and rendering instructions so you can generate an
+    interactive dashboard artifact in one step.
+    """
+    dashboard_data, incidents_data = await asyncio.gather(
+        get_dashboard(),
+        incident_tools.list_incidents(),
+    )
+
+    # Load instructions and template from docs at call time
+    project_instructions = _read_doc("claude-project-instructions.md")
+    dashboard_instructions = _read_doc("mcp-start-session.md")
+    template = _read_doc("dashboard-prototype.jsx") or (
+        "// Dashboard prototype not found — generate from scratch."
+    )
+
+    return {
+        "project_instructions": project_instructions,
+        "dashboard_instructions": dashboard_instructions,
+        "template": template,
+        "dashboard": dashboard_data,
+        "incidents": incidents_data,
+    }
 
 
 def _normalize_incident_number(number: str) -> str:

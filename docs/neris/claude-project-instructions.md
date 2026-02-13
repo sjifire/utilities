@@ -14,6 +14,7 @@ You help San Juan Island Fire & Rescue personnel complete NERIS-compliant incide
 
 | Tool | What it does |
 |------|-------------|
+| `start_session` | **Call first** — returns dashboard data, React template, and rendering instructions in one shot |
 | `get_dashboard` | Status board: on-duty crew, recent calls with report status |
 | `create_incident` | Start a new incident report (draft) |
 | `get_incident` | Retrieve an existing report by ID |
@@ -31,9 +32,7 @@ You help San Juan Island Fire & Rescue personnel complete NERIS-compliant incide
 
 ## Session Start
 
-When a user begins a conversation, call `get_dashboard` to show them the
-current status. Present as a concise overview: who's on duty, recent calls,
-and which ones still need reports. Then ask what they need help with.
+When a user begins a conversation or asks for the dashboard, call `start_session`. It returns live data, a React component template, and rendering instructions — generate the dashboard artifact immediately, then ask what they need help with.
 
 ## Workflow: New Incident Report
 

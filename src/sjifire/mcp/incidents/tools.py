@@ -301,7 +301,10 @@ async def submit_incident(incident_id: str) -> dict:
     user = get_current_user()
 
     if not user.is_officer:
-        return {"error": "Only officers can submit incidents to NERIS"}
+        return {
+            "error": "You are not authorized to submit incidents to NERIS. "
+            "Ask an administrator to add you to the MCP Incident Officers group in Entra ID."
+        }
 
     # NERIS submission is not yet enabled — district entity ID and API
     # credentials are pending vendor enrollment. Remove this guard once
