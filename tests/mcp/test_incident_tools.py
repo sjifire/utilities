@@ -13,7 +13,9 @@ from sjifire.mcp.incidents.tools import (
     _check_view_access,
     create_incident,
     get_incident,
+    get_neris_incident,
     list_incidents,
+    list_neris_incidents,
     submit_incident,
     update_incident,
 )
@@ -161,7 +163,9 @@ class TestListIncidents:
 
         result = await list_incidents()
         assert result["count"] == 1
-        mock_store.list_for_user.assert_called_once_with("ff@sjifire.org", status=None)
+        mock_store.list_for_user.assert_called_once_with(
+            "ff@sjifire.org", status=None, exclude_status="submitted"
+        )
 
     @patch("sjifire.mcp.incidents.tools.IncidentStore")
     async def test_officer_sees_all(self, mock_store_cls, officer_user, sample_doc):
@@ -172,7 +176,22 @@ class TestListIncidents:
 
         result = await list_incidents()
         assert result["count"] == 1
-        mock_store.list_by_status.assert_called_once_with(None, station=None)
+        mock_store.list_by_status.assert_called_once_with(
+            None, station=None, exclude_status="submitted"
+        )
+
+    @patch("sjifire.mcp.incidents.tools.IncidentStore")
+    async def test_explicit_status_no_exclusion(self, mock_store_cls, officer_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.list_by_status = AsyncMock(return_value=[sample_doc])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await list_incidents(status="submitted")
+        assert result["count"] == 1
+        mock_store.list_by_status.assert_called_once_with(
+            "submitted", station=None, exclude_status=None
+        )
 
 
 class TestUpdateIncident:
@@ -225,3 +244,73 @@ class TestSubmitIncident:
         assert result["status"] == "not_available"
         assert "not yet enabled" in result["message"]
         assert result["incident_id"] == "doc-123"
+
+
+class TestListNerisIncidents:
+    @patch("sjifire.mcp.incidents.tools._list_neris_incidents")
+    async def test_officer_can_list(self, mock_list, officer_user):
+        mock_list.return_value = {
+            "incidents": [
+                {
+                    "neris_id": "FD53055879|26SJ0001|123",
+                    "incident_number": "26SJ0001",
+                    "call_create": "2026-01-15T10:30:00",
+                    "status": "APPROVED",
+                    "incident_type": "111",
+                }
+            ],
+            "count": 1,
+        }
+
+        result = await list_neris_incidents()
+        assert result["count"] == 1
+        assert result["incidents"][0]["incident_number"] == "26SJ0001"
+        mock_list.assert_called_once()
+
+    async def test_regular_user_denied(self, regular_user):
+        result = await list_neris_incidents()
+        assert "error" in result
+        assert "officer" in result["error"].lower()
+
+    @patch("sjifire.mcp.incidents.tools._list_neris_incidents")
+    async def test_handles_api_error(self, mock_list, officer_user):
+        mock_list.side_effect = RuntimeError("Connection failed")
+
+        result = await list_neris_incidents()
+        assert "error" in result
+        assert "Connection failed" in result["error"]
+
+
+class TestGetNerisIncident:
+    @patch("sjifire.mcp.incidents.tools._get_neris_incident")
+    async def test_officer_can_get(self, mock_get, officer_user):
+        mock_get.return_value = {
+            "neris_id": "FD53055879|26SJ0001|123",
+            "dispatch": {"incident_number": "26SJ0001"},
+            "incident_types": [{"type": "111"}],
+        }
+
+        result = await get_neris_incident("FD53055879|26SJ0001|123")
+        assert result["neris_id"] == "FD53055879|26SJ0001|123"
+        mock_get.assert_called_once_with("FD53055879|26SJ0001|123")
+
+    async def test_regular_user_denied(self, regular_user):
+        result = await get_neris_incident("FD53055879|26SJ0001|123")
+        assert "error" in result
+        assert "officer" in result["error"].lower()
+
+    @patch("sjifire.mcp.incidents.tools._get_neris_incident")
+    async def test_not_found(self, mock_get, officer_user):
+        mock_get.return_value = None
+
+        result = await get_neris_incident("FD53055879|BOGUS|999")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    @patch("sjifire.mcp.incidents.tools._get_neris_incident")
+    async def test_handles_api_error(self, mock_get, officer_user):
+        mock_get.side_effect = RuntimeError("Connection failed")
+
+        result = await get_neris_incident("FD53055879|26SJ0001|123")
+        assert "error" in result
+        assert "Connection failed" in result["error"]

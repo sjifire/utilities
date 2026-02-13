@@ -198,6 +198,7 @@ class IncidentStore:
         status: str | None = None,
         *,
         station: str | None = None,
+        exclude_status: str | None = None,
         max_items: int = 50,
     ) -> list[IncidentDocument]:
         """List incidents, optionally filtered by status and/or station.
@@ -205,13 +206,16 @@ class IncidentStore:
         Args:
             status: Filter by status (draft, in_progress, ready_review, submitted)
             station: Filter by station code
+            exclude_status: Exclude incidents with this status
             max_items: Maximum number of results
 
         Returns:
-            List of matching incident documents
+            List of matching incident documents, sorted by incident_date ascending
         """
         if self._in_memory:
-            return self._filter_memory(status=status, station=station, max_items=max_items)
+            return self._filter_memory(
+                status=status, station=station, exclude_status=exclude_status, max_items=max_items
+            )
 
         conditions = []
         parameters = []
@@ -219,12 +223,15 @@ class IncidentStore:
         if status:
             conditions.append("c.status = @status")
             parameters.append({"name": "@status", "value": status})
+        if exclude_status:
+            conditions.append("c.status != @exclude_status")
+            parameters.append({"name": "@exclude_status", "value": exclude_status})
         if station:
             conditions.append("c.station = @station")
             parameters.append({"name": "@station", "value": station})
 
         where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        query = f"SELECT * FROM c{where_clause} ORDER BY c.created_at DESC"
+        query = f"SELECT * FROM c{where_clause} ORDER BY c.incident_date ASC"
 
         items = []
         async for item in self._container.query_items(
@@ -243,6 +250,7 @@ class IncidentStore:
         user_email: str,
         *,
         status: str | None = None,
+        exclude_status: str | None = None,
         max_items: int = 50,
     ) -> list[IncidentDocument]:
         """List incidents accessible to a specific user.
@@ -252,14 +260,18 @@ class IncidentStore:
         Args:
             user_email: User's email address (lowered)
             status: Optional status filter
+            exclude_status: Exclude incidents with this status
             max_items: Maximum results
 
         Returns:
-            List of accessible incidents
+            List of accessible incidents, sorted by incident_date ascending
         """
         if self._in_memory:
             return self._filter_memory(
-                status=status, user_email=user_email.lower(), max_items=max_items
+                status=status,
+                exclude_status=exclude_status,
+                user_email=user_email.lower(),
+                max_items=max_items,
             )
 
         conditions = ['(c.created_by = @email OR ARRAY_CONTAINS(c.crew, {"email": @email}, true))']
@@ -268,9 +280,12 @@ class IncidentStore:
         if status:
             conditions.append("c.status = @status")
             parameters.append({"name": "@status", "value": status})
+        if exclude_status:
+            conditions.append("c.status != @exclude_status")
+            parameters.append({"name": "@exclude_status", "value": exclude_status})
 
         where_clause = f" WHERE {' AND '.join(conditions)}"
-        query = f"SELECT * FROM c{where_clause} ORDER BY c.created_at DESC"
+        query = f"SELECT * FROM c{where_clause} ORDER BY c.incident_date ASC"
 
         items = []
         async for item in self._container.query_items(
@@ -289,6 +304,7 @@ class IncidentStore:
         *,
         status: str | None = None,
         station: str | None = None,
+        exclude_status: str | None = None,
         user_email: str | None = None,
         max_items: int = 50,
     ) -> list[IncidentDocument]:
@@ -296,6 +312,8 @@ class IncidentStore:
         results = []
         for data in self._memory.values():
             if status and data.get("status") != status:
+                continue
+            if exclude_status and data.get("status") == exclude_status:
                 continue
             if station and data.get("station") != station:
                 continue
@@ -305,6 +323,5 @@ class IncidentStore:
                 if not is_creator and not is_crew:
                     continue
             results.append(IncidentDocument.from_cosmos(data))
-            if len(results) >= max_items:
-                break
-        return results
+        results.sort(key=lambda doc: doc.incident_date)
+        return results[:max_items]

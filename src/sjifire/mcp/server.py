@@ -126,6 +126,8 @@ mcp.tool()(incident_tools.get_incident)
 mcp.tool()(incident_tools.list_incidents)
 mcp.tool()(incident_tools.update_incident)
 mcp.tool()(incident_tools.submit_incident)
+mcp.tool()(incident_tools.list_neris_incidents)
+mcp.tool()(incident_tools.get_neris_incident)
 
 # Register personnel tools
 mcp.tool()(personnel_tools.get_personnel)

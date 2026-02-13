@@ -121,12 +121,16 @@ async def list_incidents(
 ) -> dict:
     """List incidents you have access to.
 
+    By default, shows only incomplete incidents (draft, in_progress,
+    ready_review) sorted by oldest incident date first. Pass
+    status="submitted" to see submitted incidents.
+
     Returns incidents you created or are assigned as crew. Officers
     see all incidents.
 
     Args:
         status: Filter by status: "draft", "in_progress", "ready_review",
-                or "submitted" (optional)
+                or "submitted". When omitted, shows all except submitted.
         station: Filter by station code (optional)
 
     Returns:
@@ -134,11 +138,19 @@ async def list_incidents(
     """
     user = get_current_user()
 
+    # When no status filter is specified, exclude submitted incidents
+    # so incomplete work surfaces by default.
+    exclude_status = "submitted" if status is None else None
+
     async with IncidentStore() as store:
         if user.is_officer:
-            incidents = await store.list_by_status(status, station=station)
+            incidents = await store.list_by_status(
+                status, station=station, exclude_status=exclude_status
+            )
         else:
-            incidents = await store.list_for_user(user.email, status=status)
+            incidents = await store.list_for_user(
+                user.email, status=status, exclude_status=exclude_status
+            )
 
     summaries = [
         {
@@ -346,6 +358,91 @@ async def submit_incident(incident_id: str) -> dict:
         "incident_id": incident_id,
         "neris_incident_id": doc.neris_incident_id,
     }
+
+
+async def list_neris_incidents() -> dict:
+    """List incidents from the NERIS federal reporting system.
+
+    Returns incidents submitted to NERIS for this fire department.
+    Officers only.
+
+    Returns:
+        List of NERIS incident summaries with incident number, date,
+        status, and type information
+    """
+    user = get_current_user()
+
+    if not user.is_officer:
+        return {"error": "Only officers can access NERIS incidents"}
+
+    try:
+        result = await asyncio.to_thread(_list_neris_incidents)
+    except Exception as e:
+        logger.exception("Failed to list NERIS incidents")
+        return {"error": f"Failed to list NERIS incidents: {e}"}
+
+    return result
+
+
+def _list_neris_incidents() -> dict:
+    """Fetch incidents from NERIS (blocking, for thread pool)."""
+    from sjifire.neris.client import NerisClient
+
+    with NerisClient() as client:
+        incidents = client.get_all_incidents()
+
+    summaries = []
+    for inc in incidents:
+        dispatch = inc.get("dispatch", {})
+        types = inc.get("incident_types", [])
+        status_info = inc.get("incident_status", {})
+        summaries.append({
+            "neris_id": inc.get("neris_id", ""),
+            "incident_number": dispatch.get("incident_number", ""),
+            "call_create": dispatch.get("call_create", ""),
+            "status": status_info.get("status", ""),
+            "incident_type": types[0].get("type", "") if types else "",
+        })
+
+    return {"incidents": summaries, "count": len(summaries)}
+
+
+async def get_neris_incident(neris_incident_id: str) -> dict:
+    """Get a single incident from the NERIS federal reporting system.
+
+    Retrieves the full incident record from NERIS by its compound ID.
+    Officers only.
+
+    Args:
+        neris_incident_id: The NERIS incident ID
+            (e.g., "FD53055879|26SJ0020|1770457554")
+
+    Returns:
+        The full NERIS incident data, or an error if not found
+    """
+    user = get_current_user()
+
+    if not user.is_officer:
+        return {"error": "Only officers can access NERIS incidents"}
+
+    try:
+        result = await asyncio.to_thread(_get_neris_incident, neris_incident_id)
+    except Exception as e:
+        logger.exception("Failed to get NERIS incident %s", neris_incident_id)
+        return {"error": f"Failed to get NERIS incident: {e}"}
+
+    if result is None:
+        return {"error": f"NERIS incident not found: {neris_incident_id}"}
+
+    return result
+
+
+def _get_neris_incident(neris_incident_id: str) -> dict | None:
+    """Fetch a single incident from NERIS (blocking, for thread pool)."""
+    from sjifire.neris.client import NerisClient
+
+    with NerisClient() as client:
+        return client.get_incident(neris_incident_id)
 
 
 def _submit_to_neris(payload: dict) -> dict:  # pragma: no cover

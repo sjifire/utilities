@@ -158,6 +158,30 @@ class TestListByStatus:
         assert len(results) == 1
         assert results[0].incident_number == "26-001"
 
+    async def test_exclude_status(self):
+        doc1 = _make_doc(incident_number="26-001")
+        doc2 = _make_doc(incident_number="26-002", status="submitted")
+        doc3 = _make_doc(incident_number="26-003", status="in_progress")
+        async with IncidentStore() as store:
+            await store.create(doc1)
+            await store.create(doc2)
+            await store.create(doc3)
+            results = await store.list_by_status(exclude_status="submitted")
+        assert len(results) == 2
+        assert all(r.status != "submitted" for r in results)
+
+    async def test_sorted_by_incident_date_asc(self):
+        doc_feb = _make_doc(incident_number="26-002", incident_date=date(2026, 2, 15))
+        doc_jan = _make_doc(incident_number="26-001", incident_date=date(2026, 1, 10))
+        doc_mar = _make_doc(incident_number="26-003", incident_date=date(2026, 3, 20))
+        async with IncidentStore() as store:
+            # Insert out of order
+            await store.create(doc_feb)
+            await store.create(doc_mar)
+            await store.create(doc_jan)
+            results = await store.list_by_status()
+        assert [r.incident_number for r in results] == ["26-001", "26-002", "26-003"]
+
 
 class TestListForUser:
     async def test_as_creator(self):
@@ -197,3 +221,28 @@ class TestListForUser:
             results = await store.list_for_user("ff@sjifire.org", status="draft")
         assert len(results) == 1
         assert results[0].incident_number == "26-001"
+
+    async def test_exclude_status(self):
+        doc1 = _make_doc(created_by="ff@sjifire.org", incident_number="26-001")
+        doc2 = _make_doc(created_by="ff@sjifire.org", incident_number="26-002", status="submitted")
+        doc3 = _make_doc(created_by="ff@sjifire.org", incident_number="26-003", status="in_progress")
+        async with IncidentStore() as store:
+            await store.create(doc1)
+            await store.create(doc2)
+            await store.create(doc3)
+            results = await store.list_for_user("ff@sjifire.org", exclude_status="submitted")
+        assert len(results) == 2
+        assert all(r.status != "submitted" for r in results)
+
+    async def test_sorted_by_incident_date_asc(self):
+        doc_feb = _make_doc(
+            created_by="ff@sjifire.org", incident_number="26-002", incident_date=date(2026, 2, 15)
+        )
+        doc_jan = _make_doc(
+            created_by="ff@sjifire.org", incident_number="26-001", incident_date=date(2026, 1, 10)
+        )
+        async with IncidentStore() as store:
+            await store.create(doc_feb)
+            await store.create(doc_jan)
+            results = await store.list_for_user("ff@sjifire.org")
+        assert [r.incident_number for r in results] == ["26-001", "26-002"]
