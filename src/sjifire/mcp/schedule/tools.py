@@ -86,7 +86,7 @@ async def _ensure_cache(
             stale_dates.append(date_str)
 
     if not stale_dates:
-        logger.debug("Schedule cache is fresh for all %d dates", len(needed_dates))
+        logger.info("Schedule cache hit for all %d dates", len(needed_dates))
         return cached
 
     # Refresh stale dates from Aladtec
@@ -123,9 +123,10 @@ async def get_on_duty_crew(target_date: str | None = None) -> dict:
         Dict with "date" and "crew" list containing name, position,
         section, and shift times for each person on duty.
     """
-    get_current_user()
+    user = get_current_user()
 
     dt = datetime.strptime(target_date, "%Y-%m-%d").date() if target_date else date.today()
+    logger.info("Schedule lookup for %s (user: %s)", dt.isoformat(), user.email)
 
     # Request target date +/- 1 day for shift-change coverage
     needed = [

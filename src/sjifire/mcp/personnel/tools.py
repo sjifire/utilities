@@ -24,8 +24,8 @@ async def get_personnel() -> list[dict[str, str]]:
     Returns:
         List of {"name": "...", "email": "..."} for each active user
     """
-    # Verify caller is authenticated
-    get_current_user()
+    user = get_current_user()
+    logger.info("Personnel lookup requested by %s", user.email)
 
     client = get_graph_client()
     query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(

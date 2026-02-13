@@ -21,5 +21,5 @@ RUN uv sync --frozen --no-dev --no-editable
 
 EXPOSE 8000
 
-# Run uvicorn directly from the venv (no uv overhead at runtime)
-CMD [".venv/bin/uvicorn", "sjifire.mcp.server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use the installed entry point (goes through main() for logging setup)
+CMD [".venv/bin/mcp-server"]

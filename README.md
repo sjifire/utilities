@@ -182,10 +182,40 @@ uv run mcp-server
 - Schedule lookup (on-duty crew for any date)
 - Personnel lookup (active personnel names and emails)
 - Incident reporting (create, edit, list, submit to NERIS)
+- NERIS value sets (look up valid codes for any field — incident types, actions, location use, etc.)
 
 **Setup guide for end users:** See `docs/mcp-setup-guide.md`
 
 **Infrastructure setup:** See `scripts/setup-azure.sh` (one-time provisioning of ACR, Container Apps, Cosmos DB, Entra app registration, custom domain)
+
+#### Incident Report Assistant
+
+The MCP server powers a guided incident reporting workflow through Claude.ai. Users connect with their `@sjifire.org` Entra ID account and Claude walks them through completing NERIS-compliant reports — pulling dispatch data, crew schedules, and suggesting valid NERIS codes automatically.
+
+**Setup (Pro plan — per user):**
+
+1. Each user needs a [Claude Pro](https://claude.ai/upgrade) subscription ($20/month)
+2. In Claude.ai, go to **Settings → Integrations → Add Integration**
+3. Enter the MCP server URL: `https://mcp.sjifire.org/mcp`
+4. Sign in with your `@sjifire.org` Microsoft account
+5. Create a new **Project** (or use a shared one) with:
+   - **Custom instructions** from `docs/neris/claude-project-instructions.md`
+   - **Project Knowledge** — upload `docs/neris/value-sets-reference.md`
+6. Start a new chat in the project and say "I need to write a report"
+
+**How it works:**
+- Claude pulls dispatch data and on-duty crew automatically
+- Guides you through each section: incident type, actions taken, location, times, resources, narrative
+- Suggests NERIS codes based on context (e.g., dispatch nature "Medical Aid" → `MEDICAL||INJURY||FALL`)
+- Drafts the outcome narrative from your answers
+- Flags missing required fields before saving
+- Officers can submit completed reports to NERIS
+
+**Reference docs:**
+- `docs/neris/claude-project-instructions.md` — Full workflow instructions for the Claude.ai Project
+- `docs/neris/value-sets-reference.md` — Common NERIS value sets (incident types, actions, locations, etc.)
+- `docs/neris/eso-field-analysis.md` — ESO Suite field mapping to NERIS
+- `docs/neris/architecture.md` — System architecture and design decisions
 
 ### Aladtec Tools
 
@@ -389,6 +419,7 @@ src/sjifire/
 │   ├── oauth_provider.py  # OAuth proxy: Claude.ai ↔ Entra ID
 │   ├── dispatch/          # iSpyFire dispatch call lookup
 │   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
+│   ├── neris/             # NERIS value set lookup
 │   ├── personnel/         # Graph API personnel lookup
 │   └── schedule/          # On-duty crew with Cosmos cache
 └── scripts/           # CLI entry points

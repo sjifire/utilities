@@ -75,10 +75,12 @@ async def list_dispatch_calls(days: int = 30) -> dict:
     Returns:
         Dict with "calls" list and "count".
     """
-    get_current_user()
+    user = get_current_user()
+    logger.info("Dispatch list (%d days) requested by %s", days, user.email)
 
     try:
         calls = await asyncio.to_thread(_fetch_calls, days)
+        logger.info("Returning %d dispatch calls", len(calls))
         return {"calls": calls, "count": len(calls)}
     except Exception as e:
         logger.exception("Failed to list dispatch calls")
@@ -98,7 +100,8 @@ async def get_dispatch_call(call_id: str) -> dict:
         Dict with all call fields: nature, address, responder
         timeline, comments, iSpy mobile responders, geo location.
     """
-    get_current_user()
+    user = get_current_user()
+    logger.info("Dispatch call %s requested by %s", call_id, user.email)
 
     try:
         result = await asyncio.to_thread(_fetch_call_details, call_id)
@@ -118,10 +121,12 @@ async def get_open_dispatch_calls() -> dict:
     Returns:
         Dict with "calls" list (may be empty) and "count".
     """
-    get_current_user()
+    user = get_current_user()
+    logger.info("Open dispatch calls requested by %s", user.email)
 
     try:
         calls = await asyncio.to_thread(_fetch_open_calls)
+        logger.info("Returning %d open dispatch calls", len(calls))
         return {"calls": calls, "count": len(calls)}
     except Exception as e:
         logger.exception("Failed to get open dispatch calls")
@@ -140,7 +145,8 @@ async def get_dispatch_call_log(call_id: str) -> dict:
         Dict with "entries" list of {email, commenttype, timestamp}
         and "count".
     """
-    get_current_user()
+    user = get_current_user()
+    logger.info("Dispatch call log %s requested by %s", call_id, user.email)
 
     try:
         entries = await asyncio.to_thread(_fetch_call_log, call_id)

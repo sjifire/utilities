@@ -26,10 +26,23 @@ from starlette.responses import JSONResponse, Response
 from sjifire.core.config import get_domain
 from sjifire.mcp.dispatch import tools as dispatch_tools
 from sjifire.mcp.incidents import tools as incident_tools
+from sjifire.mcp.neris import tools as neris_tools
 from sjifire.mcp.personnel import tools as personnel_tools
 from sjifire.mcp.schedule import tools as schedule_tools
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Logging — module-level so it runs on import (uvicorn reimports for the app)
+# ---------------------------------------------------------------------------
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+# Silence Azure SDK HTTP-level noise (request/response headers)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("azure.identity").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -99,6 +112,10 @@ mcp.tool()(personnel_tools.get_personnel)
 # Register schedule tools
 mcp.tool()(schedule_tools.get_on_duty_crew)
 
+# Register NERIS reference tools
+mcp.tool()(neris_tools.list_neris_value_sets)
+mcp.tool()(neris_tools.get_neris_values)
+
 # Register dispatch tools
 mcp.tool()(dispatch_tools.list_dispatch_calls)
 mcp.tool()(dispatch_tools.get_dispatch_call)
@@ -158,11 +175,6 @@ def main() -> None:
 
     port = int(os.getenv("PORT", "8000"))
     host = os.getenv("HOST", "0.0.0.0")
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
 
     logger.info("Starting SJI Fire MCP server on %s:%d", host, port)
     uvicorn.run(
