@@ -1,5 +1,7 @@
 """Data models for iSpyFire integration."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
@@ -67,3 +69,91 @@ class ISpyFirePerson:
             "messageEmail": self.message_email,
             "messageCell": self.message_cell,
         }
+
+
+@dataclass
+class UnitResponse:
+    """A unit's dispatch response detail from CAD."""
+
+    unit_number: str
+    agency_code: str
+    status: str
+    time_of_status_change: str
+    radio_log: str = ""
+
+    @classmethod
+    def from_api(cls, data: dict) -> UnitResponse:
+        """Create from API response data."""
+        return cls(
+            unit_number=data.get("UnitNumber", ""),
+            agency_code=data.get("AgencyCode", ""),
+            status=data.get("StatusDisplayCode", ""),
+            time_of_status_change=data.get("TimeOfStatusChange", ""),
+            radio_log=data.get("RadioLog", ""),
+        )
+
+
+@dataclass
+class CallSummary:
+    """Minimal call reference from the list endpoint."""
+
+    id: str
+    ispy_timestamp: str | None = None
+
+    @classmethod
+    def from_api(cls, data: dict) -> CallSummary:
+        """Create from API response data."""
+        return cls(
+            id=data.get("_id", ""),
+            ispy_timestamp=data.get("iSpyTimestamp"),
+        )
+
+
+@dataclass
+class DispatchCall:
+    """Full dispatch call details from the central API."""
+
+    id: str
+    long_term_call_id: str
+    nature: str
+    address: str
+    agency_code: str
+    type: str = ""
+    zone_code: str = ""
+    time_reported: str = ""
+    is_completed: bool = False
+    comments: str = ""
+    joined_responders: str = ""
+    responder_details: list[UnitResponse] = field(default_factory=list)
+    ispy_responders: dict = field(default_factory=dict)
+    city: str = ""
+    state: str = ""
+    zip_code: str = ""
+    geo_location: str = ""
+    created_timestamp: int | None = None
+
+    @classmethod
+    def from_api(cls, data: dict) -> DispatchCall:
+        """Create from API response data."""
+        city_info = data.get("CityInfo", {}) or {}
+        details = [UnitResponse.from_api(d) for d in data.get("JoinedRespondersDetail", []) or []]
+        return cls(
+            id=data.get("_id", ""),
+            long_term_call_id=data.get("LongTermCallID", ""),
+            nature=data.get("Nature", ""),
+            address=data.get("RespondToAddress", ""),
+            agency_code=data.get("AgencyCode", ""),
+            type=data.get("Type", ""),
+            zone_code=data.get("ZoneCode", ""),
+            time_reported=data.get("TimeDateReported", ""),
+            is_completed=data.get("IsCompleted", False),
+            comments=data.get("JoinedComments", ""),
+            joined_responders=data.get("JoinedResponders", ""),
+            responder_details=details,
+            ispy_responders=data.get("iSpyResponders", {}),
+            city=city_info.get("City", ""),
+            state=city_info.get("StateAbbreviation", ""),
+            zip_code=city_info.get("ZIPCode", ""),
+            geo_location=data.get("iSpyGeoLocation", ""),
+            created_timestamp=data.get("iSpyCreatedTimestamp"),
+        )

@@ -1,0 +1,28 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+.venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Dev/CI files
+tests/
+docs/
+scripts/
+ESO/
+.github/
+.claude/
+.env
+*.md
+!README.md
+
+# Images and misc
+*.jpg
+*.png
+*.html
+.DS_Store

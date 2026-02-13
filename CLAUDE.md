@@ -109,8 +109,49 @@ src/sjifire/
 │   ├── models.py          # OnDutyEvent, SyncResult dataclasses
 │   ├── duty_sync.py       # DutyCalendarSync for shared mailbox (On Duty events)
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
+├── mcp/                   # Remote MCP server for Claude.ai
+│   ├── server.py          # FastMCP app, auth config, tool registration
+│   ├── auth.py            # Entra JWT validation, UserContext, RBAC
+│   ├── oauth_provider.py  # OAuth AS proxy: Claude.ai ↔ Entra ID
+│   ├── dispatch/tools.py  # iSpyFire dispatch call lookup
+│   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
+│   │   ├── models.py      # IncidentDocument, CrewAssignment (Pydantic)
+│   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
+│   │   └── tools.py       # MCP tools with role-based access control
+│   ├── personnel/tools.py # Graph API personnel lookup
+│   └── schedule/          # On-duty crew lookup with Cosmos cache
+│       ├── models.py      # DayScheduleCache (Pydantic)
+│       ├── store.py       # Cosmos DB cache with in-memory fallback
+│       └── tools.py       # MCP tool with auto-refresh from Aladtec
 └── scripts/               # CLI entry points
 ```
+
+### MCP Server (Remote, for Claude.ai)
+
+Remote MCP server at `https://mcp.sjifire.org/mcp` providing fire district tools to Claude.ai users. Deployed on Azure Container Apps.
+
+**Auth flow**: Claude.ai → MCP Server (OAuth AS) → Entra ID. The server implements `OAuthAuthorizationServerProvider` from the MCP SDK to bridge Claude.ai's Dynamic Client Registration with Entra ID. See `oauth_provider.py`.
+
+**Access control**:
+- Any `@sjifire.org` Entra user can connect (sign-in audience: `AzureADMyOrg`)
+- Officer group (`MCP Incident Officers`) gates: submit incidents, view all incidents
+- All other tools (dispatch, schedule, personnel) are open to any authenticated user
+
+**MCP tools registered**:
+- `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`
+- `get_personnel`
+- `get_on_duty_crew`
+- `list_dispatch_calls`, `get_dispatch_call`, `get_open_dispatch_calls`, `get_dispatch_call_log`
+
+**Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
+
+**Deployment**:
+- Dev: `./scripts/deploy-mcp.sh` (builds via ACR, deploys, health check with version verification)
+- Prod: `.github/workflows/mcp-deploy.yml` (on push to main, paths: `src/sjifire/mcp/**`, `Dockerfile`, etc.)
+
+**Key env vars** (set on Container App, secrets via Key Vault references):
+- `ENTRA_MCP_API_CLIENT_ID`, `ENTRA_MCP_API_CLIENT_SECRET`, `ENTRA_MCP_OFFICER_GROUP_ID`
+- `COSMOS_ENDPOINT`, `MS_GRAPH_*`, `ALADTEC_*`, `ISPYFIRE_*`, `MCP_SERVER_URL`
 
 ### Group Sync Strategy Pattern
 Group sync uses a strategy pattern with a `GroupMember` protocol that works with both Aladtec `Member` and `EntraUser` objects. The sync pulls membership data directly from Entra ID (which is synced from Aladtec via user sync).
@@ -254,6 +295,8 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ALADTEC-URL`, `ALADTEC-USERNAME`, `ALADTEC-PASSWORD`
 - `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
 - `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
+- `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-MCP-OFFICER-GROUP-ID`
+- `COSMOS-ENDPOINT`, `COSMOS-KEY`, `ACR-LOGIN-SERVER`, `ACR-USERNAME`, `ACR-PASSWORD`
 
 ### OIDC app registration
 - App: `utilities-sync` (client ID in workflow files)
@@ -265,5 +308,6 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Sync every 30 minutes (Entra to iSpyFire), uploads backup artifacts
 - `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
+- `mcp-deploy.yml`: Deploy MCP server on push to main (paths: `src/sjifire/mcp/**`, `Dockerfile`, `pyproject.toml`)
 
 All workflows authenticate via OIDC and fetch secrets from Key Vault (no GitHub secrets required).

@@ -5,16 +5,20 @@ description = "SJI Fire District utilities for integrations"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "azure-cosmos>=4.14.0",
     "azure-identity>=1.19.0",
     "beautifulsoup4>=4.12.0",
     "email-validator>=2.3.0",
     "httpx>=0.28.0",
+    "mcp[cli]>=1.26.0",
     "msgraph-sdk>=1.12.0",
     "neris-api-client>=1.5.1",
     "phonenumbers>=9.0.22",
+    "PyJWT[crypto]>=2.8.0",
     "python-dateutil>=2.9.0",
     "python-dotenv>=1.0.0",
     "tenacity>=9.1.2",
+    "uvicorn>=0.34.0",
 ]
 
 [project.scripts]
@@ -24,11 +28,13 @@ entra-user-sync = "sjifire.scripts.entra_user_sync:main"
 ms-group-sync = "sjifire.scripts.ms_group_sync:main"
 ispyfire-sync = "sjifire.scripts.ispyfire_sync:main"
 ispyfire-admin = "sjifire.scripts.ispyfire_admin:main"
+ispyfire-dispatch = "sjifire.scripts.ispyfire_dispatch:main"
 analyze-mappings = "sjifire.scripts.analyze_mappings:main"
 compare-groups = "sjifire.scripts.compare_group_memberships:main"
 m365-group-scan = "sjifire.scripts.m365_group_scan:main"
 duty-calendar-sync = "sjifire.scripts.duty_calendar_sync:main"
 personal-calendar-sync = "sjifire.scripts.personal_calendar_sync:main"
+mcp-server = "sjifire.mcp.server:main"
 
 [dependency-groups]
 dev = [
@@ -76,9 +82,11 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
+"src/sjifire/mcp/incidents/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
+"src/sjifire/mcp/server.py" = ["S104"]  # Binding to 0.0.0.0 is intentional for container
 "src/sjifire/scripts/*.py" = ["T201"]  # CLI scripts use print for output
 "scripts/*.py" = ["T201"]  # Utility scripts use print for output
-"tests/**/*.py" = ["S101", "S105", "S106", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords, skip docstrings, allow long lines
+"tests/**/*.py" = ["S101", "S105", "S106", "D101", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords, skip docstrings, allow long lines
 
 [tool.ruff.format]
 quote-style = "double"

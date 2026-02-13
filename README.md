@@ -161,6 +161,32 @@ The sync:
 - Use `--purge` to delete all Aladtec-categorized events
 - Use `--load-schedule` to skip Aladtec fetch and use cached schedule data
 
+### MCP Server (Remote, for Claude.ai)
+
+Remote MCP server providing fire district tools to Claude.ai. Deployed on Azure Container Apps at `mcp.sjifire.org`. Users connect by adding the integration URL in Claude.ai Settings → Integrations.
+
+**Run locally (dev mode, no auth):**
+```bash
+uv run mcp-server
+```
+
+**Deploy to Azure (dev):**
+```bash
+./scripts/deploy-mcp.sh              # Build & deploy
+./scripts/deploy-mcp.sh --build-only # Build image only
+./scripts/deploy-mcp.sh --health     # Health check only
+```
+
+**Available tools for Claude.ai users:**
+- Dispatch call lookup (recent calls, open calls, call details, audit logs)
+- Schedule lookup (on-duty crew for any date)
+- Personnel lookup (active personnel names and emails)
+- Incident reporting (create, edit, list, submit to NERIS)
+
+**Setup guide for end users:** See `docs/mcp-setup-guide.md`
+
+**Infrastructure setup:** See `scripts/setup-azure.sh` (one-time provisioning of ACR, Container Apps, Cosmos DB, Entra app registration, custom domain)
+
 ### Aladtec Tools
 
 **List members:**
@@ -270,6 +296,17 @@ Runs every 30 minutes:
 - `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
 - `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
 
+### MCP Deploy (mcp-deploy.yml)
+Runs on push to main (paths: `src/sjifire/mcp/**`, `Dockerfile`, `pyproject.toml`):
+- Builds Docker image via ACR
+- Configures Key Vault secret references
+- Deploys to Container Apps
+- Health check with version verification
+
+**Secrets (from Key Vault):**
+- `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-MCP-OFFICER-GROUP-ID`
+- `COSMOS-ENDPOINT`, `MS-GRAPH-*`, `ALADTEC-*`, `ISPYFIRE-*`
+
 ## Azure Key Vault
 
 All secrets are stored in Azure Key Vault `gh-website-utilities` in resource group `rg-staticweb-prod-westus2`.
@@ -346,6 +383,14 @@ src/sjifire/
 │   ├── models.py          # OnDutyEvent, SyncResult dataclasses
 │   ├── duty_sync.py       # DutyCalendarSync for shared mailbox
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
+├── mcp/               # Remote MCP server for Claude.ai
+│   ├── server.py          # FastMCP app, OAuth auth, tool registration
+│   ├── auth.py            # Entra JWT validation, UserContext
+│   ├── oauth_provider.py  # OAuth proxy: Claude.ai ↔ Entra ID
+│   ├── dispatch/          # iSpyFire dispatch call lookup
+│   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
+│   ├── personnel/         # Graph API personnel lookup
+│   └── schedule/          # On-duty crew with Cosmos cache
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
