@@ -24,6 +24,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from sjifire.core.config import get_org_config
+from sjifire.mcp import dashboard
 from sjifire.mcp.dispatch import tools as dispatch_tools
 from sjifire.mcp.incidents import tools as incident_tools
 from sjifire.mcp.neris import tools as neris_tools
@@ -138,6 +139,9 @@ mcp.tool()(schedule_tools.get_on_duty_crew)
 # Register NERIS reference tools
 mcp.tool()(neris_tools.list_neris_value_sets)
 mcp.tool()(neris_tools.get_neris_values)
+
+# Register dashboard tool
+mcp.tool()(dashboard.get_dashboard)
 
 # Register dispatch tools
 mcp.tool()(dispatch_tools.list_dispatch_calls)

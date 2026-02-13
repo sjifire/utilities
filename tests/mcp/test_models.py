@@ -138,3 +138,63 @@ class TestIncidentDocument:
     def test_crew_emails_empty(self):
         doc = self._make_doc()
         assert doc.crew_emails() == set()
+
+    def test_completeness_empty(self):
+        doc = self._make_doc()
+        result = doc.completeness()
+        assert result["filled"] == 0
+        assert result["total"] == 5
+        assert not any(result["sections"].values())
+
+    def test_completeness_partial(self):
+        doc = self._make_doc(
+            incident_type="111",
+            address="100 Spring St",
+            crew=[CrewAssignment(name="John", email="john@sjifire.org")],
+        )
+        result = doc.completeness()
+        assert result["filled"] == 3
+        assert result["total"] == 5
+        assert result["sections"]["incident_type"] is True
+        assert result["sections"]["address"] is True
+        assert result["sections"]["crew"] is True
+        assert result["sections"]["narratives"] is False
+        assert result["sections"]["timestamps"] is False
+
+    def test_completeness_full(self):
+        doc = self._make_doc(
+            incident_type="111",
+            address="100 Spring St",
+            crew=[CrewAssignment(name="John")],
+            narratives=Narratives(outcome="Contained"),
+            timestamps={"dispatch": "2026-02-12T10:00:00"},
+        )
+        result = doc.completeness()
+        assert result["filled"] == 5
+        assert result["total"] == 5
+        assert all(result["sections"].values())
+
+    def test_completeness_outcome_only_counts_as_narrative(self):
+        doc = self._make_doc(narratives=Narratives(outcome="Contained"))
+        result = doc.completeness()
+        assert result["sections"]["narratives"] is True
+
+    def test_completeness_actions_taken_only_counts_as_narrative(self):
+        doc = self._make_doc(narratives=Narratives(actions_taken="Deployed lines"))
+        result = doc.completeness()
+        assert result["sections"]["narratives"] is True
+
+    def test_completeness_empty_narratives(self):
+        doc = self._make_doc(narratives=Narratives(outcome="", actions_taken=""))
+        result = doc.completeness()
+        assert result["sections"]["narratives"] is False
+
+    def test_completeness_survives_cosmos_roundtrip(self):
+        doc = self._make_doc(
+            incident_type="111",
+            address="100 Spring St",
+            crew=[CrewAssignment(name="John")],
+        )
+        original = doc.completeness()
+        restored = IncidentDocument.from_cosmos(doc.to_cosmos())
+        assert restored.completeness() == original

@@ -242,6 +242,64 @@ class TestListByAddress:
         assert len(results) == 3
 
 
+class TestListRecent:
+    async def test_returns_recent_calls(self):
+        doc1 = _make_doc(id="uuid-1", time_reported=datetime(2026, 2, 10, 10, 0))
+        doc2 = _make_doc(id="uuid-2", time_reported=datetime(2026, 2, 12, 14, 30))
+
+        async with DispatchStore() as store:
+            await store.upsert(doc1)
+            await store.upsert(doc2)
+            results = await store.list_recent()
+
+        assert len(results) == 2
+        assert results[0].id == "uuid-2"  # Most recent first
+        assert results[1].id == "uuid-1"
+
+    async def test_sorted_desc(self):
+        for i in range(5):
+            doc = _make_doc(id=f"uuid-{i}", time_reported=datetime(2026, 2, 10 + i, 10, 0))
+            async with DispatchStore() as store:
+                await store.upsert(doc)
+
+        async with DispatchStore() as store:
+            results = await store.list_recent()
+
+        # Most recent first (Feb 14 before Feb 10)
+        dates = [r.time_reported for r in results]
+        assert dates == sorted(dates, reverse=True)
+
+    async def test_limit(self):
+        for i in range(10):
+            doc = _make_doc(id=f"uuid-{i}", time_reported=datetime(2026, 2, 1 + i, 10, 0))
+            async with DispatchStore() as store:
+                await store.upsert(doc)
+
+        async with DispatchStore() as store:
+            results = await store.list_recent(limit=3)
+
+        assert len(results) == 3
+        # Should be the 3 most recent
+        assert results[0].id == "uuid-9"
+
+    async def test_empty_store(self):
+        async with DispatchStore() as store:
+            results = await store.list_recent()
+
+        assert results == []
+
+    async def test_default_limit_is_15(self):
+        for i in range(20):
+            doc = _make_doc(id=f"uuid-{i}", time_reported=datetime(2026, 1, 1 + i, 10, 0))
+            async with DispatchStore() as store:
+                await store.upsert(doc)
+
+        async with DispatchStore() as store:
+            results = await store.list_recent()
+
+        assert len(results) == 15
+
+
 class TestGetExistingIds:
     async def test_returns_matching_ids(self):
         doc1 = _make_doc(id="uuid-1")

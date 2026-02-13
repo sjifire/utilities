@@ -133,6 +133,26 @@ class IncidentDocument(BaseModel):
 
         return payload
 
+    def completeness(self) -> dict:
+        """Report completeness across key sections.
+
+        Returns a dict with ``filled`` / ``total`` counts and a per-section
+        breakdown so callers can show "3/5 complete" style progress.
+        """
+        sections = {
+            "incident_type": bool(self.incident_type),
+            "crew": len(self.crew) > 0,
+            "narratives": bool(self.narratives.outcome or self.narratives.actions_taken),
+            "timestamps": len(self.timestamps) > 0,
+            "address": bool(self.address),
+        }
+        filled = sum(sections.values())
+        return {
+            "filled": filled,
+            "total": len(sections),
+            "sections": sections,
+        }
+
     def crew_emails(self) -> set[str]:
         """Get set of crew member emails (lowered) for access checks."""
         return {c.email.lower() for c in self.crew if c.email}
