@@ -43,28 +43,12 @@ class UserContext:
 def get_current_user() -> UserContext:
     """Get the authenticated user for the current request.
 
-    In production (ENTRA_MCP_API_CLIENT_ID set), requires auth middleware.
-    In dev mode (no Entra config), returns a dev user so tools work
-    with ``mcp dev`` inspector without needing Azure resources.
-
     Raises:
-        RuntimeError: If no user is authenticated and not in dev mode.
+        RuntimeError: If no user is authenticated in the current context.
     """
     user = _current_user.get()
     if user is not None:
         return user
-
-    # Dev mode: no Entra config → return a dev user for local testing
-    if not os.getenv("ENTRA_MCP_API_CLIENT_ID"):
-        logger.warning("No auth configured — using dev user (local testing only)")
-        return UserContext(
-            email="dev@sjifire.org",
-            name="Dev User",
-            user_id="dev-local",
-            groups=frozenset(os.getenv("ENTRA_MCP_OFFICER_GROUP_ID", "").split(","))
-            if os.getenv("ENTRA_MCP_OFFICER_GROUP_ID")
-            else frozenset(),
-        )
 
     raise RuntimeError("No authenticated user in context")
 

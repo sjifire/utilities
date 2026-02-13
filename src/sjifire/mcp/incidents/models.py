@@ -4,7 +4,12 @@ import uuid
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+MAX_NARRATIVE_LENGTH = 10_000
+MAX_CREW_SIZE = 50
+MAX_UNIT_RESPONSES = 50
+MAX_TIMESTAMPS = 30
 
 
 class CrewAssignment(BaseModel):
@@ -15,45 +20,51 @@ class CrewAssignment(BaseModel):
     Email is the stable UID for the person across systems.
     """
 
-    name: str
-    email: str | None = None
-    rank: str = ""  # Snapshotted at incident time (e.g., "Lieutenant", "Captain")
-    position: str = ""  # Role on this incident (e.g., "Engine Boss", "Firefighter")
-    unit: str = ""  # e.g., "E31", "M31"
+    name: str = Field(max_length=200)
+    email: str | None = Field(default=None, max_length=254)
+    rank: str = Field(default="", max_length=100)
+    position: str = Field(default="", max_length=100)
+    unit: str = Field(default="", max_length=20)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _normalize_email(cls, v: str | None) -> str | None:
+        return v.lower() if v else v
 
 
 class Narratives(BaseModel):
     """Incident narrative fields."""
 
-    outcome: str = ""
-    actions_taken: str = ""
+    outcome: str = Field(default="", max_length=MAX_NARRATIVE_LENGTH)
+    actions_taken: str = Field(default="", max_length=MAX_NARRATIVE_LENGTH)
 
 
 class IncidentDocument(BaseModel):
     """Full incident document stored in Cosmos DB.
 
     Superset of NERIS fields -- includes crew, internal notes, and status tracking.
-    The partition key is ``station`` (e.g., "S31").
+    The partition key is ``year`` (four-digit string derived from incident_date).
     """
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    station: str  # Partition key
+    year: str = ""  # Partition key — set by validator from incident_date
+    station: str  # Station code (e.g., "S31")
     status: Literal["draft", "in_progress", "ready_review", "submitted"] = "draft"
 
     # Core incident info
-    incident_number: str  # e.g., "26-000944"
+    incident_number: str = Field(max_length=40)  # e.g., "26-000944"
     incident_date: date
-    incident_type: str | None = None  # NERIS type code
-    address: str | None = None
-    city: str = "Friday Harbor"
-    state: str = "WA"
+    incident_type: str | None = Field(default=None, max_length=200)  # NERIS type code
+    address: str | None = Field(default=None, max_length=500)
+    city: str = Field(default="Friday Harbor", max_length=100)
+    state: str = Field(default="WA", max_length=2)
     latitude: float | None = None
     longitude: float | None = None
 
     # Crew and response
-    crew: list[CrewAssignment] = []
-    unit_responses: list[dict] = []  # NERIS apparatus/unit format
-    timestamps: dict[str, str] = {}  # e.g., {"dispatch": "...", "on_scene": "..."}
+    crew: list[CrewAssignment] = Field(default=[], max_length=MAX_CREW_SIZE)
+    unit_responses: list[dict] = Field(default=[], max_length=MAX_UNIT_RESPONSES)
+    timestamps: dict[str, str] = Field(default={}, max_length=MAX_TIMESTAMPS)
 
     # Narratives
     narratives: Narratives = Field(default_factory=Narratives)
@@ -63,7 +74,13 @@ class IncidentDocument(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
     neris_incident_id: str | None = None  # Set after NERIS submission
-    internal_notes: str = ""  # Never sent to NERIS
+    internal_notes: str = Field(default="", max_length=MAX_NARRATIVE_LENGTH)  # Never sent to NERIS
+
+    @model_validator(mode="after")
+    def _set_year(self) -> IncidentDocument:
+        """Derive year partition key from incident_date."""
+        self.year = str(self.incident_date.year)
+        return self
 
     def to_cosmos(self) -> dict:
         """Serialize for Cosmos DB storage."""

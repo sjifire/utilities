@@ -93,44 +93,72 @@ class IncidentStore:
         """
         if self._in_memory:
             self._memory[doc.id] = doc.to_cosmos()
-            logger.info("Created incident %s (in-memory, station=%s)", doc.id, doc.station)
+            logger.info("Created incident %s (in-memory, year=%s)", doc.id, doc.year)
             return doc
 
         result = await self._container.create_item(body=doc.to_cosmos())
-        logger.info("Created incident %s (station=%s)", doc.id, doc.station)
+        logger.info("Created incident %s (year=%s)", doc.id, doc.year)
         return IncidentDocument.from_cosmos(result)
 
-    async def get(self, incident_id: str, station: str) -> IncidentDocument | None:
-        """Get an incident by ID and station (partition key).
+    async def get(self, incident_id: str, year: str) -> IncidentDocument | None:
+        """Get an incident by ID and year (partition key).
 
         Args:
             incident_id: Document ID
-            station: Station code (partition key)
+            year: Four-digit year string (partition key)
 
         Returns:
             IncidentDocument if found, None otherwise
         """
         if self._in_memory:
             data = self._memory.get(incident_id)
-            if data and data.get("station") == station:
+            if data and data.get("year") == year:
                 return IncidentDocument.from_cosmos(data)
             return None
 
         try:
             result = await self._container.read_item(
                 item=incident_id,
-                partition_key=station,
+                partition_key=year,
             )
             return IncidentDocument.from_cosmos(result)
         except Exception:
-            logger.debug("Incident not found: %s (station=%s)", incident_id, station)
+            logger.debug("Incident not found: %s (year=%s)", incident_id, year)
             return None
+
+    async def get_by_id(self, incident_id: str) -> IncidentDocument | None:
+        """Find an incident by document ID (cross-partition).
+
+        Slower than ``get()`` but doesn't require the year partition key.
+        Suitable for small datasets like a single fire department's incidents.
+
+        Args:
+            incident_id: Document ID (UUID)
+
+        Returns:
+            IncidentDocument if found, None otherwise
+        """
+        if self._in_memory:
+            data = self._memory.get(incident_id)
+            return IncidentDocument.from_cosmos(data) if data else None
+
+        query = "SELECT * FROM c WHERE c.id = @id"
+        parameters: list[dict] = [{"name": "@id", "value": incident_id}]
+
+        async for item in self._container.query_items(
+            query=query,
+            parameters=parameters,
+            max_item_count=1,
+        ):
+            return IncidentDocument.from_cosmos(item)
+
+        return None
 
     async def update(self, doc: IncidentDocument) -> IncidentDocument:
         """Update an existing incident document.
 
         Args:
-            doc: Document with updated fields (must have valid id and station)
+            doc: Document with updated fields (must have valid id and year)
 
         Returns:
             The updated document
@@ -147,12 +175,12 @@ class IncidentStore:
         logger.info("Updated incident %s", doc.id)
         return IncidentDocument.from_cosmos(result)
 
-    async def delete(self, incident_id: str, station: str) -> None:
+    async def delete(self, incident_id: str, year: str) -> None:
         """Delete an incident document.
 
         Args:
             incident_id: Document ID
-            station: Station code (partition key)
+            year: Four-digit year string (partition key)
         """
         if self._in_memory:
             self._memory.pop(incident_id, None)
@@ -161,7 +189,7 @@ class IncidentStore:
 
         await self._container.delete_item(
             item=incident_id,
-            partition_key=station,
+            partition_key=year,
         )
         logger.info("Deleted incident %s", incident_id)
 
@@ -176,7 +204,7 @@ class IncidentStore:
 
         Args:
             status: Filter by status (draft, in_progress, ready_review, submitted)
-            station: Filter by station (partition key)
+            station: Filter by station code
             max_items: Maximum number of results
 
         Returns:

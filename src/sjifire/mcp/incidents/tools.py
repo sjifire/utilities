@@ -19,6 +19,8 @@ from sjifire.mcp.incidents.store import IncidentStore
 
 logger = logging.getLogger(__name__)
 
+_EDITABLE_STATUSES = {"draft", "in_progress", "ready_review"}
+
 
 def _check_view_access(doc: IncidentDocument, user_email: str, is_officer: bool) -> bool:
     """Check if user can view this incident."""
@@ -87,7 +89,7 @@ async def create_incident(
     return created.model_dump(mode="json")
 
 
-async def get_incident(incident_id: str, station: str) -> dict:
+async def get_incident(incident_id: str) -> dict:
     """Get a single incident by ID.
 
     You can only view incidents you created, are crew on, or if you
@@ -95,7 +97,6 @@ async def get_incident(incident_id: str, station: str) -> dict:
 
     Args:
         incident_id: The incident document ID
-        station: Station code (e.g., "S31")
 
     Returns:
         The full incident document, or an error if not found or no access
@@ -103,7 +104,7 @@ async def get_incident(incident_id: str, station: str) -> dict:
     user = get_current_user()
 
     async with IncidentStore() as store:
-        doc = await store.get(incident_id, station)
+        doc = await store.get_by_id(incident_id)
 
     if doc is None:
         return {"error": "Incident not found"}
@@ -158,8 +159,8 @@ async def list_incidents(
 
 async def update_incident(
     incident_id: str,
-    station: str,
     *,
+    station: str | None = None,
     status: str | None = None,
     incident_type: str | None = None,
     address: str | None = None,
@@ -180,7 +181,7 @@ async def update_incident(
 
     Args:
         incident_id: The incident document ID
-        station: Station code (e.g., "S31")
+        station: Update station code (e.g., "S31")
         status: New status (draft, in_progress, ready_review)
         incident_type: NERIS incident type code
         address: Incident address
@@ -200,7 +201,7 @@ async def update_incident(
     user = get_current_user()
 
     async with IncidentStore() as store:
-        doc = await store.get(incident_id, station)
+        doc = await store.get_by_id(incident_id)
 
         if doc is None:
             return {"error": "Incident not found"}
@@ -215,8 +216,13 @@ async def update_incident(
         if status is not None:
             if status == "submitted":
                 return {"error": "Use submit_incident to submit"}
+            if status not in _EDITABLE_STATUSES:
+                valid = ", ".join(sorted(_EDITABLE_STATUSES))
+                return {"error": f"Invalid status '{status}'. Must be one of: {valid}"}
             doc.status = status
 
+        if station is not None:
+            doc.station = station
         if incident_type is not None:
             doc.incident_type = incident_type
         if address is not None:
@@ -266,7 +272,7 @@ async def update_incident(
     return updated.model_dump(mode="json")
 
 
-async def submit_incident(incident_id: str, station: str) -> dict:
+async def submit_incident(incident_id: str) -> dict:
     """Validate and submit an incident to NERIS.
 
     Only officers can submit incidents. The incident must be in
@@ -275,7 +281,6 @@ async def submit_incident(incident_id: str, station: str) -> dict:
 
     Args:
         incident_id: The incident document ID
-        station: Station code (e.g., "S31")
 
     Returns:
         Submission result with NERIS incident ID on success, or
@@ -287,7 +292,7 @@ async def submit_incident(incident_id: str, station: str) -> dict:
         return {"error": "Only officers can submit incidents to NERIS"}
 
     async with IncidentStore() as store:
-        doc = await store.get(incident_id, station)
+        doc = await store.get_by_id(incident_id)
 
         if doc is None:
             return {"error": "Incident not found"}

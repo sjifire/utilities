@@ -37,6 +37,7 @@ class TestCreate:
         async with IncidentStore() as store:
             result = await store.create(doc)
         assert result.id == doc.id
+        assert result.year == "2026"
         assert result.station == "S31"
         assert result.status == "draft"
 
@@ -44,7 +45,7 @@ class TestCreate:
         doc = _make_doc()
         async with IncidentStore() as store:
             await store.create(doc)
-            fetched = await store.get(doc.id, "S31")
+            fetched = await store.get(doc.id, "2026")
         assert fetched is not None
         assert fetched.incident_number == "26-000944"
         assert fetched.created_by == "chief@sjifire.org"
@@ -53,14 +54,29 @@ class TestCreate:
 class TestGet:
     async def test_nonexistent_returns_none(self):
         async with IncidentStore() as store:
-            result = await store.get("nonexistent-id", "S31")
+            result = await store.get("nonexistent-id", "2026")
         assert result is None
 
-    async def test_wrong_station_returns_none(self):
-        doc = _make_doc(station="S31")
+    async def test_wrong_year_returns_none(self):
+        doc = _make_doc(incident_date=date(2026, 2, 12))
         async with IncidentStore() as store:
             await store.create(doc)
-            result = await store.get(doc.id, "S32")
+            result = await store.get(doc.id, "2025")
+        assert result is None
+
+
+class TestGetById:
+    async def test_finds_without_year(self):
+        doc = _make_doc()
+        async with IncidentStore() as store:
+            await store.create(doc)
+            result = await store.get_by_id(doc.id)
+        assert result is not None
+        assert result.incident_number == "26-000944"
+
+    async def test_nonexistent_returns_none(self):
+        async with IncidentStore() as store:
+            result = await store.get_by_id("nonexistent-id")
         assert result is None
 
 
@@ -81,7 +97,7 @@ class TestUpdate:
             await store.create(doc)
             doc.incident_type = "111"
             await store.update(doc)
-            fetched = await store.get(doc.id, "S31")
+            fetched = await store.get(doc.id, "2026")
         assert fetched is not None
         assert fetched.incident_type == "111"
 
@@ -91,13 +107,13 @@ class TestDelete:
         doc = _make_doc()
         async with IncidentStore() as store:
             await store.create(doc)
-            await store.delete(doc.id, "S31")
-            result = await store.get(doc.id, "S31")
+            await store.delete(doc.id, "2026")
+            result = await store.get(doc.id, "2026")
         assert result is None
 
     async def test_delete_nonexistent_no_error(self):
         async with IncidentStore() as store:
-            await store.delete("nonexistent-id", "S31")
+            await store.delete("nonexistent-id", "2026")
 
 
 class TestListByStatus:

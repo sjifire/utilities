@@ -8,8 +8,10 @@ Flow::
 
     Claude.ai  ←→  MCP Server (OAuth AS)  ←→  Entra ID (user login)
 
-In-memory stores (dict-based) are fine for a single-replica Container App
-that scales to zero — sessions naturally expire on restart.
+Tokens are stored in Cosmos DB (shared across replicas, survives restarts)
+with a per-replica L1 TTLCache for fast reads on every tool call.
+Client registrations and pending auth states remain in-memory (short-lived,
+re-created on each connection).
 """
 
 import base64
@@ -31,7 +33,8 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from sjifire.mcp.auth import EntraTokenValidator, UserContext, set_current_user
+from sjifire.mcp.auth import EntraTokenValidator, set_current_user
+from sjifire.mcp.token_store import TokenStore, _deserialize_user, _serialize_user, get_token_store
 
 logger = logging.getLogger(__name__)
 
@@ -65,15 +68,19 @@ class EntraOAuthProvider:
 
         self._validator = EntraTokenValidator(tenant_id, api_client_id)
 
-        # In-memory stores
+        # In-memory only (short-lived, re-created on each connection)
         self._clients: dict[str, OAuthClientInformationFull] = {}
-        self._auth_codes: dict[str, AuthorizationCode] = {}
-        self._access_tokens: dict[str, AccessToken] = {}
-        self._refresh_tokens: dict[str, RefreshToken] = {}
         # Entra state → {mcp_params, client_id, entra_code_verifier}
         self._pending_auth: dict[str, dict] = {}
-        # token string → UserContext
-        self._token_user_map: dict[str, UserContext] = {}
+
+        # Lazy-initialized Cosmos-backed store
+        self._token_store: TokenStore | None = None
+
+    async def _store(self) -> TokenStore:
+        """Get the shared TokenStore (lazy init)."""
+        if self._token_store is None:
+            self._token_store = await get_token_store()
+        return self._token_store
 
     # ------------------------------------------------------------------
     # Client Registration (RFC 7591)
@@ -168,8 +175,10 @@ class EntraOAuthProvider:
             "redirect_uri": f"{self.server_url}/callback",
             "code_verifier": entra_code_verifier,
         }
-        if self.client_secret:
-            token_data["client_secret"] = self.client_secret
+        if not self.client_secret:
+            logger.error("ENTRA_MCP_API_CLIENT_SECRET is required for token exchange")
+            return Response("Server misconfiguration: missing client secret", status_code=500)
+        token_data["client_secret"] = self.client_secret
 
         async with httpx.AsyncClient() as http:
             resp = await http.post(token_url, data=token_data)
@@ -189,23 +198,27 @@ class EntraOAuthProvider:
             logger.exception("id_token validation failed")
             return Response("Token validation failed", status_code=502)
 
-        # Mint an MCP authorization code
+        # Mint an MCP authorization code and store in Cosmos
         mcp_code = secrets.token_urlsafe(32)
         now = time.time()
+        scopes = mcp_params.scopes or ["mcp.access"]
 
-        self._auth_codes[mcp_code] = AuthorizationCode(
-            code=mcp_code,
-            scopes=mcp_params.scopes or ["mcp.access"],
-            expires_at=now + AUTH_CODE_TTL,
-            client_id=client_id,
-            code_challenge=mcp_params.code_challenge,
-            redirect_uri=mcp_params.redirect_uri,
-            redirect_uri_provided_explicitly=mcp_params.redirect_uri_provided_explicitly,
-            resource=mcp_params.resource,
+        store = await self._store()
+        await store.set(
+            "auth_code",
+            mcp_code,
+            {
+                "expires_at": now + AUTH_CODE_TTL,
+                "client_id": client_id,
+                "scopes": scopes,
+                "code_challenge": mcp_params.code_challenge,
+                "redirect_uri": str(mcp_params.redirect_uri),
+                "redirect_uri_provided_explicitly": mcp_params.redirect_uri_provided_explicitly,
+                "resource": str(mcp_params.resource) if mcp_params.resource else None,
+                "user": _serialize_user(user),
+            },
+            AUTH_CODE_TTL,
         )
-
-        # Stash user identity keyed by auth code for the token exchange step
-        self._token_user_map[f"code:{mcp_code}"] = user
 
         redirect_url = construct_redirect_uri(
             str(mcp_params.redirect_uri),
@@ -224,10 +237,21 @@ class EntraOAuthProvider:
         authorization_code: str,
     ) -> AuthorizationCode | None:
         """Load an authorization code if still valid."""
-        code_obj = self._auth_codes.get(authorization_code)
-        if code_obj and code_obj.expires_at > time.time():
-            return code_obj
-        return None
+        store = await self._store()
+        doc = await store.get("auth_code", authorization_code)
+        if doc is None:
+            return None
+
+        return AuthorizationCode(
+            code=authorization_code,
+            scopes=doc.get("scopes", ["mcp.access"]),
+            expires_at=doc["expires_at"],
+            client_id=doc["client_id"],
+            code_challenge=doc.get("code_challenge"),
+            redirect_uri=doc.get("redirect_uri"),
+            redirect_uri_provided_explicitly=doc.get("redirect_uri_provided_explicitly", True),
+            resource=doc.get("resource"),
+        )
 
     async def exchange_authorization_code(
         self,
@@ -235,31 +259,38 @@ class EntraOAuthProvider:
         authorization_code: AuthorizationCode,
     ) -> OAuthToken:
         """Mint MCP access + refresh tokens and associate with user identity."""
-        self._auth_codes.pop(authorization_code.code, None)
-        user = self._token_user_map.pop(f"code:{authorization_code.code}", None)
+        store = await self._store()
+
+        # Get the user from the auth code document before deleting it
+        code_doc = await store.get("auth_code", authorization_code.code)
+        user_data = code_doc.get("user") if code_doc else None
+        await store.delete("auth_code", authorization_code.code)
 
         now = int(time.time())
         access_token_str = secrets.token_urlsafe(32)
         refresh_token_str = secrets.token_urlsafe(32)
         scopes = authorization_code.scopes
 
-        self._access_tokens[access_token_str] = AccessToken(
-            token=access_token_str,
-            client_id=authorization_code.client_id,
-            scopes=scopes,
-            expires_at=now + ACCESS_TOKEN_TTL,
-            resource=authorization_code.resource,
-        )
+        token_data = {
+            "expires_at": now + ACCESS_TOKEN_TTL,
+            "client_id": authorization_code.client_id,
+            "scopes": scopes,
+            "resource": getattr(authorization_code, "resource", None),
+        }
+        if user_data:
+            token_data["user"] = user_data
 
-        self._refresh_tokens[refresh_token_str] = RefreshToken(
-            token=refresh_token_str,
-            client_id=authorization_code.client_id,
-            scopes=scopes,
-            expires_at=now + REFRESH_TOKEN_TTL,
-        )
+        await store.set("access_token", access_token_str, token_data, ACCESS_TOKEN_TTL)
 
-        if user:
-            self._token_user_map[access_token_str] = user
+        refresh_data = {
+            "expires_at": now + REFRESH_TOKEN_TTL,
+            "client_id": authorization_code.client_id,
+            "scopes": scopes,
+        }
+        if user_data:
+            refresh_data["user"] = user_data
+
+        await store.set("refresh_token", refresh_token_str, refresh_data, REFRESH_TOKEN_TTL)
 
         return OAuthToken(
             access_token=access_token_str,
@@ -279,10 +310,17 @@ class EntraOAuthProvider:
         refresh_token: str,
     ) -> RefreshToken | None:
         """Load a refresh token if still valid."""
-        rt = self._refresh_tokens.get(refresh_token)
-        if rt and (rt.expires_at is None or rt.expires_at > int(time.time())):
-            return rt
-        return None
+        store = await self._store()
+        doc = await store.get("refresh_token", refresh_token)
+        if doc is None:
+            return None
+
+        return RefreshToken(
+            token=refresh_token,
+            client_id=doc["client_id"],
+            scopes=doc.get("scopes", ["mcp.access"]),
+            expires_at=doc.get("expires_at"),
+        )
 
     async def exchange_refresh_token(
         self,
@@ -291,37 +329,47 @@ class EntraOAuthProvider:
         scopes: list[str],
     ) -> OAuthToken:
         """Rotate both access and refresh tokens."""
-        # Find and remove old access token for this client to transfer user
-        old_user: UserContext | None = None
-        for tok_str, at in list(self._access_tokens.items()):
-            if at.client_id == refresh_token.client_id:
-                old_user = self._token_user_map.pop(tok_str, None)
-                del self._access_tokens[tok_str]
-                break
+        store = await self._store()
 
-        self._refresh_tokens.pop(refresh_token.token, None)
+        # Get user from refresh token doc (no scan needed — user is embedded)
+        rt_doc = await store.get("refresh_token", refresh_token.token)
+        user_data = rt_doc.get("user") if rt_doc else None
+
+        # If user not on refresh token, try getting from old access token
+        if user_data is None:
+            old_doc = await store.delete_by_client("access_token", refresh_token.client_id)
+            if old_doc:
+                user_data = old_doc.get("user")
+        else:
+            # Still revoke old access tokens for this client
+            await store.delete_by_client("access_token", refresh_token.client_id)
+
+        await store.delete("refresh_token", refresh_token.token)
 
         now = int(time.time())
         new_access = secrets.token_urlsafe(32)
         new_refresh = secrets.token_urlsafe(32)
         effective_scopes = scopes or refresh_token.scopes
 
-        self._access_tokens[new_access] = AccessToken(
-            token=new_access,
-            client_id=refresh_token.client_id,
-            scopes=effective_scopes,
-            expires_at=now + ACCESS_TOKEN_TTL,
-        )
+        access_data = {
+            "expires_at": now + ACCESS_TOKEN_TTL,
+            "client_id": refresh_token.client_id,
+            "scopes": effective_scopes,
+        }
+        if user_data:
+            access_data["user"] = user_data
 
-        self._refresh_tokens[new_refresh] = RefreshToken(
-            token=new_refresh,
-            client_id=refresh_token.client_id,
-            scopes=effective_scopes,
-            expires_at=now + REFRESH_TOKEN_TTL,
-        )
+        await store.set("access_token", new_access, access_data, ACCESS_TOKEN_TTL)
 
-        if old_user:
-            self._token_user_map[new_access] = old_user
+        refresh_data = {
+            "expires_at": now + REFRESH_TOKEN_TTL,
+            "client_id": refresh_token.client_id,
+            "scopes": effective_scopes,
+        }
+        if user_data:
+            refresh_data["user"] = user_data
+
+        await store.set("refresh_token", new_refresh, refresh_data, REFRESH_TOKEN_TTL)
 
         return OAuthToken(
             access_token=new_access,
@@ -337,19 +385,25 @@ class EntraOAuthProvider:
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         """Load access token and set UserContext for downstream MCP tools."""
-        at = self._access_tokens.get(token)
-        if at is None:
-            return None
-        if at.expires_at is not None and at.expires_at < int(time.time()):
+        store = await self._store()
+        doc = await store.get("access_token", token)
+        if doc is None:
             return None
 
         # Bridge: set our UserContext so tools call get_current_user() unchanged
-        user = self._token_user_map.get(token)
-        if user:
+        user_data = doc.get("user")
+        if user_data:
+            user = _deserialize_user(user_data)
             set_current_user(user)
             logger.debug("Authenticated: %s (%s)", user.name, user.email)
 
-        return at
+        return AccessToken(
+            token=token,
+            client_id=doc["client_id"],
+            scopes=doc.get("scopes", ["mcp.access"]),
+            expires_at=doc["expires_at"],
+            resource=doc.get("resource"),
+        )
 
     # ------------------------------------------------------------------
     # Revocation
@@ -357,8 +411,8 @@ class EntraOAuthProvider:
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
         """Revoke an access or refresh token."""
+        store = await self._store()
         if isinstance(token, AccessToken):
-            self._access_tokens.pop(token.token, None)
-            self._token_user_map.pop(token.token, None)
+            await store.delete("access_token", token.token)
         elif isinstance(token, RefreshToken):
-            self._refresh_tokens.pop(token.token, None)
+            await store.delete("refresh_token", token.token)

@@ -8,6 +8,7 @@ dependencies = [
     "azure-cosmos>=4.14.0",
     "azure-identity>=1.19.0",
     "beautifulsoup4>=4.12.0",
+    "cachetools>=7.0.1",
     "email-validator>=2.3.0",
     "httpx>=0.28.0",
     "mcp[cli]>=1.26.0",
@@ -83,6 +84,7 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "src/sjifire/mcp/incidents/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
+"src/sjifire/mcp/token_store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
 "src/sjifire/mcp/server.py" = ["S104"]  # Binding to 0.0.0.0 is intentional for container
 "src/sjifire/scripts/*.py" = ["T201"]  # CLI scripts use print for output
 "scripts/*.py" = ["T201"]  # Utility scripts use print for output

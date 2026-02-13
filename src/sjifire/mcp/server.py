@@ -99,6 +99,26 @@ else:
     )
     logger.warning("No ENTRA_MCP_API_CLIENT_ID — running without auth (dev mode)")
 
+    # In dev mode, inject a synthetic user so tools that call
+    # get_current_user() still work (e.g., with ``mcp dev`` inspector).
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    from sjifire.mcp.auth import UserContext, set_current_user
+
+    _DEV_USER = UserContext(
+        email="dev@localhost",
+        name="Dev User",
+        user_id="00000000-0000-0000-0000-000000000000",
+        groups=frozenset(),
+    )
+
+    class _DevAuthMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            set_current_user(_DEV_USER)
+            return await call_next(request)
+
+    # Attached after streamable_http_app() is called below
+
 # Register incident tools
 mcp.tool()(incident_tools.create_incident)
 mcp.tool()(incident_tools.get_incident)
@@ -121,6 +141,7 @@ mcp.tool()(dispatch_tools.list_dispatch_calls)
 mcp.tool()(dispatch_tools.get_dispatch_call)
 mcp.tool()(dispatch_tools.get_open_dispatch_calls)
 mcp.tool()(dispatch_tools.get_dispatch_call_log)
+mcp.tool()(dispatch_tools.search_dispatch_calls)
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +174,10 @@ async def health(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 app = mcp.streamable_http_app()
+
+# Dev mode: inject synthetic user context on every request
+if provider is None:
+    app.add_middleware(_DevAuthMiddleware)
 
 # CORS for Claude.ai cross-origin requests
 app.add_middleware(

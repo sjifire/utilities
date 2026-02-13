@@ -31,22 +31,30 @@ async def get_personnel() -> list[dict[str, str]]:
     query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
         select=["displayName", "mail", "userPrincipalName"],
         filter="accountEnabled eq true",
-        top=200,
+        top=10,
     )
     config = RequestConfiguration(query_parameters=query_params)
     result = await client.users.get(request_configuration=config)
 
     personnel = []
-    if result and result.value:
-        for user in result.value:
-            email = user.mail or user.user_principal_name or ""
+
+    def _collect(page):
+        if not page or not page.value:
+            return
+        for u in page.value:
+            email = u.mail or u.user_principal_name or ""
             if email and not email.startswith("svc-") and not email.startswith("api@"):
                 personnel.append(
                     {
-                        "name": user.display_name or "",
+                        "name": u.display_name or "",
                         "email": email.lower(),
                     }
                 )
+
+    _collect(result)
+    while result and result.odata_next_link:
+        result = await client.users.with_url(result.odata_next_link).get()
+        _collect(result)
 
     # Sort client-side since Graph API doesn't support orderby with filter
     personnel.sort(key=lambda p: p["name"])

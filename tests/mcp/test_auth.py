@@ -5,11 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from sjifire.mcp.auth import (
-    UserContext,
-    get_current_user,
-    set_current_user,
-)
+from sjifire.mcp.auth import UserContext, get_current_user, set_current_user
 
 
 class TestUserContext:
@@ -58,21 +54,10 @@ class TestUserContext:
 
 
 class TestCurrentUserContext:
-    def test_get_without_set_returns_dev_user(self):
-        """Without auth config and no user set, returns a dev user for local testing."""
+    def test_get_without_set_raises(self):
+        """With no user set, always raises RuntimeError."""
         set_current_user(None)
-        with patch.dict(os.environ, {}, clear=True):
-            user = get_current_user()
-            assert user.email == "dev@sjifire.org"
-            assert user.name == "Dev User"
-
-    def test_get_without_set_raises_in_production(self):
-        """With auth config set but no user, raises RuntimeError."""
-        set_current_user(None)
-        with (
-            patch.dict(os.environ, {"ENTRA_MCP_API_CLIENT_ID": "some-client-id"}),
-            pytest.raises(RuntimeError, match="No authenticated user"),
-        ):
+        with pytest.raises(RuntimeError, match="No authenticated user"):
             get_current_user()
 
     def test_set_and_get(self):

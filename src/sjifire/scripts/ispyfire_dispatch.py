@@ -5,9 +5,11 @@ Commands:
     list    - List recent calls with dispatch ID, time, nature, address
     detail  - Show full details for a specific call
     open    - Show currently active/open calls
+    archive - Archive completed calls to Cosmos DB
 """
 
 import argparse
+import asyncio
 import logging
 import sys
 from datetime import UTC, datetime
@@ -164,6 +166,97 @@ def cmd_open(args) -> int:
         return 0
 
 
+async def _get_existing_ids(summary_ids: list[str]) -> set[str]:
+    """Check which call UUIDs already exist in Cosmos DB.
+
+    Args:
+        summary_ids: List of iSpyFire call UUIDs from the summary list
+
+    Returns:
+        Set of UUIDs already stored
+    """
+    from sjifire.mcp.dispatch.store import DispatchStore
+
+    async with DispatchStore() as store:
+        return await store.get_existing_ids(summary_ids)
+
+
+async def _archive_to_cosmos(
+    calls: list,
+    client: ISpyFireClient,
+) -> int:
+    """Store completed calls to Cosmos DB via DispatchStore.
+
+    Uses asyncio.to_thread to wrap the blocking ISpyFireClient.get_call_log().
+
+    Args:
+        calls: List of completed DispatchCall objects
+        client: Active ISpyFireClient session
+
+    Returns:
+        Number of calls archived
+    """
+    from sjifire.mcp.dispatch.store import DispatchStore
+
+    async def fetch_log(call_id: str) -> list[dict]:
+        return await asyncio.to_thread(client.get_call_log, call_id)
+
+    async with DispatchStore() as store:
+        return await store.store_completed(calls, fetch_log)
+
+
+def cmd_archive(args) -> int:
+    """Archive completed calls to Cosmos DB."""
+    with ISpyFireClient() as client:
+        summaries = client.get_calls(days=args.days)
+
+        if not summaries:
+            print("No calls found.")
+            return 0
+
+        # Check which calls are already archived
+        summary_ids = [s.id for s in summaries]
+        existing = asyncio.run(_get_existing_ids(summary_ids))
+        new_summaries = [s for s in summaries if s.id not in existing]
+
+        print(
+            f"Found {len(summaries)} calls in last {args.days} days "
+            f"({len(existing)} already archived, {len(new_summaries)} new)"
+        )
+
+        if not new_summaries:
+            print("All calls already archived.")
+            return 0
+
+        # Only fetch details for new calls
+        calls = []
+        for summary in new_summaries:
+            detail = client.get_call_details(summary.id)
+            if detail:
+                calls.append(detail)
+
+        completed = [c for c in calls if c.is_completed]
+        open_calls = len(calls) - len(completed)
+
+        if open_calls:
+            print(f"  {open_calls} still open (will archive when completed)")
+
+        if not completed:
+            print("No new completed calls to archive.")
+            return 0
+
+        if args.dry_run:
+            print(f"[DRY RUN] Would archive {len(completed)} completed calls to Cosmos DB")
+            for call in completed:
+                print(f"  {call.long_term_call_id}  {call.time_reported}  {call.nature}")
+            return 0
+
+        stored = asyncio.run(_archive_to_cosmos(completed, client))
+        print(f"Archived {stored} completed calls to Cosmos DB")
+
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -190,6 +283,19 @@ def main() -> int:
     # open command
     open_parser = subparsers.add_parser("open", help="Show currently open calls")
     open_parser.set_defaults(func=cmd_open)
+
+    # archive command
+    archive_parser = subparsers.add_parser(
+        "archive", help="Archive completed calls to Cosmos DB"
+    )
+    archive_parser.add_argument(
+        "--days", type=int, default=7, choices=[7, 30],
+        help="Days to look back (default: 7, use 30 for initial preload)",
+    )
+    archive_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be archived without writing"
+    )
+    archive_parser.set_defaults(func=cmd_archive)
 
     args = parser.parse_args()
 

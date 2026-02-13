@@ -295,16 +295,16 @@ if should_run 2; then
         --output none 2>/dev/null || true
     ok "Database ready"
 
-    # Container: incidents (partition key: /station)
+    # Container: incidents (partition key: /year)
     info "Creating container 'incidents'..."
     az cosmosdb sql container create \
         --account-name "$COSMOS_ACCOUNT" \
         --resource-group "$RESOURCE_GROUP" \
         --database-name "$COSMOS_DB" \
         --name "incidents" \
-        --partition-key-path "/station" \
+        --partition-key-path "/year" \
         --output none 2>/dev/null || true
-    ok "Container 'incidents' ready (partition: /station)"
+    ok "Container 'incidents' ready (partition: /year)"
 
     # Container: schedules (partition key: /date)
     info "Creating container 'schedules'..."
@@ -316,6 +316,29 @@ if should_run 2; then
         --partition-key-path "/date" \
         --output none 2>/dev/null || true
     ok "Container 'schedules' ready (partition: /date)"
+
+    # Container: dispatch-calls (partition key: /year)
+    info "Creating container 'dispatch-calls'..."
+    az cosmosdb sql container create \
+        --account-name "$COSMOS_ACCOUNT" \
+        --resource-group "$RESOURCE_GROUP" \
+        --database-name "$COSMOS_DB" \
+        --name "dispatch-calls" \
+        --partition-key-path "/year" \
+        --output none 2>/dev/null || true
+    ok "Container 'dispatch-calls' ready (partition: /year)"
+
+    # Container: oauth-tokens (partition key: /token_type, per-document TTL)
+    info "Creating container 'oauth-tokens'..."
+    az cosmosdb sql container create \
+        --account-name "$COSMOS_ACCOUNT" \
+        --resource-group "$RESOURCE_GROUP" \
+        --database-name "$COSMOS_DB" \
+        --name "oauth-tokens" \
+        --partition-key-path "/token_type" \
+        --default-ttl -1 \
+        --output none 2>/dev/null || true
+    ok "Container 'oauth-tokens' ready (partition: /token_type, TTL enabled)"
 
     # Store endpoint and key in Key Vault
     COSMOS_ENDPOINT=$(az cosmosdb show \

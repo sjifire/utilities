@@ -108,6 +108,7 @@ class TestCreateIncident:
         )
 
         assert result["station"] == "S31"
+        assert result["year"] == "2026"
         assert result["incident_number"] == "26-000944"
         assert result["status"] == "draft"
         assert result["created_by"] == "ff@sjifire.org"
@@ -118,11 +119,11 @@ class TestGetIncident:
     @patch("sjifire.mcp.incidents.tools.IncidentStore")
     async def test_creator_gets_own(self, mock_store_cls, regular_user, sample_doc):
         mock_store = AsyncMock()
-        mock_store.get = AsyncMock(return_value=sample_doc)
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await get_incident("doc-123", "S31")
+        result = await get_incident("doc-123")
         assert result["incident_number"] == "26-000944"
 
     @patch("sjifire.mcp.incidents.tools.IncidentStore")
@@ -131,22 +132,22 @@ class TestGetIncident:
         set_current_user(stranger)
 
         mock_store = AsyncMock()
-        mock_store.get = AsyncMock(return_value=sample_doc)
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await get_incident("doc-123", "S31")
+        result = await get_incident("doc-123")
         assert "error" in result
         assert "access" in result["error"].lower()
 
     @patch("sjifire.mcp.incidents.tools.IncidentStore")
     async def test_not_found(self, mock_store_cls, regular_user):
         mock_store = AsyncMock()
-        mock_store.get = AsyncMock(return_value=None)
+        mock_store.get_by_id = AsyncMock(return_value=None)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await get_incident("nonexistent", "S31")
+        result = await get_incident("nonexistent")
         assert "error" in result
 
 
@@ -178,12 +179,12 @@ class TestUpdateIncident:
     @patch("sjifire.mcp.incidents.tools.IncidentStore")
     async def test_creator_can_update(self, mock_store_cls, regular_user, sample_doc):
         mock_store = AsyncMock()
-        mock_store.get = AsyncMock(return_value=sample_doc)
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
         mock_store.update = AsyncMock(side_effect=lambda doc: doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await update_incident("doc-123", "S31", address="200 Spring St")
+        result = await update_incident("doc-123", address="200 Spring St")
         assert result["address"] == "200 Spring St"
 
     @patch("sjifire.mcp.incidents.tools.IncidentStore")
@@ -192,11 +193,11 @@ class TestUpdateIncident:
         set_current_user(crew_user)
 
         mock_store = AsyncMock()
-        mock_store.get = AsyncMock(return_value=sample_doc)
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await update_incident("doc-123", "S31", address="Hacked")
+        result = await update_incident("doc-123", address="Hacked")
         assert "error" in result
         assert "permission" in result["error"].lower()
 
@@ -204,11 +205,11 @@ class TestUpdateIncident:
     async def test_cannot_update_submitted(self, mock_store_cls, regular_user, sample_doc):
         sample_doc.status = "submitted"
         mock_store = AsyncMock()
-        mock_store.get = AsyncMock(return_value=sample_doc)
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await update_incident("doc-123", "S31", address="Too late")
+        result = await update_incident("doc-123", address="Too late")
         assert "error" in result
         assert "submitted" in result["error"].lower()
 
@@ -216,7 +217,7 @@ class TestUpdateIncident:
 class TestSubmitIncident:
     @patch("sjifire.mcp.incidents.tools.IncidentStore")
     async def test_regular_user_cannot_submit(self, mock_store_cls, regular_user, sample_doc):
-        result = await submit_incident("doc-123", "S31")
+        result = await submit_incident("doc-123")
         assert "error" in result
         assert "officer" in result["error"].lower()
 
@@ -225,13 +226,13 @@ class TestSubmitIncident:
     async def test_officer_can_submit(self, mock_store_cls, mock_neris, officer_user, sample_doc):
         sample_doc.status = "ready_review"
         mock_store = AsyncMock()
-        mock_store.get = AsyncMock(return_value=sample_doc)
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
         mock_store.update = AsyncMock(side_effect=lambda doc: doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_neris.return_value = {"neris_id": "FD53055879|26SJ0001|123"}
 
-        result = await submit_incident("doc-123", "S31")
+        result = await submit_incident("doc-123")
         assert result["status"] == "submitted"
         assert result["neris_incident_id"] == "FD53055879|26SJ0001|123"
 
@@ -239,10 +240,10 @@ class TestSubmitIncident:
     async def test_cannot_submit_draft(self, mock_store_cls, officer_user, sample_doc):
         sample_doc.status = "draft"  # Not ready_review
         mock_store = AsyncMock()
-        mock_store.get = AsyncMock(return_value=sample_doc)
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await submit_incident("doc-123", "S31")
+        result = await submit_incident("doc-123")
         assert "error" in result
         assert "ready_review" in result["error"]
