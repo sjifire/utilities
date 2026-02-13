@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # Maximum cache age before triggering an Aladtec refresh
 CACHE_MAX_AGE_HOURS = 24.0
 
+# Sections hidden from on-duty crew by default (shown with include_admin=True)
+_HIDDEN_SECTIONS = {"administration", "time off"}
+
 
 def _fetch_from_aladtec(start: date, end: date) -> list[DayScheduleCache]:
     """Fetch schedule from Aladtec and convert to cache models (blocking).
@@ -115,8 +118,8 @@ async def get_on_duty_crew(
 
     Returns who was scheduled on each section for the given date,
     plus the day before and after to capture shift-change context.
-    By default, administration staff are excluded — pass
-    ``include_admin=True`` to see everyone.
+    By default, administration staff and Time Off entries are
+    excluded — pass ``include_admin=True`` to see everyone.
 
     Data is cached in Cosmos DB and auto-refreshes from Aladtec
     if the cache is more than 24 hours old.
@@ -158,7 +161,7 @@ async def get_on_duty_crew(
 
     entries = day.entries
     if not include_admin:
-        entries = [e for e in entries if e.section.lower() != "administration"]
+        entries = [e for e in entries if e.section.lower() not in _HIDDEN_SECTIONS]
 
     crew = [
         {
