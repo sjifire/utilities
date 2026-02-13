@@ -23,7 +23,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from sjifire.core.config import get_domain
+from sjifire.core.config import get_org_config
 from sjifire.mcp.dispatch import tools as dispatch_tools
 from sjifire.mcp.incidents import tools as incident_tools
 from sjifire.mcp.neris import tools as neris_tools
@@ -50,7 +50,8 @@ logging.getLogger("azure.identity").setLevel(logging.WARNING)
 
 load_dotenv()
 
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", f"https://mcp.{get_domain()}")
+ORG = get_org_config()
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", f"https://mcp.{ORG.domain}")
 TENANT_ID = os.getenv("ENTRA_MCP_API_TENANT_ID") or os.getenv("MS_GRAPH_TENANT_ID", "")
 API_CLIENT_ID = os.getenv("ENTRA_MCP_API_CLIENT_ID", "")
 API_CLIENT_SECRET = os.getenv("ENTRA_MCP_API_CLIENT_SECRET", "")
@@ -71,7 +72,7 @@ if API_CLIENT_ID:
     server_host = urlparse(MCP_SERVER_URL).hostname or "localhost"
 
     mcp = FastMCP(
-        "SJI Fire District",
+        ORG.company_name,
         stateless_http=True,
         auth_server_provider=provider,
         auth=AuthSettings(
@@ -94,7 +95,7 @@ else:
     # Dev mode: no auth — works with mcp dev inspector
     provider = None
     mcp = FastMCP(
-        "SJI Fire District",
+        ORG.company_name,
         stateless_http=True,
     )
     logger.warning("No ENTRA_MCP_API_CLIENT_ID — running without auth (dev mode)")

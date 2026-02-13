@@ -219,7 +219,9 @@ class TestGetDispatchCall:
 
     @patch("sjifire.mcp.dispatch.tools._get_site_history", new_callable=AsyncMock, return_value=[])
     @patch("sjifire.mcp.dispatch.tools._lookup_in_store", new_callable=AsyncMock)
-    async def test_returns_call_from_store(self, mock_lookup, _mock_history, auth_user, completed_call):
+    async def test_returns_call_from_store(
+        self, mock_lookup, _mock_history, auth_user, completed_call
+    ):
         doc = DispatchCallDocument.from_dispatch_call(completed_call)
         mock_lookup.return_value = doc
 
@@ -355,7 +357,11 @@ class TestSearchDispatchCalls:
     async def test_search_by_date_range(self, auth_user):
         # Pre-populate store
         for i, dt in enumerate(
-            [datetime(2026, 1, 10, 10, 0), datetime(2026, 1, 20, 10, 0), datetime(2026, 2, 5, 10, 0)]
+            [
+                datetime(2026, 1, 10, 10, 0),
+                datetime(2026, 1, 20, 10, 0),
+                datetime(2026, 2, 5, 10, 0),
+            ]
         ):
             call = DispatchCall(
                 id=f"uuid-range-{i}",

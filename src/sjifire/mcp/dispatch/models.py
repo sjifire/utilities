@@ -56,9 +56,7 @@ class DispatchCallDocument(BaseModel):
         for rd in d["responder_details"]:
             converted = dict(rd)
             if isinstance(converted.get("time_of_status_change"), datetime):
-                converted["time_of_status_change"] = converted[
-                    "time_of_status_change"
-                ].isoformat()
+                converted["time_of_status_change"] = converted["time_of_status_change"].isoformat()
             details.append(converted)
         return cls(
             id=call.id,

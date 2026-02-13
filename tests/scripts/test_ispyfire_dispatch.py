@@ -317,7 +317,10 @@ class TestCmdArchive:
 
         with (
             patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client),
-            patch("sjifire.scripts.ispyfire_dispatch._get_existing_ids", side_effect=RuntimeError("Cosmos unavailable")),
+            patch(
+                "sjifire.scripts.ispyfire_dispatch._get_existing_ids",
+                side_effect=RuntimeError("Cosmos unavailable"),
+            ),
             pytest.raises(RuntimeError, match="Cosmos unavailable"),
         ):
             cmd_archive(MagicMock(days=7, dry_run=False))

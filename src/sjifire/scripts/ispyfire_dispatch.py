@@ -263,11 +263,12 @@ def main() -> int:
     open_parser.set_defaults(func=cmd_open)
 
     # archive command
-    archive_parser = subparsers.add_parser(
-        "archive", help="Archive completed calls to Cosmos DB"
-    )
+    archive_parser = subparsers.add_parser("archive", help="Archive completed calls to Cosmos DB")
     archive_parser.add_argument(
-        "--days", type=int, default=7, choices=[7, 30],
+        "--days",
+        type=int,
+        default=7,
+        choices=[7, 30],
         help="Days to look back (default: 7, use 30 for initial preload)",
     )
     archive_parser.add_argument(
