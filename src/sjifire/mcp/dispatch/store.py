@@ -9,7 +9,6 @@ for local development and testing with ``mcp dev``.
 
 import logging
 import os
-from collections.abc import Awaitable, Callable
 from typing import ClassVar, Self
 
 from dotenv import load_dotenv
@@ -173,8 +172,8 @@ class DispatchStore:
     ) -> list[DispatchCallDocument]:
         """List dispatch calls within a date range.
 
-        Queries on ``time_reported`` which is stored as a string like
-        "2026-02-12 14:30:00" — lexicographic comparison works for
+        Queries on ``time_reported`` which is stored as an ISO 8601
+        datetime string — lexicographic comparison works for
         YYYY-MM-DD prefixed strings.
 
         Args:
@@ -188,10 +187,13 @@ class DispatchStore:
         if self._in_memory:
             results = []
             for data in self._memory.values():
-                tr = data.get("time_reported", "")
+                tr = data.get("time_reported") or ""
                 if tr >= start_date and tr <= end_date + "~":
                     results.append(DispatchCallDocument.from_cosmos(data))
-            results.sort(key=lambda d: d.time_reported, reverse=True)
+            results.sort(
+                key=lambda d: d.time_reported.isoformat() if d.time_reported else "",
+                reverse=True,
+            )
             return results[:max_items]
 
         query = (
@@ -202,6 +204,57 @@ class DispatchStore:
         parameters = [
             {"name": "@start", "value": start_date},
             {"name": "@end", "value": end_date + "~"},
+        ]
+
+        items = []
+        async for item in self._container.query_items(
+            query=query,
+            parameters=parameters,
+            max_item_count=max_items,
+        ):
+            items.append(DispatchCallDocument.from_cosmos(item))
+            if len(items) >= max_items:
+                break
+
+        return items
+
+    async def list_by_address(
+        self,
+        address: str,
+        *,
+        exclude_id: str = "",
+        max_items: int = 10,
+    ) -> list[DispatchCallDocument]:
+        """List dispatch calls at the same address (site history).
+
+        Args:
+            address: Street address to match exactly
+            exclude_id: Call UUID to exclude (the current call)
+            max_items: Maximum results
+
+        Returns:
+            List of matching documents, ordered by time_reported desc
+        """
+        if self._in_memory:
+            results = [
+                DispatchCallDocument.from_cosmos(data)
+                for data in self._memory.values()
+                if data.get("address") == address and data.get("id") != exclude_id
+            ]
+            results.sort(
+                key=lambda d: d.time_reported.isoformat() if d.time_reported else "",
+                reverse=True,
+            )
+            return results[:max_items]
+
+        query = (
+            "SELECT * FROM c "
+            "WHERE c.address = @address AND c.id != @exclude_id "
+            "ORDER BY c.time_reported DESC"
+        )
+        parameters = [
+            {"name": "@address", "value": address},
+            {"name": "@exclude_id", "value": exclude_id},
         ]
 
         items = []
@@ -247,19 +300,14 @@ class DispatchStore:
 
         return existing
 
-    async def store_completed(
-        self,
-        calls: list[DispatchCall],
-        fetch_log_fn: Callable[[str], Awaitable[list[dict]]],
-    ) -> int:
-        """Store completed calls, fetching and embedding call logs.
+    async def store_completed(self, calls: list[DispatchCall]) -> int:
+        """Store completed dispatch calls.
 
-        Skips calls that are not completed. For each completed call,
-        fetches its audit log via the callback and upserts to Cosmos.
+        Skips calls that are not completed. Upserts each completed call
+        to Cosmos DB.
 
         Args:
             calls: List of DispatchCall dataclasses
-            fetch_log_fn: Async callback ``(call_uuid) -> list[dict]``
 
         Returns:
             Number of calls stored
@@ -268,13 +316,7 @@ class DispatchStore:
         for call in calls:
             if not call.is_completed:
                 continue
-            try:
-                call_log = await fetch_log_fn(call.id)
-            except Exception:
-                logger.warning("Failed to fetch log for %s, storing without log", call.id)
-                call_log = []
-
-            doc = DispatchCallDocument.from_dispatch_call(call, call_log=call_log)
+            doc = DispatchCallDocument.from_dispatch_call(call)
             await self.upsert(doc)
             count += 1
 

@@ -12,8 +12,7 @@ class DispatchCallDocument(BaseModel):
     """Dispatch call stored in Cosmos DB.
 
     Mirrors the iSpyFire ``DispatchCall`` dataclass with additional
-    fields for Cosmos DB storage: ``year`` (partition key), ``stored_at``,
-    and embedded ``call_log``.
+    fields for Cosmos DB storage: ``year`` (partition key) and ``stored_at``.
 
     Once a call is completed (``is_completed=True``), it's immutable in
     iSpyFire and safe to cache permanently.
@@ -27,39 +26,40 @@ class DispatchCallDocument(BaseModel):
     agency_code: str
     type: str = ""
     zone_code: str = ""
-    time_reported: str = ""
+    time_reported: datetime | None = None
     is_completed: bool = False
-    comments: str = ""
-    joined_responders: str = ""
+    cad_comments: str = ""
+    responding_units: str = ""
     responder_details: list[dict] = []
-    ispy_responders: dict = {}
     city: str = ""
     state: str = ""
     zip_code: str = ""
     geo_location: str = ""
     created_timestamp: int | None = None
-    call_log: list[dict] = []
     stored_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod
-    def from_dispatch_call(
-        cls,
-        call: DispatchCall,
-        call_log: list[dict] | None = None,
-    ) -> DispatchCallDocument:
+    def from_dispatch_call(cls, call: DispatchCall) -> DispatchCallDocument:
         """Convert from an iSpyFire DispatchCall dataclass.
 
-        Extracts the year from ``time_reported`` (e.g., "2026-02-12 14:30:00"
-        → "2026"). Falls back to deriving from the dispatch ID prefix
-        (e.g., "26" → "2026") if time_reported is empty.
+        Extracts the year from ``time_reported``. Falls back to deriving
+        from the dispatch ID prefix (e.g., "26" → "2026") if time_reported
+        is None.
 
         Args:
             call: DispatchCall dataclass from iSpyFire
-            call_log: Optional audit log entries to embed
         """
         d = asdict(call)
-        # Convert nested UnitResponse dataclasses to dicts (asdict handles this)
         year = _extract_year(call.time_reported, call.long_term_call_id)
+        # Serialize datetime values in nested responder_details dicts
+        details = []
+        for rd in d["responder_details"]:
+            converted = dict(rd)
+            if isinstance(converted.get("time_of_status_change"), datetime):
+                converted["time_of_status_change"] = converted[
+                    "time_of_status_change"
+                ].isoformat()
+            details.append(converted)
         return cls(
             id=call.id,
             year=year,
@@ -71,16 +71,14 @@ class DispatchCallDocument(BaseModel):
             zone_code=call.zone_code,
             time_reported=call.time_reported,
             is_completed=call.is_completed,
-            comments=call.comments,
-            joined_responders=call.joined_responders,
-            responder_details=d["responder_details"],
-            ispy_responders=d["ispy_responders"],
+            cad_comments=call.cad_comments,
+            responding_units=call.responding_units,
+            responder_details=details,
             city=call.city,
             state=call.state,
             zip_code=call.zip_code,
             geo_location=call.geo_location,
             created_timestamp=call.created_timestamp,
-            call_log=call_log or [],
         )
 
     def to_cosmos(self) -> dict:
@@ -100,26 +98,23 @@ class DispatchCallDocument(BaseModel):
         """
         d = self.model_dump(mode="json")
         # Remove Cosmos storage fields not in the original DispatchCall
-        for key in ("year", "stored_at", "call_log"):
+        for key in ("year", "stored_at"):
             d.pop(key, None)
         return d
 
 
-def _extract_year(time_reported: str, dispatch_id: str) -> str:
+def _extract_year(time_reported: datetime | None, dispatch_id: str) -> str:
     """Extract four-digit year from time_reported or dispatch ID prefix.
 
     Args:
-        time_reported: Timestamp string like "2026-02-12 14:30:00"
+        time_reported: Parsed datetime from iSpyFire
         dispatch_id: Dispatch ID like "26-001678"
 
     Returns:
         Four-digit year string, e.g. "2026"
     """
-    # Try time_reported first (most reliable)
-    if time_reported and len(time_reported) >= 4:
-        candidate = time_reported[:4]
-        if candidate.isdigit():
-            return candidate
+    if time_reported is not None:
+        return str(time_reported.year)
 
     # Fall back to dispatch ID prefix: "26" → "2026"
     if dispatch_id and "-" in dispatch_id:

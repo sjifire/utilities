@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
+
+
+def _parse_dt(s: str) -> datetime | None:
+    """Parse an iSpyFire timestamp string to datetime, or None if empty."""
+    if not s:
+        return None
+    return datetime.fromisoformat(s)
 
 
 @dataclass
@@ -78,7 +86,7 @@ class UnitResponse:
     unit_number: str
     agency_code: str
     status: str
-    time_of_status_change: str
+    time_of_status_change: datetime | None = None
     radio_log: str = ""
 
     @classmethod
@@ -88,7 +96,7 @@ class UnitResponse:
             unit_number=data.get("UnitNumber", ""),
             agency_code=data.get("AgencyCode", ""),
             status=data.get("StatusDisplayCode", ""),
-            time_of_status_change=data.get("TimeOfStatusChange", ""),
+            time_of_status_change=_parse_dt(data.get("TimeOfStatusChange", "")),
             radio_log=data.get("RadioLog", ""),
         )
 
@@ -120,12 +128,11 @@ class DispatchCall:
     agency_code: str
     type: str = ""
     zone_code: str = ""
-    time_reported: str = ""
+    time_reported: datetime | None = None
     is_completed: bool = False
-    comments: str = ""
-    joined_responders: str = ""
+    cad_comments: str = ""
+    responding_units: str = ""
     responder_details: list[UnitResponse] = field(default_factory=list)
-    ispy_responders: dict = field(default_factory=dict)
     city: str = ""
     state: str = ""
     zip_code: str = ""
@@ -145,12 +152,11 @@ class DispatchCall:
             agency_code=data.get("AgencyCode", ""),
             type=data.get("Type", ""),
             zone_code=data.get("ZoneCode", ""),
-            time_reported=data.get("TimeDateReported", ""),
+            time_reported=_parse_dt(data.get("TimeDateReported", "")),
             is_completed=data.get("IsCompleted", False),
-            comments=data.get("JoinedComments", ""),
-            joined_responders=data.get("JoinedResponders", ""),
+            cad_comments=data.get("JoinedComments", ""),
+            responding_units=data.get("JoinedResponders", ""),
             responder_details=details,
-            ispy_responders=data.get("iSpyResponders", {}),
             city=city_info.get("City", ""),
             state=city_info.get("StateAbbreviation", ""),
             zip_code=city_info.get("ZIPCode", ""),

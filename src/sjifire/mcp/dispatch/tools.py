@@ -1,8 +1,8 @@
 """MCP tools for querying iSpyFire dispatch/call data.
 
-Exposes recent calls, call details, open calls, call audit logs, and
-historical search via MCP tools. Completed calls are cached in Cosmos DB
-for fast retrieval and access beyond iSpyFire's 30-day window.
+Exposes recent calls, call details, open calls, and historical search
+via MCP tools. Completed calls are cached in Cosmos DB for fast
+retrieval and access beyond iSpyFire's 30-day window.
 
 All blocking ISpyFireClient calls are wrapped with
 ``asyncio.to_thread()`` for async compatibility.
@@ -12,6 +12,7 @@ import asyncio
 import logging
 import re
 from dataclasses import asdict
+from datetime import datetime
 
 from sjifire.ispyfire.models import DispatchCall
 from sjifire.mcp.auth import get_current_user
@@ -23,7 +24,14 @@ logger = logging.getLogger(__name__)
 
 def _call_to_dict(call: DispatchCall) -> dict:
     """Convert a DispatchCall dataclass to a JSON-serializable dict."""
-    return asdict(call)
+    d = asdict(call)
+    # Serialize datetime fields
+    if isinstance(d.get("time_reported"), datetime):
+        d["time_reported"] = d["time_reported"].isoformat()
+    for rd in d.get("responder_details", []):
+        if isinstance(rd.get("time_of_status_change"), datetime):
+            rd["time_of_status_change"] = rd["time_of_status_change"].isoformat()
+    return d
 
 
 def _fetch_calls(days: int) -> list[DispatchCall]:
@@ -56,28 +64,14 @@ def _fetch_open_calls() -> list[DispatchCall]:
         return client.get_open_calls()
 
 
-def _fetch_call_log(call_id: str) -> list[dict]:
-    """Fetch audit log for a call (blocking)."""
-    from sjifire.ispyfire.client import ISpyFireClient
-
-    with ISpyFireClient() as client:
-        return client.get_call_log(call_id)
-
-
-async def _async_fetch_call_log(call_id: str) -> list[dict]:
-    """Async wrapper for fetching a call log."""
-    return await asyncio.to_thread(_fetch_call_log, call_id)
-
-
 async def _store_completed_calls(calls: list[DispatchCall]) -> int:
     """Store completed calls in Cosmos DB as a side effect.
 
-    Fetches the call log for each completed call and embeds it.
     Errors are logged but never propagated to the caller.
     """
     try:
         async with DispatchStore() as store:
-            return await store.store_completed(calls, _async_fetch_call_log)
+            return await store.store_completed(calls)
     except Exception:
         logger.warning("Failed to store completed calls", exc_info=True)
         return 0
@@ -120,6 +114,8 @@ async def get_dispatch_call(call_id: str) -> dict:
 
     Checks Cosmos DB first for fast retrieval, falls back to iSpyFire.
     Completed calls fetched from iSpyFire are stored for future lookups.
+    Includes site history (previous calls at the same address) when
+    available from the archive.
 
     Accepts either the internal UUID or the dispatch ID
     (e.g. "26-001678").
@@ -129,7 +125,7 @@ async def get_dispatch_call(call_id: str) -> dict:
 
     Returns:
         Dict with all call fields: nature, address, responder
-        timeline, comments, iSpy mobile responders, geo location.
+        timeline, CAD comments, geo location, and site_history.
     """
     user = get_current_user()
     logger.info("Dispatch call %s requested by %s", call_id, user.email)
@@ -139,18 +135,30 @@ async def get_dispatch_call(call_id: str) -> dict:
         doc = await _lookup_in_store(call_id)
         if doc:
             logger.info("Dispatch call %s found in store", call_id)
-            return doc.to_dict()
+            result = doc.to_dict()
+            address = doc.address
+            exclude_id = doc.id
+        else:
+            # Fall back to iSpyFire
+            call = await asyncio.to_thread(_fetch_call_details, call_id)
+            if call is None:
+                return {"error": f"Call not found: {call_id}"}
 
-        # Fall back to iSpyFire
-        call = await asyncio.to_thread(_fetch_call_details, call_id)
-        if call is None:
-            return {"error": f"Call not found: {call_id}"}
+            # Store if completed
+            if call.is_completed:
+                await _store_single_call(call)
 
-        # Store if completed
-        if call.is_completed:
-            await _store_single_call(call)
+            result = _call_to_dict(call)
+            address = call.address
+            exclude_id = call.id
 
-        return _call_to_dict(call)
+        # Include site history from archive
+        if address:
+            history = await _get_site_history(address, exclude_id)
+            if history:
+                result["site_history"] = history
+
+        return result
     except Exception as e:
         logger.exception("Failed to get dispatch call details")
         return {"error": str(e)}
@@ -175,37 +183,6 @@ async def get_open_dispatch_calls() -> dict:
         return {"calls": call_dicts, "count": len(call_dicts)}
     except Exception as e:
         logger.exception("Failed to get open dispatch calls")
-        return {"error": str(e)}
-
-
-async def get_dispatch_call_log(call_id: str) -> dict:
-    """Get the audit log for a dispatch call.
-
-    Checks Cosmos DB first (call log is embedded in stored documents),
-    falls back to iSpyFire for calls not yet stored.
-
-    Args:
-        call_id: Call UUID.
-
-    Returns:
-        Dict with "entries" list of {email, commenttype, timestamp}
-        and "count".
-    """
-    user = get_current_user()
-    logger.info("Dispatch call log %s requested by %s", call_id, user.email)
-
-    try:
-        # Check Cosmos for embedded call log
-        doc = await _lookup_in_store(call_id)
-        if doc and doc.call_log:
-            logger.info("Call log for %s found in store (%d entries)", call_id, len(doc.call_log))
-            return {"entries": doc.call_log, "count": len(doc.call_log)}
-
-        # Fall back to iSpyFire
-        entries = await asyncio.to_thread(_fetch_call_log, call_id)
-        return {"entries": entries, "count": len(entries)}
-    except Exception as e:
-        logger.exception("Failed to get dispatch call log")
         return {"error": str(e)}
 
 
@@ -282,9 +259,10 @@ async def _lookup_in_store(call_id: str) -> DispatchCallDocument | None:
             else:
                 # UUID — need the year for a point read.
                 # Try current year and previous year as a heuristic.
-                from datetime import UTC, datetime
+                from datetime import UTC
+                from datetime import datetime as dt_cls
 
-                current_year = str(datetime.now(UTC).year)
+                current_year = str(dt_cls.now(UTC).year)
                 doc = await store.get(call_id, current_year)
                 if doc:
                     return doc
@@ -296,12 +274,29 @@ async def _lookup_in_store(call_id: str) -> DispatchCallDocument | None:
 
 
 async def _store_single_call(call: DispatchCall) -> None:
-    """Store a single completed call with its log."""
+    """Store a single completed call in Cosmos DB."""
     try:
-        call_log = await _async_fetch_call_log(call.id)
-        doc = DispatchCallDocument.from_dispatch_call(call, call_log=call_log)
+        doc = DispatchCallDocument.from_dispatch_call(call)
         async with DispatchStore() as store:
             await store.upsert(doc)
         logger.info("Stored completed call %s (%s)", call.long_term_call_id, call.id)
     except Exception:
         logger.warning("Failed to store call %s", call.id, exc_info=True)
+
+
+async def _get_site_history(address: str, exclude_id: str) -> list[dict]:
+    """Get previous calls at the same address from the archive."""
+    try:
+        async with DispatchStore() as store:
+            docs = await store.list_by_address(address, exclude_id=exclude_id)
+        return [
+            {
+                "dispatch_id": d.long_term_call_id,
+                "date": d.time_reported.isoformat() if d.time_reported else None,
+                "nature": d.nature,
+            }
+            for d in docs
+        ]
+    except Exception:
+        logger.debug("Failed to fetch site history for %s", address, exc_info=True)
+        return []

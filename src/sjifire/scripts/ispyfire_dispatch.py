@@ -27,6 +27,13 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
+def _fmt_dt(dt: datetime | None) -> str:
+    """Format a datetime for display, or 'N/A' if None."""
+    if dt is None:
+        return "N/A"
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
 def _format_timestamp(ts: str | None) -> str:
     """Format a unix timestamp string to a readable date."""
     if not ts:
@@ -58,10 +65,10 @@ def cmd_list(args) -> int:
                 city = f", {detail.city}" if detail.city else ""
                 print(
                     f"{detail.long_term_call_id:<15} "
-                    f"{detail.time_reported:<22} "
+                    f"{_fmt_dt(detail.time_reported):<22} "
                     f"{detail.nature:<25} "
                     f"{detail.address}{city:<30} "
-                    f"{detail.joined_responders}{status}"
+                    f"{detail.responding_units}{status}"
                 )
             else:
                 ts = _format_timestamp(summary.ispy_timestamp)
@@ -91,7 +98,7 @@ def cmd_detail(args) -> int:
         print(f"  Zone:         {call.zone_code}")
         call_type = {"f": "Fire", "m": "Medical", "e": "EMS"}.get(call.type, call.type)
         print(f"  Type:         {call_type}")
-        print(f"  Reported:     {call.time_reported}")
+        print(f"  Reported:     {_fmt_dt(call.time_reported)}")
         print(f"  Status:       {status}")
         print(f"  Agency:       {call.agency_code}")
         if call.geo_location:
@@ -107,34 +114,15 @@ def cmd_detail(args) -> int:
                 print(
                     f"  {unit.unit_number:<8} "
                     f"{unit.status:<8} "
-                    f"{unit.time_of_status_change:<24} "
+                    f"{_fmt_dt(unit.time_of_status_change):<24} "
                     f"{unit.radio_log}"
                 )
 
-        # iSpy mobile responders
-        if call.ispy_responders:
-            print("\n  iSpy Mobile Responders:")
-            for resp in call.ispy_responders.values():
-                name = f"{resp.get('first', '')} {resp.get('last', '')}"
-                status_str = resp.get("status", "")
-                print(f"    {name:<25} {status_str}")
-
-        # Comments
-        if call.comments:
-            print("\n  Comments:")
-            for line in call.comments.split("\n"):
+        # CAD Comments
+        if call.cad_comments:
+            print("\n  CAD Comments:")
+            for line in call.cad_comments.split("\n"):
                 print(f"    {line}")
-
-        # Audit log
-        if args.log:
-            log_entries = client.get_call_log(call.id)
-            if log_entries:
-                print(f"\n  Audit Log ({len(log_entries)} entries):")
-                for entry in log_entries:
-                    ts = entry.get("timestamp", 0)
-                    dt = datetime.fromtimestamp(ts, tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
-                    email = entry.get("email", "unknown")
-                    print(f"    {dt}  {email}")
 
         print()
         return 0
@@ -156,10 +144,10 @@ def cmd_open(args) -> int:
             city = f", {call.city}" if call.city else ""
             print(
                 f"{call.long_term_call_id:<15} "
-                f"{call.time_reported:<22} "
+                f"{_fmt_dt(call.time_reported):<22} "
                 f"{call.nature:<25} "
                 f"{call.address}{city:<30} "
-                f"{call.joined_responders}"
+                f"{call.responding_units}"
             )
 
         print(f"\nTotal: {len(calls)} open calls")
@@ -181,28 +169,19 @@ async def _get_existing_ids(summary_ids: list[str]) -> set[str]:
         return await store.get_existing_ids(summary_ids)
 
 
-async def _archive_to_cosmos(
-    calls: list,
-    client: ISpyFireClient,
-) -> int:
+async def _archive_to_cosmos(calls: list) -> int:
     """Store completed calls to Cosmos DB via DispatchStore.
-
-    Uses asyncio.to_thread to wrap the blocking ISpyFireClient.get_call_log().
 
     Args:
         calls: List of completed DispatchCall objects
-        client: Active ISpyFireClient session
 
     Returns:
         Number of calls archived
     """
     from sjifire.mcp.dispatch.store import DispatchStore
 
-    async def fetch_log(call_id: str) -> list[dict]:
-        return await asyncio.to_thread(client.get_call_log, call_id)
-
     async with DispatchStore() as store:
-        return await store.store_completed(calls, fetch_log)
+        return await store.store_completed(calls)
 
 
 def cmd_archive(args) -> int:
@@ -248,10 +227,10 @@ def cmd_archive(args) -> int:
         if args.dry_run:
             print(f"[DRY RUN] Would archive {len(completed)} completed calls to Cosmos DB")
             for call in completed:
-                print(f"  {call.long_term_call_id}  {call.time_reported}  {call.nature}")
+                print(f"  {call.long_term_call_id}  {_fmt_dt(call.time_reported)}  {call.nature}")
             return 0
 
-        stored = asyncio.run(_archive_to_cosmos(completed, client))
+        stored = asyncio.run(_archive_to_cosmos(completed))
         print(f"Archived {stored} completed calls to Cosmos DB")
 
     return 0
@@ -277,7 +256,6 @@ def main() -> int:
     # detail command
     detail_parser = subparsers.add_parser("detail", help="Show full call details")
     detail_parser.add_argument("call_id", help="Call ID (UUID) or dispatch ID (e.g. 26-001678)")
-    detail_parser.add_argument("--log", action="store_true", help="Include audit log")
     detail_parser.set_defaults(func=cmd_detail)
 
     # open command

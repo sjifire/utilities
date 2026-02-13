@@ -140,7 +140,6 @@ mcp.tool()(neris_tools.get_neris_values)
 mcp.tool()(dispatch_tools.list_dispatch_calls)
 mcp.tool()(dispatch_tools.get_dispatch_call)
 mcp.tool()(dispatch_tools.get_open_dispatch_calls)
-mcp.tool()(dispatch_tools.get_dispatch_call_log)
 mcp.tool()(dispatch_tools.search_dispatch_calls)
 
 

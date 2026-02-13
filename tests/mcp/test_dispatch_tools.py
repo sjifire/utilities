@@ -1,6 +1,7 @@
 """Tests for MCP dispatch tools."""
 
 import os
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,10 +12,10 @@ from sjifire.mcp.dispatch.models import DispatchCallDocument
 from sjifire.mcp.dispatch.store import DispatchStore
 from sjifire.mcp.dispatch.tools import (
     _call_to_dict,
+    _get_site_history,
     _lookup_in_store,
     _store_single_call,
     get_dispatch_call,
-    get_dispatch_call_log,
     get_open_dispatch_calls,
     list_dispatch_calls,
     search_dispatch_calls,
@@ -52,20 +53,19 @@ def sample_call():
         agency_code="SJF",
         type="EMS",
         zone_code="Z1",
-        time_reported="2026-02-12 14:30:00",
+        time_reported=datetime(2026, 2, 12, 14, 30),
         is_completed=False,
-        comments="Patient fall, possible hip injury",
-        joined_responders="E31,M31",
+        cad_comments="Patient fall, possible hip injury",
+        responding_units="E31,M31",
         responder_details=[
             UnitResponse(
                 unit_number="E31",
                 agency_code="SJF",
                 status="Dispatched",
-                time_of_status_change="2026-02-12 14:30:15",
+                time_of_status_change=datetime(2026, 2, 12, 14, 30, 15),
                 radio_log="E31 dispatched",
             ),
         ],
-        ispy_responders={"user1": "responding"},
         city="Friday Harbor",
         state="WA",
         zip_code="98250",
@@ -84,12 +84,11 @@ def completed_call():
         agency_code="SJF",
         type="FIRE",
         zone_code="Z1",
-        time_reported="2026-02-12 10:00:00",
+        time_reported=datetime(2026, 2, 12, 10, 0),
         is_completed=True,
-        comments="Alarm reset",
-        joined_responders="E31",
+        cad_comments="Alarm reset",
+        responding_units="E31",
         responder_details=[],
-        ispy_responders={},
         city="Friday Harbor",
         state="WA",
         zip_code="98250",
@@ -112,13 +111,22 @@ class TestCallToDict:
         assert result["responder_details"][0]["unit_number"] == "E31"
         assert result["responder_details"][0]["status"] == "Dispatched"
 
+    def test_serializes_datetime_fields(self, sample_call):
+        result = _call_to_dict(sample_call)
+        # time_reported should be ISO string
+        assert isinstance(result["time_reported"], str)
+        assert result["time_reported"].startswith("2026-02-12")
+        # Nested time_of_status_change should also be ISO string
+        assert isinstance(result["responder_details"][0]["time_of_status_change"], str)
+
     def test_preserves_all_fields(self, sample_call):
         result = _call_to_dict(sample_call)
         assert result["city"] == "Friday Harbor"
         assert result["state"] == "WA"
         assert result["zip_code"] == "98250"
         assert result["geo_location"] == "48.5343,-123.0170"
-        assert result["ispy_responders"] == {"user1": "responding"}
+        assert result["cad_comments"] == "Patient fall, possible hip injury"
+        assert result["responding_units"] == "E31,M31"
         assert result["is_completed"] is False
 
 
@@ -196,10 +204,11 @@ class TestListDispatchCalls:
 
 
 class TestGetDispatchCall:
+    @patch("sjifire.mcp.dispatch.tools._get_site_history", new_callable=AsyncMock, return_value=[])
     @patch("sjifire.mcp.dispatch.tools._lookup_in_store", new_callable=AsyncMock, return_value=None)
     @patch("sjifire.mcp.dispatch.tools._fetch_call_details")
     async def test_returns_call_from_ispyfire(
-        self, mock_fetch, _mock_store, auth_user, sample_call
+        self, mock_fetch, _mock_store, _mock_history, auth_user, sample_call
     ):
         mock_fetch.return_value = sample_call
 
@@ -208,8 +217,9 @@ class TestGetDispatchCall:
         assert result["nature"] == "Medical Aid"
         assert result["long_term_call_id"] == "26-001678"
 
+    @patch("sjifire.mcp.dispatch.tools._get_site_history", new_callable=AsyncMock, return_value=[])
     @patch("sjifire.mcp.dispatch.tools._lookup_in_store", new_callable=AsyncMock)
-    async def test_returns_call_from_store(self, mock_lookup, auth_user, completed_call):
+    async def test_returns_call_from_store(self, mock_lookup, _mock_history, auth_user, completed_call):
         doc = DispatchCallDocument.from_dispatch_call(completed_call)
         mock_lookup.return_value = doc
 
@@ -231,11 +241,12 @@ class TestGetDispatchCall:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
+    @patch("sjifire.mcp.dispatch.tools._get_site_history", new_callable=AsyncMock, return_value=[])
     @patch("sjifire.mcp.dispatch.tools._lookup_in_store", new_callable=AsyncMock, return_value=None)
     @patch("sjifire.mcp.dispatch.tools._store_single_call", new_callable=AsyncMock)
     @patch("sjifire.mcp.dispatch.tools._fetch_call_details")
     async def test_stores_completed_on_fetch(
-        self, mock_fetch, mock_store_single, _mock_lookup, auth_user, completed_call
+        self, mock_fetch, mock_store_single, _mock_lookup, _mock_history, auth_user, completed_call
     ):
         mock_fetch.return_value = completed_call
 
@@ -244,11 +255,12 @@ class TestGetDispatchCall:
         assert result["is_completed"] is True
         mock_store_single.assert_called_once_with(completed_call)
 
+    @patch("sjifire.mcp.dispatch.tools._get_site_history", new_callable=AsyncMock, return_value=[])
     @patch("sjifire.mcp.dispatch.tools._lookup_in_store", new_callable=AsyncMock, return_value=None)
     @patch("sjifire.mcp.dispatch.tools._store_single_call", new_callable=AsyncMock)
     @patch("sjifire.mcp.dispatch.tools._fetch_call_details")
     async def test_does_not_store_open_calls(
-        self, mock_fetch, mock_store_single, _mock_lookup, auth_user, sample_call
+        self, mock_fetch, mock_store_single, _mock_lookup, _mock_history, auth_user, sample_call
     ):
         mock_fetch.return_value = sample_call  # is_completed=False
 
@@ -265,6 +277,23 @@ class TestGetDispatchCall:
 
         assert "error" in result
         assert "API error" in result["error"]
+
+    @patch("sjifire.mcp.dispatch.tools._get_site_history", new_callable=AsyncMock)
+    @patch("sjifire.mcp.dispatch.tools._lookup_in_store", new_callable=AsyncMock, return_value=None)
+    @patch("sjifire.mcp.dispatch.tools._fetch_call_details")
+    async def test_includes_site_history(
+        self, mock_fetch, _mock_lookup, mock_history, auth_user, sample_call
+    ):
+        mock_fetch.return_value = sample_call
+        mock_history.return_value = [
+            {"dispatch_id": "26-001000", "date": "2026-01-15T08:00:00", "nature": "Fire Alarm"},
+        ]
+
+        result = await get_dispatch_call("call-uuid-123")
+
+        assert "site_history" in result
+        assert len(result["site_history"]) == 1
+        assert result["site_history"][0]["dispatch_id"] == "26-001000"
 
 
 class TestGetOpenDispatchCalls:
@@ -296,75 +325,6 @@ class TestGetOpenDispatchCalls:
         assert "timeout" in result["error"]
 
 
-class TestGetDispatchCallLog:
-    @patch("sjifire.mcp.dispatch.tools._lookup_in_store", new_callable=AsyncMock, return_value=None)
-    @patch("sjifire.mcp.dispatch.tools._fetch_call_log")
-    async def test_returns_log_from_ispyfire(self, mock_fetch, _mock_lookup, auth_user):
-        mock_fetch.return_value = [
-            {
-                "email": "chief@sjifire.org",
-                "commenttype": "viewed",
-                "timestamp": "2026-02-12T15:00:00Z",
-            },
-        ]
-
-        result = await get_dispatch_call_log("call-uuid-123")
-
-        assert result["count"] == 1
-        assert result["entries"][0]["email"] == "chief@sjifire.org"
-
-    @patch("sjifire.mcp.dispatch.tools._lookup_in_store", new_callable=AsyncMock)
-    async def test_returns_log_from_store(self, mock_lookup, auth_user):
-        call = DispatchCall(
-            id="call-uuid-stored",
-            long_term_call_id="26-000100",
-            nature="Fire Alarm",
-            address="100 First St",
-            agency_code="SJF",
-            time_reported="2026-02-12 10:00:00",
-            is_completed=True,
-        )
-        log_entries = [
-            {
-                "email": "ff@sjifire.org",
-                "commenttype": "viewed",
-                "timestamp": "2026-02-12T10:05:00Z",
-            },
-            {
-                "email": "chief@sjifire.org",
-                "commenttype": "viewed",
-                "timestamp": "2026-02-12T10:10:00Z",
-            },
-        ]
-        doc = DispatchCallDocument.from_dispatch_call(call, call_log=log_entries)
-        mock_lookup.return_value = doc
-
-        result = await get_dispatch_call_log("call-uuid-stored")
-
-        assert result["count"] == 2
-        assert result["entries"][0]["email"] == "ff@sjifire.org"
-
-    @patch("sjifire.mcp.dispatch.tools._lookup_in_store", new_callable=AsyncMock, return_value=None)
-    @patch("sjifire.mcp.dispatch.tools._fetch_call_log")
-    async def test_empty_log(self, mock_fetch, _mock_lookup, auth_user):
-        mock_fetch.return_value = []
-
-        result = await get_dispatch_call_log("call-uuid-123")
-
-        assert result["count"] == 0
-        assert result["entries"] == []
-
-    @patch("sjifire.mcp.dispatch.tools._lookup_in_store", new_callable=AsyncMock, return_value=None)
-    @patch("sjifire.mcp.dispatch.tools._fetch_call_log")
-    async def test_handles_exception(self, mock_fetch, _mock_lookup, auth_user):
-        mock_fetch.side_effect = RuntimeError("not found")
-
-        result = await get_dispatch_call_log("bad-id")
-
-        assert "error" in result
-        assert "not found" in result["error"]
-
-
 class TestSearchDispatchCalls:
     async def test_search_by_dispatch_id(self, auth_user):
         # Pre-populate store
@@ -374,7 +334,7 @@ class TestSearchDispatchCalls:
             nature="Medical Aid",
             address="300 Spring St",
             agency_code="SJF",
-            time_reported="2026-01-15 08:00:00",
+            time_reported=datetime(2026, 1, 15, 8, 0),
             is_completed=True,
         )
         doc = DispatchCallDocument.from_dispatch_call(call)
@@ -394,8 +354,8 @@ class TestSearchDispatchCalls:
 
     async def test_search_by_date_range(self, auth_user):
         # Pre-populate store
-        for i, date in enumerate(
-            ["2026-01-10 10:00:00", "2026-01-20 10:00:00", "2026-02-05 10:00:00"]
+        for i, dt in enumerate(
+            [datetime(2026, 1, 10, 10, 0), datetime(2026, 1, 20, 10, 0), datetime(2026, 2, 5, 10, 0)]
         ):
             call = DispatchCall(
                 id=f"uuid-range-{i}",
@@ -403,7 +363,7 @@ class TestSearchDispatchCalls:
                 nature="Medical Aid",
                 address="200 Spring St",
                 agency_code="SJF",
-                time_reported=date,
+                time_reported=dt,
                 is_completed=True,
             )
             doc = DispatchCallDocument.from_dispatch_call(call)
@@ -438,7 +398,7 @@ class TestLookupInStore:
             nature="Medical Aid",
             address="100 Main St",
             agency_code="SJF",
-            time_reported="2026-03-01 09:00:00",
+            time_reported=datetime(2026, 3, 1, 9, 0),
             is_completed=True,
         )
         doc = DispatchCallDocument.from_dispatch_call(call)
@@ -456,16 +416,17 @@ class TestLookupInStore:
 
     async def test_uuid_found_current_year(self):
         """UUID lookup tries current year first."""
-        from datetime import UTC, datetime
+        from datetime import UTC
+        from datetime import datetime as dt_cls
 
-        current_year = str(datetime.now(UTC).year)
+        current_year = str(dt_cls.now(UTC).year)
         call = DispatchCall(
             id="uuid-current-year",
             long_term_call_id=f"{current_year[2:]}-000001",
             nature="Fire Alarm",
             address="200 Spring St",
             agency_code="SJF",
-            time_reported=f"{current_year}-06-15 12:00:00",
+            time_reported=datetime(int(current_year), 6, 15, 12, 0),
             is_completed=True,
         )
         doc = DispatchCallDocument.from_dispatch_call(call)
@@ -479,16 +440,17 @@ class TestLookupInStore:
 
     async def test_uuid_found_previous_year(self):
         """UUID lookup falls back to previous year when not in current year."""
-        from datetime import UTC, datetime
+        from datetime import UTC
+        from datetime import datetime as dt_cls
 
-        prev_year = str(int(datetime.now(UTC).year) - 1)
+        prev_year = str(int(dt_cls.now(UTC).year) - 1)
         call = DispatchCall(
             id="uuid-prev-year",
             long_term_call_id=f"{prev_year[2:]}-000500",
             nature="Structure Fire",
             address="300 Harbor St",
             agency_code="SJF",
-            time_reported=f"{prev_year}-11-20 08:00:00",
+            time_reported=datetime(int(prev_year), 11, 20, 8, 0),
             is_completed=True,
         )
         doc = DispatchCallDocument.from_dispatch_call(call)
@@ -507,16 +469,17 @@ class TestLookupInStore:
 
     async def test_uuid_from_older_year_not_found(self):
         """UUID from 2+ years ago won't be found (only checks current & prev)."""
-        from datetime import UTC, datetime
+        from datetime import UTC
+        from datetime import datetime as dt_cls
 
-        old_year = str(int(datetime.now(UTC).year) - 2)
+        old_year = str(int(dt_cls.now(UTC).year) - 2)
         call = DispatchCall(
             id="uuid-old-year",
             long_term_call_id=f"{old_year[2:]}-000100",
             nature="Medical Aid",
             address="100 Main St",
             agency_code="SJF",
-            time_reported=f"{old_year}-01-15 10:00:00",
+            time_reported=datetime(int(old_year), 1, 15, 10, 0),
             is_completed=True,
         )
         doc = DispatchCallDocument.from_dispatch_call(call)
@@ -538,20 +501,16 @@ class TestLookupInStore:
 
 
 class TestStoreSingleCall:
-    """Tests for _store_single_call — fetches log, creates doc, upserts."""
+    """Tests for _store_single_call — creates doc and upserts directly."""
 
-    @patch("sjifire.mcp.dispatch.tools._async_fetch_call_log", new_callable=AsyncMock)
-    async def test_stores_call_with_log(self, mock_fetch_log):
-        mock_fetch_log.return_value = [
-            {"email": "ff@sjifire.org", "commenttype": "viewed"},
-        ]
+    async def test_stores_call(self):
         call = DispatchCall(
             id="uuid-store-single",
             long_term_call_id="26-002000",
             nature="Medical Aid",
             address="100 Main St",
             agency_code="SJF",
-            time_reported="2026-05-01 14:00:00",
+            time_reported=datetime(2026, 5, 1, 14, 0),
             is_completed=True,
         )
 
@@ -563,43 +522,16 @@ class TestStoreSingleCall:
 
         assert doc is not None
         assert doc.long_term_call_id == "26-002000"
-        assert doc.call_log == [{"email": "ff@sjifire.org", "commenttype": "viewed"}]
-        mock_fetch_log.assert_called_once_with("uuid-store-single")
 
-    @patch("sjifire.mcp.dispatch.tools._async_fetch_call_log", new_callable=AsyncMock)
-    async def test_log_fetch_failure_does_not_raise(self, mock_fetch_log):
-        """If fetching the call log fails, the error is swallowed."""
-        mock_fetch_log.side_effect = RuntimeError("network error")
-        call = DispatchCall(
-            id="uuid-log-fail",
-            long_term_call_id="26-002001",
-            nature="Fire Alarm",
-            address="200 Spring St",
-            agency_code="SJF",
-            time_reported="2026-05-02 10:00:00",
-            is_completed=True,
-        )
-
-        # Should not raise
-        await _store_single_call(call)
-
-        # Call should NOT be stored since the exception happens before upsert
-        # (the entire try block catches the exception from _async_fetch_call_log)
-        async with DispatchStore() as store:
-            doc = await store.get("uuid-log-fail", "2026")
-        assert doc is None
-
-    @patch("sjifire.mcp.dispatch.tools._async_fetch_call_log", new_callable=AsyncMock)
-    async def test_store_upsert_failure_does_not_raise(self, mock_fetch_log):
+    async def test_store_upsert_failure_does_not_raise(self):
         """If the upsert itself fails, the error is swallowed."""
-        mock_fetch_log.return_value = []
         call = DispatchCall(
             id="uuid-upsert-fail",
             long_term_call_id="26-002002",
             nature="Medical Aid",
             address="100 Main St",
             agency_code="SJF",
-            time_reported="2026-05-03 08:00:00",
+            time_reported=datetime(2026, 5, 3, 8, 0),
             is_completed=True,
         )
 
@@ -609,3 +541,43 @@ class TestStoreSingleCall:
         ):
             # Should not raise
             await _store_single_call(call)
+
+
+class TestGetSiteHistory:
+    """Tests for _get_site_history."""
+
+    async def test_returns_previous_calls(self):
+        # Pre-populate with calls at the same address
+        for i in range(3):
+            call = DispatchCall(
+                id=f"uuid-hist-{i}",
+                long_term_call_id=f"26-00{i + 100:04d}",
+                nature=["Medical Aid", "Fire Alarm", "Smoke Check"][i],
+                address="200 Spring St",
+                agency_code="SJF",
+                time_reported=datetime(2026, 1, 10 + i, 10, 0),
+                is_completed=True,
+            )
+            doc = DispatchCallDocument.from_dispatch_call(call)
+            async with DispatchStore() as store:
+                await store.upsert(doc)
+
+        result = await _get_site_history("200 Spring St", "uuid-hist-2")
+
+        assert len(result) == 2
+        # Should have dispatch_id, date, nature
+        assert "dispatch_id" in result[0]
+        assert "date" in result[0]
+        assert "nature" in result[0]
+
+    async def test_no_history(self):
+        result = await _get_site_history("999 Nowhere St", "some-id")
+        assert result == []
+
+    async def test_exception_returns_empty(self):
+        with patch(
+            "sjifire.mcp.dispatch.tools.DispatchStore",
+            side_effect=RuntimeError("Cosmos down"),
+        ):
+            result = await _get_site_history("200 Spring St", "some-id")
+        assert result == []

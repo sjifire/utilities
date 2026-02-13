@@ -2,6 +2,7 @@
 
 import os
 import sys
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,19 +35,18 @@ def _make_call(**overrides) -> DispatchCall:
         "agency_code": "SJF",
         "type": "EMS",
         "zone_code": "Z1",
-        "time_reported": "2026-02-12 14:30:00",
+        "time_reported": datetime(2026, 2, 12, 14, 30),
         "is_completed": True,
-        "comments": "Patient fall",
-        "joined_responders": "E31",
+        "cad_comments": "Patient fall",
+        "responding_units": "E31",
         "responder_details": [
             UnitResponse(
                 unit_number="E31",
                 agency_code="SJF",
                 status="Dispatched",
-                time_of_status_change="2026-02-12 14:30:15",
+                time_of_status_change=datetime(2026, 2, 12, 14, 30, 15),
             ),
         ],
-        "ispy_responders": {},
         "city": "Friday Harbor",
         "state": "WA",
         "zip_code": "98250",
@@ -65,40 +65,20 @@ class TestArchiveToCosmos:
         completed = _make_call(id="uuid-done", is_completed=True)
         open_call = _make_call(id="uuid-open", is_completed=False)
 
-        mock_client = MagicMock()
-        mock_client.get_call_log.return_value = [{"email": "ff@sjifire.org"}]
-
-        count = await _archive_to_cosmos([completed, open_call], mock_client)
+        count = await _archive_to_cosmos([completed, open_call])
         assert count == 1
 
         async with DispatchStore() as store:
             doc = await store.get("uuid-done", "2026")
             assert doc is not None
             assert doc.nature == "Medical Aid"
-            assert doc.call_log == [{"email": "ff@sjifire.org"}]
 
             doc = await store.get("uuid-open", "2026")
             assert doc is None
 
     async def test_empty_list(self):
-        mock_client = MagicMock()
-        count = await _archive_to_cosmos([], mock_client)
+        count = await _archive_to_cosmos([])
         assert count == 0
-        mock_client.get_call_log.assert_not_called()
-
-    async def test_log_fetch_failure_still_stores(self):
-        call = _make_call(id="uuid-fail", is_completed=True)
-
-        mock_client = MagicMock()
-        mock_client.get_call_log.side_effect = RuntimeError("network error")
-
-        count = await _archive_to_cosmos([call], mock_client)
-        assert count == 1
-
-        async with DispatchStore() as store:
-            doc = await store.get("uuid-fail", "2026")
-            assert doc is not None
-            assert doc.call_log == []
 
     async def test_multiple_completed_calls(self):
         calls = [
@@ -106,24 +86,18 @@ class TestArchiveToCosmos:
             for i in range(1, 4)
         ]
 
-        mock_client = MagicMock()
-        mock_client.get_call_log.return_value = [{"email": "ff@sjifire.org"}]
-
-        count = await _archive_to_cosmos(calls, mock_client)
+        count = await _archive_to_cosmos(calls)
         assert count == 3
 
         async with DispatchStore() as store:
             for i in range(1, 4):
                 doc = await store.get(f"uuid-{i}", "2026")
                 assert doc is not None
-        assert mock_client.get_call_log.call_count == 3
 
 
 class TestGetExistingIds:
     async def test_returns_stored_ids(self):
         call = _make_call(id="uuid-existing")
-        from sjifire.mcp.dispatch.models import DispatchCallDocument
-
         doc = DispatchCallDocument.from_dispatch_call(call)
         async with DispatchStore() as store:
             await store.upsert(doc)
@@ -149,7 +123,6 @@ class TestCmdArchive:
         mock_client = MagicMock()
         mock_client.get_calls.return_value = summaries
         mock_client.get_call_details.side_effect = [completed, open_call]
-        mock_client.get_call_log.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
@@ -165,8 +138,6 @@ class TestCmdArchive:
     def test_skips_already_archived(self, capsys):
         """Calls already in Cosmos should not have details fetched."""
         completed = _make_call(id="uuid-old", is_completed=True)
-        from sjifire.mcp.dispatch.models import DispatchCallDocument
-
         doc = DispatchCallDocument.from_dispatch_call(completed)
         # Pre-populate the in-memory store
         DispatchStore._memory[doc.id] = doc.to_cosmos()
@@ -178,7 +149,6 @@ class TestCmdArchive:
         mock_client.get_calls.return_value = summaries
         # Only uuid-new should have details fetched
         mock_client.get_call_details.return_value = new_call
-        mock_client.get_call_log.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
@@ -197,8 +167,6 @@ class TestCmdArchive:
     def test_all_already_archived(self, capsys):
         """When everything is already archived, no details are fetched."""
         completed = _make_call(id="uuid-1", is_completed=True)
-        from sjifire.mcp.dispatch.models import DispatchCallDocument
-
         doc = DispatchCallDocument.from_dispatch_call(completed)
         DispatchStore._memory[doc.id] = doc.to_cosmos()
 
@@ -238,7 +206,6 @@ class TestCmdArchive:
         output = capsys.readouterr().out
         assert "[DRY RUN]" in output
         assert "26-001678" in output
-        mock_client.get_call_log.assert_not_called()
 
     def test_no_calls_found(self, capsys):
         mock_client = MagicMock()
@@ -302,7 +269,6 @@ class TestCmdArchive:
         mock_client = MagicMock()
         mock_client.get_calls.return_value = summaries
         mock_client.get_call_details.side_effect = [completed, open1, open2]
-        mock_client.get_call_log.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
@@ -324,7 +290,6 @@ class TestCmdArchive:
         mock_client = MagicMock()
         mock_client.get_calls.return_value = summaries
         mock_client.get_call_details.return_value = call
-        mock_client.get_call_log.return_value = [{"email": "chief@sjifire.org", "commenttype": "viewed"}]
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
@@ -339,7 +304,6 @@ class TestCmdArchive:
         doc = DispatchCallDocument.from_cosmos(data)
         assert doc.long_term_call_id == "26-009999"
         assert doc.nature == "Structure Fire"
-        assert doc.call_log == [{"email": "chief@sjifire.org", "commenttype": "viewed"}]
         assert doc.year == "2026"
 
     def test_cosmos_failure_on_existing_check_propagates(self, capsys):
@@ -411,7 +375,6 @@ class TestCLIArgParsing:
         assert result == 0
         output = capsys.readouterr().out
         assert "[DRY RUN]" in output
-        mock_client.get_call_log.assert_not_called()
 
     def test_no_command_shows_help(self, capsys):
         with patch.object(sys, "argv", ["ispyfire-dispatch"]):

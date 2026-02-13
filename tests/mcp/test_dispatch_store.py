@@ -1,7 +1,8 @@
 """Tests for DispatchStore (in-memory mode)."""
 
 import os
-from unittest.mock import AsyncMock, patch
+from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -28,19 +29,18 @@ def _make_call(**overrides) -> DispatchCall:
         "agency_code": "SJF",
         "type": "EMS",
         "zone_code": "Z1",
-        "time_reported": "2026-02-12 14:30:00",
+        "time_reported": datetime(2026, 2, 12, 14, 30),
         "is_completed": True,
-        "comments": "Patient fall",
-        "joined_responders": "E31",
+        "cad_comments": "Patient fall",
+        "responding_units": "E31",
         "responder_details": [
             UnitResponse(
                 unit_number="E31",
                 agency_code="SJF",
                 status="Dispatched",
-                time_of_status_change="2026-02-12 14:30:15",
+                time_of_status_change=datetime(2026, 2, 12, 14, 30, 15),
             ),
         ],
-        "ispy_responders": {},
         "city": "Friday Harbor",
         "state": "WA",
         "zip_code": "98250",
@@ -115,22 +115,22 @@ class TestUpsert:
         assert result.id == doc.id
 
     async def test_upsert_overwrites(self):
-        doc1 = _make_doc(comments="original")
-        doc2 = _make_doc(comments="updated")
+        doc1 = _make_doc(cad_comments="original")
+        doc2 = _make_doc(cad_comments="updated")
 
         async with DispatchStore() as store:
             await store.upsert(doc1)
             await store.upsert(doc2)
             result = await store.get("call-uuid-1", "2026")
 
-        assert result.comments == "updated"
+        assert result.cad_comments == "updated"
 
 
 class TestListByDateRange:
     async def test_returns_calls_in_range(self):
-        doc1 = _make_doc(id="uuid-1", time_reported="2026-02-10 10:00:00")
-        doc2 = _make_doc(id="uuid-2", time_reported="2026-02-12 14:30:00")
-        doc3 = _make_doc(id="uuid-3", time_reported="2026-02-15 08:00:00")
+        doc1 = _make_doc(id="uuid-1", time_reported=datetime(2026, 2, 10, 10, 0))
+        doc2 = _make_doc(id="uuid-2", time_reported=datetime(2026, 2, 12, 14, 30))
+        doc3 = _make_doc(id="uuid-3", time_reported=datetime(2026, 2, 15, 8, 0))
 
         async with DispatchStore() as store:
             await store.upsert(doc1)
@@ -142,7 +142,7 @@ class TestListByDateRange:
         assert results[0].id == "uuid-2"
 
     async def test_empty_range(self):
-        doc = _make_doc(time_reported="2026-02-12 14:30:00")
+        doc = _make_doc(time_reported=datetime(2026, 2, 12, 14, 30))
 
         async with DispatchStore() as store:
             await store.upsert(doc)
@@ -151,8 +151,8 @@ class TestListByDateRange:
         assert len(results) == 0
 
     async def test_sorted_desc(self):
-        doc1 = _make_doc(id="uuid-1", time_reported="2026-02-10 10:00:00")
-        doc2 = _make_doc(id="uuid-2", time_reported="2026-02-12 14:30:00")
+        doc1 = _make_doc(id="uuid-1", time_reported=datetime(2026, 2, 10, 10, 0))
+        doc2 = _make_doc(id="uuid-2", time_reported=datetime(2026, 2, 12, 14, 30))
 
         async with DispatchStore() as store:
             await store.upsert(doc1)
@@ -165,12 +165,79 @@ class TestListByDateRange:
 
     async def test_max_items(self):
         for i in range(5):
-            doc = _make_doc(id=f"uuid-{i}", time_reported=f"2026-02-{10 + i:02d} 10:00:00")
+            doc = _make_doc(id=f"uuid-{i}", time_reported=datetime(2026, 2, 10 + i, 10, 0))
             async with DispatchStore() as store:
                 await store.upsert(doc)
 
         async with DispatchStore() as store:
             results = await store.list_by_date_range("2026-02-01", "2026-02-28", max_items=3)
+
+        assert len(results) == 3
+
+
+class TestListByAddress:
+    async def test_returns_matching_address(self):
+        doc1 = _make_doc(id="uuid-1", address="200 Spring St")
+        doc2 = _make_doc(id="uuid-2", address="200 Spring St")
+        doc3 = _make_doc(id="uuid-3", address="100 First St")
+
+        async with DispatchStore() as store:
+            await store.upsert(doc1)
+            await store.upsert(doc2)
+            await store.upsert(doc3)
+            results = await store.list_by_address("200 Spring St")
+
+        assert len(results) == 2
+
+    async def test_excludes_current_call(self):
+        doc1 = _make_doc(id="uuid-1", address="200 Spring St")
+        doc2 = _make_doc(id="uuid-2", address="200 Spring St")
+
+        async with DispatchStore() as store:
+            await store.upsert(doc1)
+            await store.upsert(doc2)
+            results = await store.list_by_address("200 Spring St", exclude_id="uuid-1")
+
+        assert len(results) == 1
+        assert results[0].id == "uuid-2"
+
+    async def test_no_matches(self):
+        doc = _make_doc(address="200 Spring St")
+
+        async with DispatchStore() as store:
+            await store.upsert(doc)
+            results = await store.list_by_address("999 Nowhere St")
+
+        assert len(results) == 0
+
+    async def test_sorted_desc(self):
+        doc1 = _make_doc(
+            id="uuid-1", address="200 Spring St", time_reported=datetime(2026, 1, 10, 10, 0)
+        )
+        doc2 = _make_doc(
+            id="uuid-2", address="200 Spring St", time_reported=datetime(2026, 2, 12, 14, 30)
+        )
+
+        async with DispatchStore() as store:
+            await store.upsert(doc1)
+            await store.upsert(doc2)
+            results = await store.list_by_address("200 Spring St")
+
+        assert results[0].id == "uuid-2"  # Later date first
+        assert results[1].id == "uuid-1"
+
+    async def test_max_items(self):
+        for i in range(5):
+            doc = _make_doc(
+                id=f"uuid-{i}",
+                address="200 Spring St",
+                time_reported=datetime(2026, 2, 10 + i, 10, 0),
+            )
+            async with DispatchStore() as store:
+                await store.upsert(doc)
+
+        async with DispatchStore() as store:
+            results = await store.list_by_address("200 Spring St", max_items=3)
 
         assert len(results) == 3
 
@@ -214,43 +281,23 @@ class TestStoreCompleted:
         completed_call = _make_call(id="uuid-done", is_completed=True)
         open_call = _make_call(id="uuid-open", is_completed=False)
 
-        fetch_log = AsyncMock(return_value=[{"email": "ff@sjifire.org", "commenttype": "viewed"}])
-
         async with DispatchStore() as store:
-            count = await store.store_completed([completed_call, open_call], fetch_log)
+            count = await store.store_completed([completed_call, open_call])
             assert count == 1
 
             # Completed call should be stored
             doc = await store.get("uuid-done", "2026")
             assert doc is not None
-            assert doc.call_log == [{"email": "ff@sjifire.org", "commenttype": "viewed"}]
+            assert doc.nature == "Medical Aid"
 
             # Open call should not be stored
             doc = await store.get("uuid-open", "2026")
             assert doc is None
 
-        # Log was only fetched for the completed call
-        fetch_log.assert_called_once_with("uuid-done")
-
-    async def test_handles_log_fetch_failure(self):
-        call = _make_call(id="uuid-fail", is_completed=True)
-        fetch_log = AsyncMock(side_effect=RuntimeError("network error"))
-
-        async with DispatchStore() as store:
-            count = await store.store_completed([call], fetch_log)
-            assert count == 1
-
-            # Call stored without log
-            doc = await store.get("uuid-fail", "2026")
-            assert doc is not None
-            assert doc.call_log == []
-
     async def test_returns_zero_for_no_completed(self):
         open_call = _make_call(is_completed=False)
-        fetch_log = AsyncMock()
 
         async with DispatchStore() as store:
-            count = await store.store_completed([open_call], fetch_log)
+            count = await store.store_completed([open_call])
 
         assert count == 0
-        fetch_log.assert_not_called()
