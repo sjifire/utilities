@@ -396,13 +396,15 @@ def _list_neris_incidents() -> dict:
         dispatch = inc.get("dispatch", {})
         types = inc.get("incident_types", [])
         status_info = inc.get("incident_status", {})
-        summaries.append({
-            "neris_id": inc.get("neris_id", ""),
-            "incident_number": dispatch.get("incident_number", ""),
-            "call_create": dispatch.get("call_create", ""),
-            "status": status_info.get("status", ""),
-            "incident_type": types[0].get("type", "") if types else "",
-        })
+        summaries.append(
+            {
+                "neris_id": inc.get("neris_id", ""),
+                "incident_number": dispatch.get("incident_number", ""),
+                "call_create": dispatch.get("call_create", ""),
+                "status": status_info.get("status", ""),
+                "incident_type": types[0].get("type", "") if types else "",
+            }
+        )
 
     return {"incidents": summaries, "count": len(summaries)}
 

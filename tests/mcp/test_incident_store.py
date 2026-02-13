@@ -225,7 +225,9 @@ class TestListForUser:
     async def test_exclude_status(self):
         doc1 = _make_doc(created_by="ff@sjifire.org", incident_number="26-001")
         doc2 = _make_doc(created_by="ff@sjifire.org", incident_number="26-002", status="submitted")
-        doc3 = _make_doc(created_by="ff@sjifire.org", incident_number="26-003", status="in_progress")
+        doc3 = _make_doc(
+            created_by="ff@sjifire.org", incident_number="26-003", status="in_progress"
+        )
         async with IncidentStore() as store:
             await store.create(doc1)
             await store.create(doc2)
