@@ -9,13 +9,13 @@ Report status is cross-referenced from two sources:
 """
 
 import asyncio
-import json
 import logging
 import os
-import re
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+from jinja2 import Environment, FileSystemLoader
 
 from sjifire.core.config import get_org_config
 from sjifire.mcp.auth import get_current_user
@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 _SRC_DOCS = Path(__file__).resolve().parents[3] / "docs"
 _APP_DOCS = Path("/app/docs")
 _DOCS_DIR = _SRC_DOCS if _SRC_DOCS.is_dir() else _APP_DOCS
+
+# Jinja2 template environment for dashboard HTML shell.
+_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+_jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=True)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -310,49 +314,6 @@ def _build_template_context(
     }
 
 
-_PAGE_WRAP = (
-    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
-    '<meta name="viewport" content="width=device-width,initial-scale=1">'
-    "<title>SJIF&amp;R Dashboard</title></head><body>{}</body></html>"
-)
-
-
-def _minify_html(html: str) -> str:
-    """Strip whitespace from HTML to reduce token count.
-
-    Removes HTML comments, strips leading/trailing whitespace per line,
-    drops blank lines, and joins everything together.  The source template
-    stays readable; this runs once at load time.
-    """
-    html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
-    lines = (line.strip() for line in html.splitlines())
-    return "".join(line for line in lines if line)
-
-
-_template_cache: str | None = None
-
-
-def _load_template() -> str:
-    """Load and minify the dashboard template (cached after first call)."""
-    global _template_cache
-    if _template_cache is None:
-        raw = (_DOCS_DIR / "dashboard-template.html").read_text()
-        _template_cache = _minify_html(raw)
-    return _template_cache
-
-
-def _inject_data(template: str, ctx: dict) -> str:
-    """Replace the ``/*DATA*/null`` placeholder with serialised JSON."""
-    data_json = json.dumps(ctx, separators=(",", ":"), ensure_ascii=False)
-    data_json = data_json.replace("</", "<\\/")  # prevent </script> injection
-    return template.replace("/*DATA*/null", data_json)
-
-
-def _build_browser_page(ctx: dict) -> str:
-    """Render the full visual dashboard page for the browser endpoint."""
-    return _PAGE_WRAP.format(_inject_data(_load_template(), ctx))
-
-
 def _build_summary(ctx: dict) -> str:
     """Build a concise markdown summary for Claude to present as text."""
     lines: list[str] = []
@@ -456,28 +417,9 @@ async def refresh_dashboard() -> dict:
 
 
 async def render_for_browser() -> str:
-    """Fetch all data and render the full HTML dashboard for the browser.
-
-    Includes upcoming crew and personnel contacts (browser-only enrichments).
-    These are optional — failures logged but don't break the page.
-    """
-    dashboard_data, incidents_data, upcoming, contacts = await asyncio.gather(
-        get_dashboard(),
-        incident_tools.list_incidents(),
-        _fetch_upcoming_schedule(),
-        _fetch_personnel_contacts(),
-        return_exceptions=True,
-    )
-    if isinstance(upcoming, BaseException):
-        logger.warning("Upcoming schedule unavailable: %s", upcoming)
-        upcoming = None
-    if isinstance(contacts, BaseException):
-        logger.warning("Personnel contacts unavailable: %s", contacts)
-        contacts = None
-    ctx = _build_template_context(
-        dashboard_data, incidents_data, upcoming=upcoming, contacts=contacts
-    )
-    return _build_browser_page(ctx)
+    """Render dashboard HTML shell. Data loaded client-side via Alpine.js."""
+    template = _jinja_env.get_template("dashboard.html")
+    return template.render()
 
 
 async def get_dashboard_data() -> dict:
