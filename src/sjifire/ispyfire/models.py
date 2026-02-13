@@ -7,10 +7,21 @@ from datetime import datetime
 
 
 def _parse_dt(s: str) -> datetime | None:
-    """Parse an iSpyFire timestamp string to datetime, or None if empty."""
+    """Parse an iSpyFire timestamp string to datetime, or None if empty.
+
+    Handles both ISO format ("2026-02-02T18:58:21") and the iSpyFire
+    non-standard format ("18:58:21 02/02/2026").
+    """
     if not s:
         return None
-    return datetime.fromisoformat(s)
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        # iSpyFire sometimes returns "HH:MM:SS MM/DD/YYYY"
+        try:
+            return datetime.strptime(s, "%H:%M:%S %m/%d/%Y")
+        except ValueError:
+            return None
 
 
 @dataclass

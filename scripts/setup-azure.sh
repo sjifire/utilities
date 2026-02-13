@@ -288,57 +288,55 @@ if should_run 2; then
 
     # Database
     info "Creating database $COSMOS_DB..."
-    az cosmosdb sql database create \
-        --account-name "$COSMOS_ACCOUNT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --name "$COSMOS_DB" \
-        --output none 2>/dev/null || true
-    ok "Database ready"
+    if az cosmosdb sql database show --account-name "$COSMOS_ACCOUNT" --resource-group "$RESOURCE_GROUP" --name "$COSMOS_DB" &>/dev/null; then
+        warn "Database $COSMOS_DB already exists"
+    else
+        az cosmosdb sql database create \
+            --account-name "$COSMOS_ACCOUNT" \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$COSMOS_DB" \
+            --output none
+        ok "Database created"
+    fi
+
+    # Helper: create container if it doesn't exist (fails on real errors)
+    create_container() {
+        local name="$1" pk="$2"
+        shift 2
+        if az cosmosdb sql container show \
+            --account-name "$COSMOS_ACCOUNT" \
+            --resource-group "$RESOURCE_GROUP" \
+            --database-name "$COSMOS_DB" \
+            --name "$name" &>/dev/null; then
+            warn "Container '$name' already exists"
+        else
+            az cosmosdb sql container create \
+                --account-name "$COSMOS_ACCOUNT" \
+                --resource-group "$RESOURCE_GROUP" \
+                --database-name "$COSMOS_DB" \
+                --name "$name" \
+                --partition-key-path "$pk" \
+                "$@" \
+                --output none
+            ok "Container '$name' created (partition: $pk)"
+        fi
+    }
 
     # Container: incidents (partition key: /year)
     info "Creating container 'incidents'..."
-    az cosmosdb sql container create \
-        --account-name "$COSMOS_ACCOUNT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --database-name "$COSMOS_DB" \
-        --name "incidents" \
-        --partition-key-path "/year" \
-        --output none 2>/dev/null || true
-    ok "Container 'incidents' ready (partition: /year)"
+    create_container "incidents" "/year"
 
     # Container: schedules (partition key: /date)
     info "Creating container 'schedules'..."
-    az cosmosdb sql container create \
-        --account-name "$COSMOS_ACCOUNT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --database-name "$COSMOS_DB" \
-        --name "schedules" \
-        --partition-key-path "/date" \
-        --output none 2>/dev/null || true
-    ok "Container 'schedules' ready (partition: /date)"
+    create_container "schedules" "/date"
 
     # Container: dispatch-calls (partition key: /year)
     info "Creating container 'dispatch-calls'..."
-    az cosmosdb sql container create \
-        --account-name "$COSMOS_ACCOUNT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --database-name "$COSMOS_DB" \
-        --name "dispatch-calls" \
-        --partition-key-path "/year" \
-        --output none 2>/dev/null || true
-    ok "Container 'dispatch-calls' ready (partition: /year)"
+    create_container "dispatch-calls" "/year"
 
     # Container: oauth-tokens (partition key: /token_type, per-document TTL)
     info "Creating container 'oauth-tokens'..."
-    az cosmosdb sql container create \
-        --account-name "$COSMOS_ACCOUNT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --database-name "$COSMOS_DB" \
-        --name "oauth-tokens" \
-        --partition-key-path "/token_type" \
-        --default-ttl -1 \
-        --output none 2>/dev/null || true
-    ok "Container 'oauth-tokens' ready (partition: /token_type, TTL enabled)"
+    create_container "oauth-tokens" "/token_type" --ttl -1
 
     # Store endpoint and key in Key Vault
     COSMOS_ENDPOINT=$(az cosmosdb show \
