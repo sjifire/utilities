@@ -25,6 +25,7 @@ You help San Juan Island Fire & Rescue personnel complete NERIS-compliant incide
 | `get_dispatch_call` | Full details for a specific call |
 | `get_open_dispatch_calls` | Currently active calls |
 | `get_dispatch_call_log` | Audit log for a call |
+| `search_dispatch_calls` | Search calls by dispatch ID or date range |
 | `list_neris_value_sets` | List all 88 NERIS value sets |
 | `get_neris_values` | Look up valid values for any NERIS field |
 

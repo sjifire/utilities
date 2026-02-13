@@ -113,11 +113,16 @@ src/sjifire/
 │   ├── server.py          # FastMCP app, auth config, tool registration
 │   ├── auth.py            # Entra JWT validation, UserContext, RBAC
 │   ├── oauth_provider.py  # OAuth AS proxy: Claude.ai ↔ Entra ID
-│   ├── dispatch/tools.py  # iSpyFire dispatch call lookup
+│   ├── token_store.py     # Two-layer OAuth token store (TTLCache + Cosmos DB)
+│   ├── dispatch/          # iSpyFire dispatch call lookup + archival
+│   │   ├── models.py      # DispatchCallDocument (Pydantic)
+│   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
+│   │   └── tools.py       # MCP tools for dispatch calls
 │   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
 │   │   ├── models.py      # IncidentDocument, CrewAssignment (Pydantic)
 │   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
 │   │   └── tools.py       # MCP tools with role-based access control
+│   ├── neris/tools.py     # NERIS value set lookup tools
 │   ├── personnel/tools.py # Graph API personnel lookup
 │   └── schedule/          # On-duty crew lookup with Cosmos cache
 │       ├── models.py      # DayScheduleCache (Pydantic)

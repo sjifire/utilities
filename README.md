@@ -417,7 +417,8 @@ src/sjifire/
 │   ├── server.py          # FastMCP app, OAuth auth, tool registration
 │   ├── auth.py            # Entra JWT validation, UserContext
 │   ├── oauth_provider.py  # OAuth proxy: Claude.ai ↔ Entra ID
-│   ├── dispatch/          # iSpyFire dispatch call lookup
+│   ├── token_store.py     # OAuth token store (TTLCache + Cosmos DB)
+│   ├── dispatch/          # iSpyFire dispatch call lookup + archival
 │   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
 │   ├── neris/             # NERIS value set lookup
 │   ├── personnel/         # Graph API personnel lookup
