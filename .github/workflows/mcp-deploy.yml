@@ -136,6 +136,27 @@ jobs:
                 "BUILD_VERSION=${{ github.sha }}" \
               --replace-env-vars
 
+      - name: Configure EasyAuth
+        uses: azure/cli@v2
+        with:
+          azcliversion: agentazcliversion
+          inlineScript: |
+            az containerapp auth update \
+              --name ${{ env.CONTAINER_APP }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --unauthenticated-client-action AllowAnonymous \
+              --enabled true \
+              --output none
+
+            az containerapp auth microsoft update \
+              --name ${{ env.CONTAINER_APP }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --client-id "${{ env.ENTRA_MCP_API_CLIENT_ID }}" \
+              --client-secret-name entra-mcp-api-client-secret \
+              --tenant-id "${{ env.MS_GRAPH_TENANT_ID }}" \
+              --yes \
+              --output none
+
       - name: Health check
         run: |
           echo "Waiting for deployment to stabilize..."

@@ -2,6 +2,7 @@
   "company_name": "San Juan Island Fire & Rescue",
   "domain": "sjifire.org",
   "service_email": "svc-automations@sjifire.org",
+  "timezone": "America/Los_Angeles",
   "skip_emails": [
     "aladtec.admin@sjifire.org",
     "api@sjifire.org"

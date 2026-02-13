@@ -166,24 +166,14 @@ class NerisClient:
             Incident dict, or None if not found
         """
         neris_id = neris_id or self.entity_id
-        # The API has no single-incident GET; filter the list by incident_number
-        # The incident_number is the middle segment of the compound NERIS ID
-        parts = neris_id_incident.split("|")
-        if len(parts) != 3:
-            logger.error(f"Invalid incident NERIS ID format: {neris_id_incident}")
-            return None
-
-        incident_number = parts[1]
-        result = self.api.list_incidents(
-            neris_id_entity=neris_id,
-            incident_number=incident_number,
-            page_size=1,
-        )
-        incidents = result.get("incidents", [])
-        if not incidents:
-            logger.warning(f"Incident not found: {neris_id_incident}")
-            return None
-        return incidents[0]
+        # The API has no single-incident GET endpoint; fetch all and match
+        # by compound neris_id. This is reliable regardless of ID format
+        # (the middle segment may differ from incident_number with dashes).
+        for inc in self.get_all_incidents(neris_id=neris_id):
+            if inc.get("neris_id") == neris_id_incident:
+                return inc
+        logger.warning(f"Incident not found: {neris_id_incident}")
+        return None
 
     def patch_incident(
         self,

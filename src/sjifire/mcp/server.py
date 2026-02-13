@@ -21,10 +21,11 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from sjifire.core.config import get_org_config
 from sjifire.mcp import dashboard
+from sjifire.mcp.auth import get_easyauth_user, set_current_user
 from sjifire.mcp.dispatch import tools as dispatch_tools
 from sjifire.mcp.incidents import tools as incident_tools
 from sjifire.mcp.neris import tools as neris_tools
@@ -44,6 +45,7 @@ logging.basicConfig(
 )
 # Silence Azure SDK HTTP-level noise (request/response headers)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("azure.cosmos._cosmos_http_logging_policy").setLevel(logging.WARNING)
 logging.getLogger("azure.identity").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
@@ -106,7 +108,7 @@ else:
     # get_current_user() still work (e.g., with ``mcp dev`` inspector).
     from starlette.middleware.base import BaseHTTPMiddleware
 
-    from sjifire.mcp.auth import UserContext, set_current_user
+    from sjifire.mcp.auth import UserContext
 
     _DEV_USER = UserContext(
         email="dev@localhost",
@@ -144,6 +146,7 @@ mcp.tool()(neris_tools.get_neris_values)
 # Register dashboard tools
 mcp.tool()(dashboard.get_dashboard)
 mcp.tool()(dashboard.start_session)
+mcp.tool()(dashboard.refresh_dashboard)
 
 # Register dispatch tools
 mcp.tool()(dispatch_tools.list_dispatch_calls)
@@ -167,6 +170,37 @@ async def entra_callback(request: Request) -> Response:
     if provider is None:
         return JSONResponse({"error": "Auth not configured"}, status_code=501)
     return await provider.handle_callback(request)
+
+
+@mcp.custom_route("/dashboard", methods=["GET"])
+async def dashboard_page(request: Request) -> Response:
+    """Serve the authenticated browser dashboard (EasyAuth SSO)."""
+    user = get_easyauth_user(request)
+    if user:
+        set_current_user(user)
+    elif provider is not None:
+        return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=/dashboard")
+    # In dev mode, _DevAuthMiddleware already set the user
+    html = await dashboard.render_for_browser()
+    return Response(html, media_type="text/html")
+
+
+@mcp.custom_route("/dashboard/data", methods=["GET"])
+async def dashboard_data(request: Request) -> Response:
+    """Return dashboard data as JSON for client-side refresh."""
+    user = get_easyauth_user(request)
+    if user:
+        set_current_user(user)
+    elif provider is not None:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    data = await dashboard.get_dashboard_data()
+    return JSONResponse(data)
+
+
+@mcp.custom_route("/dashboard/logout", methods=["GET"])
+async def dashboard_logout(request: Request) -> Response:
+    """Log out of the dashboard and redirect back."""
+    return RedirectResponse("/.auth/logout?post_logout_redirect_uri=/dashboard")
 
 
 @mcp.custom_route("/health", methods=["GET"])

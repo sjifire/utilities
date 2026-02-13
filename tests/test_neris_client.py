@@ -358,11 +358,14 @@ SAMPLE_NERIS_ID = f"{ENTITY_ID}|26SJ0020|1770457554"
 
 
 class TestGetIncident:
-    """Tests for get_incident method."""
+    """Tests for get_incident — scans all incidents and matches by neris_id."""
 
     def test_get_incident_found(self, mock_credentials, mock_api):
         mock_api.list_incidents.return_value = {
-            "incidents": [{"neris_id": SAMPLE_NERIS_ID}],
+            "incidents": [
+                {"neris_id": "FD53055879|OTHER|9999"},
+                {"neris_id": SAMPLE_NERIS_ID},
+            ],
         }
 
         with NerisClient() as client:
@@ -370,26 +373,24 @@ class TestGetIncident:
 
         assert result is not None
         assert result["neris_id"] == SAMPLE_NERIS_ID
-        mock_api.list_incidents.assert_called_once_with(
-            neris_id_entity=ENTITY_ID,
-            incident_number="26SJ0020",
-            page_size=1,
-        )
 
     def test_get_incident_not_found(self, mock_credentials, mock_api):
-        mock_api.list_incidents.return_value = {"incidents": []}
+        mock_api.list_incidents.return_value = {
+            "incidents": [{"neris_id": "FD53055879|OTHER|9999"}],
+        }
 
         with NerisClient() as client:
             result = client.get_incident(SAMPLE_NERIS_ID)
 
         assert result is None
 
-    def test_get_incident_invalid_id_format(self, mock_credentials, mock_api):
+    def test_get_incident_empty_results(self, mock_credentials, mock_api):
+        mock_api.list_incidents.return_value = {"incidents": []}
+
         with NerisClient() as client:
-            result = client.get_incident("bad-format")
+            result = client.get_incident(SAMPLE_NERIS_ID)
 
         assert result is None
-        mock_api.list_incidents.assert_not_called()
 
     def test_get_incident_custom_entity(self, mock_credentials, mock_api):
         custom_id = "FD99999999|INC001|1234567890"
@@ -403,8 +404,8 @@ class TestGetIncident:
         assert result is not None
         mock_api.list_incidents.assert_called_once_with(
             neris_id_entity="FD99999999",
-            incident_number="INC001",
-            page_size=1,
+            page_size=100,
+            cursor=None,
         )
 
 

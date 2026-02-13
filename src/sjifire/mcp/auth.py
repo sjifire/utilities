@@ -6,6 +6,8 @@ and checks group membership for role-based access control.
 Group membership is used internally only -- never exposed to tools or users.
 """
 
+import base64
+import json
 import logging
 import os
 from contextvars import ContextVar
@@ -13,6 +15,7 @@ from dataclasses import dataclass, field
 
 import jwt
 from jwt import PyJWKClient
+from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +59,50 @@ def get_current_user() -> UserContext:
 def set_current_user(user: UserContext) -> None:
     """Set the authenticated user for the current request."""
     _current_user.set(user)
+
+
+def get_easyauth_user(request: Request) -> UserContext | None:
+    """Extract user identity from Azure Container Apps EasyAuth headers.
+
+    EasyAuth injects ``X-MS-CLIENT-PRINCIPAL`` as a Base64-encoded JSON
+    blob containing the authenticated user's claims.  Returns None when
+    the header is absent (unauthenticated request).
+    """
+    principal_b64 = request.headers.get("X-MS-CLIENT-PRINCIPAL")
+    if not principal_b64:
+        return None
+
+    try:
+        data = json.loads(base64.b64decode(principal_b64))
+    except (ValueError, KeyError):
+        logger.warning("Failed to decode X-MS-CLIENT-PRINCIPAL header")
+        return None
+
+    claims_list = data.get("claims", [])
+
+    # Build single-value lookup and collect multi-value groups
+    claims: dict[str, str] = {}
+    groups: set[str] = set()
+    for c in claims_list:
+        typ, val = c.get("typ", ""), c.get("val", "")
+        claims[typ] = val
+        if typ == "groups":
+            groups.add(val)
+
+    email = (
+        claims.get("preferred_username")
+        or claims.get("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")
+        or ""
+    )
+    name = claims.get("name", email.split("@")[0] if email else "Unknown")
+    user_id = claims.get("http://schemas.microsoft.com/identity/claims/objectidentifier", "")
+
+    return UserContext(
+        email=email.lower(),
+        name=name,
+        user_id=user_id,
+        groups=frozenset(groups),
+    )
 
 
 class EntraTokenValidator:

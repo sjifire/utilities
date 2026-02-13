@@ -152,6 +152,7 @@ class OrgConfig:
     company_name: str
     domain: str
     service_email: str
+    timezone: str = "America/Los_Angeles"
     skip_emails: list[str] = field(default_factory=list)
 
 
@@ -217,6 +218,7 @@ def load_org_config() -> OrgConfig:
         company_name=config_data["company_name"],
         domain=config_data["domain"],
         service_email=config_data["service_email"],
+        timezone=config_data.get("timezone", "America/Los_Angeles"),
         skip_emails=config_data.get("skip_emails", []),
     )
 

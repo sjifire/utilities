@@ -178,7 +178,8 @@ uv run mcp-server
 ```
 
 **Available tools for Claude.ai users:**
-- Dispatch call lookup (recent calls, open calls, call details, audit logs)
+- Operations dashboard (`start_session`) — status board with on-duty crew, recent calls, and report status; browser dashboard at `/dashboard` with EasyAuth SSO
+- Dispatch call lookup (recent calls, open calls, call details, search by date range)
 - Schedule lookup (on-duty crew for any date)
 - Personnel lookup (active personnel names and emails)
 - Incident reporting (create, edit, list, submit to NERIS)
@@ -198,10 +199,8 @@ The MCP server powers a guided incident reporting workflow through Claude.ai. Us
 2. In Claude.ai, go to **Settings → Integrations → Add Integration**
 3. Enter the MCP server URL: `https://mcp.sjifire.org/mcp`
 4. Sign in with your `@sjifire.org` Microsoft account
-5. Create a new **Project** (or use a shared one) with:
-   - **Custom instructions** from `docs/neris/claude-project-instructions.md`
-   - **Project Knowledge** — upload `docs/neris/value-sets-reference.md`
-6. Start a new chat in the project and say "I need to write a report"
+5. Start a new chat — the integration provides prompts, resources, and tools automatically
+6. Select the **Operations Dashboard** prompt, or say "I need to write a report"
 
 **How it works:**
 - Claude pulls dispatch data and on-duty crew automatically
@@ -212,7 +211,7 @@ The MCP server powers a guided incident reporting workflow through Claude.ai. Us
 - Officers can submit completed reports to NERIS
 
 **Reference docs:**
-- `docs/neris/claude-project-instructions.md` — Full workflow instructions for the Claude.ai Project
+- `docs/neris/incident-report-instructions.md` — Full workflow instructions for the Claude.ai Project
 - `docs/neris/value-sets-reference.md` — Common NERIS value sets (incident types, actions, locations, etc.)
 - `docs/neris/eso-field-analysis.md` — ESO Suite field mapping to NERIS
 - `docs/neris/architecture.md` — System architecture and design decisions
@@ -415,9 +414,11 @@ src/sjifire/
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
 ├── mcp/               # Remote MCP server for Claude.ai
 │   ├── server.py          # FastMCP app, OAuth auth, tool registration
-│   ├── auth.py            # Entra JWT validation, UserContext
+│   ├── auth.py            # Entra JWT validation, EasyAuth header parsing, UserContext
 │   ├── oauth_provider.py  # OAuth proxy: Claude.ai ↔ Entra ID
 │   ├── token_store.py     # OAuth token store (TTLCache + Cosmos DB)
+│   ├── dashboard.py       # Operations dashboard (client-side rendered) + session bootstrap
+│   ├── prompts.py         # MCP prompts and resources
 │   ├── dispatch/          # iSpyFire dispatch call lookup + archival
 │   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
 │   ├── neris/             # NERIS value set lookup

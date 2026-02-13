@@ -540,8 +540,9 @@ class TestNerisCrossReference:
 
         result = await get_dashboard()
 
-        # Both appear as entries in the unified list
-        assert result["call_count"] == 2
+        # NERIS-only entries appear in recent_calls but call_count
+        # only reflects actual dispatch calls (source of truth).
+        assert result["call_count"] == 0
         ids = {c["dispatch_id"] for c in result["recent_calls"]}
         assert "26001980" in ids
         assert "26SJ0020" in ids
@@ -597,8 +598,8 @@ class TestNerisCrossReference:
         # Dispatch call has no match
         assert result["recent_calls"][0]["dispatch_id"] == "26-001678"
         assert result["recent_calls"][0]["report"] is None
-        # Unmatched NERIS report appended as its own entry
-        assert result["call_count"] == 2
+        # call_count reflects dispatch calls only (source of truth)
+        assert result["call_count"] == 1
         neris_call = result["recent_calls"][1]
         assert neris_call["dispatch_id"] == "1770796348"
         assert neris_call["report"]["source"] == "neris"

@@ -162,6 +162,7 @@ async def list_incidents(
             "incident_type": doc.incident_type,
             "created_by": doc.created_by,
             "crew_count": len(doc.crew),
+            "neris_incident_id": doc.neris_incident_id,
         }
         for doc in incidents
     ]

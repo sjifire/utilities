@@ -1,0 +1,340 @@
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+:root{
+  --b1:rgba(255,255,255,.04);--b2:rgba(255,255,255,.06);--b3:rgba(255,255,255,.08);--b4:rgba(255,255,255,.1);
+  --r:#dc2626;--g:#4ade80;--bl:#60a5fa;--am:#fbbf24;--am2:#f59e0b;--pu:#c084fc;--gr:#6b7280;--err:#f87171;
+  --bg1:#162033;--bg2:#1a2744;
+  --t1:#fff;--t2:#e2e8f0;--t3:#94a3b8;--t4:#64748b;--t5:#475569;
+  --blA:rgba(96,165,250,.12);--amA:rgba(245,158,11,.12);--gA:rgba(34,197,94,.15);--rA:rgba(220,38,38,.15);--puA:rgba(192,132,252,.12)
+}
+.root{min-height:100vh;background:#0c1829;font-family:'Segoe UI','Helvetica Neue',sans-serif;color:var(--t2)}
+.t1{color:var(--t1)}.t2{color:var(--t2)}.t3{color:var(--t3)}.t4{color:var(--t4)}.t5{color:var(--t5)}
+.grn-t{color:var(--g)}.amb-t{color:var(--am)}.blu-t{color:var(--bl)}
+.f10{font-size:10px}.f11{font-size:11px}.f12{font-size:12px}.f13{font-size:13px}.f14{font-size:14px}.f20{font-size:20px}.f28{font-size:28px}
+.b{font-weight:600}.bb{font-weight:700}.mono{font-family:monospace}.nw{white-space:nowrap}.lh1{line-height:1}.lh15{line-height:1.5}
+.up{text-transform:uppercase;letter-spacing:.08em}.tar{text-align:right}
+.mt2{margin-top:2px}.mt4{margin-top:4px}.mt6{margin-top:6px}.mb8{margin-bottom:8px}.mb16{margin-bottom:16px}.mb24{margin-bottom:24px}.mt20{margin-top:20px}
+.fx{display:flex}.fx-s{display:flex;justify-content:space-between;align-items:flex-start}.gap10{gap:10px}
+.wrap{max-width:1200px;margin:0 auto}
+.g4,.g3,.g-ov{display:grid;gap:16px}
+.g4{grid-template-columns:repeat(4,1fr)}.g3{grid-template-columns:repeat(3,1fr)}.g-ov{grid-template-columns:1fr 1.6fr;gap:20px}
+.hdr{background:linear-gradient(135deg,#0f2240,#1a3a5c);border-bottom:3px solid var(--r)}
+.hdr-inner{padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.logo{letter-spacing:.02em;line-height:1.2}
+.status{display:inline-flex;align-items:center;gap:6px;margin-top:4px;border-radius:20px;padding:3px 12px;border:1px solid}
+.status.ok{background:var(--gA);border-color:rgba(34,197,94,.3);color:var(--g)}
+.status.ok .pulse{background:var(--g)}
+.status.active{background:var(--rA);border-color:rgba(220,38,38,.3);color:var(--err)}
+.status.active .pulse{background:var(--err)}
+.pulse{width:7px;height:7px;border-radius:50%;display:inline-block;animation:pulse 2s ease-in-out infinite}
+.updated-row{margin-top:6px;display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.refresh-hint{background:var(--blA);padding:2px 10px;border-radius:12px}
+.nav{background:#111d32;border-bottom:1px solid var(--b2);padding:0 24px}
+.tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--t4);padding:12px 20px;cursor:pointer}
+.tab.on{border-bottom-color:var(--r);color:var(--t1)}
+.pnl{background:var(--bg1);border:1px solid var(--b2);border-radius:8px;overflow:hidden}
+.phdr{padding:14px 18px;border-bottom:1px solid var(--b2);display:flex;justify-content:space-between;align-items:center}
+.main{padding:24px}
+.stat{background:linear-gradient(135deg,var(--bg1),var(--bg2));border:1px solid var(--b2);border-radius:8px;padding:20px 18px;border-left:3px solid}
+.stat[data-a="grn"]{border-left-color:var(--g)}
+.stat[data-a="blu"]{border-left-color:var(--bl)}
+.stat[data-a="amb"]{border-left-color:var(--am2)}
+.stat[data-a="pur"]{border-left-color:var(--pu)}
+.bdg{font-size:11px;padding:3px 10px;border-radius:4px;font-weight:600;background:var(--blA);color:var(--bl)}
+.bdg.amb{background:var(--amA);color:var(--am)}
+.bdg.grn{background:var(--gA);color:var(--g)}
+.bdg[data-p="Captain"]{background:var(--rA);color:var(--err)}
+.bdg[data-p="Lieutenant"]{background:var(--amA);color:var(--am)}
+.bdg[data-p="Chief"]{background:var(--puA);color:var(--pu)}
+.orow{padding:12px 18px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center}
+.orow:last-child,.call:last-child{border-bottom:none}
+.call{padding:14px 18px;border-left:3px solid;border-bottom:1px solid var(--b1)}
+.call[data-s="high"]{border-left-color:var(--r);background:rgba(220,38,38,.1)}
+.call[data-s="medium"]{border-left-color:var(--am2);background:rgba(245,158,11,.08)}
+.call[data-s="low"]{border-left-color:var(--gr);background:rgba(107,114,128,.08)}
+.call-r{text-align:right;flex-shrink:0}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot[data-s="high"]{background:var(--r)}
+.dot[data-s="medium"]{background:var(--am2)}
+.dot[data-s="low"]{background:var(--gr)}
+.tbl-wrap{overflow-x:auto}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl thead tr{border-bottom:1px solid var(--b3)}
+.tbl tbody tr{border-bottom:1px solid var(--b1)}
+.tbl tbody tr:nth-child(even){background:rgba(255,255,255,.015)}
+.th{padding:10px 14px;font-size:11px;color:var(--t4);text-transform:uppercase;letter-spacing:.08em;font-weight:600;white-space:nowrap;text-align:left}
+.td{padding:12px 14px}.dot-td{width:30px}
+.sechdr{padding:8px 18px;background:rgba(255,255,255,.02);border-bottom:1px solid var(--b1)}
+.crow{padding:10px 18px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center;gap:12px}
+.crow .bdg{font-size:10px;padding:1px 6px}
+.clink{font-size:11px;color:var(--t4);text-decoration:none}.clink:hover{color:var(--bl);text-decoration:underline}.clink+.clink::before{content:" | ";color:var(--t5)}
+.empty{padding:32px 18px;text-align:center;color:var(--t5);font-size:13px}
+.rbtn{font-size:11px;padding:5px 12px;border-radius:4px;font-weight:600;cursor:pointer;background:rgba(245,158,11,.15);color:var(--am);border:1px solid rgba(245,158,11,.3);min-width:100px;text-align:center;display:inline-block}
+.rbtn.n{background:rgba(96,165,250,.15);color:var(--bl);border-color:rgba(96,165,250,.3)}
+.rhint{margin-top:6px;font-size:11px;color:var(--t3);background:rgba(255,255,255,.05);border:1px solid var(--b4);border-radius:4px;padding:6px 10px}
+.help-row{padding:14px 18px;border-top:1px solid var(--b1);display:flex;gap:16px;align-items:flex-start}
+.help-lbl{flex-shrink:0;min-width:280px}
+.help-cmd{font-size:12px;background:rgba(96,165,250,.1);color:var(--bl);padding:4px 10px;border-radius:4px;font-family:'SF Mono','Fira Code',monospace;font-weight:600}
+.help-intro{padding:16px 18px 8px}
+.help-foot{padding:16px 18px;border-top:1px solid var(--b2)}
+.footer{padding:16px 24px 32px;display:flex;justify-content:space-between}
+</style>
+<div class="root">
+
+  <header class="hdr">
+    <div class="wrap hdr-inner">
+      <div class="fx gap10" style="align-items:center">
+        <img src="https://res.cloudinary.com/san-juan-fire-district-3/image/fetch/f_auto/https://www.sjifire.org/assets/sjifire-logo-clear.png" alt="SJIF&amp;R" style="height:52px;width:52px;border-radius:4px">
+        <div>
+          <div class="bb f20 t1 logo">SJIF&amp;R Operations Dashboard</div>
+          <div class="up f11 t3 mt2">San Juan Island Fire &amp; Rescue</div>
+        </div>
+      </div>
+      <div class="tar">
+        <div class="f13 t3" id="hdr-date"></div>
+        <div id="hdr-status"></div>
+        <div class="updated-row">
+          <span class="f11 t4" id="hdr-updated"></span>
+          <span class="refresh-hint f11 b blu-t">Auto-updates every hour</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="nav">
+    <div class="wrap fx">
+      <button class="tab f13 b up on" data-tab="overview">Overview</button>
+      <button class="tab f13 b up" data-tab="calls">Recent Calls</button>
+      <button class="tab f13 b up" data-tab="crew">On Duty</button>
+      <button class="tab f13 b up" data-tab="reporting">Reporting</button>
+      <button class="tab f13 b up" data-tab="help">Help</button>
+    </div>
+  </nav>
+
+  <main class="wrap main">
+
+    <!-- OVERVIEW -->
+    <div id="tab-overview">
+      <div class="g4 mb24" id="ov-stats"></div>
+      <div class="g-ov">
+        <div class="pnl">
+          <div class="phdr">
+            <span class="f14 b t1" id="ov-crew-hdr"></span>
+            <span class="f11 t4" id="ov-crew-range"></span>
+          </div>
+          <div id="ov-crew"></div>
+        </div>
+        <div class="pnl">
+          <div class="phdr">
+            <span class="f14 b t1">Recent Calls</span>
+            <span class="f11 t4" id="ov-calls-count"></span>
+          </div>
+          <div id="ov-calls"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CALLS -->
+    <div id="tab-calls" hidden>
+      <div class="pnl">
+        <div class="phdr">
+          <span class="f14 b t1">Dispatch Log</span>
+          <span class="f11 t4" id="cl-count"></span>
+        </div>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th class="th"></th><th class="th">ID</th><th class="th">Date/Time</th><th class="th">Nature</th><th class="th">Address</th></tr></thead>
+          <tbody id="cl-tbody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- CREW -->
+    <div id="tab-crew" hidden>
+      <div class="pnl mb24">
+        <div class="phdr">
+          <span class="f14 b t1" id="cr-hdr"></span>
+          <span id="cr-shift"></span>
+        </div>
+        <div id="cr-sections"></div>
+      </div>
+      <div class="pnl" id="cr-upcoming-pnl" hidden>
+        <div class="phdr">
+          <span class="f14 b t1" id="cr-up-hdr"></span>
+          <span class="bdg" id="cr-up-badge"></span>
+        </div>
+        <div id="cr-up-sections"></div>
+      </div>
+    </div>
+
+    <!-- REPORTING -->
+    <div id="tab-reporting" hidden>
+      <div class="g3 mb24" id="rp-stats"></div>
+      <div class="pnl">
+        <div class="phdr">
+          <span class="f14 b t1">Incident Reports</span>
+          <span class="bdg" id="rp-badge"></span>
+        </div>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th class="th"></th><th class="th">ID</th><th class="th">Date</th><th class="th">Nature</th><th class="th">Status</th><th class="th">Action</th></tr></thead>
+          <tbody id="rp-tbody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- HELP -->
+    <div id="tab-help" hidden>
+      <div class="pnl">
+        <div class="phdr">
+          <span class="f14 b t1">Claude Commands</span>
+          <span class="f11 t4">Type these in the chat</span>
+        </div>
+        <div class="help-intro"><p class="f13 t3 mb16 lh15">Use these commands to interact with dispatch, crew, and reporting.</p></div>
+        <div id="hp-list"></div>
+        <div class="help-foot"><p class="f12 t5 lh15">You can also ask Claude anything in natural language.</p></div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="wrap footer f11 t5">
+    <span>San Juan County Fire District 3 &middot; 1011 Mullis Street, Friday Harbor, WA 98250</span>
+    <span>&copy; 2026 SJIF&amp;R</span>
+  </footer>
+
+</div>
+<script>
+let D=/*DATA*/null;
+const $=id=>document.getElementById(id),
+Q=s=>document.querySelectorAll(s),
+X=s=>s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'),
+T='<td class="td';
+
+/* shared builders */
+function S(a,l,v,s){return '<div class="stat" data-a="'+a+'"><div class="up t4 f11 mb8">'+X(l)+'</div><div class="bb f28 t1 lh1">'+X(String(v))+'</div><div class="f12 t3 mt6">'+s+'</div></div>';}
+function R(c){return '<tr>'+T+' dot-td"><span class="dot" data-s="'+X(c.severity)+'"></span></td>'+T+' mono t3 f12">'+X(c.id)+'</td>'+T+' t2 nw">'+X(c.date)+' '+X(c.time)+'</td>'+T+' t1 b nw">'+c.icon+' '+X(c.nature)+'</td>';}
+
+function render(){
+if(!D)return;
+const rc=D.recent_calls;
+
+/* header */
+$('hdr-date').textContent=D.date_display;
+$('hdr-updated').textContent='Updated '+D.updated_time;
+const sc=D.open_calls?'active':'ok',
+  st=D.open_calls?D.open_calls+' Active Call'+(D.open_calls>1?'s':''):'No Active Calls';
+$('hdr-status').className='status f12 b '+sc;
+$('hdr-status').innerHTML='<span class="pulse"></span> '+X(st);
+
+/* overview stats */
+$('ov-stats').innerHTML=
+  S('grn','Open Calls',D.open_calls,X(D.open_calls?'Active dispatch':'All clear'))+
+  S('blu','On Duty',D.unique_crew_count,X(D.platoon))+
+  S('amb','Recent Calls',rc.length,X(D.neris_count+' submitted to NERIS'))+
+  S('pur','Duty Officer',D.chief_officer||'\u2014','Chief Officer');
+
+/* overview crew */
+$('ov-crew-hdr').textContent='On Duty \u2014 '+D.platoon;
+$('ov-crew-range').textContent=D.crew_date_range;
+$('ov-crew').innerHTML=D.crew.length?D.crew.map(c=>
+  '<div class="orow"><div><div class="f13 b t2">'+X(c.name)+'</div><div class="f11 t4 mt2">'+X(c.position)+'</div></div><span class="bdg">'+X(c.section)+'</span></div>'
+).join(''):'<div class="empty">No crew data available.</div>';
+
+/* overview calls (top 5) */
+const top5=rc.slice(0,5);
+$('ov-calls-count').textContent=top5.length+' calls';
+$('ov-calls').innerHTML=top5.length?top5.map(c=>
+  '<div class="call" data-s="'+X(c.severity)+'"><div class="fx-s"><div class="fx gap10">'+
+  '<span class="f20 lh1">'+c.icon+'</span><div><div class="f13 b t2">'+X(c.nature)+'</div>'+
+  '<div class="f12 t3 mt2">'+X(c.address)+'</div></div></div>'+
+  '<div class="call-r"><div class="f12 t3 b">'+X(c.date)+'</div><div class="f11 t4">'+X(c.time)+'</div>'+
+  '<div class="f10 t5 mt4 mono">'+X(c.id)+'</div>'+
+  '<div class="mt4">'+(c.has_report?'<span class="f11 grn-t">\u2713 NERIS</span>':'<span class="f11 amb-t">\u26A0 No report</span>')+'</div>'+
+  '</div></div></div>'
+).join(''):'<div class="empty">No recent calls.</div>';
+
+/* calls tab */
+$('cl-count').textContent=rc.length+' calls';
+$('cl-tbody').innerHTML=rc.map(c=>R(c)+T+' t3">'+X(c.address)+'</td></tr>').join('');
+
+/* crew tab — shared row builder */
+function CW(c){
+  let ct='';
+  if(c.email)ct+='<a class="clink" href="mailto:'+X(c.email)+'">email</a>';
+  if(c.mobile)ct+='<a class="clink" href="tel:'+X(c.mobile)+'">mobile</a>';
+  return '<div class="crow"><div class="fx" style="align-items:center;gap:8px;flex-wrap:wrap">'+
+    '<span class="f13 b t2">'+X(c.name)+'</span>'+
+    '<span class="bdg" data-p="'+X(c.position)+'">'+X(c.position)+'</span>'+
+    (ct?'<span>'+ct+'</span>':'')+
+    '</div><span class="f12 t4 mono">'+X(c.shift)+'</span></div>';
+}
+function SEC(secs){
+  return secs.length?secs.map(s=>
+    '<div class="sechdr f11 t4 b up">'+X(s.label)+'</div>'+s.members.map(CW).join('')
+  ).join(''):'<div class="empty">No crew data available.</div>';
+}
+$('cr-hdr').textContent=D.platoon+' \u2014 '+D.crew_date_range;
+$('cr-shift').className='bdg';
+$('cr-shift').textContent=D.shift_until?'until '+D.shift_until:'On duty';
+$('cr-sections').innerHTML=SEC(D.sections);
+/* upcoming crew */
+if(D.upcoming_sections&&D.upcoming_sections.length){
+  $('cr-upcoming-pnl').hidden=false;
+  $('cr-up-hdr').textContent='Upcoming \u2014 '+(D.upcoming_platoon||'')+' '+D.upcoming_date_range;
+  $('cr-up-badge').textContent=D.upcoming_shift_starts?'starting at '+D.upcoming_shift_starts:D.upcoming_crew.length+' crew';
+  $('cr-up-sections').innerHTML=SEC(D.upcoming_sections);
+}else{$('cr-upcoming-pnl').hidden=true;}
+
+/* reporting tab */
+$('rp-stats').innerHTML=
+  S('blu','In Progress',D.local_reports,'Drafts &amp; reviews')+
+  S('amb','Missing Reports',D.missing_reports,'No incident report yet')+
+  S('grn','In NERIS',D.neris_count,'Submitted to NERIS');
+$('rp-badge').textContent=rc.length+' incidents';
+$('rp-tbody').innerHTML=rc.map(c=>{
+  const nid=c.neris_id?'<div class="f10 t4 mono mt2">'+X(c.neris_id)+'</div>':'';
+  const st=c.has_report?'<span class="f11 grn-t b">\u2713 '+X(c.report_status)+'</span>'+nid:'<span class="f11 amb-t">\u26A0 Missing</span>';
+  return R(c)+T+'">'+st+'</td>'+T+'"><div><button class="rbtn'+(c.has_report?' n':'')+'" type="button">'+X(c.report_label)+'</button>'+
+    '<div class="rhint" hidden>Ask Claude: <strong class="'+(c.has_report?'blu-t':'amb-t')+'">'+X(c.report_prompt)+'</strong></div></div></td></tr>';
+}).join('');
+
+/* help tab */
+$('hp-list').innerHTML=[
+  ['refresh','Refresh dashboard'],
+  ['Start a report for 26-XXXXXX','Create incident report'],
+  ['Import NERIS data for 26-XXXXXX','Pull existing NERIS submission into a draft'],
+  ['Show me call 26-XXXXXX','Get dispatch call details'],
+  ['Who was on duty Jan 15?','Look up crew for any date'],
+  ['List incidents','Show draft/in-progress reports'],
+  ['Submit incident for [ID]','Submit to NERIS'],
+  ['Search calls from Jan 1 to Jan 31','Search dispatch archive'],
+  ['Show open calls','Check active calls']
+].map(([c,d])=>'<div class="help-row"><div class="help-lbl"><code class="help-cmd">'+X(c)+'</code></div><div class="f12 t3 lh15">'+X(d)+'</div></div>').join('');
+
+/* report action button toggle (re-binds each render since elements are recreated) */
+Q('.rbtn').forEach(b=>b.addEventListener('click',()=>{
+  const h=b.nextElementSibling;h.hidden=!h.hidden;
+}));
+}
+
+async function refresh(){
+try{
+  const r=await fetch('/dashboard/data');
+  if(r.ok){D=await r.json();render();}
+  else if(r.status===401)location.reload();
+}catch(e){}
+}
+
+if(!D)document.body.innerHTML='<p style="color:#fff;padding:40px">No data</p>';
+else{
+render();
+/* tab switching (bound once — tabs are static HTML) */
+Q('.tab').forEach(t=>t.addEventListener('click',()=>{
+  Q('.tab').forEach(b=>b.classList.remove('on'));
+  t.classList.add('on');
+  Q('[id^="tab-"]').forEach(p=>p.hidden=true);
+  document.getElementById('tab-'+t.dataset.tab).hidden=false;
+}));
+setInterval(refresh,3600000);
+}
+</script>

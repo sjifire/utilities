@@ -9,10 +9,15 @@ Report status is cross-referenced from two sources:
 """
 
 import asyncio
+import json
 import logging
-from datetime import UTC, datetime
+import os
+import re
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
+from sjifire.core.config import get_org_config
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.dispatch.store import DispatchStore
 from sjifire.mcp.incidents import tools as incident_tools
@@ -26,43 +31,476 @@ _SRC_DOCS = Path(__file__).resolve().parents[3] / "docs"
 _APP_DOCS = Path("/app/docs")
 _DOCS_DIR = _SRC_DOCS if _SRC_DOCS.is_dir() else _APP_DOCS
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-def _read_doc(filename: str) -> str:
-    """Read a doc file, trying the docs dir then neris/ subdirectory."""
-    for subdir in ("", "neris"):
-        path = _DOCS_DIR / subdir / filename if subdir else _DOCS_DIR / filename
-        if path.exists():
-            return path.read_text()
-    return ""
+
+def _local_tz() -> ZoneInfo:
+    return ZoneInfo(get_org_config().timezone)
+
+
+def _server_url() -> str:
+    org = get_org_config()
+    return os.getenv("MCP_SERVER_URL", f"https://mcp.{org.domain}")
+
+
+def _get_severity(nature: str) -> str:
+    """Map call nature to severity level for display styling."""
+    n = nature.upper()
+    if "CPR" in n or "ALS" in n or "ACCIDENT" in n:
+        return "high"
+    if "FIRE" in n and "ALARM" not in n:
+        return "medium"
+    return "low"
+
+
+def _get_icon(nature: str) -> str:
+    """Map call nature to an emoji icon."""
+    if "CPR" in nature or "ALS" in nature:
+        return "\U0001f691"
+    if "Accident" in nature:
+        return "\U0001f697"
+    if "Structure" in nature:
+        return "\U0001f525"
+    if "Chimney" in nature:
+        return "\U0001f3e0"
+    if "Alarm" in nature:
+        return "\U0001f514"
+    if "Vehicle" in nature:
+        return "\U0001f692"
+    if "Animal" in nature:
+        return "\U0001f43e"
+    if "Burn" in nature:
+        return "\U0001f50d"
+    return "\U0001f4df"
+
+
+_SECTION_ORDER = ["S31", "Chief Officer", "FB31", "Support"]
+_SECTION_LABELS = {
+    "S31": "Station 31",
+    "Chief Officer": "Chief Officer",
+    "FB31": "Fireboat 31 Standby",
+    "Support": "Support Standby",
+}
+
+
+# ---------------------------------------------------------------------------
+# Template rendering
+# ---------------------------------------------------------------------------
+
+
+def _build_crew_list(
+    raw_crew: list[dict],
+    contact_lookup: dict[str, dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Build crew list and grouped sections from raw schedule data.
+
+    Returns (crew, sections) where crew is a flat list of member dicts
+    and sections is a list of {"key", "label", "members"} groups.
+    """
+    contacts = contact_lookup or {}
+    crew = []
+    for c in raw_crew:
+        contact = contacts.get(c["name"].lower(), {})
+        crew.append(
+            {
+                "name": c["name"],
+                "position": c["position"],
+                "section": c["section"],
+                "shift": f"{c.get('start_time', '')}-{c.get('end_time', '')}",
+                "email": contact.get("email", ""),
+                "mobile": contact.get("mobile", ""),
+            }
+        )
+
+    # Group by section (preserve order)
+    section_members: dict[str, list] = {}
+    seen_sections: list[str] = []
+    for c in crew:
+        sec = c["section"]
+        if sec not in section_members:
+            section_members[sec] = []
+            seen_sections.append(sec)
+        section_members[sec].append(c)
+
+    sections = [
+        {"key": k, "label": _SECTION_LABELS.get(k, k), "members": section_members[k]}
+        for k in _SECTION_ORDER
+        if k in section_members
+    ]
+    sections.extend(
+        {"key": k, "label": k, "members": section_members[k]}
+        for k in seen_sections
+        if k not in _SECTION_ORDER
+    )
+
+    return crew, sections
+
+
+def _build_template_context(
+    dashboard_data: dict,
+    incidents_data: dict,
+    *,
+    upcoming: dict | None = None,
+    contacts: dict[str, dict] | None = None,
+) -> dict:
+    """Transform raw API data into template variables."""
+    # Parse timestamp and convert to Pacific
+    ts_str = dashboard_data.get("timestamp", "")
+    try:
+        ts = datetime.fromisoformat(ts_str).astimezone(_local_tz())
+    except (ValueError, TypeError):
+        ts = datetime.now(_local_tz())
+
+    date_display = f"{ts.strftime('%A')}, {ts.strftime('%B')} {ts.day}, {ts.year}"
+    hour = ts.hour % 12 or 12
+    updated_time = f"{hour}:{ts.strftime('%M')} {'AM' if ts.hour < 12 else 'PM'}"
+    is_business_hours = 8 <= ts.hour < 18
+
+    # User info
+    user = dashboard_data.get("user", {})
+
+    # On-duty crew
+    on_duty = dashboard_data.get("on_duty", {})
+    platoon = on_duty.get("platoon", "")
+    raw_current_crew = on_duty.get("crew", [])
+    crew, sections = _build_crew_list(raw_current_crew, contacts)
+
+    unique_crew_count = len({c["name"] for c in crew})
+
+    # Shift end time for "until HH:MM" badge
+    end_times = [c.get("end_time", "") for c in raw_current_crew if c.get("end_time")]
+    shift_until = max(set(end_times), key=end_times.count).replace(":", "") if end_times else ""
+
+    # Chief officer last name
+    chief_officer = ""
+    for c in crew:
+        if c["section"] == "Chief Officer":
+            parts = c["name"].split()
+            chief_officer = parts[-1] if parts else ""
+            break
+
+    # Recent calls — separate dispatch calls from NERIS-only entries.
+    # get_dashboard() appends unmatched NERIS reports (address=None) to
+    # the dispatch calls list; we filter them out so stats and tables
+    # only reflect actual dispatch activity.
+    raw_calls = dashboard_data.get("recent_calls", [])
+    if isinstance(raw_calls, dict):
+        raw_calls = []  # error case
+    recent_calls = []
+    open_calls = 0
+    neris_count = 0
+
+    for call in raw_calls:
+        # Skip NERIS-only entries (no matching dispatch call)
+        if call.get("address") is None:
+            continue
+
+        nature = call.get("nature", "")
+        severity = _get_severity(nature)
+        icon = _get_icon(nature)
+
+        # Parse date/time and convert to Pacific
+        date_str = call.get("date")
+        call_date = ""
+        call_time = ""
+        if date_str:
+            try:
+                dt = datetime.fromisoformat(date_str)
+                if dt.tzinfo:
+                    dt = dt.astimezone(_local_tz())
+                call_date = f"{dt.strftime('%b')} {dt.day}"
+                call_time = dt.strftime("%H:%M")
+            except (ValueError, TypeError):
+                call_date = str(date_str)
+
+        report = call.get("report")
+        has_report = report is not None
+        if has_report:
+            neris_count += 1
+        if not call.get("is_completed", True):
+            open_calls += 1
+
+        dispatch_id = call.get("dispatch_id", "")
+        neris_id = report.get("neris_id", "") if report else ""
+        recent_calls.append(
+            {
+                "id": dispatch_id,
+                "nature": nature,
+                "address": call.get("address") or "",
+                "date": call_date,
+                "time": call_time,
+                "severity": severity,
+                "icon": icon,
+                "has_report": has_report,
+                "neris_id": neris_id,
+                "report_label": "View NERIS Record" if has_report else "Start Report",
+                "report_prompt": (
+                    f"Show NERIS record {neris_id}"
+                    if neris_id
+                    else f"Start a report for {dispatch_id}"
+                ),
+                "report_status": report.get("status", "").replace("_", " ") if report else "",
+            }
+        )
+
+    # Local reports count
+    incidents = incidents_data.get("incidents", [])
+    local_reports = len(incidents)
+
+    # Crew date range (e.g., "Feb 12-13")
+    crew_date = on_duty.get("date", "")
+    crew_date_range = ""
+    if crew_date:
+        try:
+            d = datetime.strptime(crew_date, "%Y-%m-%d")
+            next_d = d + timedelta(days=1)
+            crew_date_range = f"{d.strftime('%b')} {d.day}-{next_d.day}"
+        except ValueError:
+            pass
+
+    missing_reports = len(recent_calls) - neris_count - local_reports
+
+    # Upcoming crew (browser-only enrichment)
+    upcoming_platoon = ""
+    upcoming_crew: list[dict] = []
+    upcoming_sections: list[dict] = []
+    upcoming_date_range = ""
+    upcoming_shift_starts = ""
+    if upcoming and isinstance(upcoming, dict) and "error" not in upcoming:
+        upcoming_platoon = upcoming.get("platoon", "")
+        raw_upcoming_crew = upcoming.get("crew", [])
+        upcoming_crew, upcoming_sections = _build_crew_list(raw_upcoming_crew, contacts)
+        up_date = upcoming.get("date", "")
+        if up_date:
+            try:
+                d = datetime.strptime(up_date, "%Y-%m-%d")
+                next_d = d + timedelta(days=1)
+                upcoming_date_range = f"{d.strftime('%b')} {d.day}-{next_d.day}"
+            except ValueError:
+                pass
+        start_times = [c.get("start_time", "") for c in raw_upcoming_crew if c.get("start_time")]
+        upcoming_shift_starts = (
+            max(set(start_times), key=start_times.count).replace(":", "") if start_times else ""
+        )
+
+    return {
+        "date_display": date_display,
+        "updated_time": updated_time,
+        "is_business_hours": is_business_hours,
+        "user_name": user.get("name", ""),
+        "platoon": platoon,
+        "crew": crew,
+        "unique_crew_count": unique_crew_count,
+        "chief_officer": chief_officer,
+        "open_calls": open_calls,
+        "recent_calls": recent_calls,
+        "neris_count": neris_count,
+        "local_reports": local_reports,
+        "missing_reports": max(missing_reports, 0),
+        "sections": sections,
+        "crew_date_range": crew_date_range,
+        "shift_until": shift_until,
+        "upcoming_platoon": upcoming_platoon,
+        "upcoming_crew": upcoming_crew,
+        "upcoming_sections": upcoming_sections,
+        "upcoming_date_range": upcoming_date_range,
+        "upcoming_shift_starts": upcoming_shift_starts,
+    }
+
+
+_PAGE_WRAP = (
+    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+    '<meta name="viewport" content="width=device-width,initial-scale=1">'
+    "<title>SJIF&amp;R Dashboard</title></head><body>{}</body></html>"
+)
+
+
+def _minify_html(html: str) -> str:
+    """Strip whitespace from HTML to reduce token count.
+
+    Removes HTML comments, strips leading/trailing whitespace per line,
+    drops blank lines, and joins everything together.  The source template
+    stays readable; this runs once at load time.
+    """
+    html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
+    lines = (line.strip() for line in html.splitlines())
+    return "".join(line for line in lines if line)
+
+
+_template_cache: str | None = None
+
+
+def _load_template() -> str:
+    """Load and minify the dashboard template (cached after first call)."""
+    global _template_cache
+    if _template_cache is None:
+        raw = (_DOCS_DIR / "dashboard-template.html").read_text()
+        _template_cache = _minify_html(raw)
+    return _template_cache
+
+
+def _inject_data(template: str, ctx: dict) -> str:
+    """Replace the ``/*DATA*/null`` placeholder with serialised JSON."""
+    data_json = json.dumps(ctx, separators=(",", ":"), ensure_ascii=False)
+    data_json = data_json.replace("</", "<\\/")  # prevent </script> injection
+    return template.replace("/*DATA*/null", data_json)
+
+
+def _build_browser_page(ctx: dict) -> str:
+    """Render the full visual dashboard page for the browser endpoint."""
+    return _PAGE_WRAP.format(_inject_data(_load_template(), ctx))
+
+
+def _build_summary(ctx: dict) -> str:
+    """Build a concise markdown summary for Claude to present as text."""
+    lines: list[str] = []
+
+    # Header
+    lines.append(f"**{ctx['date_display']}** — Updated {ctx['updated_time']}")
+
+    # Status line
+    parts: list[str] = []
+    oc = ctx["open_calls"]
+    if oc:
+        parts.append(f"{oc} Active Call{'s' if oc > 1 else ''}")
+    else:
+        parts.append("No Active Calls")
+    parts.append(f"{ctx['unique_crew_count']} On Duty ({ctx['platoon']})")
+    if ctx["chief_officer"]:
+        parts.append(f"Chief: {ctx['chief_officer']}")
+    lines.append(" | ".join(parts))
+    lines.append("")
+
+    # Recent calls
+    rc = ctx["recent_calls"]
+    missing = ctx["missing_reports"]
+    hdr = f"**Recent Calls** — {len(rc)} calls"
+    if missing:
+        hdr += f", {missing} missing report{'s' if missing != 1 else ''}"
+    lines.append(hdr)
+
+    for c in rc[:8]:
+        neris_id = c.get("neris_id", "")
+        fallback = "NERIS" if c["has_report"] else "No report"
+        status = f"NERIS `{neris_id}`" if neris_id else fallback
+        lines.append(
+            f"- {c['icon']} **{c['id']}** {c['nature']} — "
+            f"{c['address']} ({c['date']} {c['time']}) *{status}*"
+        )
+    if len(rc) > 8:
+        lines.append(f"- *...and {len(rc) - 8} more*")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# MCP tools
+# ---------------------------------------------------------------------------
 
 
 async def start_session() -> dict:
-    """Start an operations dashboard session with live data.
+    """Start an operations dashboard session.
 
     Call this when a user asks for the dashboard, status board, operations
-    overview, or wants to see what's going on. Returns live data, a React
-    component template, and rendering instructions so you can generate an
-    interactive dashboard artifact in one step.
+    overview, or wants to see what's going on.  Returns a text summary
+    for fast display and a browser URL for the full visual dashboard.
     """
+    t0 = datetime.now(UTC)
+
     dashboard_data, incidents_data = await asyncio.gather(
         get_dashboard(),
         incident_tools.list_incidents(),
     )
 
-    # Load instructions and template from docs at call time
-    project_instructions = _read_doc("claude-project-instructions.md")
-    dashboard_instructions = _read_doc("mcp-start-session.md")
-    template = _read_doc("dashboard-prototype.jsx") or (
-        "// Dashboard prototype not found — generate from scratch."
-    )
+    ctx = _build_template_context(dashboard_data, incidents_data)
+    summary = _build_summary(ctx)
+
+    elapsed = (datetime.now(UTC) - t0).total_seconds()
+    logger.info("start_session completed in %.1fs", elapsed)
+
+    instructions = (_DOCS_DIR / "mcp-start-session.md").read_text().strip()
 
     return {
-        "project_instructions": project_instructions,
-        "dashboard_instructions": dashboard_instructions,
-        "template": template,
-        "dashboard": dashboard_data,
-        "incidents": incidents_data,
+        "summary": summary,
+        "dashboard_url": f"{_server_url()}/dashboard",
+        "instructions": instructions,
     }
+
+
+async def refresh_dashboard() -> dict:
+    """Refresh dashboard data.
+
+    Call this when the user says "refresh" or "update".  Returns a fresh
+    text summary and browser URL.  Faster than ``start_session`` because
+    it skips the instructions payload.
+    """
+    t0 = datetime.now(UTC)
+
+    dashboard_data, incidents_data = await asyncio.gather(
+        get_dashboard(),
+        incident_tools.list_incidents(),
+    )
+
+    ctx = _build_template_context(dashboard_data, incidents_data)
+    summary = _build_summary(ctx)
+
+    elapsed = (datetime.now(UTC) - t0).total_seconds()
+    logger.info("refresh_dashboard completed in %.1fs", elapsed)
+
+    return {
+        "summary": summary,
+        "dashboard_url": f"{_server_url()}/dashboard",
+    }
+
+
+async def render_for_browser() -> str:
+    """Fetch all data and render the full HTML dashboard for the browser.
+
+    Includes upcoming crew and personnel contacts (browser-only enrichments).
+    These are optional — failures logged but don't break the page.
+    """
+    dashboard_data, incidents_data, upcoming, contacts = await asyncio.gather(
+        get_dashboard(),
+        incident_tools.list_incidents(),
+        _fetch_upcoming_schedule(),
+        _fetch_personnel_contacts(),
+        return_exceptions=True,
+    )
+    if isinstance(upcoming, BaseException):
+        logger.warning("Upcoming schedule unavailable: %s", upcoming)
+        upcoming = None
+    if isinstance(contacts, BaseException):
+        logger.warning("Personnel contacts unavailable: %s", contacts)
+        contacts = None
+    ctx = _build_template_context(
+        dashboard_data, incidents_data, upcoming=upcoming, contacts=contacts
+    )
+    return _build_browser_page(ctx)
+
+
+async def get_dashboard_data() -> dict:
+    """Fetch all data and return template context for client-side refresh.
+
+    Includes upcoming crew and personnel contacts for the browser dashboard.
+    """
+    dashboard_data, incidents_data, upcoming, contacts = await asyncio.gather(
+        get_dashboard(),
+        incident_tools.list_incidents(),
+        _fetch_upcoming_schedule(),
+        _fetch_personnel_contacts(),
+        return_exceptions=True,
+    )
+    if isinstance(upcoming, BaseException):
+        logger.warning("Upcoming schedule unavailable: %s", upcoming)
+        upcoming = None
+    if isinstance(contacts, BaseException):
+        logger.warning("Personnel contacts unavailable: %s", contacts)
+        contacts = None
+    return _build_template_context(
+        dashboard_data, incidents_data, upcoming=upcoming, contacts=contacts
+    )
 
 
 def _normalize_incident_number(number: str) -> str:
@@ -87,6 +525,7 @@ async def get_dashboard() -> dict:
         and ``call_count`` keys.
     """
     user = get_current_user()
+    t0 = datetime.now(UTC)
 
     # Fetch all four data sources in parallel.  return_exceptions=True
     # so a single failure doesn't block the others.
@@ -96,6 +535,18 @@ async def get_dashboard() -> dict:
         _fetch_incidents(user.email, user.is_officer),
         _fetch_neris_reports(),
         return_exceptions=True,
+    )
+
+    elapsed = (datetime.now(UTC) - t0).total_seconds()
+    labels = ["dispatch", "schedule", "incidents", "neris"]
+    statuses = [
+        "err" if isinstance(r, BaseException) else "ok"
+        for r in (calls_result, schedule_result, incidents_result, neris_result)
+    ]
+    logger.info(
+        "get_dashboard fetched in %.1fs (%s)",
+        elapsed,
+        ", ".join(f"{name}={s}" for name, s in zip(labels, statuses, strict=True)),
     )
 
     result: dict = {
@@ -141,6 +592,7 @@ async def get_dashboard() -> dict:
                 "date": call.time_reported.isoformat() if call.time_reported else None,
                 "nature": call.nature,
                 "address": call.address,
+                "is_completed": call.is_completed,
             }
             # Cross-reference: local draft takes priority, then NERIS
             normalized = _normalize_incident_number(call.long_term_call_id)
@@ -161,12 +613,13 @@ async def get_dashboard() -> dict:
                 "nature": nr.get("incident_type", ""),
                 "address": None,
                 "report": nr,
+                "is_completed": True,
             }
             for nr in neris_lookup.values()
         )
 
         result["recent_calls"] = recent_calls
-        result["call_count"] = len(recent_calls)
+        result["call_count"] = len(calls_result)  # dispatch calls only
 
     return result
 
@@ -183,7 +636,7 @@ async def _fetch_schedule():
 
 
 async def _fetch_incidents(user_email: str, is_officer: bool) -> dict[str, dict]:
-    """Fetch non-submitted incidents and build dispatch_id → report info lookup."""
+    """Fetch non-submitted incidents and build dispatch_id -> report info lookup."""
     async with IncidentStore() as store:
         if is_officer:
             incidents = await store.list_by_status(exclude_status="submitted", max_items=50)
@@ -245,3 +698,49 @@ def _list_neris_reports() -> dict:
 async def _fetch_neris_reports() -> dict:
     """Fetch NERIS reports via thread pool (blocking API)."""
     return await asyncio.to_thread(_list_neris_reports)
+
+
+async def _fetch_upcoming_schedule() -> dict:
+    """Fetch tomorrow's on-duty crew via the schedule tool."""
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    return await schedule_tools.get_on_duty_crew(target_date=tomorrow)
+
+
+async def _fetch_personnel_contacts() -> dict[str, dict]:
+    """Fetch personnel with contact info from Graph API.
+
+    Returns dict mapping lowercased display name to contact dict
+    with ``email`` and ``mobile`` fields.
+    """
+    from kiota_abstractions.base_request_configuration import RequestConfiguration
+    from msgraph.generated.users.users_request_builder import UsersRequestBuilder
+
+    from sjifire.core.msgraph_client import get_graph_client
+
+    client = get_graph_client()
+    query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
+        select=["displayName", "mail", "userPrincipalName", "mobilePhone"],
+        filter="accountEnabled eq true",
+        top=100,
+    )
+    config = RequestConfiguration(query_parameters=query_params)
+    result = await client.users.get(request_configuration=config)
+
+    contacts: dict[str, dict] = {}
+
+    def collect(page):
+        if not page or not page.value:
+            return
+        for u in page.value:
+            name = u.display_name or ""
+            email = (u.mail or u.user_principal_name or "").lower()
+            mobile = u.mobile_phone or ""
+            if name and email:
+                contacts[name.lower()] = {"email": email, "mobile": mobile}
+
+    collect(result)
+    while result and result.odata_next_link:
+        result = await client.users.with_url(result.odata_next_link).get()
+        collect(result)
+
+    return contacts

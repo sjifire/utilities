@@ -111,9 +111,11 @@ src/sjifire/
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
 ├── mcp/                   # Remote MCP server for Claude.ai
 │   ├── server.py          # FastMCP app, auth config, tool registration
-│   ├── auth.py            # Entra JWT validation, UserContext, RBAC
+│   ├── auth.py            # Entra JWT validation, EasyAuth header parsing, UserContext, RBAC
 │   ├── oauth_provider.py  # OAuth AS proxy: Claude.ai ↔ Entra ID
 │   ├── token_store.py     # Two-layer OAuth token store (TTLCache + Cosmos DB)
+│   ├── dashboard.py       # Operations dashboard (client-side rendered) + session bootstrap
+│   ├── prompts.py         # MCP prompts and resources (project instructions, NERIS values)
 │   ├── dispatch/          # iSpyFire dispatch call lookup + archival
 │   │   ├── models.py      # DispatchCallDocument (Pydantic)
 │   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
@@ -142,12 +144,24 @@ Remote MCP server at `https://mcp.sjifire.org/mcp` providing fire district tools
 - Officer group (`MCP Incident Officers`) gates: submit incidents, view all incidents
 - All other tools (dispatch, schedule, personnel) are open to any authenticated user
 
-**MCP tools registered** (13 tools):
+**MCP tools registered** (18 tools):
+- `start_session` (text summary + browser dashboard URL + session bootstrap)
+- `refresh_dashboard` (refreshes data, returns updated summary + new URL)
+- `get_dashboard` (raw data: on-duty crew, recent calls, report status)
 - `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`
+- `list_neris_incidents`, `get_neris_incident` (NERIS federal reporting records)
 - `get_personnel`
 - `get_on_duty_crew` (hides admin by default; `include_admin=True` to show all)
 - `list_dispatch_calls`, `get_dispatch_call`, `get_open_dispatch_calls`, `search_dispatch_calls`
 - `list_neris_value_sets`, `get_neris_values`
+
+**Dashboard**: `start_session` returns a markdown summary (fast text display) plus a link to `/dashboard` for the full visual dashboard. `refresh_dashboard` returns fresh data without the instructions payload. The browser dashboard at `/dashboard` is authenticated via Azure Container Apps EasyAuth (Entra ID SSO) and auto-refreshes every hour. The visual dashboard is rendered client-side from `docs/dashboard-template.html` with injected JSON data.
+
+**MCP prompts**: `operations_dashboard`, `incident_reporting`, `shift_briefing` — selectable workflows in Claude.ai.
+
+**MCP resources**: `sjifire://project-instructions` (from `docs/neris/incident-report-instructions.md`), `sjifire://neris-values` (from `docs/neris/value-sets-reference.md`).
+
+**Session instructions**: `docs/mcp-start-session.md` — loaded by `start_session` tool, tells Claude how to present the dashboard and what actions to offer.
 
 **Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
 
@@ -283,7 +297,7 @@ uv run ruff format --check .
 
 ## Configuration Files
 
-- `config/entra_sync.json`: Company name, domain, skip list
+- `config/organization.json`: Company name, domain, service email, timezone, skip list
 - `config/group_mappings.json`: Position-to-group assignments
 - `.env`: Credentials (not committed) - use `./scripts/pull-secrets.sh` to populate
 

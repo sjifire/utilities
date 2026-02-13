@@ -24,6 +24,92 @@ const LIVE_DATA = {
 };
 /* ===== END LIVE DATA ===== */
 
+const CSS = `
+*{box-sizing:border-box;margin:0;padding:0}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+:root{
+  --b1:rgba(255,255,255,.04);--b2:rgba(255,255,255,.06);--b3:rgba(255,255,255,.08);--b4:rgba(255,255,255,.1);
+  --r:#dc2626;--g:#4ade80;--bl:#60a5fa;--am:#fbbf24;--am2:#f59e0b;--pu:#c084fc;--gr:#6b7280;--err:#f87171;
+  --bg1:#162033;--bg2:#1a2744;
+  --t1:#fff;--t2:#e2e8f0;--t3:#94a3b8;--t4:#64748b;--t5:#475569;
+  --blA:rgba(96,165,250,.12);--amA:rgba(245,158,11,.12);--gA:rgba(34,197,94,.15);--rA:rgba(220,38,38,.15);--puA:rgba(192,132,252,.12)
+}
+.root{min-height:100vh;background:#0c1829;font-family:'Segoe UI','Helvetica Neue',sans-serif;color:var(--t2)}
+.t1{color:var(--t1)}.t2{color:var(--t2)}.t3{color:var(--t3)}.t4{color:var(--t4)}.t5{color:var(--t5)}
+.grn-t{color:var(--g)}.amb-t{color:var(--am)}.blu-t{color:var(--bl)}
+.f10{font-size:10px}.f11{font-size:11px}.f12{font-size:12px}.f13{font-size:13px}.f14{font-size:14px}.f20{font-size:20px}.f28{font-size:28px}
+.b{font-weight:600}.bb{font-weight:700}.mono{font-family:monospace}.nw{white-space:nowrap}.lh1{line-height:1}.lh15{line-height:1.5}
+.up{text-transform:uppercase;letter-spacing:.08em}.tar{text-align:right}
+.mt2{margin-top:2px}.mt4{margin-top:4px}.mt6{margin-top:6px}.mb8{margin-bottom:8px}.mb16{margin-bottom:16px}.mb24{margin-bottom:24px}.mt20{margin-top:20px}
+.fx{display:flex}.fx-s{display:flex;justify-content:space-between;align-items:flex-start}.gap10{gap:10px}
+.wrap{max-width:1200px;margin:0 auto}
+.g4,.g3,.g-ov{display:grid;gap:16px}
+.g4{grid-template-columns:repeat(4,1fr)}.g3{grid-template-columns:repeat(3,1fr)}.g-ov{grid-template-columns:1fr 1.6fr;gap:20px}
+.hdr{background:linear-gradient(135deg,#0f2240,#1a3a5c);border-bottom:3px solid var(--r)}
+.hdr-inner{padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.logo{letter-spacing:.02em;line-height:1.2}
+.status{display:inline-flex;align-items:center;gap:6px;margin-top:4px;border-radius:20px;padding:3px 12px;font-size:12px;font-weight:600;border:1px solid;
+  &.ok{background:var(--gA);border-color:rgba(34,197,94,.3);color:var(--g);& .pulse{background:var(--g)}}
+  &.active{background:var(--rA);border-color:rgba(220,38,38,.3);color:var(--err);& .pulse{background:var(--err)}}
+}
+.pulse{width:7px;height:7px;border-radius:50%;display:inline-block;animation:pulse 2s ease-in-out infinite}
+.updated-row{margin-top:6px;display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.refresh-hint{font-size:11px;background:var(--blA);color:var(--bl);padding:2px 10px;border-radius:12px;font-weight:600}
+.nav{background:#111d32;border-bottom:1px solid var(--b2);padding:0 24px}
+.tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--t4);padding:12px 20px;font-size:13px;font-weight:600;cursor:pointer;text-transform:uppercase;letter-spacing:.06em;
+  &.on{border-bottom-color:var(--r);color:var(--t1)}
+}
+.pnl{background:var(--bg1);border:1px solid var(--b2);border-radius:8px;overflow:hidden}
+.phdr{padding:14px 18px;border-bottom:1px solid var(--b2);display:flex;justify-content:space-between;align-items:center}
+.main{padding:24px}
+.stat{background:linear-gradient(135deg,var(--bg1),var(--bg2));border:1px solid var(--b2);border-radius:8px;padding:20px 18px;border-left:3px solid;
+  &[data-a="grn"]{border-left-color:var(--g)}
+  &[data-a="blu"]{border-left-color:var(--bl)}
+  &[data-a="amb"]{border-left-color:var(--am2)}
+  &[data-a="pur"]{border-left-color:var(--pu)}
+}
+.bdg{font-size:11px;padding:3px 10px;border-radius:4px;font-weight:600;background:var(--blA);color:var(--bl);
+  &.amb{background:var(--amA);color:var(--am)}
+  &.grn{background:var(--gA);color:var(--g)}
+  &[data-p="Captain"]{background:var(--rA);color:var(--err)}
+  &[data-p="Lieutenant"]{background:var(--amA);color:var(--am)}
+  &[data-p="Chief"]{background:var(--puA);color:var(--pu)}
+}
+.orow{padding:12px 18px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center;&:last-child{border-bottom:none}}
+.call{padding:14px 18px;border-left:3px solid;border-bottom:1px solid var(--b1);
+  &:last-child{border-bottom:none}
+  &[data-s="high"]{border-left-color:var(--r);background:rgba(220,38,38,.1)}
+  &[data-s="medium"]{border-left-color:var(--am2);background:rgba(245,158,11,.08)}
+  &[data-s="low"]{border-left-color:var(--gr);background:rgba(107,114,128,.08)}
+}
+.call-r{text-align:right;flex-shrink:0}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;
+  &[data-s="high"]{background:var(--r)}
+  &[data-s="medium"]{background:var(--am2)}
+  &[data-s="low"]{background:var(--gr)}
+}
+.tbl-wrap{overflow-x:auto}
+.tbl{width:100%;border-collapse:collapse;font-size:13px;
+  & thead tr{border-bottom:1px solid var(--b3)}
+  & tbody tr{border-bottom:1px solid var(--b1);&:nth-child(even){background:rgba(255,255,255,.015)}}
+}
+.th{padding:10px 14px;text-align:left;font-size:11px;color:var(--t4);text-transform:uppercase;letter-spacing:.06em;font-weight:600;white-space:nowrap}
+.td{padding:12px 14px}.dot-td{width:30px}
+.sechdr{padding:8px 18px;background:rgba(255,255,255,.02);border-bottom:1px solid var(--b1);font-size:11px;color:var(--t4);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+.crow{padding:14px 18px;border-bottom:1px solid var(--b1);display:grid;grid-template-columns:2fr 1.2fr 1fr;align-items:center}
+.empty{padding:32px 18px;text-align:center;color:var(--t5);font-size:13px}
+.rbtn{font-size:11px;padding:5px 12px;border-radius:4px;font-weight:600;cursor:pointer;background:rgba(245,158,11,.15);color:var(--am);border:1px solid rgba(245,158,11,.3);
+  &.n{background:rgba(96,165,250,.15);color:var(--bl);border-color:rgba(96,165,250,.3)}
+}
+.rhint{margin-top:6px;font-size:11px;color:var(--t3);background:rgba(255,255,255,.05);border:1px solid var(--b4);border-radius:4px;padding:6px 10px}
+.help-row{padding:14px 18px;border-top:1px solid var(--b1);display:flex;gap:16px;align-items:flex-start}
+.help-lbl{flex-shrink:0;min-width:280px}
+.help-cmd{font-size:12px;background:rgba(96,165,250,.1);color:var(--bl);padding:4px 10px;border-radius:4px;font-family:'SF Mono','Fira Code',monospace;font-weight:600}
+.help-intro{padding:16px 18px 8px}
+.help-foot{padding:16px 18px;border-top:1px solid var(--b2)}
+.footer{padding:16px 24px 32px;display:flex;justify-content:space-between;font-size:11px;color:var(--t5)}
+`;
+
 const D = LIVE_DATA;
 const uniqueCrew = [...new Map(D.crew.map(c=>[c.name,c])).values()];
 const last5 = D.recentCalls.slice(0,5);
@@ -32,11 +118,11 @@ const ic = n=>n.includes("CPR")||n.includes("ALS")?"🚑":n.includes("Accident")
 const SECS = [{key:"S31",label:"Station 31"},{key:"Chief Officer",label:"Chief Officer"},{key:"FB31",label:"Fireboat 31 Standby"},{key:"Support",label:"Support Standby"}];
 const HELP = [["refresh","Refresh dashboard"],["Start a report for 26-XXXXXX","Create incident report"],["Import NERIS report for 26-XXXXXX","Pull NERIS report into draft"],["Show me call 26-XXXXXX","Get dispatch call details"],["Who was on duty Jan 15?","Look up crew for any date"],["List incidents","Show draft/in-progress reports"],["Submit incident for [ID]","Submit to NERIS"],["Search calls from Jan 1 to Jan 31","Search dispatch archive"],["Show open calls","Check active calls"]];
 
-const Bdg = ({text,cls})=><span className={`bdg ${cls||"blu"}`}>{text}</span>;
+const Bdg = ({text,cls})=><span className={`bdg ${cls||""}`}>{text}</span>;
 const Stat = ({label,value,accent,sub})=>(<div className="stat" data-a={accent}><div className="up t4 f11 mb8">{label}</div><div className="bb f28 t1 lh1">{value}</div><div className="f12 t3 mt6">{sub}</div></div>);
 const Panel = ({title,right,children})=>(<div className="pnl"><div className="phdr"><span className="f14 b t1">{title}</span>{right&&<span className="f11 t4">{right}</span>}</div>{children}</div>);
-const CallRow = ({c,i,children})=>(<tr>
-  <td className="td" style={{width:30}}><span className="dot" data-s={c.severity}/></td>
+const CallRow = ({c,children})=>(<tr>
+  <td className="td dot-td"><span className="dot" data-s={c.severity}/></td>
   <td className="td mono t3 f12">{c.id}</td>
   <td className="td t2 nw">{c.date} {c.time}</td>
   <td className="td t1 b nw">{ic(c.nature)} {c.nature}</td>
@@ -60,13 +146,15 @@ export default function Dashboard() {
 
   return (
     <div className="root">
+      <style>{CSS}</style>
+
       <header className="hdr">
         <div className="wrap hdr-inner">
           <div>
-            <div className="bb f20 t1" style={{letterSpacing:"0.02em",lineHeight:1.2}}>SJIF&R Operations Dashboard</div>
+            <div className="bb f20 t1 logo">SJIF&R Operations Dashboard</div>
             <div className="up f11 t3 mt2">San Juan Island Fire & Rescue</div>
           </div>
-          <div style={{textAlign:"right"}}>
+          <div className="tar">
             <div className="f13 t3">Wednesday, February 12, 2026</div>
             <div className={`status ${D.openCalls?"active":"ok"}`}>
               <span className="pulse"/>{D.openCalls?`${D.openCalls} Active Call${D.openCalls>1?"s":""}`:"No Active Calls"}
@@ -85,7 +173,7 @@ export default function Dashboard() {
         </div>
       </nav>
 
-      <main className="wrap" style={{padding:24}}>
+      <main className="wrap main">
 
         {tab==="overview"&&(<div>
           <div className="g4 mb24">
@@ -119,7 +207,7 @@ export default function Dashboard() {
           <Panel title="Dispatch Log" right={`${D.recentCalls.length} calls`}>
             <div className="tbl-wrap"><table className="tbl">
               <thead><tr>{["","ID","Date/Time","Nature","Address","Report","Notes"].map(h=><th key={h} className="th">{h}</th>)}</tr></thead>
-              <tbody>{D.recentCalls.map((c,i)=>(<CallRow key={i} c={c} i={i}>
+              <tbody>{D.recentCalls.map((c,i)=>(<CallRow key={i} c={c}>
                 <td className="td">{c.neris?<span className="f11 grn-t b">✓ NERIS</span>:<span className="f11 amb-t">⚠ Missing</span>}</td>
                 <td className="td t4 f12">{c.note}</td>
               </CallRow>))}</tbody>
@@ -134,7 +222,7 @@ export default function Dashboard() {
               {m.map((c,j)=>(<div key={j} className="crow">
                 <span className="f14 b t2">{c.name}</span>
                 <span className="bdg" data-p={c.position}>{c.position}</span>
-                <span className="f12 t4 mono" style={{textAlign:"right"}}>{c.shift}</span>
+                <span className="f12 t4 mono tar">{c.shift}</span>
               </div>))}
             </div>);})}
           </Panel>
@@ -153,7 +241,7 @@ export default function Dashboard() {
             <Panel title="Calls Needing Reports" right={<Bdg text={`${D.recentCalls.length} calls`} cls="amb"/>}>
               <div className="tbl-wrap"><table className="tbl">
                 <thead><tr>{["","ID","Date","Nature","Address","NERIS","Action"].map(h=><th key={h} className="th">{h}</th>)}</tr></thead>
-                <tbody>{D.recentCalls.map((c,i)=>(<CallRow key={i} c={c} i={i}>
+                <tbody>{D.recentCalls.map((c,i)=>(<CallRow key={i} c={c}>
                   <td className="td">{c.neris?<span className="f11 grn-t">✓ {c.neris.status.replace(/_/g," ")}</span>:<span className="f11 t5">—</span>}</td>
                   <td className="td">{rptBtn(c)}</td>
                 </CallRow>))}</tbody>
@@ -164,81 +252,17 @@ export default function Dashboard() {
 
         {tab==="help"&&(
           <Panel title="Claude Commands" right="Type these in the chat">
-            <div style={{padding:"16px 18px 8px"}}><p className="f13 t3" style={{marginBottom:16,lineHeight:1.5}}>Use these commands to interact with dispatch, crew, and reporting.</p></div>
+            <div className="help-intro"><p className="f13 t3 mb16 lh15">Use these commands to interact with dispatch, crew, and reporting.</p></div>
             {HELP.map(([cmd,desc],i)=>(<div key={i} className="help-row">
-              <div style={{flexShrink:0,minWidth:280}}><code className="help-cmd">{cmd}</code></div>
-              <div className="f12 t3" style={{lineHeight:1.5}}>{desc}</div>
+              <div className="help-lbl"><code className="help-cmd">{cmd}</code></div>
+              <div className="f12 t3 lh15">{desc}</div>
             </div>))}
-            <div className="help-foot"><p className="f12 t5" style={{lineHeight:1.5}}>You can also ask Claude anything in natural language.</p></div>
+            <div className="help-foot"><p className="f12 t5 lh15">You can also ask Claude anything in natural language.</p></div>
           </Panel>
         )}
 
       </main>
       <footer className="wrap footer"><span>San Juan County Fire District 3 · 1011 Mullis Street, Friday Harbor, WA 98250</span><span>© 2026 SJIF&R</span></footer>
-
-      <style>{`
-*{box-sizing:border-box;margin:0;padding:0}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
-.root{min-height:100vh;background:#0c1829;font-family:'Segoe UI','Helvetica Neue',sans-serif;color:#e2e8f0}
-.t1{color:#fff}.t2{color:#e2e8f0}.t3{color:#94a3b8}.t4{color:#64748b}.t5{color:#475569}
-.grn-t{color:#4ade80}.amb-t{color:#fbbf24}.blu-t{color:#60a5fa}
-.f10{font-size:10px}.f11{font-size:11px}.f12{font-size:12px}.f13{font-size:13px}.f14{font-size:14px}.f20{font-size:20px}.f28{font-size:28px}
-.b{font-weight:600}.bb{font-weight:700}.mono{font-family:monospace}.nw{white-space:nowrap}.lh1{line-height:1}
-.up{text-transform:uppercase;letter-spacing:0.08em}
-.mt2{margin-top:2px}.mt4{margin-top:4px}.mt6{margin-top:6px}.mb8{margin-bottom:8px}.mb24{margin-bottom:24px}.mt20{margin-top:20px}
-.fx{display:flex}.fx-s{display:flex;justify-content:space-between;align-items:flex-start}.gap10{gap:10px}
-.wrap{max-width:1200px;margin:0 auto}
-.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.g-ov{display:grid;grid-template-columns:1fr 1.6fr;gap:20px}
-.hdr{background:linear-gradient(135deg,#0f2240,#1a3a5c);border-bottom:3px solid #b91c1c}
-.hdr-inner{padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
-.status{display:inline-flex;align-items:center;gap:6px;margin-top:4px;border-radius:20px;padding:3px 12px;font-size:12px;font-weight:600;border:1px solid}
-.status.ok{background:rgba(34,197,94,0.15);border-color:rgba(34,197,94,0.3);color:#4ade80}
-.status.active{background:rgba(220,38,38,0.15);border-color:rgba(220,38,38,0.3);color:#f87171}
-.pulse{width:7px;height:7px;border-radius:50%;display:inline-block;animation:pulse 2s ease-in-out infinite}
-.status.ok .pulse{background:#4ade80}.status.active .pulse{background:#f87171}
-.updated-row{margin-top:6px;display:flex;align-items:center;justify-content:flex-end;gap:8px}
-.refresh-hint{font-size:11px;background:rgba(96,165,250,0.12);color:#60a5fa;padding:2px 10px;border-radius:12px;font-weight:600}
-.nav{background:#111d32;border-bottom:1px solid rgba(255,255,255,0.06);padding:0 24px}
-.tab{background:none;border:none;border-bottom:2px solid transparent;color:#64748b;padding:12px 20px;font-size:13px;font-weight:600;cursor:pointer;text-transform:uppercase;letter-spacing:0.06em}
-.tab.on{border-bottom-color:#b91c1c;color:#fff}
-.pnl{background:#162033;border:1px solid rgba(255,255,255,0.06);border-radius:8px;overflow:hidden}
-.phdr{padding:14px 18px;border-bottom:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center}
-.stat{background:linear-gradient(135deg,#162033,#1a2744);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:20px 18px;border-left:3px solid}
-.stat[data-a="grn"]{border-left-color:#4ade80}.stat[data-a="blu"]{border-left-color:#60a5fa}.stat[data-a="amb"]{border-left-color:#f59e0b}.stat[data-a="pur"]{border-left-color:#c084fc}
-.bdg{font-size:11px;padding:3px 10px;border-radius:4px;font-weight:600;background:rgba(96,165,250,0.12);color:#60a5fa}
-.bdg.blu{background:rgba(96,165,250,0.12);color:#60a5fa}.bdg.amb{background:rgba(245,158,11,0.12);color:#fbbf24}.bdg.grn{background:rgba(34,197,94,0.15);color:#4ade80}
-.bdg[data-p="Captain"]{background:rgba(220,38,38,0.15);color:#f87171}
-.bdg[data-p="Lieutenant"]{background:rgba(245,158,11,0.12);color:#fbbf24}
-.bdg[data-p="Chief"]{background:rgba(192,132,252,0.12);color:#c084fc}
-.orow{padding:12px 18px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;justify-content:space-between;align-items:center}
-.orow:last-child{border-bottom:none}
-.call{padding:14px 18px;border-left:3px solid;border-bottom:1px solid rgba(255,255,255,0.04)}
-.call:last-child{border-bottom:none}
-.call[data-s="high"]{border-left-color:#dc2626;background:rgba(220,38,38,0.1)}
-.call[data-s="medium"]{border-left-color:#f59e0b;background:rgba(245,158,11,0.08)}
-.call[data-s="low"]{border-left-color:#6b7280;background:rgba(107,114,128,0.08)}
-.call-r{text-align:right;flex-shrink:0}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
-.dot[data-s="high"]{background:#dc2626}.dot[data-s="medium"]{background:#f59e0b}.dot[data-s="low"]{background:#6b7280}
-.tbl-wrap{overflow-x:auto}.tbl{width:100%;border-collapse:collapse;font-size:13px}
-.th{padding:10px 14px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;white-space:nowrap}
-thead tr{border-bottom:1px solid rgba(255,255,255,0.08)}
-tbody tr{border-bottom:1px solid rgba(255,255,255,0.04)}
-tbody tr:nth-child(even){background:rgba(255,255,255,0.015)}
-.td{padding:12px 14px}
-.sechdr{padding:8px 18px;background:rgba(255,255,255,0.02);border-bottom:1px solid rgba(255,255,255,0.04);font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;font-weight:600}
-.crow{padding:14px 18px;border-bottom:1px solid rgba(255,255,255,0.04);display:grid;grid-template-columns:2fr 1.2fr 1fr;align-items:center}
-.empty{padding:32px 18px;text-align:center;color:#475569;font-size:13px}
-.rbtn{font-size:11px;padding:5px 12px;border-radius:4px;font-weight:600;cursor:pointer;background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)}
-.rbtn.n{background:rgba(96,165,250,0.15);color:#60a5fa;border-color:rgba(96,165,250,0.3)}
-.rhint{margin-top:6px;font-size:11px;color:#94a3b8;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:6px 10px}
-.help-row{padding:14px 18px;border-top:1px solid rgba(255,255,255,0.04);display:flex;gap:16px;align-items:flex-start}
-.help-cmd{font-size:12px;background:rgba(96,165,250,0.1);color:#60a5fa;padding:4px 10px;border-radius:4px;font-family:'SF Mono','Fira Code',monospace;font-weight:600}
-.help-foot{padding:16px 18px;border-top:1px solid rgba(255,255,255,0.06)}
-.footer{padding:16px 24px 32px;display:flex;justify-content:space-between;font-size:11px;color:#475569}
-      `}</style>
     </div>
   );
 }

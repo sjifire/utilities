@@ -185,6 +185,31 @@ az containerapp update \
 ok "Container App updated with ${IMAGE_NAME}:${TAG}"
 
 # ---------------------------------------------------------------------------
+# Configure EasyAuth (Azure Container Apps built-in auth)
+# ---------------------------------------------------------------------------
+
+info "Configuring EasyAuth..."
+EA_CLIENT_ID=$(az keyvault secret show --vault-name "$KEY_VAULT" --name ENTRA-MCP-API-CLIENT-ID --query value -o tsv)
+EA_TENANT_ID=$(az keyvault secret show --vault-name "$KEY_VAULT" --name MS-GRAPH-TENANT-ID --query value -o tsv)
+
+az containerapp auth update \
+    --name "$CONTAINER_APP" \
+    --resource-group "$RESOURCE_GROUP" \
+    --unauthenticated-client-action AllowAnonymous \
+    --enabled true \
+    --output none
+
+az containerapp auth microsoft update \
+    --name "$CONTAINER_APP" \
+    --resource-group "$RESOURCE_GROUP" \
+    --client-id "$EA_CLIENT_ID" \
+    --client-secret-name entra-mcp-api-client-secret \
+    --tenant-id "$EA_TENANT_ID" \
+    --yes \
+    --output none
+ok "EasyAuth configured"
+
+# ---------------------------------------------------------------------------
 # Health check — verify the NEW version is serving
 # ---------------------------------------------------------------------------
 

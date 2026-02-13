@@ -25,60 +25,20 @@ def register_prompts(mcp: FastMCP) -> None:
         name="operations_dashboard",
         title="Operations Dashboard",
         description=(
-            "Generate a live operations dashboard as a React artifact. "
-            "Fetches today's on-duty crew, recent dispatch calls, and "
-            "incident report status, then renders an interactive dashboard."
+            "Show a live operations dashboard. Fetches today's on-duty crew, "
+            "recent dispatch calls, and incident report status, then renders "
+            "an interactive dashboard as an HTML artifact."
         ),
     )
     def operations_dashboard() -> str:
         return """\
-You are building a live operations dashboard for San Juan Island Fire & Rescue.
+Call `start_session` to get the operations dashboard. It returns pre-rendered HTML \
+in `dashboard_html` — create an HTML artifact with that content (copy verbatim).
 
-**Step 1 — Gather data** (call these tools in parallel):
-- `get_dashboard` — returns on-duty crew, recent dispatch calls, and report status in one call
-- `list_incidents` — returns incomplete incident reports (drafts, in-progress, ready for review)
+**Refreshing:** On "refresh"/"update", call `start_session` again and create a new artifact.
 
-**Step 2 — Build the dashboard artifact**
-
-Create a React artifact using the design template below as a starting point.
-Replace the hardcoded sample data with the live data you fetched.
-
-Key rules:
-- Show "Last Updated: {time}" in the header using the timestamp from `get_dashboard()` — \
-include a subtle "ask Claude to refresh" hint below it so users know they can request fresh data
-- The "Duty Officer" stat card should show the **Chief Officer** section crew member
-- The crew list should NOT include Administration or Time Off sections
-- Each dispatch call should show whether it has an incident report (from the `report` field)
-- On the Overview tab, each recent call should show a small report status indicator: \
-green checkmark for calls with reports, amber "No report" for calls missing one
-- The Reporting tab should show in-progress reports and calls missing reports
-- In the Reporting tab, calls without reports should have a "Start Report" button instead of \
-a passive badge — when clicked, it shows a hint: "Ask Claude: Start a report for {dispatch_id}"
-- Display the SJI Fire logo in the upper-left corner of the header, next to the title \
-— include an onError fallback so the header still looks good if the image fails to load
-- Logo URL: https://res.cloudinary.com/san-juan-fire-district-3\
-/image/fetch/f_auto/https://www.sjifire.org/assets/sjifire-logo-clear.png
-
-**Design template** (adapt with live data):
-
-The dashboard has 4 tabs: Overview, Recent Calls, On Duty, Reporting.
-- Dark theme with navy background (#0c1829)
-- Red accent bar under header (#b91c1c)
-- Severity indicators: high=#dc2626, medium=#f59e0b, low=#6b7280
-- Stats cards with colored left borders
-- Monospace font for dispatch IDs and times
-
-See the `sjifire://dashboard-prototype` resource for the full React component to use as a template.
-
-**Refreshing the dashboard:**
-When the user asks to refresh the dashboard (e.g., "refresh", "update", "get latest"), \
-re-call `get_dashboard` and `list_incidents` and regenerate the artifact with fresh data. \
-Keep the same layout — just swap in the new data.
-
-**Starting a report from the dashboard:**
-When the user clicks a "Start Report" button or mentions a dispatch ID they want to report on, \
-switch to the incident reporting workflow: call `get_dispatch_call` for that ID and begin \
-creating an incident report. You do not need to re-ask which call — use the dispatch ID provided.
+**Starting a report:** When the user clicks "Start Report" or mentions a dispatch ID, \
+call `get_dispatch_call` for that ID and begin the incident reporting workflow.
 """
 
     @mcp.prompt(
@@ -168,18 +128,34 @@ def register_resources(mcp: FastMCP) -> None:
     """Register all MCP resources."""
 
     @mcp.resource(
-        uri="sjifire://dashboard-prototype",
-        name="Dashboard Prototype",
-        title="Operations Dashboard React Component",
+        uri="sjifire://project-instructions",
+        name="Project Instructions",
+        title="Incident Report Assistant Instructions",
         description=(
-            "A complete React component for the SJI Fire operations dashboard. "
-            "Use this as a template when generating dashboard artifacts. "
-            "Replace the hardcoded sample data with live data from MCP tools."
+            "Workflow guide for incident reporting: how to gather data, "
+            "classify incidents, build narratives, and submit to NERIS."
         ),
-        mime_type="text/javascript",
+        mime_type="text/markdown",
     )
-    def dashboard_prototype() -> str:
-        dashboard_path = _DOCS_DIR / "dashboard-prototype.jsx"
-        if dashboard_path.exists():
-            return dashboard_path.read_text()
-        return "// Dashboard prototype not found — generate from scratch."
+    def project_instructions() -> str:
+        path = _DOCS_DIR / "neris" / "incident-report-instructions.md"
+        if path.exists():
+            return path.read_text()
+        return "# Project instructions not found."
+
+    @mcp.resource(
+        uri="sjifire://neris-values",
+        name="NERIS Values Reference",
+        title="NERIS Value Sets Quick Reference",
+        description=(
+            "Common NERIS value sets for incident reporting: incident types, "
+            "action/tactics, property use, and more. Load this when starting "
+            "an incident report."
+        ),
+        mime_type="text/markdown",
+    )
+    def neris_values() -> str:
+        path = _DOCS_DIR / "neris" / "value-sets-reference.md"
+        if path.exists():
+            return path.read_text()
+        return "# NERIS values reference not found."

@@ -163,24 +163,20 @@ if should_run 1; then
         ok "App registered: $MCP_CLIENT_ID"
     fi
 
-    # Ensure /callback redirect URI is on the Web platform (server-side token exchange)
+    # Ensure redirect URIs on the Web platform (server-side token exchange)
     # SPA platform won't work — Entra enforces browser-origin redemption for SPA codes.
-    # With isFallbackPublicClient=true, Entra accepts PKCE without client_secret on Web.
-    info "Ensuring Web redirect URI for /callback..."
+    # /callback = MCP OAuth proxy, /.auth/login/aad/callback = EasyAuth (browser dashboard)
+    info "Ensuring Web redirect URIs..."
 
     # Clear any SPA redirect URI (wrong platform for server-side exchange)
     az ad app update --id "$MCP_CLIENT_ID" \
         --set "spa={\"redirectUris\":[]}" 2>/dev/null || true
 
-    EXISTING_WEB=$(az ad app show --id "$MCP_CLIENT_ID" \
-        --query "web.redirectUris" -o json 2>/dev/null || echo "[]")
-    if echo "$EXISTING_WEB" | python3 -c "import sys,json; uris=json.load(sys.stdin); sys.exit(0 if 'https://mcp.${DOMAIN}/callback' in uris else 1)" 2>/dev/null; then
-        ok "Web redirect URI /callback already present"
-    else
-        az ad app update --id "$MCP_CLIENT_ID" \
-            --web-redirect-uris "https://mcp.${DOMAIN}/callback"
-        ok "Added Web redirect URI: https://mcp.${DOMAIN}/callback"
-    fi
+    az ad app update --id "$MCP_CLIENT_ID" \
+        --web-redirect-uris \
+            "https://mcp.${DOMAIN}/callback" \
+            "https://mcp.${DOMAIN}/.auth/login/aad/callback"
+    ok "Web redirect URIs: /callback, /.auth/login/aad/callback"
 
     # Create client secret for server-side token exchange (if not already stored)
     EXISTING_SECRET=$(az keyvault secret show --vault-name "$KEY_VAULT" --name "ENTRA-MCP-API-CLIENT-SECRET" --query value -o tsv 2>/dev/null || true)
