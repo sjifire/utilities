@@ -373,7 +373,10 @@ async def list_neris_incidents() -> dict:
     user = get_current_user()
 
     if not user.is_officer:
-        return {"error": "Only officers can access NERIS incidents"}
+        return {
+            "error": "You are not authorized to view or edit NERIS reports. "
+            "Ask an administrator to add you to the MCP Incident Officers group in Entra ID."
+        }
 
     try:
         result = await asyncio.to_thread(_list_neris_incidents)
@@ -425,7 +428,10 @@ async def get_neris_incident(neris_incident_id: str) -> dict:
     user = get_current_user()
 
     if not user.is_officer:
-        return {"error": "Only officers can access NERIS incidents"}
+        return {
+            "error": "You are not authorized to view or edit NERIS reports. "
+            "Ask an administrator to add you to the MCP Incident Officers group in Entra ID."
+        }
 
     try:
         result = await asyncio.to_thread(_get_neris_incident, neris_incident_id)

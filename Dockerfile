@@ -11,10 +11,11 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies into .venv without the project itself
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Copy source code, config, and README (hatchling requires readme)
+# Copy source code, config, docs, and README (hatchling requires readme)
 COPY README.md ./
 COPY src/ src/
 COPY config/ config/
+COPY docs/ docs/
 
 # Install the project (fast — deps already cached above)
 RUN uv sync --frozen --no-dev --no-editable

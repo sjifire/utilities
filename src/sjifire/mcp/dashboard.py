@@ -2,6 +2,10 @@
 
 Returns on-duty crew, recent dispatch calls, and their incident report
 status in a single call so Claude.ai can immediately orient the user.
+
+Report status is cross-referenced from two sources:
+1. Local IncidentDocument drafts in Cosmos DB (in-progress reports)
+2. NERIS federal reporting system (submitted/approved reports)
 """
 
 import asyncio
@@ -16,26 +20,36 @@ from sjifire.mcp.schedule import tools as schedule_tools
 logger = logging.getLogger(__name__)
 
 
+def _normalize_incident_number(number: str) -> str:
+    """Normalize incident number for cross-referencing.
+
+    Dispatch IDs use "26-001980", NERIS uses "26001980".
+    Stripping non-alphanumeric characters makes them match.
+    """
+    return number.replace("-", "")
+
+
 async def get_dashboard() -> dict:
     """Get a status board with on-duty crew and recent calls.
 
     Returns who is on duty today, the most recent dispatch calls, and
-    whether each call has an incident report started.  Designed to be
-    called at the start of every Claude.ai session so users see an
-    instant overview.
+    whether each call has an incident report (local draft or NERIS).
+    Designed to be called at the start of every Claude.ai session so
+    users see an instant overview.
 
     Returns:
-        Dict with ``user``, ``on_duty``, ``recent_calls``, and
-        ``call_count`` keys.
+        Dict with ``user``, ``on_duty``, ``recent_calls``,
+        and ``call_count`` keys.
     """
     user = get_current_user()
 
-    # Fetch all three data sources in parallel.  return_exceptions=True
+    # Fetch all four data sources in parallel.  return_exceptions=True
     # so a single failure doesn't block the others.
-    calls_result, schedule_result, incidents_result = await asyncio.gather(
+    calls_result, schedule_result, incidents_result, neris_result = await asyncio.gather(
         _fetch_recent_calls(),
         _fetch_schedule(),
         _fetch_incidents(user.email, user.is_officer),
+        _fetch_neris_reports(),
         return_exceptions=True,
     )
 
@@ -55,14 +69,21 @@ async def get_dashboard() -> dict:
     else:
         result["on_duty"] = schedule_result
 
-    # --- Build incident lookup ---
+    # --- Build incident lookup (local drafts) ---
     incident_lookup: dict[str, dict] = {}
     if isinstance(incidents_result, BaseException):
         logger.exception("Dashboard: incidents fetch failed", exc_info=incidents_result)
     else:
         incident_lookup = incidents_result
 
-    # --- Recent calls section ---
+    # --- Build NERIS report lookup ---
+    neris_lookup: dict[str, dict] = {}
+    if isinstance(neris_result, BaseException):
+        logger.exception("Dashboard: NERIS fetch failed", exc_info=neris_result)
+    else:
+        neris_lookup = dict(neris_result["lookup"])  # copy so we can pop matched
+
+    # --- Unified recent calls list ---
     if isinstance(calls_result, BaseException):
         logger.exception("Dashboard: dispatch fetch failed", exc_info=calls_result)
         result["recent_calls"] = {"error": str(calls_result)}
@@ -76,10 +97,28 @@ async def get_dashboard() -> dict:
                 "nature": call.nature,
                 "address": call.address,
             }
-            # Cross-reference with incident reports
-            incident_info = incident_lookup.get(call.long_term_call_id)
-            entry["report"] = incident_info
+            # Cross-reference: local draft takes priority, then NERIS
+            normalized = _normalize_incident_number(call.long_term_call_id)
+            report = incident_lookup.get(call.long_term_call_id)
+            if report is None:
+                report = neris_lookup.pop(normalized, None)
+            else:
+                # Still consume the NERIS entry so it doesn't appear twice
+                neris_lookup.pop(normalized, None)
+            entry["report"] = report
             recent_calls.append(entry)
+
+        # Append NERIS reports that didn't match any dispatch call
+        recent_calls.extend(
+            {
+                "dispatch_id": nr.get("incident_number", ""),
+                "date": nr.get("call_create"),
+                "nature": nr.get("incident_type", ""),
+                "address": None,
+                "report": nr,
+            }
+            for nr in neris_lookup.values()
+        )
 
         result["recent_calls"] = recent_calls
         result["call_count"] = len(recent_calls)
@@ -111,8 +150,53 @@ async def _fetch_incidents(user_email: str, is_officer: bool) -> dict[str, dict]
     lookup: dict[str, dict] = {}
     for doc in incidents:
         lookup[doc.incident_number] = {
+            "source": "local",
             "status": doc.status,
             "completeness": doc.completeness(),
             "incident_id": doc.id,
         }
     return lookup
+
+
+def _list_neris_reports() -> dict:
+    """Fetch NERIS incidents (blocking, for thread pool)."""
+    from sjifire.neris.client import NerisClient
+
+    with NerisClient() as client:
+        incidents = client.get_all_incidents()
+
+    lookup: dict[str, dict] = {}
+    reports: list[dict] = []
+
+    for inc in incidents:
+        dispatch = inc.get("dispatch", {})
+        types = inc.get("incident_types", [])
+        status_info = inc.get("incident_status", {})
+
+        neris_id = inc.get("neris_id", "")
+        incident_number = dispatch.get("incident_number", "")
+        status = status_info.get("status", "")
+        incident_type = types[0].get("type", "") if types else ""
+        call_create = dispatch.get("call_create", "")
+
+        summary = {
+            "source": "neris",
+            "neris_id": neris_id,
+            "incident_number": incident_number,
+            "status": status,
+            "incident_type": incident_type,
+            "call_create": call_create,
+        }
+
+        reports.append(summary)
+
+        # Build lookup by normalized incident number for cross-referencing
+        normalized = _normalize_incident_number(incident_number)
+        lookup[normalized] = summary
+
+    return {"lookup": lookup, "reports": reports}
+
+
+async def _fetch_neris_reports() -> dict:
+    """Fetch NERIS reports via thread pool (blocking API)."""
+    return await asyncio.to_thread(_list_neris_reports)

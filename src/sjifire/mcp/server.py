@@ -29,6 +29,7 @@ from sjifire.mcp.dispatch import tools as dispatch_tools
 from sjifire.mcp.incidents import tools as incident_tools
 from sjifire.mcp.neris import tools as neris_tools
 from sjifire.mcp.personnel import tools as personnel_tools
+from sjifire.mcp.prompts import register_prompts, register_resources
 from sjifire.mcp.schedule import tools as schedule_tools
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,10 @@ mcp.tool()(dispatch_tools.list_dispatch_calls)
 mcp.tool()(dispatch_tools.get_dispatch_call)
 mcp.tool()(dispatch_tools.get_open_dispatch_calls)
 mcp.tool()(dispatch_tools.search_dispatch_calls)
+
+# Register prompts and resources
+register_prompts(mcp)
+register_resources(mcp)
 
 
 # ---------------------------------------------------------------------------
