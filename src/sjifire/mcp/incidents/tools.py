@@ -291,7 +291,23 @@ async def submit_incident(incident_id: str) -> dict:
     if not user.is_officer:
         return {"error": "Only officers can submit incidents to NERIS"}
 
-    async with IncidentStore() as store:
+    # NERIS submission is not yet enabled — district entity ID and API
+    # credentials are pending vendor enrollment. Remove this guard once
+    # NERIS_ENTITY_ID and NERIS_CLIENT_ID/SECRET are configured.
+    return {
+        "status": "not_available",
+        "message": (
+            "NERIS submission is not yet enabled. The incident report has been "
+            "saved locally and can be submitted once NERIS API credentials are "
+            "configured. Contact the system administrator to complete NERIS "
+            "vendor enrollment."
+        ),
+        "incident_id": incident_id,
+    }
+
+    # --- NERIS submission (disabled until credentials are configured) ---
+
+    async with IncidentStore() as store:  # pragma: no cover
         doc = await store.get_by_id(incident_id)
 
         if doc is None:
@@ -332,7 +348,7 @@ async def submit_incident(incident_id: str) -> dict:
     }
 
 
-def _submit_to_neris(payload: dict) -> dict:
+def _submit_to_neris(payload: dict) -> dict:  # pragma: no cover
     """Submit incident payload to NERIS (blocking, for thread pool).
 
     Returns dict with neris_id on success or error on failure.

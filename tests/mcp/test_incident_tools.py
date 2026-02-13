@@ -215,35 +215,13 @@ class TestUpdateIncident:
 
 
 class TestSubmitIncident:
-    @patch("sjifire.mcp.incidents.tools.IncidentStore")
-    async def test_regular_user_cannot_submit(self, mock_store_cls, regular_user, sample_doc):
+    async def test_regular_user_cannot_submit(self, regular_user):
         result = await submit_incident("doc-123")
         assert "error" in result
         assert "officer" in result["error"].lower()
 
-    @patch("sjifire.mcp.incidents.tools._submit_to_neris")
-    @patch("sjifire.mcp.incidents.tools.IncidentStore")
-    async def test_officer_can_submit(self, mock_store_cls, mock_neris, officer_user, sample_doc):
-        sample_doc.status = "ready_review"
-        mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
-        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
-        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-        mock_neris.return_value = {"neris_id": "FD53055879|26SJ0001|123"}
-
+    async def test_officer_gets_not_available(self, officer_user):
         result = await submit_incident("doc-123")
-        assert result["status"] == "submitted"
-        assert result["neris_incident_id"] == "FD53055879|26SJ0001|123"
-
-    @patch("sjifire.mcp.incidents.tools.IncidentStore")
-    async def test_cannot_submit_draft(self, mock_store_cls, officer_user, sample_doc):
-        sample_doc.status = "draft"  # Not ready_review
-        mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
-        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        result = await submit_incident("doc-123")
-        assert "error" in result
-        assert "ready_review" in result["error"]
+        assert result["status"] == "not_available"
+        assert "not yet enabled" in result["message"]
+        assert result["incident_id"] == "doc-123"
