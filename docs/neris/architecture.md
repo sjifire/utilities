@@ -36,11 +36,10 @@ Claude.ai  ←→  MCP Server (OAuth AS)  ←→  Entra ID (user login)
 | `update_incident` | Creator/officer | Edit fields on non-submitted incidents |
 | `submit_incident` | Officer only | Validate and submit to NERIS |
 | `get_personnel` | Any user | Look up personnel via Graph API |
-| `get_on_duty_crew` | Any user | On-duty crew from Aladtec (Cosmos-cached) |
+| `get_on_duty_crew` | Any user | On-duty crew from Aladtec (Cosmos-cached, admin hidden by default) |
 | `list_dispatch_calls` | Any user | Recent dispatch calls from iSpyFire |
 | `get_dispatch_call` | Any user | Single call details (iSpyFire or Cosmos archive) |
 | `get_open_dispatch_calls` | Any user | Currently open calls |
-| `get_dispatch_call_log` | Any user | Call audit log |
 | `search_dispatch_calls` | Any user | Search by dispatch ID or date range |
 | `list_neris_value_sets` | Any user | Browse available NERIS code sets |
 | `get_neris_values` | Any user | Look up specific NERIS codes |

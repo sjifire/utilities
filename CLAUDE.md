@@ -142,11 +142,12 @@ Remote MCP server at `https://mcp.sjifire.org/mcp` providing fire district tools
 - Officer group (`MCP Incident Officers`) gates: submit incidents, view all incidents
 - All other tools (dispatch, schedule, personnel) are open to any authenticated user
 
-**MCP tools registered**:
+**MCP tools registered** (13 tools):
 - `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`
 - `get_personnel`
-- `get_on_duty_crew`
-- `list_dispatch_calls`, `get_dispatch_call`, `get_open_dispatch_calls`, `get_dispatch_call_log`
+- `get_on_duty_crew` (hides admin by default; `include_admin=True` to show all)
+- `list_dispatch_calls`, `get_dispatch_call`, `get_open_dispatch_calls`, `search_dispatch_calls`
+- `list_neris_value_sets`, `get_neris_values`
 
 **Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
 

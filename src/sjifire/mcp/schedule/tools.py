@@ -107,17 +107,23 @@ async def _ensure_cache(
     return cached
 
 
-async def get_on_duty_crew(target_date: str | None = None) -> dict:
+async def get_on_duty_crew(
+    target_date: str | None = None,
+    include_admin: bool = False,
+) -> dict:
     """Get the crew that was on duty for a specific date.
 
     Returns who was scheduled on each section for the given date,
     plus the day before and after to capture shift-change context.
+    By default, administration staff are excluded — pass
+    ``include_admin=True`` to see everyone.
 
     Data is cached in Cosmos DB and auto-refreshes from Aladtec
     if the cache is more than 24 hours old.
 
     Args:
         target_date: Date in YYYY-MM-DD format. Defaults to today.
+        include_admin: Include administration staff (default: False).
 
     Returns:
         Dict with "date" and "crew" list containing name, position,
@@ -150,6 +156,10 @@ async def get_on_duty_crew(target_date: str | None = None) -> dict:
             "note": "No schedule data available for this date.",
         }
 
+    entries = day.entries
+    if not include_admin:
+        entries = [e for e in entries if e.section.lower() != "administration"]
+
     crew = [
         {
             "name": e.name,
@@ -158,7 +168,7 @@ async def get_on_duty_crew(target_date: str | None = None) -> dict:
             "start_time": e.start_time,
             "end_time": e.end_time,
         }
-        for e in day.entries
+        for e in entries
     ]
 
     return {

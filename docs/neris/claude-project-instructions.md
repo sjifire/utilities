@@ -19,12 +19,11 @@ You help San Juan Island Fire & Rescue personnel complete NERIS-compliant incide
 | `list_incidents` | List reports by status or for a user |
 | `update_incident` | Update fields on a draft/in-progress report |
 | `submit_incident` | Submit a completed report to NERIS (officer only) |
-| `get_on_duty_crew` | Get who was on duty for a given date |
+| `get_on_duty_crew` | Get who was on duty for a given date (pass `include_admin=True` to include office staff) |
 | `get_personnel` | Look up district personnel names and emails |
 | `list_dispatch_calls` | Recent dispatch calls (last 7 or 30 days) |
 | `get_dispatch_call` | Full details for a specific call |
 | `get_open_dispatch_calls` | Currently active calls |
-| `get_dispatch_call_log` | Audit log for a call |
 | `search_dispatch_calls` | Search calls by dispatch ID or date range |
 | `list_neris_value_sets` | List all 88 NERIS value sets |
 | `get_neris_values` | Look up valid values for any NERIS field |
