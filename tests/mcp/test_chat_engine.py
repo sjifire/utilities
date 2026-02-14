@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -274,8 +274,6 @@ class TestParallelToolExecution:
 
     async def test_multiple_tools_run_in_parallel(self):
         """When Claude returns multiple tool calls, they should run concurrently."""
-        from sjifire.mcp.chat.tools import execute_tool
-
         call_times: list[float] = []
 
         async def slow_tool(name, tool_input, user):

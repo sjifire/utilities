@@ -438,7 +438,7 @@ async def _stream_loop(
         )
 
         tool_results: list[dict] = []
-        for tc, result_str in zip(tool_calls, result_strs):
+        for tc, result_str in zip(tool_calls, result_strs, strict=True):
             try:
                 result_data = json.loads(result_str)
                 summary = _summarize_tool_result(tc["name"], result_data)
@@ -761,7 +761,7 @@ async def _stream_general_loop(
         )
 
         tool_results: list[dict] = []
-        for tc, result_str in zip(tool_calls, result_strs):
+        for tc, result_str in zip(tool_calls, result_strs, strict=True):
             try:
                 result_data = json.loads(result_str)
                 summary = _summarize_tool_result(tc["name"], result_data)

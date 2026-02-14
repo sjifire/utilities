@@ -15,7 +15,12 @@ from datetime import UTC, datetime
 
 from sjifire.core.config import get_org_config
 from sjifire.mcp.auth import get_current_user
-from sjifire.mcp.incidents.models import CrewAssignment, IncidentDocument, Narratives
+from sjifire.mcp.incidents.models import (
+    CrewAssignment,
+    EditEntry,
+    IncidentDocument,
+    Narratives,
+)
 from sjifire.mcp.incidents.store import IncidentStore
 from sjifire.mcp.token_store import get_token_store
 
@@ -338,7 +343,9 @@ async def update_incident(
         if doc.status == "submitted":
             return {"error": "Cannot modify a submitted incident"}
 
-        # Apply updates (only non-None values)
+        # Apply updates (only non-None values) and track changed fields
+        fields_changed: list[str] = []
+
         if status is not None:
             if status == "submitted":
                 return {"error": "Use submit_incident to submit"}
@@ -346,19 +353,26 @@ async def update_incident(
                 valid = ", ".join(sorted(_EDITABLE_STATUSES))
                 return {"error": f"Invalid status '{status}'. Must be one of: {valid}"}
             doc.status = status
+            fields_changed.append("status")
 
         if station is not None:
             doc.station = station
+            fields_changed.append("station")
         if incident_type is not None:
             doc.incident_type = incident_type
+            fields_changed.append("incident_type")
         if address is not None:
             doc.address = address
+            fields_changed.append("address")
         if city is not None:
             doc.city = city
+            fields_changed.append("city")
         if latitude is not None:
             doc.latitude = latitude
+            fields_changed.append("latitude")
         if longitude is not None:
             doc.longitude = longitude
+            fields_changed.append("longitude")
 
         if crew is not None:
             doc.crew = [
@@ -371,6 +385,7 @@ async def update_incident(
                 )
                 for c in crew
             ]
+            fields_changed.append("crew")
 
         if outcome_narrative is not None or actions_taken_narrative is not None:
             doc.narratives = Narratives(
@@ -383,18 +398,35 @@ async def update_incident(
                     else doc.narratives.actions_taken
                 ),
             )
+            if outcome_narrative is not None:
+                fields_changed.append("outcome_narrative")
+            if actions_taken_narrative is not None:
+                fields_changed.append("actions_taken_narrative")
 
         if unit_responses is not None:
             doc.unit_responses = unit_responses
+            fields_changed.append("unit_responses")
         if timestamps is not None:
             doc.timestamps = {**doc.timestamps, **timestamps}
+            fields_changed.append("timestamps")
         if internal_notes is not None:
             doc.internal_notes = internal_notes
+            fields_changed.append("internal_notes")
+
+        # Record edit history
+        if fields_changed:
+            doc.edit_history.append(
+                EditEntry(
+                    editor_email=user.email,
+                    editor_name=user.name,
+                    fields_changed=fields_changed,
+                )
+            )
 
         doc.updated_at = datetime.now(UTC)
         updated = await store.update(doc)
 
-    logger.info("User %s updated incident %s", user.email, incident_id)
+    logger.info("User %s updated incident %s: %s", user.email, incident_id, fields_changed)
     return updated.model_dump(mode="json")
 
 
@@ -544,6 +576,15 @@ async def reset_incident(incident_id: str) -> dict:
         # Reset status to draft
         doc.status = "draft"
         doc.updated_at = datetime.now(UTC)
+
+        # Record reset in edit history
+        doc.edit_history.append(
+            EditEntry(
+                editor_email=user.email,
+                editor_name=user.name,
+                fields_changed=["reset"],
+            )
+        )
 
         updated = await store.update(doc)
 

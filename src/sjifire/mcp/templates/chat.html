@@ -212,6 +212,32 @@
     .send-btn:hover:not(:disabled) { background: #4a94f0; }
     .send-btn:disabled { opacity: .4; cursor: not-allowed; }
 
+    /* ── Suggestion chips ── */
+    .chat-hints {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 20px;
+      border-top: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+    .chat-hint {
+      background: var(--border-subtle);
+      border: 1px solid var(--border-default);
+      color: var(--text-muted);
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 14px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .chat-hint:hover {
+      background: rgba(96, 165, 250, .1);
+      border-color: var(--color-blue);
+      color: var(--text-secondary);
+    }
+
     /* ── Error banner ── */
     .error-banner {
       background: var(--red-alpha);
@@ -299,6 +325,14 @@
     <template x-if="streaming && currentText">
       <div class="msg assistant" x-html="renderMarkdown(currentText)"></div>
     </template>
+  </div>
+
+  <!-- Quick action chips -->
+  <div class="chat-hints" x-show="!streaming">
+    <button class="chat-hint" @click="sendMessage('Add today\'s on-duty crew')">Add today's crew</button>
+    <button class="chat-hint" @click="sendMessage('Fill in timestamps from dispatch')">Fill in timestamps</button>
+    <button class="chat-hint" @click="sendMessage('Write the narrative')">Write narrative</button>
+    <button class="chat-hint" @click="sendMessage('What fields are still missing?')">What's missing?</button>
   </div>
 
   <!-- Input bar -->

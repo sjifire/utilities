@@ -3,14 +3,11 @@
 from dataclasses import dataclass
 from datetime import date
 
-import pytest
-
 from sjifire.core.schedule import (
     clean_position,
     detect_shift_change_hour,
     is_filled_entry,
     resolve_duty_date,
-    should_exclude_section,
 )
 
 

@@ -7,6 +7,7 @@ the same rules.
 
 import logging
 from collections import Counter
+from datetime import date
 from typing import Protocol
 
 from sjifire.core.config import get_org_config
@@ -119,10 +120,10 @@ def detect_shift_change_hour(entries: list[HasShiftTimes]) -> int | None:
 
 
 def resolve_duty_date(
-    target_date: "date",
+    target_date: date,
     shift_change_hour: int | None,
     hour: int | None = None,
-) -> tuple["date", "date | None"]:
+) -> tuple[date, date | None]:
     """Determine which day's crew is actually on duty at a given time.
 
     Before the shift change hour, the *previous* day's crew is still

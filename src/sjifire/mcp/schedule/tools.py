@@ -16,7 +16,11 @@ import logging
 from datetime import date, datetime, timedelta
 
 from sjifire.core.config import get_timezone
-from sjifire.core.schedule import detect_shift_change_hour, resolve_duty_date, should_exclude_section
+from sjifire.core.schedule import (
+    detect_shift_change_hour,
+    resolve_duty_date,
+    should_exclude_section,
+)
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.schedule.models import DayScheduleCache, ScheduleEntryCache
 from sjifire.mcp.schedule.store import ScheduleStore
@@ -187,7 +191,7 @@ async def get_on_duty_crew(
         dt = datetime.strptime(target_date, "%Y-%m-%d").date() if target_date else date.today()
     except ValueError:
         return {"error": f"Invalid date format: {target_date!r}. Expected YYYY-MM-DD."}
-    logger.info("Schedule lookup for %s hour=%s (user: %s)", dt.isoformat(), target_hour, user.email)
+    logger.info("Schedule lookup for %s hour=%s (user: %s)", dt, target_hour, user.email)
 
     # Request target date +/- 1 day for shift-change coverage
     needed = [
