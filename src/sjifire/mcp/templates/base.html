@@ -417,16 +417,28 @@
   function headerStatus() {
     return {
       date_display: '', open_calls: 0, updated_time: '', loaded: false,
+      _prevOpen: -1,
       async init() {
-        await this.refresh();
-        setInterval(() => this.refresh(), 3600000);
-      },
-      async refresh() {
+        // Initial date from full dashboard data
         try {
           const r = await fetch('/dashboard/data');
           if (r.ok) {
             const d = await r.json();
             this.date_display = d.date_display || '';
+            this.open_calls = d.open_calls || 0;
+            this.updated_time = d.updated_time || '';
+            this.loaded = true;
+            this._prevOpen = this.open_calls;
+          }
+        } catch(e) { /* silent */ }
+        // Poll open calls every 30 seconds
+        setInterval(() => this.pollOpenCalls(), 5000);
+      },
+      async pollOpenCalls() {
+        try {
+          const r = await fetch('/api/open-calls');
+          if (r.ok) {
+            const d = await r.json();
             this.open_calls = d.open_calls || 0;
             this.updated_time = d.updated_time || '';
             this.loaded = true;

@@ -208,6 +208,18 @@ async def dashboard_data(request: Request) -> Response:
     return JSONResponse(data)
 
 
+@mcp.custom_route("/api/open-calls", methods=["GET"])
+async def open_calls_api(request: Request) -> Response:
+    """Return open dispatch calls (30-second cached)."""
+    user = get_easyauth_user(request)
+    if user:
+        set_current_user(user)
+    elif provider is not None:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    data = await dashboard.get_open_calls_cached()
+    return JSONResponse(data)
+
+
 @mcp.custom_route("/dashboard/logout", methods=["GET"])
 async def dashboard_logout(request: Request) -> Response:
     """Log out of the dashboard and redirect back."""

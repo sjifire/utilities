@@ -11,6 +11,7 @@ Report status is cross-referenced from two sources:
 import asyncio
 import logging
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -83,6 +84,67 @@ def _get_icon(nature: str) -> str:
 def _get_section_labels() -> dict[str, str]:
     """Get section display labels from organization config."""
     return get_org_config().schedule_section_labels
+
+
+# ---------------------------------------------------------------------------
+# Cached open-calls poller (30-second TTL)
+# ---------------------------------------------------------------------------
+
+_OPEN_CALLS_TTL = 5  # seconds
+_open_calls_cache: dict | None = None
+_open_calls_ts: float = 0
+_open_calls_lock = asyncio.Lock()
+
+
+async def get_open_calls_cached() -> dict:
+    """Return open dispatch calls with a 30-second server-side cache.
+
+    Polls iSpyFire's lightweight open-calls endpoint and caches the
+    result so multiple browser clients don't each trigger a fetch.
+    """
+    global _open_calls_cache, _open_calls_ts
+
+    now = time.monotonic()
+    if _open_calls_cache is not None and (now - _open_calls_ts) < _OPEN_CALLS_TTL:
+        return _open_calls_cache
+
+    async with _open_calls_lock:
+        # Re-check after acquiring lock (another request may have refreshed)
+        now = time.monotonic()
+        if _open_calls_cache is not None and (now - _open_calls_ts) < _OPEN_CALLS_TTL:
+            return _open_calls_cache
+
+        try:
+            async with DispatchStore() as store:
+                docs = await store.fetch_open()
+
+            tz = get_timezone()
+            ts = datetime.now(tz)
+            hour = ts.hour % 12 or 12
+            updated_time = f"{hour}:{ts.strftime('%M')} {'AM' if ts.hour < 12 else 'PM'}"
+
+            result = {
+                "open_calls": len(docs),
+                "updated_time": updated_time,
+                "calls": [
+                    {
+                        "dispatch_id": d.long_term_call_id,
+                        "nature": d.nature,
+                        "address": d.address,
+                    }
+                    for d in docs
+                ],
+            }
+        except Exception:
+            logger.exception("Failed to fetch open calls")
+            # Return stale cache if available, otherwise empty
+            if _open_calls_cache is not None:
+                return _open_calls_cache
+            result = {"open_calls": 0, "updated_time": "", "calls": []}
+
+        _open_calls_cache = result
+        _open_calls_ts = time.monotonic()
+        return result
 
 
 # ---------------------------------------------------------------------------
