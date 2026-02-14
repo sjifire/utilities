@@ -144,11 +144,11 @@ Remote MCP server at `https://mcp.sjifire.org/mcp` providing fire district tools
 - Officer group (`MCP Incident Officers`) gates: submit incidents, view all incidents
 - All other tools (dispatch, schedule, personnel) are open to any authenticated user
 
-**MCP tools registered** (18 tools):
+**MCP tools registered** (19 tools):
 - `start_session` (text summary + browser dashboard URL + session bootstrap)
 - `refresh_dashboard` (refreshes data, returns updated summary + new URL)
 - `get_dashboard` (raw data: on-duty crew, recent calls, report status)
-- `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`
+- `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`, `reset_incident`
 - `list_neris_incidents`, `get_neris_incident` (NERIS federal reporting records)
 - `get_personnel`
 - `get_on_duty_crew` (hides admin by default; `include_admin=True` to show all)
@@ -164,6 +164,8 @@ Remote MCP server at `https://mcp.sjifire.org/mcp` providing fire district tools
 **Session instructions**: `docs/mcp-start-session.md` — loaded by `start_session` tool, tells Claude how to present the dashboard and what actions to offer.
 
 **Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
+
+**Cosmos DB backup**: Continuous 30-day PITR (any-second point-in-time restore). For ad-hoc JSON exports beyond 30 days, use `uv run backup-cosmos`. Infrastructure provisioned via `./scripts/setup-azure.sh --phase 2`.
 
 **Deployment**:
 - Dev: `./scripts/deploy-mcp.sh` (builds via ACR, deploys, health check with version verification)
@@ -288,6 +290,14 @@ The `ms-group-sync` command uses Entra ID as the source of truth for membership 
 - **New groups**: Created as Exchange mail-enabled security groups by default (no SharePoint sprawl)
 
 Note: Run `entra-user-sync` before `ms-group-sync` to ensure Entra ID has current data.
+
+### Cosmos DB backup (ad-hoc JSON export)
+```bash
+uv run backup-cosmos                    # Both collections
+uv run backup-cosmos --incidents-only
+uv run backup-cosmos --dispatch-only
+uv run backup-cosmos --output /path/
+```
 
 ### Check linting
 ```bash
