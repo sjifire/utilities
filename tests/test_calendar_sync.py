@@ -387,25 +387,36 @@ class TestDutyCalendarSyncConvertSchedules:
         assert date(2026, 2, 1) in dates
         assert date(2026, 2, 2) in dates
 
-    def test_convert_schedules_until_1800_from_previous(self, calendar_sync, sample_schedules):
-        """Until 1800 crew comes from previous day's shift."""
+    def test_convert_schedules_until_1800_from_today(self, calendar_sync, sample_schedules):
+        """Until 1800 crew comes from today's schedule (shift covering today)."""
         events = calendar_sync.convert_schedules_to_events(sample_schedules, {})
 
-        # Feb 2 event should have Feb 1 crew as "until 1800"
-        feb2_event = next(e for e in events if e.event_date == date(2026, 2, 2))
-        assert feb2_event.until_platoon == "A"
-        assert "S31" in feb2_event.until_crew
-        assert feb2_event.until_crew["S31"][0].name == "John Doe"
+        # Feb 1 event should have Feb 1 crew as "until 1800"
+        # (crew covering Feb 1, ending at shift change)
+        feb1_event = next(e for e in events if e.event_date == date(2026, 2, 1))
+        assert feb1_event.until_platoon == "A"
+        assert "S31" in feb1_event.until_crew
+        assert feb1_event.until_crew["S31"][0].name == "John Doe"
 
-    def test_convert_schedules_from_1800_from_today(self, calendar_sync, sample_schedules):
-        """From 1800 crew comes from today's shift."""
+    def test_convert_schedules_from_1800_from_next_day(self, calendar_sync, sample_schedules):
+        """From 1800 crew comes from next day's schedule (shift starting tonight)."""
         events = calendar_sync.convert_schedules_to_events(sample_schedules, {})
 
-        # Feb 2 event should have Feb 2 crew as "from 1800"
+        # Feb 1 event should have Feb 2 crew as "from 1800"
+        # (crew starting tonight, covering Feb 2)
+        feb1_event = next(e for e in events if e.event_date == date(2026, 2, 1))
+        assert feb1_event.from_platoon == "B"
+        assert "S31" in feb1_event.from_crew
+        assert feb1_event.from_crew["S31"][0].name == "Jane Smith"
+
+    def test_convert_schedules_last_day_no_from_crew(self, calendar_sync, sample_schedules):
+        """Last day in range has no from crew (no next day data)."""
+        events = calendar_sync.convert_schedules_to_events(sample_schedules, {})
+
+        # Feb 2 is the last day, no Feb 3 data, so no "from" crew
         feb2_event = next(e for e in events if e.event_date == date(2026, 2, 2))
-        assert feb2_event.from_platoon == "B"
-        assert "S31" in feb2_event.from_crew
-        assert feb2_event.from_crew["S31"][0].name == "Jane Smith"
+        assert feb2_event.until_platoon == "B"
+        assert feb2_event.from_crew == {}
 
     def test_convert_schedules_empty_list(self, calendar_sync):
         """Convert empty schedules returns empty list."""
