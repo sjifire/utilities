@@ -5,7 +5,7 @@ are ephemeral with minReplicas: 0.
 
 Limits:
 - Monthly per-user: 2M tokens (~$30 at Sonnet pricing)
-- Daily per-user: 200K tokens
+- Daily per-user: 1M tokens
 - Per-conversation: 50 turns (enforced in engine, not here)
 - Anthropic console: $100/month hard cap (external)
 """
@@ -23,7 +23,7 @@ _INPUT_COST_PER_TOKEN = 3.0 / 1_000_000
 _OUTPUT_COST_PER_TOKEN = 15.0 / 1_000_000
 
 MONTHLY_TOKEN_LIMIT = 5_000_000
-DAILY_TOKEN_LIMIT = 500_000
+DAILY_TOKEN_LIMIT = 1_000_000
 
 
 @dataclass(frozen=True)
