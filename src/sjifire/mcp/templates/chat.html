@@ -497,6 +497,7 @@ function chatApp() {
         const labels = {
           get_incident: 'Loading incident data...',
           update_incident: 'Saving changes...',
+          reset_incident: 'Resetting report...',
           get_dispatch_call: 'Looking up dispatch data...',
           search_dispatch_calls: 'Searching dispatch calls...',
           get_on_duty_crew: 'Checking crew schedule...',
@@ -522,6 +523,11 @@ function chatApp() {
           expanded: false
         });
         this.scrollToBottom();
+        // After a successful reset, reload to get fresh state
+        if (data.name === 'reset_incident' && !(data.summary || '').startsWith('Error')) {
+          setTimeout(() => location.reload(), 800);
+          return;
+        }
       } else if (type === 'done') {
         // Token usage could be shown but keeping it minimal
       } else if (type === 'error') {

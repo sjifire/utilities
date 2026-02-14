@@ -2,7 +2,7 @@
 
 Wraps the same async functions the MCP tools use, with user context
 set before each call. Only a safe subset of tools is exposed to the
-chat Claude — no create, delete, submit, or reset operations.
+chat Claude — no create, delete, or submit operations.
 """
 
 import json
@@ -95,6 +95,24 @@ TOOL_SCHEMAS: list[dict] = [
                 "internal_notes": {
                     "type": "string",
                     "description": "Internal notes (not sent to NERIS)",
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
+        "name": "reset_incident",
+        "description": (
+            "Reset an incident report to a clean slate. Clears all content "
+            "fields (type, crew, narratives) and re-populates address and "
+            "timestamps from dispatch data. Use when the user wants to start over."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
                 },
             },
             "required": ["incident_id"],
@@ -226,6 +244,9 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         incident_id = tool_input["incident_id"]
         kwargs = {k: v for k, v in tool_input.items() if k != "incident_id"}
         return await incident_tools.update_incident(incident_id, **kwargs)
+
+    if name == "reset_incident":
+        return await incident_tools.reset_incident(tool_input["incident_id"])
 
     if name == "get_dispatch_call":
         return await dispatch_tools.get_dispatch_call(tool_input["call_id"])

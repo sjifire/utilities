@@ -497,6 +497,10 @@ def _summarize_tool_result(name: str, data: dict) -> str:
         num = data.get("incident_number", "")
         return f"Updated incident {num}"
 
+    if name == "reset_incident":
+        num = data.get("incident_number", "")
+        return f"Reset incident {num}"
+
     if name == "get_dispatch_call":
         nature = data.get("nature", "")
         addr = data.get("address", "")
