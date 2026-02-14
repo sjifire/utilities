@@ -31,7 +31,7 @@ async def get_personnel() -> list[dict[str, str]]:
     query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
         select=["displayName", "mail", "userPrincipalName"],
         filter="accountEnabled eq true",
-        top=10,
+        top=999,
     )
     config = RequestConfiguration(query_parameters=query_params)
     result = await client.users.get(request_configuration=config)

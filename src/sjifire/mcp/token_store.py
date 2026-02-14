@@ -133,7 +133,12 @@ class TokenStore:
                     item=token_id,
                     partition_key=token_type,
                 )
-            except Exception:
+            except Exception as exc:
+                # CosmosResourceNotFoundError → expected (token doesn't exist)
+                # Other exceptions → log as warning (transient Cosmos issue)
+                exc_name = type(exc).__name__
+                if "NotFound" not in exc_name:
+                    logger.warning("TokenStore.get(%s, %s) failed: %s", token_type, token_id, exc)
                 doc = None
 
         if doc is None:

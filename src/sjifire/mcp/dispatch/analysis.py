@@ -60,15 +60,37 @@ def _build_prompt(doc: DispatchCallDocument, crew_context: str = "") -> str:
     return "\n".join(lines)
 
 
+_azure_client = None
+_anthropic_client = None
+
+
+def _get_azure_client():
+    """Get or create a reusable Azure OpenAI client."""
+    global _azure_client
+    if _azure_client is None:
+        from openai import AsyncAzureOpenAI
+
+        _azure_client = AsyncAzureOpenAI(
+            azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+            api_key=os.getenv("AZURE_OPENAI_API_KEY", ""),
+            api_version="2024-10-21",
+        )
+    return _azure_client
+
+
+def _get_anthropic_client():
+    """Get or create a reusable Anthropic client."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        from anthropic import AsyncAnthropic
+
+        _anthropic_client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    return _anthropic_client
+
+
 async def _call_azure_openai(system: str, user_prompt: str) -> str:
     """Call Azure OpenAI with JSON mode."""
-    from openai import AsyncAzureOpenAI
-
-    client = AsyncAzureOpenAI(
-        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-        api_key=os.getenv("AZURE_OPENAI_API_KEY", ""),
-        api_version="2024-10-21",
-    )
+    client = _get_azure_client()
     deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
 
     response = await client.chat.completions.create(
@@ -85,9 +107,7 @@ async def _call_azure_openai(system: str, user_prompt: str) -> str:
 
 async def _call_anthropic(system: str, user_prompt: str) -> str:
     """Call Anthropic Claude with JSON output."""
-    from anthropic import AsyncAnthropic  # requires: pip install anthropic
-
-    client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = _get_anthropic_client()
 
     response = await client.messages.create(
         model="claude-haiku-4-5-20251001",

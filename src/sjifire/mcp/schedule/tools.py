@@ -134,7 +134,10 @@ async def get_on_duty_crew(
     """
     user = get_current_user()
 
-    dt = datetime.strptime(target_date, "%Y-%m-%d").date() if target_date else date.today()
+    try:
+        dt = datetime.strptime(target_date, "%Y-%m-%d").date() if target_date else date.today()
+    except ValueError:
+        return {"error": f"Invalid date format: {target_date!r}. Expected YYYY-MM-DD."}
     logger.info("Schedule lookup for %s (user: %s)", dt.isoformat(), user.email)
 
     # Request target date +/- 1 day for shift-change coverage
