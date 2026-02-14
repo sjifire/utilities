@@ -21,11 +21,12 @@ class TestIsOperationalSection:
 
     Operational sections are those involved in emergency response:
     - Stations (S31, S32, etc.)
-    - Chief positions
     - Backup Duty
     - Support
     - State Mobe (wildland mobilization)
     - Marine operations
+
+    Admin sections (Chief, Administration, etc.) are excluded.
     """
 
     def test_station_s31_is_operational(self):
@@ -56,13 +57,13 @@ class TestIsOperationalSection:
         """'Station 31' format is operational."""
         assert is_operational_section("Station 31") is True
 
-    def test_chief_officer_is_operational(self):
-        """Chief Officer is operational."""
-        assert is_operational_section("Chief Officer") is True
+    def test_chief_officer_is_not_operational(self):
+        """Chief Officer is an admin role, not operational."""
+        assert is_operational_section("Chief Officer") is False
 
-    def test_chief_on_call_is_operational(self):
-        """Chief on Call is operational."""
-        assert is_operational_section("Chief on Call") is True
+    def test_chief_on_call_is_not_operational(self):
+        """Chief on Call is an admin role, not operational."""
+        assert is_operational_section("Chief on Call") is False
 
     def test_backup_duty_is_operational(self):
         """Backup Duty is operational."""
@@ -75,6 +76,10 @@ class TestIsOperationalSection:
     def test_support_is_operational(self):
         """Support is operational."""
         assert is_operational_section("Support") is True
+
+    def test_support_substring_is_operational(self):
+        """Support sections with extra words are operational."""
+        assert is_operational_section("Support Staff") is True
 
     def test_marine_is_operational(self):
         """Marine section is operational."""
@@ -125,8 +130,13 @@ class TestShouldExcludeSection:
     def test_includes_operational(self):
         """Operational sections are not excluded."""
         assert should_exclude_section("S31") is False
-        assert should_exclude_section("Chief Officer") is False
         assert should_exclude_section("Backup Duty") is False
+        assert should_exclude_section("Support") is False
+
+    def test_excludes_chief(self):
+        """Chief sections are admin roles and should be excluded."""
+        assert should_exclude_section("Chief Officer") is True
+        assert should_exclude_section("Chief on Call") is True
 
 
 class TestIsUnfilledPosition:
@@ -515,25 +525,36 @@ class TestDutyCalendarSyncConvertSchedules:
         assert date(2026, 2, 1) in dates
         assert date(2026, 2, 2) in dates
 
-    def test_convert_schedules_until_1800_from_previous(self, calendar_sync, sample_schedules):
-        """Until 1800 crew comes from previous day's shift."""
+    def test_convert_schedules_until_1800_from_today(self, calendar_sync, sample_schedules):
+        """Until 1800 crew comes from today's schedule (shift covering today)."""
         events = calendar_sync.convert_schedules_to_events(sample_schedules, {})
 
-        # Feb 2 event should have Feb 1 crew as "until 1800"
-        feb2_event = next(e for e in events if e.event_date == date(2026, 2, 2))
-        assert feb2_event.until_platoon == "A"
-        assert "S31" in feb2_event.until_crew
-        assert feb2_event.until_crew["S31"][0].name == "John Doe"
+        # Feb 1 event should have Feb 1 crew as "until 1800"
+        # (crew covering Feb 1, ending at shift change)
+        feb1_event = next(e for e in events if e.event_date == date(2026, 2, 1))
+        assert feb1_event.until_platoon == "A"
+        assert "S31" in feb1_event.until_crew
+        assert feb1_event.until_crew["S31"][0].name == "John Doe"
 
-    def test_convert_schedules_from_1800_from_today(self, calendar_sync, sample_schedules):
-        """From 1800 crew comes from today's shift."""
+    def test_convert_schedules_from_1800_from_next_day(self, calendar_sync, sample_schedules):
+        """From 1800 crew comes from next day's schedule (shift starting tonight)."""
         events = calendar_sync.convert_schedules_to_events(sample_schedules, {})
 
-        # Feb 2 event should have Feb 2 crew as "from 1800"
+        # Feb 1 event should have Feb 2 crew as "from 1800"
+        # (crew starting tonight, covering Feb 2)
+        feb1_event = next(e for e in events if e.event_date == date(2026, 2, 1))
+        assert feb1_event.from_platoon == "B"
+        assert "S31" in feb1_event.from_crew
+        assert feb1_event.from_crew["S31"][0].name == "Jane Smith"
+
+    def test_convert_schedules_last_day_no_from_crew(self, calendar_sync, sample_schedules):
+        """Last day in range has no from crew (no next day data)."""
+        events = calendar_sync.convert_schedules_to_events(sample_schedules, {})
+
+        # Feb 2 is the last day, no Feb 3 data, so no "from" crew
         feb2_event = next(e for e in events if e.event_date == date(2026, 2, 2))
-        assert feb2_event.from_platoon == "B"
-        assert "S31" in feb2_event.from_crew
-        assert feb2_event.from_crew["S31"][0].name == "Jane Smith"
+        assert feb2_event.until_platoon == "B"
+        assert feb2_event.from_crew == {}
 
     def test_convert_schedules_empty_list(self, calendar_sync):
         """Convert empty schedules returns empty list."""

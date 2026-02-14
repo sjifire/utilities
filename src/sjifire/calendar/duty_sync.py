@@ -166,14 +166,14 @@ def is_operational_section(section: str) -> bool:
 
     Operational sections are those involved in emergency response:
     - Stations (S31, S32, S33, etc.)
-    - Chief/Command positions
     - Backup Duty
     - Support
     - State Mobe (wildland mobilization)
     - Marine operations
 
-    Non-operational sections (administration, training, trades, etc.)
-    are filtered out automatically by this pattern-based approach.
+    Non-operational/admin sections (chief, administration, training,
+    trades, etc.) are filtered out automatically by this pattern-based
+    approach.
     """
     section_lower = section.lower()
 
@@ -183,16 +183,12 @@ def is_operational_section(section: str) -> bool:
     if "station" in section_lower:
         return True
 
-    # Chief positions (Chief Officer, Chief on Call, etc.)
-    if "chief" in section_lower:
-        return True
-
     # Backup duty
     if "backup" in section_lower:
         return True
 
     # Support section
-    if section_lower == "support":
+    if "support" in section_lower:
         return True
 
     # State Mobe (wildland mobilization)
@@ -464,35 +460,40 @@ class DutyCalendarSync:
         # Get all unique dates from schedules
         all_dates = sorted(schedules_by_date.keys())
 
-        # For each date, we show crew "until shift change" (from previous day's shift)
-        # and "from shift change" (from this day's shift)
-        # The first date in range won't have "until" data from previous day
-        # unless that previous day is also in our data
+        # Aladtec stores shifts by the day they COVER, not the day they start.
+        # A 1800-1800 shift on Feb 14 means the crew arrived at 1800 Feb 13
+        # and leaves at 1800 Feb 14. So for each calendar date:
+        # - "Until shift change": today's schedule (crew covering today, ending at shift change)
+        # - "From shift change": next day's schedule (crew starting tonight, covering tomorrow)
+        # The last date in range won't have "from" data from the next day
+        # unless that next day is also in our data
 
         events: list[AllDayDutyEvent] = []
 
         for event_date in all_dates:
-            # Previous day's schedule provides "until shift change" crew
-            prev_date = event_date - timedelta(days=1)
-            prev_schedule = schedules_by_date.get(prev_date)
-
-            # This day's schedule provides "from shift change" crew
+            # This day's schedule provides "until shift change" crew
+            # (they're covering today, their shift ends at shift change)
             today_schedule = schedules_by_date.get(event_date)
 
-            # Build "until" crew (from previous day's shift)
+            # Next day's schedule provides "from shift change" crew
+            # (they start at shift change tonight, covering tomorrow)
+            next_date = event_date + timedelta(days=1)
+            next_schedule = schedules_by_date.get(next_date)
+
+            # Build "until" crew (from today's shift, ending at shift change)
             until_crew: dict[str, list[CrewMember]] = {}
             until_platoon = ""
-            if prev_schedule:
-                until_platoon = prev_schedule.platoon
-                filled = self._get_filled_entries(prev_schedule)
+            if today_schedule:
+                until_platoon = today_schedule.platoon
+                filled = self._get_filled_entries(today_schedule)
                 until_crew = self._entries_to_crew(filled, user_cache)
 
-            # Build "from" crew (from today's shift)
+            # Build "from" crew (from next day's shift, starting at shift change)
             from_crew: dict[str, list[CrewMember]] = {}
             from_platoon = ""
-            if today_schedule:
-                from_platoon = today_schedule.platoon
-                filled = self._get_filled_entries(today_schedule)
+            if next_schedule:
+                from_platoon = next_schedule.platoon
+                filled = self._get_filled_entries(next_schedule)
                 from_crew = self._entries_to_crew(filled, user_cache)
 
             # Only create event if we have at least some crew data
