@@ -78,7 +78,6 @@ async def _call_azure_openai(system: str, user_prompt: str) -> str:
             {"role": "user", "content": user_prompt},
         ],
         response_format={"type": "json_object"},
-        max_tokens=400,
         temperature=0,
     )
     return response.choices[0].message.content or ""
@@ -92,7 +91,6 @@ async def _call_anthropic(system: str, user_prompt: str) -> str:
 
     response = await client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=400,
         system=system,
         messages=[{"role": "user", "content": user_prompt}],
     )
