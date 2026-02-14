@@ -18,7 +18,7 @@ docs/*
 !docs/neris
 docs/neris/*
 !docs/neris/incident-report-instructions.md
-!docs/neris/value-sets-reference.md
+!docs/neris/neris-value-sets-reference.md
 scripts/
 ESO/
 .github/

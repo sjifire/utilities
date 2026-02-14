@@ -155,7 +155,7 @@ def register_resources(mcp: FastMCP) -> None:
         mime_type="text/markdown",
     )
     def neris_values() -> str:
-        path = _DOCS_DIR / "neris" / "value-sets-reference.md"
+        path = _DOCS_DIR / "neris" / "neris-value-sets-reference.md"
         if path.exists():
             return path.read_text()
         return "# NERIS values reference not found."

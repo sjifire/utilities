@@ -284,8 +284,8 @@ def main() -> int:
     archive_parser.add_argument(
         "--days",
         type=int,
-        default=2,
-        help="Days to look back (default: 2)",
+        required=True,
+        help="Days to look back",
     )
     archive_parser.add_argument(
         "--dry-run", action="store_true", help="Show what would be archived without writing"

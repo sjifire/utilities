@@ -159,7 +159,7 @@ Remote MCP server at `https://mcp.sjifire.org/mcp` providing fire district tools
 
 **MCP prompts**: `operations_dashboard`, `incident_reporting`, `shift_briefing` — selectable workflows in Claude.ai.
 
-**MCP resources**: `sjifire://project-instructions` (from `docs/neris/incident-report-instructions.md`), `sjifire://neris-values` (from `docs/neris/value-sets-reference.md`).
+**MCP resources**: `sjifire://project-instructions` (from `docs/neris/incident-report-instructions.md`), `sjifire://neris-values` (from `docs/neris/neris-value-sets-reference.md`).
 
 **Session instructions**: `docs/mcp-start-session.md` — loaded by `start_session` tool, tells Claude how to present the dashboard and what actions to offer.
 

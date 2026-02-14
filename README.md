@@ -212,8 +212,7 @@ The MCP server powers a guided incident reporting workflow through Claude.ai. Us
 
 **Reference docs:**
 - `docs/neris/incident-report-instructions.md` — Full workflow instructions for the Claude.ai Project
-- `docs/neris/value-sets-reference.md` — Common NERIS value sets (incident types, actions, locations, etc.)
-- `docs/neris/eso-field-analysis.md` — ESO Suite field mapping to NERIS
+- `docs/neris/neris-value-sets-reference.md` — Common NERIS value sets (incident types, actions, locations, etc.)
 - `docs/neris/architecture.md` — System architecture and design decisions
 
 ### Aladtec Tools
