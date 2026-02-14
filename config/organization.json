@@ -31,6 +31,12 @@
   "default_city": "Friday Harbor",
   "default_state": "WA",
   "officer_group_name": "MCP Incident Officers",
+  "schedule_section_order": ["chief", "e31", "s31", "station 31", "backup", "fb", "fireboat", "support"],
+  "schedule_section_labels": {
+    "S31": "Station 31",
+    "FB31": "Fireboat 31 Standby",
+    "Support": "Support Standby"
+  },
   "duty_event_subject": "On Duty",
   "calendar_category": "Aladtec",
   "skip_emails": [

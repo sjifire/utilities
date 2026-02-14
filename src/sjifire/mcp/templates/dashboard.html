@@ -75,7 +75,7 @@
 .th{padding:10px 14px;font-size:11px;color:var(--t4);text-transform:uppercase;letter-spacing:.08em;font-weight:600;white-space:nowrap;text-align:left}
 .td{padding:12px 14px}.dot-td{width:30px}
 .crew-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.crew-tbl{width:auto}.crew-tbl td,.crew-tbl th{white-space:nowrap}
+.crew-tbl td,.crew-tbl th{white-space:nowrap}.crew-tbl .shift{text-align:right}
 .sechdr{padding:8px 18px;background:rgba(255,255,255,.02);border-bottom:1px solid var(--b1)}
 .crow{padding:10px 18px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center;gap:12px}
 .crow .bdg{font-size:10px;padding:1px 6px}
@@ -323,10 +323,10 @@
                 <thead><tr>
                   <th class="th">Name</th>
                   <th class="th">Rank</th>
-                  <th class="th">Shift</th>
+                  <th class="th shift">Shift</th>
                 </tr></thead>
                 <tbody>
-                  <template x-for="s in D.sections" :key="s.key">
+                  <template x-for="s in D.sections.slice().reverse()" :key="s.key">
                     <template x-for="(c, i) in [{_header: true, label: s.label}, ...s.members]" :key="c._header ? 'h-' + s.key : c.name + c.shift">
                       <tr>
                         <template x-if="c._header">
@@ -349,7 +349,7 @@
                           <td class="td nw"><span class="bdg" :data-p="c.position" x-text="c.position"></span></td>
                         </template>
                         <template x-if="!c._header">
-                          <td class="td f12 t4 mono nw" x-text="c.shift"></td>
+                          <td class="td f12 t4 mono nw shift" x-text="c.shift"></td>
                         </template>
                       </tr>
                     </template>
@@ -374,10 +374,10 @@
                 <thead><tr>
                   <th class="th">Name</th>
                   <th class="th">Rank</th>
-                  <th class="th">Shift</th>
+                  <th class="th shift">Shift</th>
                 </tr></thead>
                 <tbody>
-                  <template x-for="s in D.upcoming_sections" :key="s.key">
+                  <template x-for="s in D.upcoming_sections.slice().reverse()" :key="s.key">
                     <template x-for="(c, i) in [{_header: true, label: s.label}, ...s.members]" :key="c._header ? 'h-' + s.key : c.name + c.shift">
                       <tr>
                         <template x-if="c._header">
@@ -400,7 +400,7 @@
                           <td class="td nw"><span class="bdg" :data-p="c.position" x-text="c.position"></span></td>
                         </template>
                         <template x-if="!c._header">
-                          <td class="td f12 t4 mono nw" x-text="c.shift"></td>
+                          <td class="td f12 t4 mono nw shift" x-text="c.shift"></td>
                         </template>
                       </tr>
                     </template>

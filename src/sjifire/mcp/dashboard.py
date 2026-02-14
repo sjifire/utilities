@@ -16,7 +16,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
-from sjifire.calendar.models import position_sort_key
+from sjifire.calendar.models import position_sort_key, section_sort_key
 from sjifire.core.config import get_org_config, get_timezone
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.dispatch.store import DispatchStore
@@ -80,13 +80,9 @@ def _get_icon(nature: str) -> str:
     return "\U0001f4df"
 
 
-_SECTION_ORDER = ["S31", "Chief Officer", "FB31", "Support"]
-_SECTION_LABELS = {
-    "S31": "Station 31",
-    "Chief Officer": "Chief Officer",
-    "FB31": "Fireboat 31 Standby",
-    "Support": "Support Standby",
-}
+def _get_section_labels() -> dict[str, str]:
+    """Get section display labels from organization config."""
+    return get_org_config().schedule_section_labels
 
 
 # ---------------------------------------------------------------------------
@@ -120,28 +116,24 @@ def _build_crew_list(
             }
         )
 
-    # Group by section (preserve order), sorted by position seniority
+    # Group by section, sort sections by priority, positions by seniority
     section_members: dict[str, list] = {}
-    seen_sections: list[str] = []
     for c in crew:
         sec = c["section"]
         if sec not in section_members:
             section_members[sec] = []
-            seen_sections.append(sec)
         section_members[sec].append(c)
     for members in section_members.values():
         members.sort(key=lambda c: c["_sort_key"])
 
+    ordered_keys = sorted(section_members, key=section_sort_key)
     sections = [
-        {"key": k, "label": _SECTION_LABELS.get(k, k), "members": section_members[k]}
-        for k in _SECTION_ORDER
-        if k in section_members
+        {"key": k, "label": _get_section_labels().get(k, k), "members": section_members[k]}
+        for k in ordered_keys
     ]
-    sections.extend(
-        {"key": k, "label": k, "members": section_members[k]}
-        for k in seen_sections
-        if k not in _SECTION_ORDER
-    )
+
+    # Rebuild flat crew list in section + position order (for overview tab)
+    crew = [c for s in sections for c in s["members"]]
 
     return crew, sections
 

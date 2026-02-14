@@ -168,6 +168,8 @@ class OrgConfig:
     default_city: str = ""
     default_state: str = ""
     officer_group_name: str = ""
+    schedule_section_order: tuple[str, ...] = ()
+    schedule_section_labels: dict[str, str] = field(default_factory=dict)
     duty_event_subject: str = ""
     calendar_category: str = ""
     skip_emails: list[str] = field(default_factory=list)
@@ -246,6 +248,8 @@ def load_org_config() -> OrgConfig:
         default_city=config_data.get("default_city", ""),
         default_state=config_data.get("default_state", ""),
         officer_group_name=config_data.get("officer_group_name", ""),
+        schedule_section_order=tuple(config_data.get("schedule_section_order", ())),
+        schedule_section_labels=config_data.get("schedule_section_labels", {}),
         duty_event_subject=config_data.get("duty_event_subject", ""),
         calendar_category=config_data.get("calendar_category", ""),
         skip_emails=config_data.get("skip_emails", []),

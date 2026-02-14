@@ -1,6 +1,5 @@
 """Data models for calendar events."""
 
-import re
 from dataclasses import dataclass, field
 from datetime import date
 from html import escape
@@ -29,42 +28,23 @@ def get_aladtec_url() -> str:
     return url
 
 
-def section_sort_key(section: str) -> tuple[int, int, str]:
-    """Sort key for sections with custom priority order.
+def section_sort_key(section: str) -> tuple[int, str]:
+    """Sort key for sections using config-driven priority order.
 
-    Sorting priority (soft matching, case-insensitive):
-    1. Chief (matches "chief", "chief officer", "chief on call", etc.)
-    2. S31 (the primary station)
-    3. Backup (matches "backup", "backup duty officer", etc.)
-    4. Support (matches "support")
-    5. Other stations (S32, S33, etc.) - sorted by number
-    6. Everything else - sorted alphabetically
+    Reads ``schedule_section_order`` from organization.json — a list of
+    keywords checked case-insensitively against the section name.  The
+    first matching keyword determines priority (position in the list).
+    Unmatched sections sort alphabetically at the end.
     """
+    from sjifire.core.config import get_org_config
+
     section_lower = section.lower()
+    for i, keyword in enumerate(get_org_config().schedule_section_order):
+        if keyword.lower() in section_lower:
+            return (i, section)
 
-    # Priority 0: Chief (soft match)
-    if "chief" in section_lower:
-        return (0, 0, section)
-
-    # Priority 1: S31 specifically
-    if section_lower == "s31" or section_lower == "station 31":
-        return (1, 0, section)
-
-    # Priority 2: Backup (soft match)
-    if "backup" in section_lower:
-        return (2, 0, section)
-
-    # Priority 3: Support (soft match)
-    if "support" in section_lower:
-        return (3, 0, section)
-
-    # Priority 4: Other stations (sorted by number)
-    station_match = re.match(r"^S(\d+)$", section, re.IGNORECASE)
-    if station_match:
-        return (4, int(station_match.group(1)), section)
-
-    # Priority 5: Everything else alphabetically
-    return (5, 0, section)
+    # Unmatched sections sort after all configured ones
+    return (len(get_org_config().schedule_section_order), section)
 
 
 def position_sort_key(position: str) -> int:
