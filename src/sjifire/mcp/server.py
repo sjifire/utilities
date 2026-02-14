@@ -22,10 +22,18 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.routing import Route
 
 from sjifire.core.config import get_org_config
 from sjifire.mcp import dashboard
 from sjifire.mcp.auth import get_easyauth_user, set_current_user
+from sjifire.mcp.chat.routes import (
+    chat_page,
+    chat_stream,
+    conversation_history,
+    create_report,
+    reports_list,
+)
 from sjifire.mcp.dispatch import tools as dispatch_tools
 from sjifire.mcp.incidents import tools as incident_tools
 from sjifire.mcp.neris import tools as neris_tools
@@ -221,6 +229,15 @@ async def health(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 app = mcp.streamable_http_app()
+
+# Chat routes — Starlette Route directly because @mcp.custom_route
+# doesn't support path parameters like {incident_id}.
+# Order matters: exact paths before parameterized paths.
+app.routes.insert(0, Route("/reports/{incident_id}/chat", chat_stream, methods=["POST"]))
+app.routes.insert(0, Route("/reports/{incident_id}/conversation", conversation_history))
+app.routes.insert(0, Route("/reports/{incident_id}", chat_page))
+app.routes.insert(0, Route("/reports/new", create_report, methods=["POST"]))
+app.routes.insert(0, Route("/reports", reports_list))
 
 # Dev mode: inject synthetic user context on every request
 if provider is None:
