@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+
+{% block title %}Incident Report &mdash; {{ incident_number }}{% endblock %}
+
+{% block head_scripts %}
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+body{overflow:hidden}
+
+/* Layout */
+.chat-app{display:flex;flex-direction:column;height:100vh}
+.chat-header{background:linear-gradient(135deg,#0f2240,#1a3a5c);border-bottom:3px solid var(--color-red);padding:10px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.chat-header-left{display:flex;align-items:center;gap:12px}
+.chat-header h1{font-size:16px;color:var(--text-primary);font-weight:600}
+.back-link{color:var(--color-blue);text-decoration:none;font-size:13px;opacity:.8}
+.back-link:hover{opacity:1}
+.status-badge{font-size:11px;padding:3px 10px;border-radius:4px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.status-badge.draft{background:var(--blue-alpha);color:var(--color-blue)}
+.status-badge.in_progress{background:var(--amber-alpha);color:var(--color-amber)}
+.status-badge.ready_review{background:var(--green-alpha);color:var(--color-green)}
+
+/* Messages area */
+.messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px}
+.messages::-webkit-scrollbar{width:6px}
+.messages::-webkit-scrollbar-thumb{background:var(--border-medium);border-radius:3px}
+
+.msg{max-width:85%;padding:12px 16px;border-radius:12px;font-size:14px;line-height:1.6}
+.msg.user{align-self:flex-end;background:var(--color-blue);color:#fff;border-bottom-right-radius:4px}
+.msg.assistant{align-self:flex-start;background:var(--bg-panel-alt);border:1px solid var(--border-default);border-bottom-left-radius:4px}
+.msg.assistant p{margin-bottom:8px}
+.msg.assistant p:last-child{margin-bottom:0}
+.msg.assistant strong{color:var(--text-primary)}
+.msg.assistant code{background:var(--border-medium);padding:1px 5px;border-radius:3px;font-size:13px}
+.msg.assistant pre{background:var(--bg-page);border:1px solid var(--border-default);border-radius:6px;padding:10px;margin:8px 0;overflow-x:auto}
+.msg.assistant pre code{background:none;padding:0}
+.msg.assistant ul,.msg.assistant ol{margin:4px 0 8px 20px}
+.msg.assistant li{margin-bottom:4px}
+.msg.assistant blockquote{border-left:3px solid var(--color-blue);padding-left:12px;margin:8px 0;color:var(--text-muted)}
+
+/* Tool indicators */
+.tool-indicator{align-self:flex-start;display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--border-subtle);border:1px solid var(--border-default);border-radius:8px;font-size:12px;color:var(--text-dim)}
+.tool-indicator .spinner{width:14px;height:14px;border:2px solid var(--border-medium);border-top-color:var(--color-blue);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.tool-result{align-self:flex-start;padding:8px 14px;background:var(--green-alpha);border:1px solid rgba(34,197,94,.2);border-radius:8px;font-size:12px;color:var(--color-green);cursor:pointer}
+.tool-result:hover{background:rgba(34,197,94,.2)}
+
+/* Welcome message */
+.welcome{align-self:center;text-align:center;padding:40px 20px;color:var(--text-dim)}
+.welcome h2{color:var(--text-muted);font-size:18px;margin-bottom:8px}
+.welcome p{font-size:14px}
+
+/* Typing indicator */
+.typing{align-self:flex-start;display:flex;gap:4px;padding:12px 16px;background:var(--bg-panel-alt);border:1px solid var(--border-default);border-radius:12px;border-bottom-left-radius:4px}
+.typing span{width:7px;height:7px;background:var(--text-dim);border-radius:50%;animation:bounce 1.4s infinite}
+.typing span:nth-child(2){animation-delay:.2s}
+.typing span:nth-child(3){animation-delay:.4s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
+
+/* Input bar */
+.input-bar{border-top:1px solid var(--border-default);padding:12px 20px;background:var(--bg-panel);flex-shrink:0;display:flex;gap:10px;align-items:flex-end}
+.input-bar textarea{flex:1;background:var(--bg-page);border:1px solid var(--border-medium);border-radius:8px;color:var(--text-secondary);padding:10px 14px;font-size:14px;font-family:inherit;resize:none;min-height:42px;max-height:120px;line-height:1.5}
+.input-bar textarea:focus{outline:none;border-color:var(--color-blue)}
+.input-bar textarea::placeholder{color:var(--text-dim)}
+.input-bar textarea:disabled{opacity:.5}
+.send-btn{background:var(--color-blue);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;height:42px}
+.send-btn:hover:not(:disabled){background:#4a94f0}
+.send-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* Error banner */
+.error-banner{background:var(--red-alpha);border:1px solid rgba(220,38,38,.3);color:var(--color-error);padding:10px 16px;border-radius:8px;font-size:13px;align-self:stretch;text-align:center}
+
+/* Chat responsive */
+@media(max-width:640px){
+  .msg{max-width:95%}
+  .chat-header h1{font-size:14px}
+  .input-bar{padding:8px 12px}
+}
+</style>
+{% endblock %}
+
+{% block header %}{% endblock %}
+
+{% block body %}
+<div class="chat-app" x-data="chatApp()" x-init="init()" x-cloak>
+  <!-- Compact header -->
+  <div class="chat-header">
+    <div class="chat-header-left">
+      <a href="/reports" class="back-link">&larr; Reports</a>
+      <h1>{{ incident_number }}</h1>
+      <span class="status-badge {{ incident_status }}" x-text="status">{{ incident_status }}</span>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div class="messages" x-ref="messages">
+    <!-- Welcome message (shown when no messages) -->
+    <template x-if="messages.length === 0 && !streaming">
+      <div class="welcome">
+        <h2>Incident Report Assistant</h2>
+        <p>I'll help you complete the NERIS report for {{ incident_number }}.<br>
+        Type a message to get started, or just say "hi" and I'll walk you through it.</p>
+      </div>
+    </template>
+
+    <!-- Message list -->
+    <template x-for="(msg, i) in messages" :key="i">
+      <div>
+        <!-- User or assistant message -->
+        <template x-if="msg.type === 'message'">
+          <div class="msg" :class="msg.role" x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content"></div>
+        </template>
+        <!-- Tool call indicator -->
+        <template x-if="msg.type === 'tool_call'">
+          <div class="tool-indicator">
+            <template x-if="msg.pending"><div class="spinner"></div></template>
+            <span x-text="msg.label"></span>
+          </div>
+        </template>
+        <!-- Tool result -->
+        <template x-if="msg.type === 'tool_result'">
+          <div class="tool-result" x-text="'\u2713 ' + msg.summary" @click="msg.expanded = !msg.expanded"></div>
+        </template>
+        <!-- Error -->
+        <template x-if="msg.type === 'error'">
+          <div class="error-banner" x-text="msg.content"></div>
+        </template>
+      </div>
+    </template>
+
+    <!-- Typing indicator (shown while waiting for first token) -->
+    <template x-if="streaming && !currentText">
+      <div class="typing"><span></span><span></span><span></span></div>
+    </template>
+
+    <!-- Streaming assistant message -->
+    <template x-if="streaming && currentText">
+      <div class="msg assistant" x-html="renderMarkdown(currentText)"></div>
+    </template>
+  </div>
+
+  <!-- Input bar -->
+  <div class="input-bar">
+    <textarea
+      x-ref="input"
+      x-model="inputText"
+      :disabled="streaming"
+      placeholder="Type your message..."
+      @keydown.enter.prevent="if (!$event.shiftKey) sendMessage()"
+      @input="autoResize($event)"
+      rows="1"
+    ></textarea>
+    <button class="send-btn" :disabled="streaming || !inputText.trim()" @click="sendMessage()">Send</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block body_scripts %}
+<script>
+function chatApp() {
+  return {
+    messages: [],
+    inputText: '',
+    streaming: false,
+    currentText: '',
+    status: '{{ incident_status }}',
+    incidentId: '{{ incident_id }}',
+
+    async init() {
+      // Load conversation history
+      try {
+        const res = await fetch(`/reports/${this.incidentId}/conversation`);
+        if (res.ok) {
+          const data = await res.json();
+          for (const msg of data.messages || []) {
+            if (msg.content) {
+              this.messages.push({type: 'message', role: msg.role, content: msg.content});
+            }
+            if (msg.tool_use) {
+              for (const tu of msg.tool_use) {
+                this.messages.push({
+                  type: 'tool_result',
+                  summary: tu.name + ' completed',
+                  expanded: false
+                });
+              }
+            }
+          }
+          this.scrollToBottom();
+        }
+      } catch (e) {
+        console.error('Failed to load history:', e);
+      }
+    },
+
+    renderMarkdown(text) {
+      if (!text) return '';
+      try {
+        return DOMPurify.sanitize(marked.parse(text));
+      } catch {
+        return text;
+      }
+    },
+
+    autoResize(e) {
+      const ta = e.target;
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+    },
+
+    scrollToBottom() {
+      this.$nextTick(() => {
+        const el = this.$refs.messages;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    async sendMessage() {
+      const text = this.inputText.trim();
+      if (!text || this.streaming) return;
+
+      // Add user message
+      this.messages.push({type: 'message', role: 'user', content: text});
+      this.inputText = '';
+      this.streaming = true;
+      this.currentText = '';
+      this.scrollToBottom();
+
+      // Reset textarea height
+      this.$refs.input.style.height = 'auto';
+
+      try {
+        const res = await fetch(`/reports/${this.incidentId}/chat`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: text})
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({error: 'Request failed'}));
+          this.messages.push({type: 'error', content: err.error || 'Request failed'});
+          this.streaming = false;
+          return;
+        }
+
+        // Read SSE stream
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const {done, value} = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, {stream: true});
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          let eventType = '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith('data: ') && eventType) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                this.handleEvent(eventType, data);
+              } catch {}
+              eventType = '';
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Chat error:', e);
+        this.messages.push({type: 'error', content: 'Connection error. Please try again.'});
+      }
+
+      // Finalize streaming message
+      if (this.currentText) {
+        this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+        this.currentText = '';
+      }
+      this.streaming = false;
+      this.scrollToBottom();
+    },
+
+    handleEvent(type, data) {
+      if (type === 'text') {
+        this.currentText += data.content || '';
+        this.scrollToBottom();
+      } else if (type === 'tool_call') {
+        // Finalize current text if any
+        if (this.currentText) {
+          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+          this.currentText = '';
+        }
+        const labels = {
+          get_incident: 'Loading incident data...',
+          update_incident: 'Saving changes...',
+          get_dispatch_call: 'Looking up dispatch data...',
+          search_dispatch_calls: 'Searching dispatch calls...',
+          get_on_duty_crew: 'Checking crew schedule...',
+          get_neris_values: 'Looking up NERIS values...'
+        };
+        this.messages.push({
+          type: 'tool_call',
+          label: labels[data.name] || `Running ${data.name}...`,
+          pending: true
+        });
+        this.scrollToBottom();
+      } else if (type === 'tool_result') {
+        // Mark last tool_call as complete
+        for (let i = this.messages.length - 1; i >= 0; i--) {
+          if (this.messages[i].type === 'tool_call' && this.messages[i].pending) {
+            this.messages[i].pending = false;
+            break;
+          }
+        }
+        this.messages.push({
+          type: 'tool_result',
+          summary: data.summary || data.name,
+          expanded: false
+        });
+        this.scrollToBottom();
+      } else if (type === 'done') {
+        // Token usage could be shown but keeping it minimal
+      } else if (type === 'error') {
+        if (this.currentText) {
+          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+          this.currentText = '';
+        }
+        this.messages.push({type: 'error', content: data.message});
+        this.scrollToBottom();
+      }
+    }
+  };
+}
+</script>
+{% endblock %}

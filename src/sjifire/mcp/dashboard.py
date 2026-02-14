@@ -470,7 +470,7 @@ async def refresh_dashboard() -> dict:
 async def render_for_browser() -> str:
     """Render dashboard HTML shell. Data loaded client-side via Alpine.js."""
     template = _jinja_env.get_template("dashboard.html")
-    return template.render()
+    return template.render(active_page="dashboard")
 
 
 async def get_dashboard_data() -> dict:

@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block title %}Incident Reports{% endblock %}
+
+{% block extra_styles %}
+<style>
+/* Reports main */
+.reports-main{max-width:1100px;margin:0 auto;padding:24px}
+.reports-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px}
+
+/* Table hover */
+.data-table tbody tr{transition:background .15s}
+.data-table tbody tr:hover{background:rgba(96,165,250,.06)}
+
+/* Report details */
+.neris-id{font-size:10px;color:var(--text-dim);font-family:monospace;margin-top:2px}
+.completeness{font-size:11px;color:var(--text-dim);margin-top:2px}
+.completeness-bar{display:inline-block;width:40px;height:3px;background:var(--border-default);border-radius:2px;vertical-align:middle;margin-left:4px}
+.completeness-fill{height:100%;border-radius:2px;background:var(--color-blue)}
+
+/* Cell styles */
+.call-id{font-family:monospace;font-size:12px;color:var(--text-muted)}
+.nature{color:var(--text-primary);font-weight:600;white-space:nowrap}
+.address{color:var(--text-secondary);font-size:12px;margin-top:2px}
+.dt{white-space:nowrap;color:var(--text-secondary)}
+.dt-time{color:var(--text-muted);font-size:12px}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal{background:var(--bg-panel);border:1px solid var(--border-medium);border-radius:10px;padding:24px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.modal h2{font-size:16px;color:var(--text-primary);margin-bottom:16px}
+.modal label{display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.modal input,.modal select{width:100%;background:var(--bg-page);border:1px solid var(--border-medium);border-radius:6px;color:var(--text-secondary);padding:8px 12px;font-size:14px;font-family:inherit;margin-bottom:12px}
+.modal input:focus,.modal select:focus{outline:none;border-color:var(--color-blue)}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:8px}
+.modal-actions button{padding:8px 18px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;border:none}
+.btn-primary{background:var(--color-blue);color:#fff}
+.btn-primary:hover{background:#4a94f0}
+.btn-secondary{background:var(--border-medium);color:var(--text-muted)}
+.btn-secondary:hover{background:var(--border-strong)}
+
+/* Reports responsive */
+@media(max-width:768px){
+  .reports-main{padding:16px}
+  .reports-stats{grid-template-columns:1fr}
+  .data-table th:nth-child(n+5),.data-table td:nth-child(n+5){display:none}
+}
+</style>
+{% endblock %}
+
+{% block body_attrs %}x-data="reportsApp()" x-cloak{% endblock %}
+
+{% block page_title %}Incident Reports{% endblock %}
+
+{% block tab_bar %}
+<div class="nav-bar">
+  <button class="nav-tab" :class="{ active: filter === 'all' }" @click="filter = 'all'">
+    All <span style="opacity:.6" x-text="'(' + calls.length + ')'"></span>
+  </button>
+  <button class="nav-tab" :class="{ active: filter === 'missing' }" @click="filter = 'missing'">
+    Missing Report <span style="opacity:.6" x-text="'(' + countByFilter('missing') + ')'"></span>
+  </button>
+  <button class="nav-tab" :class="{ active: filter === 'local' }" @click="filter = 'local'">
+    In Progress <span style="opacity:.6" x-text="'(' + countByFilter('local') + ')'"></span>
+  </button>
+  <button class="nav-tab" :class="{ active: filter === 'neris' }" @click="filter = 'neris'">
+    Submitted <span style="opacity:.6" x-text="'(' + countByFilter('neris') + ')'"></span>
+  </button>
+</div>
+{% endblock %}
+
+{% block body %}
+<div class="reports-main">
+  <!-- Stats -->
+  <div class="reports-stats">
+    <div class="stat-card accent-blue">
+      <div class="stat-label">In Progress</div>
+      <div class="stat-value">{{ local_draft_count }}</div>
+      <div class="stat-desc">Drafts &amp; reviews</div>
+    </div>
+    <div class="stat-card accent-amber">
+      <div class="stat-label">Missing Reports</div>
+      <div class="stat-value">{{ missing_reports }}</div>
+      <div class="stat-desc">No incident report yet</div>
+    </div>
+    <div class="stat-card accent-green">
+      <div class="stat-label">In NERIS</div>
+      <div class="stat-value">{{ neris_count }}</div>
+      <div class="stat-desc">Submitted to NERIS</div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <template x-if="filtered().length > 0">
+    <div class="panel data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th class="dot-cell"></th>
+            <th>ID</th>
+            <th>Date/Time</th>
+            <th>Nature</th>
+            <th>Address</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="c in filtered()" :key="c.id">
+            <tr>
+              <td class="dot-cell"><span class="severity-dot" :class="c.severity"></span></td>
+              <td class="call-id" x-text="c.id"></td>
+              <td class="dt">
+                <div x-text="c.date"></div>
+                <div class="dt-time" x-text="c.time"></div>
+              </td>
+              <td>
+                <div class="nature" x-text="c.icon + ' ' + c.nature"></div>
+              </td>
+              <td class="address" x-text="c.address || '\u2014'"></td>
+              <td>
+                <!-- NERIS only (no local draft) -->
+                <template x-if="c.report_source === 'neris'">
+                  <div>
+                    <div class="report-status neris" x-text="'\u2713 In NERIS'"></div>
+                    <div class="neris-id" x-text="c.neris_id || 'No local report'"></div>
+                  </div>
+                </template>
+                <!-- Local draft -->
+                <template x-if="c.report_source === 'local'">
+                  <div>
+                    <div class="report-status local" x-text="c.report_status || 'draft'"></div>
+                    <template x-if="c.completeness">
+                      <div class="completeness">
+                        <span x-text="c.completeness.filled + '/' + c.completeness.total"></span>
+                        <span class="completeness-bar"><span class="completeness-fill" :style="'width:' + (c.completeness.total ? (c.completeness.filled / c.completeness.total * 100) : 0) + '%'"></span></span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <!-- No report -->
+                <template x-if="!c.has_report">
+                  <div class="report-status missing">&triangledown; Missing</div>
+                </template>
+              </td>
+              <td>
+                <!-- Local draft: Edit -->
+                <template x-if="c.report_source === 'local' && c.incident_id">
+                  <a class="action-btn edit" :href="'/reports/' + c.incident_id" @click.stop>Edit Report</a>
+                </template>
+                <!-- NERIS only: Import -->
+                <template x-if="c.report_source === 'neris'">
+                  <button class="action-btn import" @click.stop="startReport(c)">Import from NERIS</button>
+                </template>
+                <!-- No report: Start -->
+                <template x-if="!c.has_report">
+                  <button class="action-btn start" @click.stop="startReport(c)">Start Report</button>
+                </template>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </template>
+
+  <!-- Empty state -->
+  <template x-if="filtered().length === 0">
+    <div class="empty-state" style="padding:60px 20px">
+      <h2>No calls match this filter</h2>
+      <p>Try a different filter or check back later.</p>
+    </div>
+  </template>
+</div>
+
+<!-- New Report Modal -->
+<template x-if="showModal">
+  <div class="modal-overlay" @click.self="showModal = false" @keydown.escape.window="showModal = false">
+    <div class="modal">
+      <h2>Start Incident Report</h2>
+      <form method="POST" action="/reports/new" @submit="submitting = true">
+        <label for="incident_number">Incident Number</label>
+        <input type="text" id="incident_number" name="incident_number" :value="modalCallId" required readonly style="opacity:.7">
+
+        <label for="incident_date">Incident Date</label>
+        <input type="date" id="incident_date" name="incident_date" :value="modalDate" required>
+
+        <label for="station">Station</label>
+        <select id="station" name="station">
+          <option value="S31" selected>S31 &mdash; Friday Harbor</option>
+        </select>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" @click="showModal = false">Cancel</button>
+          <button type="submit" class="btn-primary" :disabled="submitting" x-text="submitting ? 'Creating...' : 'Create Report'"></button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>
+{% endblock %}
+
+{% block body_scripts %}
+<script>
+function reportsApp() {
+  return {
+    calls: {{ calls | tojson }},
+    filter: 'all',
+    showModal: false,
+    submitting: false,
+    modalCallId: '',
+    modalDate: '{{ today }}',
+
+    filtered() {
+      if (this.filter === 'all') return this.calls;
+      if (this.filter === 'missing') return this.calls.filter(c => !c.has_report);
+      if (this.filter === 'local') return this.calls.filter(c => c.report_source === 'local');
+      if (this.filter === 'neris') return this.calls.filter(c => c.report_source === 'neris');
+      return this.calls;
+    },
+
+    countByFilter(f) {
+      if (f === 'missing') return this.calls.filter(c => !c.has_report).length;
+      if (f === 'local') return this.calls.filter(c => c.report_source === 'local').length;
+      if (f === 'neris') return this.calls.filter(c => c.report_source === 'neris').length;
+      return this.calls.length;
+    },
+
+    startReport(call) {
+      this.modalCallId = call.id;
+      this.modalDate = this.parseCallDate(call.date) || '{{ today }}';
+      this.showModal = true;
+    },
+
+    parseCallDate(dateStr) {
+      if (!dateStr) return null;
+      const d = new Date(dateStr + ' {{ today[:4] }}');
+      if (isNaN(d)) return null;
+      return d.toISOString().split('T')[0];
+    }
+  };
+}
+</script>
+{% endblock %}
