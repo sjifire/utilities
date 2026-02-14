@@ -350,16 +350,14 @@ if should_run 2; then
     store_secret "COSMOS-ENDPOINT" "$COSMOS_ENDPOINT"
     store_secret "COSMOS-KEY" "$COSMOS_KEY"
 
-    # ---- Backup: Continuous PITR (7-day) ----
+    # ---- Backup: Continuous PITR (30-day) ----
     #
-    # Built-in 7-day point-in-time restore (any-second granularity).
+    # Built-in 30-day point-in-time restore (any-second granularity).
+    # Cost: $0.20/GB × data size × regions/month (pennies for small DBs).
     # For longer retention, use: uv run backup-cosmos (JSON export to disk/blob)
     #
-    # NOTE: Azure Backup vault for Cosmos DB NoSQL is not yet available as an
-    # Azure Backup datasource type. When it becomes GA, we can add vault-based
-    # daily snapshots with 1-year retention here.
-    #
     # NOTE: Migration from periodic → continuous is ONE-WAY (cannot revert).
+    # Switching between 7-day and 30-day tiers IS reversible.
 
     CURRENT_BACKUP_TYPE=$(az cosmosdb show \
         --name "$COSMOS_ACCOUNT" \
@@ -367,17 +365,32 @@ if should_run 2; then
         --query "backupPolicy.type" -o tsv)
 
     if [ "$CURRENT_BACKUP_TYPE" = "Continuous" ]; then
-        ok "Already using continuous backup (7-day PITR)"
+        # Ensure we're on the 30-day tier (upgrade from 7-day is instant)
+        CURRENT_TIER=$(az cosmosdb show \
+            --name "$COSMOS_ACCOUNT" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "backupPolicy.continuousModeProperties.tier" -o tsv 2>/dev/null || echo "")
+        if [ "$CURRENT_TIER" = "Continuous30Days" ]; then
+            ok "Already using continuous backup (30-day PITR)"
+        else
+            info "Upgrading to 30-day continuous backup tier..."
+            az cosmosdb update \
+                --name "$COSMOS_ACCOUNT" \
+                --resource-group "$RESOURCE_GROUP" \
+                --continuous-tier Continuous30Days \
+                --output none
+            ok "Upgraded to continuous backup (30-day PITR)"
+        fi
     else
-        info "Migrating to continuous backup (7-day PITR)..."
+        info "Migrating to continuous backup (30-day PITR)..."
         info "This is a one-way migration and may take several minutes..."
         az cosmosdb update \
             --name "$COSMOS_ACCOUNT" \
             --resource-group "$RESOURCE_GROUP" \
             --backup-policy-type Continuous \
-            --continuous-tier Continuous7Days \
+            --continuous-tier Continuous30Days \
             --output none
-        ok "Migrated to continuous backup (7-day PITR)"
+        ok "Migrated to continuous backup (30-day PITR)"
     fi
 
     ok "Phase 2 complete"
