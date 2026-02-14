@@ -47,7 +47,6 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("MS_GRAPH_CLIENT_SECRET", "test-client-secret")
 
 
-
 @pytest.fixture
 def mock_graph_client():
     """Mock MS Graph client for testing."""

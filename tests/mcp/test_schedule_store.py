@@ -103,8 +103,11 @@ class TestGetRange:
 def _entry(start: str, end: str, name: str = "Test") -> ScheduleEntryCache:
     """Helper to create a schedule entry with given times."""
     return ScheduleEntryCache(
-        name=name, position="Firefighter", section="S31",
-        start_time=start, end_time=end,
+        name=name,
+        position="Firefighter",
+        section="S31",
+        start_time=start,
+        end_time=end,
     )
 
 
@@ -199,8 +202,11 @@ class TestEntryCoverTime:
 
 def _make_schedule(date_str: str, entries: list[ScheduleEntryCache]) -> DayScheduleCache:
     return DayScheduleCache(
-        id=date_str, date=date_str, platoon="A",
-        entries=entries, fetched_at=datetime.now(UTC),
+        id=date_str,
+        date=date_str,
+        platoon="A",
+        entries=entries,
+        fetched_at=datetime.now(UTC),
     )
 
 
@@ -209,13 +215,19 @@ class TestGetForTime:
 
     async def test_morning_call_gets_previous_day_crew(self):
         """08:41 call on Jan 20 should get crew from Jan 19 schedule."""
-        jan19 = _make_schedule("2026-01-19", [
-            _entry("18:00", "18:00", "Pollack"),    # chief, full shift
-            _entry("18:00", "12:00", "Dodd"),        # captain, until noon
-        ])
-        jan20 = _make_schedule("2026-01-20", [
-            _entry("18:00", "18:00", "English"),     # next shift, starts 18:00
-        ])
+        jan19 = _make_schedule(
+            "2026-01-19",
+            [
+                _entry("18:00", "18:00", "Pollack"),  # chief, full shift
+                _entry("18:00", "12:00", "Dodd"),  # captain, until noon
+            ],
+        )
+        jan20 = _make_schedule(
+            "2026-01-20",
+            [
+                _entry("18:00", "18:00", "English"),  # next shift, starts 18:00
+            ],
+        )
         async with ScheduleStore() as store:
             await store.upsert(jan19)
             await store.upsert(jan20)
@@ -228,12 +240,18 @@ class TestGetForTime:
 
     async def test_evening_call_gets_current_day_crew(self):
         """20:00 call on Jan 20 should get crew from Jan 20 schedule."""
-        jan19 = _make_schedule("2026-01-19", [
-            _entry("18:00", "18:00", "Pollack"),
-        ])
-        jan20 = _make_schedule("2026-01-20", [
-            _entry("18:00", "18:00", "English"),
-        ])
+        jan19 = _make_schedule(
+            "2026-01-19",
+            [
+                _entry("18:00", "18:00", "Pollack"),
+            ],
+        )
+        jan20 = _make_schedule(
+            "2026-01-20",
+            [
+                _entry("18:00", "18:00", "English"),
+            ],
+        )
         async with ScheduleStore() as store:
             await store.upsert(jan19)
             await store.upsert(jan20)
@@ -245,12 +263,18 @@ class TestGetForTime:
 
     async def test_shift_boundary_new_crew_at_1800(self):
         """At exactly 18:00, new crew starts and old crew ends."""
-        jan19 = _make_schedule("2026-01-19", [
-            _entry("18:00", "18:00", "Old Crew"),
-        ])
-        jan20 = _make_schedule("2026-01-20", [
-            _entry("18:00", "18:00", "New Crew"),
-        ])
+        jan19 = _make_schedule(
+            "2026-01-19",
+            [
+                _entry("18:00", "18:00", "Old Crew"),
+            ],
+        )
+        jan20 = _make_schedule(
+            "2026-01-20",
+            [
+                _entry("18:00", "18:00", "New Crew"),
+            ],
+        )
         async with ScheduleStore() as store:
             await store.upsert(jan19)
             await store.upsert(jan20)
@@ -262,10 +286,13 @@ class TestGetForTime:
 
     async def test_partial_shift_ends_before_call(self):
         """FF on 19:30-08:30 shift should not show for 08:41 call."""
-        jan19 = _make_schedule("2026-01-19", [
-            _entry("18:00", "18:00", "Pollack"),
-            _entry("19:30", "08:30", "Howitt"),
-        ])
+        jan19 = _make_schedule(
+            "2026-01-19",
+            [
+                _entry("18:00", "18:00", "Pollack"),
+                _entry("19:30", "08:30", "Howitt"),
+            ],
+        )
         async with ScheduleStore() as store:
             await store.upsert(jan19)
             results = await store.get_for_time(datetime(2026, 1, 20, 8, 41))
@@ -276,9 +303,12 @@ class TestGetForTime:
 
     async def test_daytime_admin_included(self):
         """Admin on 11:30-15:00 should show for 12:00 call."""
-        jan20 = _make_schedule("2026-01-20", [
-            _entry("11:30", "15:00", "Taylor"),
-        ])
+        jan20 = _make_schedule(
+            "2026-01-20",
+            [
+                _entry("11:30", "15:00", "Taylor"),
+            ],
+        )
         async with ScheduleStore() as store:
             await store.upsert(jan20)
             results = await store.get_for_time(datetime(2026, 1, 20, 12, 0))
@@ -288,9 +318,12 @@ class TestGetForTime:
 
     async def test_daytime_admin_not_started(self):
         """Admin on 11:30-15:00 should not show for 08:41 call."""
-        jan20 = _make_schedule("2026-01-20", [
-            _entry("11:30", "15:00", "Taylor"),
-        ])
+        jan20 = _make_schedule(
+            "2026-01-20",
+            [
+                _entry("11:30", "15:00", "Taylor"),
+            ],
+        )
         async with ScheduleStore() as store:
             await store.upsert(jan20)
             results = await store.get_for_time(datetime(2026, 1, 20, 8, 41))
@@ -305,13 +338,19 @@ class TestGetForTime:
 
     async def test_mixed_both_days(self):
         """Morning call gets overnight crew + daytime admin from today."""
-        jan19 = _make_schedule("2026-01-19", [
-            _entry("18:00", "18:00", "Overnight Chief"),
-        ])
-        jan20 = _make_schedule("2026-01-20", [
-            _entry("07:00", "15:00", "Morning Admin"),
-            _entry("18:00", "18:00", "Next Shift"),
-        ])
+        jan19 = _make_schedule(
+            "2026-01-19",
+            [
+                _entry("18:00", "18:00", "Overnight Chief"),
+            ],
+        )
+        jan20 = _make_schedule(
+            "2026-01-20",
+            [
+                _entry("07:00", "15:00", "Morning Admin"),
+                _entry("18:00", "18:00", "Next Shift"),
+            ],
+        )
         async with ScheduleStore() as store:
             await store.upsert(jan19)
             await store.upsert(jan20)

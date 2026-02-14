@@ -106,9 +106,7 @@ class TestConfigConsistency:
     def test_no_rank_in_positions(self):
         cfg = get_org_config()
         for rank in cfg.rank_hierarchy:
-            assert rank not in cfg.operational_positions, (
-                f"Rank '{rank}' in operational_positions"
-            )
+            assert rank not in cfg.operational_positions, f"Rank '{rank}' in operational_positions"
             assert rank not in cfg.marine_positions, f"Rank '{rank}' in marine_positions"
 
     def test_officer_positions_not_empty(self):

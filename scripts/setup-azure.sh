@@ -58,9 +58,6 @@ TENANT_ID="4122848f-c317-4267-9c07-7c504150d1bd"
 # Cosmos DB
 COSMOS_ACCOUNT="sjifire-mcp-cosmos"
 COSMOS_DATABASE="sjifire-incidents"
-BACKUP_VAULT="sjifire-backup-vault"
-BACKUP_POLICY="cosmos-daily-1yr"
-
 # Container Registry + Container Apps
 ACR_NAME="sjifiremcp"
 CA_ENV="sjifire-mcp-env"
@@ -121,7 +118,7 @@ info "Using subscription: $SUB_ID"
 info "Tenant: $TENANT_ID"
 
 # Register resource providers (idempotent, no-op if already registered)
-for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices Microsoft.DataProtection; do
+for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices; do
     STATE=$(az provider show --namespace "$ns" --query registrationState -o tsv 2>/dev/null || echo "NotRegistered")
     if [ "$STATE" != "Registered" ]; then
         info "Registering provider $ns..."
@@ -129,7 +126,7 @@ for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microso
     fi
 done
 # Wait for registration to complete
-for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices Microsoft.DataProtection; do
+for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices; do
     STATE=$(az provider show --namespace "$ns" --query registrationState -o tsv)
     if [ "$STATE" != "Registered" ]; then
         info "Waiting for $ns to register..."
@@ -353,18 +350,16 @@ if should_run 2; then
     store_secret "COSMOS-ENDPOINT" "$COSMOS_ENDPOINT"
     store_secret "COSMOS-KEY" "$COSMOS_KEY"
 
-    # ---- Backup: Continuous PITR (7-day) + Azure Backup vault (1-year) ----
+    # ---- Backup: Continuous PITR (7-day) ----
     #
-    # Two layers of protection:
-    #   1. Continuous backup — built-in 7-day point-in-time restore (any second)
-    #   2. Azure Backup vault — daily snapshots with 1-year retention (~$5/mo)
+    # Built-in 7-day point-in-time restore (any-second granularity).
+    # For longer retention, use: uv run backup-cosmos (JSON export to disk/blob)
+    #
+    # NOTE: Azure Backup vault for Cosmos DB NoSQL is not yet available as an
+    # Azure Backup datasource type. When it becomes GA, we can add vault-based
+    # daily snapshots with 1-year retention here.
     #
     # NOTE: Migration from periodic → continuous is ONE-WAY (cannot revert).
-
-    COSMOS_RESOURCE_ID=$(az cosmosdb show \
-        --name "$COSMOS_ACCOUNT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query id -o tsv)
 
     CURRENT_BACKUP_TYPE=$(az cosmosdb show \
         --name "$COSMOS_ACCOUNT" \
@@ -372,7 +367,7 @@ if should_run 2; then
         --query "backupPolicy.type" -o tsv)
 
     if [ "$CURRENT_BACKUP_TYPE" = "Continuous" ]; then
-        ok "Already using continuous backup"
+        ok "Already using continuous backup (7-day PITR)"
     else
         info "Migrating to continuous backup (7-day PITR)..."
         info "This is a one-way migration and may take several minutes..."
@@ -383,150 +378,6 @@ if should_run 2; then
             --continuous-tier Continuous7Days \
             --output none
         ok "Migrated to continuous backup (7-day PITR)"
-    fi
-
-    # Azure Backup vault for long-term retention
-    if az dataprotection backup-vault show \
-        --vault-name "$BACKUP_VAULT" \
-        --resource-group "$RESOURCE_GROUP" &>/dev/null; then
-        warn "Backup vault $BACKUP_VAULT already exists"
-    else
-        info "Creating Azure Backup vault..."
-        az dataprotection backup-vault create \
-            --vault-name "$BACKUP_VAULT" \
-            --resource-group "$RESOURCE_GROUP" \
-            --location "$LOCATION" \
-            --type SystemAssigned \
-            --storage-setting "[{\"type\":\"LocallyRedundant\",\"datastore-type\":\"VaultStore\"}]" \
-            --output none
-        ok "Backup vault created"
-    fi
-
-    # Grant Backup vault managed identity access to Cosmos DB
-    VAULT_IDENTITY=$(az dataprotection backup-vault show \
-        --vault-name "$BACKUP_VAULT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query "identity.principalId" -o tsv)
-
-    info "Granting Backup vault access to Cosmos DB..."
-    az role assignment create \
-        --assignee-object-id "$VAULT_IDENTITY" \
-        --assignee-principal-type ServicePrincipal \
-        --role "Cosmos DB Operator" \
-        --scope "$COSMOS_RESOURCE_ID" \
-        --output none 2>/dev/null || true
-    az role assignment create \
-        --assignee-object-id "$VAULT_IDENTITY" \
-        --assignee-principal-type ServicePrincipal \
-        --role "Reader" \
-        --scope "/subscriptions/$SUB_ID/resourceGroups/$RESOURCE_GROUP" \
-        --output none 2>/dev/null || true
-    ok "Backup vault RBAC configured"
-
-    # Create backup policy (daily snapshots, 1-year vault retention)
-    if az dataprotection backup-policy show \
-        --vault-name "$BACKUP_VAULT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --name "$BACKUP_POLICY" &>/dev/null; then
-        warn "Backup policy $BACKUP_POLICY already exists"
-    else
-        info "Creating backup policy (daily, 1-year retention)..."
-        # Daily at 6am Pacific (14:00 UTC), 1-year retention in vault
-        POLICY_JSON=$(python3 -c "
-import json, sys
-policy = {
-    'datasourceTypes': ['Microsoft.DocumentDB/databaseAccounts'],
-    'objectType': 'BackupPolicy',
-    'policyRules': [
-        {
-            'name': 'BackupDaily',
-            'objectType': 'AzureBackupRule',
-            'backupParameters': {
-                'objectType': 'AzureBackupParams',
-                'backupType': 'Incremental'
-            },
-            'trigger': {
-                'objectType': 'ScheduleBasedTriggerContext',
-                'schedule': {
-                    'repeatingTimeIntervals': ['R/2024-01-01T14:00:00+00:00/P1D']
-                },
-                'taggingCriteria': [{
-                    'isDefault': True,
-                    'tagInfo': {'tagName': 'Default'},
-                    'taggingPriority': 99
-                }]
-            },
-            'dataStore': {
-                'objectType': 'DataStoreInfoBase',
-                'dataStoreType': 'VaultStore'
-            }
-        },
-        {
-            'name': 'Default',
-            'objectType': 'AzureRetentionRule',
-            'isDefault': True,
-            'lifecycles': [{
-                'deleteAfter': {
-                    'objectType': 'AbsoluteDeleteOption',
-                    'duration': 'P365D'
-                },
-                'sourceDataStore': {
-                    'objectType': 'DataStoreInfoBase',
-                    'dataStoreType': 'VaultStore'
-                }
-            }]
-        }
-    ]
-}
-json.dump(policy, sys.stdout)")
-
-        az dataprotection backup-policy create \
-            --vault-name "$BACKUP_VAULT" \
-            --resource-group "$RESOURCE_GROUP" \
-            --name "$BACKUP_POLICY" \
-            --policy "$POLICY_JSON" \
-            --output none
-        ok "Backup policy created"
-    fi
-
-    # Configure backup instance (connect Cosmos DB → vault)
-    POLICY_ID=$(az dataprotection backup-policy show \
-        --vault-name "$BACKUP_VAULT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --name "$BACKUP_POLICY" \
-        --query id -o tsv)
-
-    EXISTING_INSTANCE=$(az dataprotection backup-instance list \
-        --vault-name "$BACKUP_VAULT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query "[?properties.dataSourceInfo.resourceID=='$COSMOS_RESOURCE_ID'].name | [0]" \
-        -o tsv 2>/dev/null || true)
-
-    if [ -n "$EXISTING_INSTANCE" ]; then
-        warn "Backup instance already configured"
-    else
-        info "Configuring Cosmos DB backup instance..."
-        INSTANCE_JSON=$(az dataprotection backup-instance initialize \
-            --datasource-id "$COSMOS_RESOURCE_ID" \
-            --datasource-type AzureDatabaseForCosmosDb \
-            --datasource-location "$LOCATION" \
-            --policy-id "$POLICY_ID" \
-            -o json)
-
-        az dataprotection backup-instance validate-for-backup \
-            --vault-name "$BACKUP_VAULT" \
-            --resource-group "$RESOURCE_GROUP" \
-            --backup-instance "$INSTANCE_JSON" \
-            --output none 2>/dev/null || \
-            warn "Validation failed — RBAC may need a few minutes to propagate. Re-run phase 2 to retry."
-
-        az dataprotection backup-instance create \
-            --vault-name "$BACKUP_VAULT" \
-            --resource-group "$RESOURCE_GROUP" \
-            --backup-instance "$INSTANCE_JSON" \
-            --output none 2>/dev/null || \
-            warn "Backup instance creation failed — re-run phase 2 after RBAC propagation"
-        ok "Cosmos DB backup instance configured"
     fi
 
     ok "Phase 2 complete"
