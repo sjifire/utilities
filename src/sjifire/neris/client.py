@@ -8,10 +8,11 @@ from dotenv import load_dotenv
 from neris_api_client import Config, GrantType, NerisApiClient
 from neris_api_client.models import TypeIncidentStatusPayloadValue
 
+from sjifire.core.config import get_org_config
+
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.neris.fsri.org/v1"
-ENTITY_ID = "FD53055879"
 
 
 def get_neris_credentials() -> tuple[str, str]:
@@ -49,9 +50,9 @@ class NerisClient:
             incidents = client.list_incidents()
     """
 
-    def __init__(self, entity_id: str = ENTITY_ID) -> None:
-        """Initialize with entity ID."""
-        self.entity_id = entity_id
+    def __init__(self, entity_id: str | None = None) -> None:
+        """Initialize with entity ID (defaults to organization.json)."""
+        self.entity_id = entity_id or get_org_config().neris_entity_id
         self._client: NerisApiClient | None = None
 
     def __enter__(self) -> Self:

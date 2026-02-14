@@ -7,13 +7,15 @@ import pytest
 
 from sjifire.aladtec.schedule_scraper import ScheduleEntry
 from sjifire.calendar.personal_sync import (
-    ALADTEC_CATEGORY,
     ExistingEvent,
     PersonalCalendarSync,
     make_event_body,
     make_event_subject,
     normalize_body_for_comparison,
 )
+from sjifire.core.config import get_org_config
+
+ALADTEC_CATEGORY = get_org_config().calendar_category
 
 # =============================================================================
 # Helper Function Tests

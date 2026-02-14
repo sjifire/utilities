@@ -17,12 +17,14 @@ from msgraph.generated.users.item.calendars.item.events.events_request_builder i
 
 from sjifire.aladtec.schedule_scraper import ScheduleEntry
 from sjifire.calendar.models import get_aladtec_url
-from sjifire.core.config import get_graph_credentials, get_timezone, get_timezone_name
+from sjifire.core.config import (
+    get_graph_credentials,
+    get_org_config,
+    get_timezone,
+    get_timezone_name,
+)
 
 logger = logging.getLogger(__name__)
-
-# Category for Aladtec events in primary calendar
-ALADTEC_CATEGORY = "Aladtec"
 
 # Timezone loaded from organization.json via get_timezone() / get_timezone_name().
 
@@ -123,14 +125,14 @@ class PersonalCalendarSync:
             # Check if Aladtec already exists
             if result and result.value:
                 for cat in result.value:
-                    if cat.display_name == ALADTEC_CATEGORY:
+                    if cat.display_name == get_org_config().calendar_category:
                         return True  # Already exists
 
             # Create the category with orange color
             from msgraph.generated.models.outlook_category import OutlookCategory
 
             new_cat = OutlookCategory(
-                display_name=ALADTEC_CATEGORY,
+                display_name=get_org_config().calendar_category,
                 color="preset6",  # Orange
             )
             await self.client.users.by_user_id(user_email).outlook.master_categories.post(new_cat)
@@ -192,7 +194,7 @@ class PersonalCalendarSync:
         uses_primary = user_email.lower() in self._uses_primary_calendar
         filter_query = None
         if uses_primary:
-            filter_query = f"categories/any(c:c eq '{ALADTEC_CATEGORY}')"
+            filter_query = f"categories/any(c:c eq '{get_org_config().calendar_category}')"
 
         try:
             # Get events from this calendar
@@ -312,7 +314,7 @@ class PersonalCalendarSync:
         # Add category if using primary calendar (to identify Aladtec events)
         categories = None
         if user_email.lower() in self._uses_primary_calendar:
-            categories = [ALADTEC_CATEGORY]
+            categories = [get_org_config().calendar_category]
 
         event = Event(
             subject=make_event_subject(entry),
@@ -357,7 +359,7 @@ class PersonalCalendarSync:
         # Add category if using primary calendar (to identify Aladtec events)
         categories = None
         if user_email.lower() in self._uses_primary_calendar:
-            categories = [ALADTEC_CATEGORY]
+            categories = [get_org_config().calendar_category]
 
         event = Event(
             subject=make_event_subject(entry),
@@ -422,7 +424,7 @@ class PersonalCalendarSync:
             query_params = EventsRequestBuilder.EventsRequestBuilderGetQueryParameters(
                 top=500,
                 select=["id", "subject", "start"],
-                filter=f"categories/any(c:c eq '{ALADTEC_CATEGORY}')",
+                filter=f"categories/any(c:c eq '{get_org_config().calendar_category}')",
             )
             config = EventsRequestBuilder.EventsRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params,

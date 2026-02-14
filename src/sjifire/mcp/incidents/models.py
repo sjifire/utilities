@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from sjifire.core.config import get_org_config
+
 MAX_NARRATIVE_LENGTH = 10_000
 MAX_CREW_SIZE = 50
 MAX_UNIT_RESPONSES = 50
@@ -56,8 +58,8 @@ class IncidentDocument(BaseModel):
     incident_date: date
     incident_type: str | None = Field(default=None, max_length=200)  # NERIS type code
     address: str | None = Field(default=None, max_length=500)
-    city: str = Field(default="Friday Harbor", max_length=100)
-    state: str = Field(default="WA", max_length=2)
+    city: str = Field(default="", max_length=100)
+    state: str = Field(default="", max_length=2)
     latitude: float | None = None
     longitude: float | None = None
 
@@ -77,9 +79,14 @@ class IncidentDocument(BaseModel):
     internal_notes: str = Field(default="", max_length=MAX_NARRATIVE_LENGTH)  # Never sent to NERIS
 
     @model_validator(mode="after")
-    def _set_year(self) -> IncidentDocument:
-        """Derive year partition key from incident_date."""
+    def _set_defaults(self) -> IncidentDocument:
+        """Derive year partition key and apply org defaults."""
         self.year = str(self.incident_date.year)
+        cfg = get_org_config()
+        if not self.city:
+            self.city = cfg.default_city
+        if not self.state:
+            self.state = cfg.default_state
         return self
 
     def to_cosmos(self) -> dict:

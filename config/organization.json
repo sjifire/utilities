@@ -27,6 +27,12 @@
     "Marine: Pilot"
   ],
   "chief_unit_prefixes": ["BN", "CH", "OPS"],
+  "neris_entity_id": "FD53055879",
+  "default_city": "Friday Harbor",
+  "default_state": "WA",
+  "officer_group_name": "MCP Incident Officers",
+  "duty_event_subject": "On Duty",
+  "calendar_category": "Aladtec",
   "skip_emails": [
     "aladtec.admin@sjifire.org",
     "api@sjifire.org"

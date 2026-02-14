@@ -13,6 +13,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from sjifire.core.config import get_org_config
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.incidents.models import CrewAssignment, IncidentDocument, Narratives
 from sjifire.mcp.incidents.store import IncidentStore
@@ -302,9 +303,10 @@ async def submit_incident(incident_id: str) -> dict:
     user = get_current_user()
 
     if not user.is_officer:
+        group = get_org_config().officer_group_name
         return {
             "error": "You are not authorized to submit incidents to NERIS. "
-            "Ask an administrator to add you to the MCP Incident Officers group in Entra ID."
+            f"Ask an administrator to add you to the {group} group in Entra ID."
         }
 
     # NERIS submission is not yet enabled — district entity ID and API
@@ -377,9 +379,10 @@ async def list_neris_incidents() -> dict:
     user = get_current_user()
 
     if not user.is_officer:
+        group = get_org_config().officer_group_name
         return {
             "error": "You are not authorized to view or edit NERIS reports. "
-            "Ask an administrator to add you to the MCP Incident Officers group in Entra ID."
+            f"Ask an administrator to add you to the {group} group in Entra ID."
         }
 
     try:
@@ -432,9 +435,10 @@ async def get_neris_incident(neris_incident_id: str) -> dict:
     user = get_current_user()
 
     if not user.is_officer:
+        group = get_org_config().officer_group_name
         return {
             "error": "You are not authorized to view or edit NERIS reports. "
-            "Ask an administrator to add you to the MCP Incident Officers group in Entra ID."
+            f"Ask an administrator to add you to the {group} group in Entra ID."
         }
 
     try:

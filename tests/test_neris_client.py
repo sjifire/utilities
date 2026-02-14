@@ -5,7 +5,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from neris_api_client.models import TypeIncidentStatusPayloadValue
 
-from sjifire.neris.client import ENTITY_ID, NerisClient, get_neris_credentials
+from sjifire.core.config import get_org_config
+from sjifire.neris.client import NerisClient, get_neris_credentials
+
+ENTITY_ID = get_org_config().neris_entity_id
 
 
 class TestGetNerisCredentials:

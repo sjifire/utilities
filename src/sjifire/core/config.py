@@ -164,6 +164,12 @@ class OrgConfig:
     operational_positions: frozenset[str] = field(default_factory=frozenset)
     marine_positions: frozenset[str] = field(default_factory=frozenset)
     chief_unit_prefixes: frozenset[str] = field(default_factory=frozenset)
+    neris_entity_id: str = ""
+    default_city: str = ""
+    default_state: str = ""
+    officer_group_name: str = ""
+    duty_event_subject: str = ""
+    calendar_category: str = ""
     skip_emails: list[str] = field(default_factory=list)
 
 
@@ -236,6 +242,12 @@ def load_org_config() -> OrgConfig:
         operational_positions=frozenset(config_data.get("operational_positions", ())),
         marine_positions=frozenset(config_data.get("marine_positions", ())),
         chief_unit_prefixes=frozenset(config_data.get("chief_unit_prefixes", ())),
+        neris_entity_id=config_data.get("neris_entity_id", ""),
+        default_city=config_data.get("default_city", ""),
+        default_state=config_data.get("default_state", ""),
+        officer_group_name=config_data.get("officer_group_name", ""),
+        duty_event_subject=config_data.get("duty_event_subject", ""),
+        calendar_category=config_data.get("calendar_category", ""),
         skip_emails=config_data.get("skip_emails", []),
     )
 

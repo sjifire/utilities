@@ -119,3 +119,21 @@ class TestConfigConsistency:
 
     def test_cosmos_database_set(self):
         assert get_org_config().cosmos_database != ""
+
+    def test_neris_entity_id_set(self):
+        assert get_org_config().neris_entity_id != ""
+
+    def test_default_city_set(self):
+        assert get_org_config().default_city != ""
+
+    def test_default_state_set(self):
+        assert len(get_org_config().default_state) == 2
+
+    def test_officer_group_name_set(self):
+        assert get_org_config().officer_group_name != ""
+
+    def test_duty_event_subject_set(self):
+        assert get_org_config().duty_event_subject != ""
+
+    def test_calendar_category_set(self):
+        assert get_org_config().calendar_category != ""

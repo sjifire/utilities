@@ -6,6 +6,7 @@ from datetime import date
 from html import escape
 
 from sjifire.aladtec.client import get_aladtec_credentials
+from sjifire.core.config import get_org_config
 
 # Position ordering: officers first, then AO, then firefighters
 POSITION_ORDER = {
@@ -230,7 +231,7 @@ class AllDayDutyEvent:
     @property
     def subject(self) -> str:
         """Generate event subject/title."""
-        return "On Duty"
+        return get_org_config().duty_event_subject
 
     @property
     def body_html(self) -> str:
