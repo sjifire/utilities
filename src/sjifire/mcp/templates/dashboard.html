@@ -128,18 +128,6 @@
 {% block body %}
 <main class="content-wrap dashboard-main" style="padding:24px">
 
-  <!-- Status bar (moved from header for consistency) -->
-  <div x-show="!loading && !error" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-    <div style="font-size:13px;color:var(--text-muted)" x-text="D.date_display"></div>
-    <div style="display:flex;align-items:center;gap:12px">
-      <div class="status-pill" :class="D.open_calls ? 'active' : 'ok'">
-        <span class="pulse-dot"></span>
-        <span x-text="D.open_calls ? D.open_calls + ' Active Call' + (D.open_calls > 1 ? 's' : '') : 'No Active Calls'"></span>
-      </div>
-      <span style="font-size:11px;color:var(--text-dim)" x-text="'Updated ' + D.updated_time"></span>
-    </div>
-  </div>
-
   <!-- LOADING SKELETON -->
   <div x-show="loading">
     <div class="grid-4" style="margin-bottom:24px">
