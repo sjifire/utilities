@@ -122,8 +122,6 @@ def _detect_shift_change_hour_from_schedules(schedules: list[DaySchedule]) -> in
 MAX_CONCURRENT_REQUESTS = 10
 
 
-
-
 def normalize_html_for_comparison(html: str) -> str:
     """Extract plain text from HTML for comparison.
 
@@ -422,9 +420,7 @@ class DutyCalendarSync:
     def _get_filled_entries(self, day_schedule: DaySchedule) -> list[ScheduleEntry]:
         """Get filled entries from a day schedule, filtering excluded sections."""
         return [
-            e
-            for e in day_schedule.get_filled_positions()
-            if not should_exclude_section(e.section)
+            e for e in day_schedule.get_filled_positions() if not should_exclude_section(e.section)
         ]
 
     def _entries_to_crew(

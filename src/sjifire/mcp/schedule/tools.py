@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 CACHE_MAX_AGE_HOURS = 24.0
 
 
-
 def _detect_shift_change_hour_from_cache(cached: dict[str, DayScheduleCache]) -> int | None:
     """Detect shift change hour from cached schedule days.
 

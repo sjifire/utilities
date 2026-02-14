@@ -67,6 +67,7 @@ def _deserialize_auth_params(data: dict) -> AuthorizationParams:
         resource=data.get("resource"),
     )
 
+
 # Token lifetimes (seconds)
 ACCESS_TOKEN_TTL = 3600  # 1 hour
 REFRESH_TOKEN_TTL = 86400  # 24 hours
