@@ -266,7 +266,7 @@ def main() -> int:
     # list command
     list_parser = subparsers.add_parser("list", help="List recent calls")
     list_parser.add_argument(
-        "--days", type=int, default=30, choices=[7, 30], help="Days to look back (default: 30)"
+        "--days", type=int, default=30, help="Days to look back (default: 30)"
     )
     list_parser.set_defaults(func=cmd_list)
 
@@ -284,9 +284,8 @@ def main() -> int:
     archive_parser.add_argument(
         "--days",
         type=int,
-        default=7,
-        choices=[7, 30],
-        help="Days to look back (default: 7, use 30 for initial preload)",
+        default=2,
+        help="Days to look back (default: 2)",
     )
     archive_parser.add_argument(
         "--dry-run", action="store_true", help="Show what would be archived without writing"

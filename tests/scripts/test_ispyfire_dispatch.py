@@ -291,7 +291,7 @@ class TestCmdArchive:
 class TestCLIArgParsing:
     """Test CLI argument parsing via main()."""
 
-    def test_archive_defaults_to_7_days(self, capsys):
+    def test_archive_defaults_to_2_days(self, capsys):
         mock_client = MagicMock()
         mock_client.get_calls.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -304,7 +304,7 @@ class TestCLIArgParsing:
             result = main()
 
         assert result == 0
-        mock_client.get_calls.assert_called_once_with(days=7)
+        mock_client.get_calls.assert_called_once_with(days=2)
 
     def test_archive_days_30(self, capsys):
         mock_client = MagicMock()
