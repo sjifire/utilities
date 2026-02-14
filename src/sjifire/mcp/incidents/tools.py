@@ -155,6 +155,17 @@ async def create_incident(
     """
     user = get_current_user()
 
+    # Check for duplicate incident number
+    async with IncidentStore() as store:
+        existing = await store.get_by_number(incident_number)
+    if existing is not None:
+        return {
+            "error": f"An incident report for {incident_number} already exists "
+            f"(status: {existing.status}, created by {existing.created_by}). "
+            f"Use get_incident to view it.",
+            "existing_id": existing.id,
+        }
+
     # Pre-fill from dispatch data (address, coordinates, timestamps)
     prefill = await _prefill_from_dispatch(incident_number)
 

@@ -64,9 +64,9 @@ class IncidentDocument(BaseModel):
     longitude: float | None = None
 
     # Crew and response
-    crew: list[CrewAssignment] = Field(default=[], max_length=MAX_CREW_SIZE)
-    unit_responses: list[dict] = Field(default=[], max_length=MAX_UNIT_RESPONSES)
-    timestamps: dict[str, str] = Field(default={}, max_length=MAX_TIMESTAMPS)
+    crew: list[CrewAssignment] = Field(default_factory=list, max_length=MAX_CREW_SIZE)
+    unit_responses: list[dict] = Field(default_factory=list, max_length=MAX_UNIT_RESPONSES)
+    timestamps: dict[str, str] = Field(default_factory=dict, max_length=MAX_TIMESTAMPS)
 
     # Narratives
     narratives: Narratives = Field(default_factory=Narratives)

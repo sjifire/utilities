@@ -130,7 +130,7 @@ class TestListDispatchCalls:
         result = await list_dispatch_calls()
 
         assert "error" in result
-        assert "connection failed" in result["error"]
+        assert "Unable to retrieve dispatch calls" in result["error"]
 
     async def test_requires_auth(self):
         """In production mode, unauthenticated requests fail."""
@@ -204,7 +204,7 @@ class TestGetDispatchCall:
         result = await get_dispatch_call("call-uuid-123")
 
         assert "error" in result
-        assert "API error" in result["error"]
+        assert "Unable to retrieve call details" in result["error"]
 
     @patch.object(DispatchStore, "list_by_address", new_callable=AsyncMock)
     @patch.object(DispatchStore, "get_or_fetch", new_callable=AsyncMock)
@@ -254,7 +254,7 @@ class TestGetOpenDispatchCalls:
         result = await get_open_dispatch_calls()
 
         assert "error" in result
-        assert "timeout" in result["error"]
+        assert "Unable to retrieve open calls" in result["error"]
 
 
 class TestSearchDispatchCalls:

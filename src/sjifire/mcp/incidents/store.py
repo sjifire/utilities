@@ -153,6 +153,33 @@ class IncidentStore:
 
         return None
 
+    async def get_by_number(self, incident_number: str) -> IncidentDocument | None:
+        """Find an incident by incident number (cross-partition).
+
+        Args:
+            incident_number: Dispatch incident number (e.g. "26-000944")
+
+        Returns:
+            IncidentDocument if found, None otherwise
+        """
+        if self._in_memory:
+            for data in self._memory.values():
+                if data.get("incident_number") == incident_number:
+                    return IncidentDocument.from_cosmos(data)
+            return None
+
+        query = "SELECT * FROM c WHERE c.incident_number = @num"
+        parameters: list[dict] = [{"name": "@num", "value": incident_number}]
+
+        async for item in self._container.query_items(
+            query=query,
+            parameters=parameters,
+            max_item_count=1,
+        ):
+            return IncidentDocument.from_cosmos(item)
+
+        return None
+
     async def update(self, doc: IncidentDocument) -> IncidentDocument:
         """Update an existing incident document.
 

@@ -12,6 +12,9 @@ from sjifire.mcp.dispatch.store import DispatchStore
 logger = logging.getLogger(__name__)
 
 
+_MAX_DISPATCH_DAYS = 90
+
+
 async def list_dispatch_calls(days: int = 30) -> dict:
     """List recent dispatch calls with full details.
 
@@ -26,6 +29,7 @@ async def list_dispatch_calls(days: int = 30) -> dict:
         Dict with "calls" list and "count".
     """
     user = get_current_user()
+    days = max(1, min(days, _MAX_DISPATCH_DAYS))
     logger.info("Dispatch list (%d days) requested by %s", days, user.email)
 
     try:
@@ -34,9 +38,9 @@ async def list_dispatch_calls(days: int = 30) -> dict:
 
         logger.info("Returning %d dispatch calls", len(docs))
         return {"calls": [d.to_dict() for d in docs], "count": len(docs)}
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to list dispatch calls")
-        return {"error": str(e)}
+        return {"error": "Unable to retrieve dispatch calls. Please try again."}
 
 
 async def get_dispatch_call(call_id: str) -> dict:
@@ -82,9 +86,9 @@ async def get_dispatch_call(call_id: str) -> dict:
                     ]
 
             return result
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to get dispatch call details")
-        return {"error": str(e)}
+        return {"error": "Unable to retrieve call details. Please try again."}
 
 
 async def get_open_dispatch_calls() -> dict:
@@ -105,9 +109,9 @@ async def get_open_dispatch_calls() -> dict:
 
         logger.info("Returning %d open dispatch calls", len(docs))
         return {"calls": [d.to_dict() for d in docs], "count": len(docs)}
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to get open dispatch calls")
-        return {"error": str(e)}
+        return {"error": "Unable to retrieve open calls. Please try again."}
 
 
 async def search_dispatch_calls(
@@ -163,6 +167,6 @@ async def search_dispatch_calls(
                 "calls": [d.to_dict() for d in docs],
                 "count": len(docs),
             }
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to search dispatch calls")
-        return {"error": str(e)}
+        return {"error": "Unable to search dispatch calls. Please try again."}

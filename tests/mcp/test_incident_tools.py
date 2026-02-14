@@ -101,6 +101,7 @@ class TestCreateIncident:
     @patch("sjifire.mcp.incidents.tools.IncidentStore")
     async def test_creates_draft(self, mock_store_cls, regular_user):
         mock_store = AsyncMock()
+        mock_store.get_by_number = AsyncMock(return_value=None)
         mock_store.create = AsyncMock(side_effect=lambda doc: doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -118,6 +119,23 @@ class TestCreateIncident:
         assert result["status"] == "draft"
         assert result["created_by"] == "ff@sjifire.org"
         assert len(result["crew"]) == 1
+
+    @patch("sjifire.mcp.incidents.tools.IncidentStore")
+    async def test_rejects_duplicate_number(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_number = AsyncMock(return_value=sample_doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await create_incident(
+            incident_number="26-000944",
+            incident_date="2026-02-12",
+            station="S31",
+        )
+
+        assert "error" in result
+        assert "already exists" in result["error"]
+        assert result["existing_id"] == sample_doc.id
 
 
 class TestGetIncident:
