@@ -177,6 +177,7 @@ az containerapp secret set \
         "ispyfire-password=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-PASSWORD,identityref:system" \
         "neris-client-id=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-ID,identityref:system" \
         "neris-client-secret=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-SECRET,identityref:system" \
+        "anthropic-api-key=keyvaultref:${VAULT_URL}/secrets/ANTHROPIC-API-KEY,identityref:system" \
     --output none
 ok "Secrets linked to Key Vault"
 
@@ -206,6 +207,7 @@ az containerapp update \
         "ISPYFIRE_PASSWORD=secretref:ispyfire-password" \
         "NERIS_CLIENT_ID=secretref:neris-client-id" \
         "NERIS_CLIENT_SECRET=secretref:neris-client-secret" \
+        "ANTHROPIC_API_KEY=secretref:anthropic-api-key" \
         "MCP_SERVER_URL=https://${CUSTOM_DOMAIN}" \
         "BUILD_VERSION=${TAG}" \
     --output none

@@ -337,6 +337,14 @@ if should_run 2; then
     info "Creating container 'oauth-tokens'..."
     create_container "oauth-tokens" "/token_type" --ttl -1
 
+    # Container: conversations (partition key: /incident_id, 90-day TTL)
+    info "Creating container 'conversations'..."
+    create_container "conversations" "/incident_id" --ttl 7776000
+
+    # Container: budgets (partition key: /month, 120-day TTL)
+    info "Creating container 'budgets'..."
+    create_container "budgets" "/month" --ttl 10368000
+
     # Store endpoint and key in Key Vault
     COSMOS_ENDPOINT=$(az cosmosdb show \
         --name "$COSMOS_ACCOUNT" \
@@ -485,7 +493,7 @@ if should_run 3; then
             --registry-password "$ACR_PASSWORD" \
             --target-port 8000 \
             --ingress external \
-            --min-replicas 0 \
+            --min-replicas 1 \
             --max-replicas 3 \
             --cpu 0.5 \
             --memory 1.0Gi \
@@ -508,6 +516,18 @@ if should_run 3; then
             --output none
         ok "Container App created"
     fi
+
+    # Ensure scaling config is up to date (idempotent)
+    info "Ensuring scaling config (min=1, max=3, 0.5 vCPU, 1Gi)..."
+    az containerapp update \
+        --name "$CA_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --min-replicas 1 \
+        --max-replicas 3 \
+        --cpu 0.5 \
+        --memory 1.0Gi \
+        --output none
+    ok "Scaling config applied"
 
     # Enable managed identity
     info "Enabling system-assigned managed identity..."
