@@ -4,19 +4,22 @@
 # =============================================================================
 #
 # Builds a container image via ACR and updates the running Container App.
-# Use this for dev/testing deployments without merging to main.
+# Used by both local dev deploys and GitHub Actions (mcp-deploy.yml).
 #
 # Usage:
 #   ./scripts/deploy-mcp.sh              # Build & deploy
 #   ./scripts/deploy-mcp.sh --build-only # Build image without deploying
 #   ./scripts/deploy-mcp.sh --health     # Just run health check
 #
+# Environment:
+#   TAG=<version>  Override image tag (default: dev-YYYYMMDD-HHMMSS)
+#
 # =============================================================================
 
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# Configuration (matches setup-azure.sh and mcp-deploy.yml)
+# Configuration (matches setup-azure.sh)
 # ---------------------------------------------------------------------------
 
 RESOURCE_GROUP="rg-sjifire-mcp"
@@ -24,6 +27,7 @@ ACR_NAME="sjifiremcp"
 CONTAINER_APP="sjifire-mcp"
 IMAGE_NAME="sjifire-mcp"
 CUSTOM_DOMAIN="mcp.sjifire.org"
+KEY_VAULT="gh-website-utilities"
 
 TAG="${TAG:-dev-$(date +%Y%m%d-%H%M%S)}"
 
@@ -111,11 +115,23 @@ if [ "$BUILD_ONLY" = true ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Deploy
+# Fetch config from Key Vault
 # ---------------------------------------------------------------------------
 
-KEY_VAULT="gh-website-utilities"
 VAULT_URL="https://${KEY_VAULT}.vault.azure.net"
+
+_get_secret() {
+    az keyvault secret show --vault-name "$KEY_VAULT" --name "$1" --query value -o tsv 2>/dev/null || echo ""
+}
+
+info "Fetching config from Key Vault..."
+ENTRA_MCP_API_CLIENT_ID=$(_get_secret "ENTRA-MCP-API-CLIENT-ID")
+ENTRA_MCP_OFFICER_GROUP_ID=$(_get_secret "ENTRA-MCP-OFFICER-GROUP-ID")
+COSMOS_ENDPOINT=$(_get_secret "COSMOS-ENDPOINT")
+MS_GRAPH_TENANT_ID=$(_get_secret "MS-GRAPH-TENANT-ID")
+MS_GRAPH_CLIENT_ID=$(_get_secret "MS-GRAPH-CLIENT-ID")
+ALADTEC_URL=$(_get_secret "ALADTEC-URL")
+ok "Config fetched"
 
 # ---------------------------------------------------------------------------
 # Ensure managed identity can read Key Vault secrets (idempotent)
@@ -165,21 +181,32 @@ az containerapp secret set \
 ok "Secrets linked to Key Vault"
 
 # ---------------------------------------------------------------------------
-# Update image and env vars
+# Update image and env vars (full replacement — single source of truth)
 # ---------------------------------------------------------------------------
 
-info "Updating Container App image..."
+info "Updating Container App image and env vars..."
 az containerapp update \
     --name "$CONTAINER_APP" \
     --resource-group "$RESOURCE_GROUP" \
     --image "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${TAG}" \
-    --set-env-vars \
+    --replace-env-vars \
+        "ENTRA_MCP_API_TENANT_ID=${MS_GRAPH_TENANT_ID}" \
+        "ENTRA_MCP_API_CLIENT_ID=${ENTRA_MCP_API_CLIENT_ID}" \
+        "ENTRA_MCP_OFFICER_GROUP_ID=${ENTRA_MCP_OFFICER_GROUP_ID}" \
         "ENTRA_MCP_API_CLIENT_SECRET=secretref:entra-mcp-api-client-secret" \
+        "COSMOS_ENDPOINT=${COSMOS_ENDPOINT}" \
+        "MS_GRAPH_TENANT_ID=${MS_GRAPH_TENANT_ID}" \
+        "MS_GRAPH_CLIENT_ID=${MS_GRAPH_CLIENT_ID}" \
+        "MS_GRAPH_CLIENT_SECRET=secretref:ms-graph-client-secret" \
+        "ALADTEC_URL=${ALADTEC_URL}" \
+        "ALADTEC_USERNAME=secretref:aladtec-username" \
+        "ALADTEC_PASSWORD=secretref:aladtec-password" \
         "ISPYFIRE_URL=secretref:ispyfire-url" \
         "ISPYFIRE_USERNAME=secretref:ispyfire-username" \
         "ISPYFIRE_PASSWORD=secretref:ispyfire-password" \
         "NERIS_CLIENT_ID=secretref:neris-client-id" \
         "NERIS_CLIENT_SECRET=secretref:neris-client-secret" \
+        "MCP_SERVER_URL=https://${CUSTOM_DOMAIN}" \
         "BUILD_VERSION=${TAG}" \
     --output none
 ok "Container App updated with ${IMAGE_NAME}:${TAG}"
@@ -189,9 +216,6 @@ ok "Container App updated with ${IMAGE_NAME}:${TAG}"
 # ---------------------------------------------------------------------------
 
 info "Configuring EasyAuth..."
-EA_CLIENT_ID=$(az keyvault secret show --vault-name "$KEY_VAULT" --name ENTRA-MCP-API-CLIENT-ID --query value -o tsv)
-EA_TENANT_ID=$(az keyvault secret show --vault-name "$KEY_VAULT" --name MS-GRAPH-TENANT-ID --query value -o tsv)
-
 az containerapp auth update \
     --name "$CONTAINER_APP" \
     --resource-group "$RESOURCE_GROUP" \
@@ -202,9 +226,9 @@ az containerapp auth update \
 az containerapp auth microsoft update \
     --name "$CONTAINER_APP" \
     --resource-group "$RESOURCE_GROUP" \
-    --client-id "$EA_CLIENT_ID" \
+    --client-id "$ENTRA_MCP_API_CLIENT_ID" \
     --client-secret-name entra-mcp-api-client-secret \
-    --tenant-id "$EA_TENANT_ID" \
+    --tenant-id "$MS_GRAPH_TENANT_ID" \
     --yes \
     --output none
 ok "EasyAuth configured"
@@ -228,6 +252,21 @@ for i in $(seq 1 20); do
     printf "  %s (%s)...\r" "$REV_STATE" "${i}"
     sleep 3
 done
+
+# ---------------------------------------------------------------------------
+# Purge old images (keep latest 5 + latest tag)
+# ---------------------------------------------------------------------------
+
+info "Purging old ACR images (keeping 5 most recent)..."
+az acr run \
+    --registry "$ACR_NAME" \
+    --cmd "acr purge --filter '${IMAGE_NAME}:.*' --ago 0d --keep 5 --untagged" \
+    /dev/null --output none 2>/dev/null || warn "ACR purge failed (non-critical)"
+ok "ACR cleanup complete"
+
+# ---------------------------------------------------------------------------
+# Verify version
+# ---------------------------------------------------------------------------
 
 info "Verifying version ${TAG} is serving..."
 for i in $(seq 1 10); do

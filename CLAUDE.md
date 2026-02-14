@@ -168,8 +168,8 @@ Remote MCP server at `https://mcp.sjifire.org/mcp` providing fire district tools
 **Cosmos DB backup**: Continuous 30-day PITR (any-second point-in-time restore). For ad-hoc JSON exports beyond 30 days, use `uv run backup-cosmos`. Infrastructure provisioned via `./scripts/setup-azure.sh --phase 2`.
 
 **Deployment**:
-- Dev: `./scripts/deploy-mcp.sh` (builds via ACR, deploys, health check with version verification)
-- Prod: `.github/workflows/mcp-deploy.yml` (on push to main, paths: `src/sjifire/mcp/**`, `Dockerfile`, etc.)
+- Dev: `./scripts/deploy-mcp.sh` (builds via ACR, deploys, configures EasyAuth, health check, ACR purge)
+- Prod: `.github/workflows/mcp-deploy.yml` (on push to main — calls `deploy-mcp.sh` with `TAG=${{ github.sha }}`)
 
 **Key env vars** (set on Container App, secrets via Key Vault references):
 - `ENTRA_MCP_API_CLIENT_ID`, `ENTRA_MCP_API_CLIENT_SECRET`, `ENTRA_MCP_OFFICER_GROUP_ID`
