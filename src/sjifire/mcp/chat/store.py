@@ -139,6 +139,21 @@ class ConversationStore:
         logger.info("Updated conversation %s", doc.id)
         return ConversationDocument.from_cosmos(result)
 
+    async def delete_by_incident(self, incident_id: str) -> bool:
+        """Delete the conversation for an incident. Returns True if deleted."""
+        doc = await self.get_by_incident(incident_id)
+        if doc is None:
+            return False
+
+        if self._in_memory:
+            self._memory.pop(doc.id, None)
+            logger.info("Deleted conversation %s (in-memory)", doc.id)
+            return True
+
+        await self._container.delete_item(item=doc.id, partition_key=incident_id)
+        logger.info("Deleted conversation %s for incident %s", doc.id, incident_id)
+        return True
+
 
 class BudgetStore:
     """Async CRUD for user budget documents in Cosmos DB.

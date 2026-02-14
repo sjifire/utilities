@@ -602,6 +602,17 @@ async def reset_incident(incident_id: str) -> dict:
         },
         _RESET_COOLDOWN_TTL,
     )
+    # Clear chat conversation so the assistant starts fresh
+    try:
+        from sjifire.mcp.chat.store import ConversationStore
+
+        async with ConversationStore() as conv_store:
+            deleted = await conv_store.delete_by_incident(incident_id)
+            if deleted:
+                logger.info("Cleared chat history for incident %s", incident_id)
+    except Exception:
+        logger.warning("Failed to clear chat history for %s", incident_id, exc_info=True)
+
     logger.info("User %s reset incident %s", user.email, incident_id)
     return updated.model_dump(mode="json")
 
