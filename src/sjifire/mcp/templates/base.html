@@ -107,11 +107,6 @@
       color: var(--text-muted);
       white-space: nowrap;
     }
-    .nav-status-updated {
-      font-size: 11px;
-      color: var(--text-dim);
-      white-space: nowrap;
-    }
 
     /* ── Status Pill ── */
     @keyframes pulse {
@@ -387,7 +382,6 @@
       .nav-bar          { padding: 0 12px; }
       .nav-tab          { padding: 12px 14px; font-size: 11px; }
       .nav-status-date    { display: none; }
-      .nav-status-updated { display: none; }
       .nav-bar-right      { gap: 6px; }
     }
   </style>
@@ -432,22 +426,17 @@
 
   function headerStatus() {
     return {
-      date_display: '', open_calls: 0, updated_time: '', loaded: false,
-      _prevOpen: -1,
+      date_display: '', open_calls: 0, loaded: false,
       async init() {
-        // Initial date from full dashboard data
         try {
           const r = await fetch('/dashboard/data');
           if (r.ok) {
             const d = await r.json();
             this.date_display = d.date_display || '';
             this.open_calls = d.open_calls || 0;
-            this.updated_time = d.updated_time || '';
             this.loaded = true;
-            this._prevOpen = this.open_calls;
           }
         } catch(e) { /* silent */ }
-        // Poll open calls every 30 seconds
         setInterval(() => this.pollOpenCalls(), 5000);
       },
       async pollOpenCalls() {
@@ -456,7 +445,6 @@
           if (r.ok) {
             const d = await r.json();
             this.open_calls = d.open_calls || 0;
-            this.updated_time = d.updated_time || '';
             this.loaded = true;
           }
         } catch(e) { /* silent */ }

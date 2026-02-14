@@ -417,7 +417,6 @@
       <span class="pulse-dot"></span>
       <span x-text="open_calls ? open_calls + ' Active Call' + (open_calls > 1 ? 's' : '') : 'No Active Calls'"></span>
     </div>
-    <span class="nav-status-updated" x-show="updated_time" x-text="'Updated ' + updated_time"></span>
   </div>
 </div>
 {% endblock %}
@@ -428,17 +427,17 @@
   <div class="reports-stats" x-show="activeTab !== 'help'">
     <div class="stat-card accent-blue">
       <div class="stat-label">In Progress</div>
-      <div class="stat-value">{{ local_draft_count }}</div>
+      <div class="stat-value" x-text="countByFilter('local')"></div>
       <div class="stat-desc">Drafts &amp; reviews</div>
     </div>
     <div class="stat-card accent-amber">
       <div class="stat-label">Missing Reports</div>
-      <div class="stat-value">{{ missing_reports }}</div>
+      <div class="stat-value" x-text="countByFilter('missing')"></div>
       <div class="stat-desc">No incident report yet</div>
     </div>
     <div class="stat-card accent-green">
       <div class="stat-label">In NERIS</div>
-      <div class="stat-value">{{ neris_count }}</div>
+      <div class="stat-value" x-text="countByFilter('neris')"></div>
       <div class="stat-desc">Submitted to NERIS</div>
     </div>
   </div>
@@ -661,6 +660,21 @@ function reportsApp() {
       ['Look up NERIS code for structure fire', 'Search NERIS value sets'],
       ['What is the incident type for a chimney fire?', 'Find specific NERIS codes']
     ],
+
+    init() {
+      hashTab(['all','missing','local','neris','help'], 'all').init.call(this);
+      setInterval(() => this.refreshData(), 60000);
+    },
+
+    async refreshData() {
+      try {
+        const r = await fetch('/dashboard/data');
+        if (r.ok) {
+          const d = await r.json();
+          this.calls = d.recent_calls || [];
+        }
+      } catch(e) { /* silent */ }
+    },
 
     // Chat drawer state
     chatOpen: false,
