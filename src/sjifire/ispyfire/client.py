@@ -17,7 +17,7 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from sjifire.ispyfire.models import CallSummary, DispatchCall, ISpyFirePerson
+from sjifire.ispyfire.models import DispatchCall, ISpyFirePerson
 
 
 def get_ispyfire_credentials() -> tuple[str, str, str]:
@@ -697,31 +697,30 @@ class ISpyFireClient:
 
     # ── Dispatch / Call methods (central API) ──────────────────────────
 
-    def get_calls(self, days: int = 30) -> list[CallSummary]:
-        """List recent calls from the central API.
+    def get_calls(self, days: int = 30) -> list[DispatchCall]:
+        """Search recent calls and return full details for each.
+
+        Uses the search endpoint for discovery, then fetches full details.
 
         Args:
-            days: Number of days to look back (7 or 30 only)
+            days: Number of days to look back
 
         Returns:
-            List of CallSummary objects
+            List of DispatchCall objects with full details
         """
-        if not self.ispyid:
-            logger.error("ispyid not available - central API not initialized")
-            return []
+        now = int(time.time())
+        after = now - (days * 24 * 60 * 60)
+        raw = self.search_calls_raw(after=after, before=now)
+        logger.info(f"Search returned {len(raw)} calls for last {days} days")
 
-        if days not in (7, 30):
-            logger.warning(f"Only 7 or 30 day windows supported, got {days}. Using 30.")
-            days = 30
-
-        url = f"{self.CENTRAL_API_BASE}/calls/me/{days}/{self.ispyid}/all"
-        response = self._central_request("GET", url)
-        if not response or response.status_code != 200:
-            logger.error("Failed to fetch calls")
-            return []
-
-        data = response.json()
-        return [CallSummary.from_api(c) for c in data.get("results", [])]
+        calls: list[DispatchCall] = []
+        for entry in raw:
+            call_id = entry.get("_id")
+            if call_id:
+                detail = self.get_call_details(call_id)
+                if detail:
+                    calls.append(detail)
+        return calls
 
     def get_call_details(self, call_id: str) -> DispatchCall | None:
         """Get full details for a specific call.
@@ -736,7 +735,7 @@ class ISpyFireClient:
             logger.error("ispyid not available - central API not initialized")
             return None
 
-        # If it looks like a dispatch ID (e.g. "26-001678"), search by listing
+        # If it looks like a dispatch ID (e.g. "26-001678"), search for it
         if re.match(r"\d{2}-\d+", call_id):
             return self._get_call_by_dispatch_id(call_id)
 
@@ -756,7 +755,7 @@ class ISpyFireClient:
     def _get_call_by_dispatch_id(self, dispatch_id: str) -> DispatchCall | None:
         """Find a call by its dispatch ID (e.g. '26-001678').
 
-        Fetches the 30-day call list and looks up details for matching calls.
+        Uses search to find the call, then fetches full details.
 
         Args:
             dispatch_id: The LongTermCallID to search for
@@ -764,11 +763,16 @@ class ISpyFireClient:
         Returns:
             DispatchCall if found, None otherwise
         """
-        summaries = self.get_calls(days=30)
-        for summary in summaries:
-            detail = self.get_call_details(summary.id)
-            if detail and detail.long_term_call_id == dispatch_id:
-                return detail
+        # Search a wide window (90 days) to find the call
+        now = int(time.time())
+        after = now - (90 * 24 * 60 * 60)
+        raw = self.search_calls_raw(after=after, before=now)
+        for entry in raw:
+            entry_id = entry.get("_id")
+            if entry_id:
+                detail = self.get_call_details(entry_id)
+                if detail and detail.long_term_call_id == dispatch_id:
+                    return detail
         return None
 
     def get_open_calls(self) -> list[DispatchCall]:
@@ -814,6 +818,49 @@ class ISpyFireClient:
         response = self._central_request("GET", url)
         if not response or response.status_code != 200:
             logger.error(f"Failed to fetch call log: {call_id}")
+            return []
+
+        data = response.json()
+        return data.get("results", [])
+
+    def search_calls_raw(
+        self,
+        after: int,
+        before: int,
+        page_size: int = 50,
+    ) -> list[dict]:
+        """Search calls via the PUT search endpoint (raw API response).
+
+        This endpoint supports arbitrary date ranges (back to ~Dec 2025)
+        unlike get_calls() which is limited by the {days} path parameter.
+
+        Args:
+            after: Unix timestamp (seconds) for start of range
+            before: Unix timestamp (seconds) for end of range
+            page_size: Number of results per page
+
+        Returns:
+            Raw list of call dicts from the API
+        """
+        if not self.ispyid:
+            logger.error("ispyid not available - central API not initialized")
+            return []
+
+        url = f"{self.CENTRAL_API_BASE}/calls/search/{self.ispyid}"
+        payload = {
+            "after": after,
+            "before": before,
+            "pagesize": page_size,
+        }
+        response = self._central_request(
+            "PUT",
+            url,
+            content=json.dumps(payload),
+            headers={"Content-Type": "application/json"},
+        )
+        if not response or response.status_code != 200:
+            status = response.status_code if response else "no response"
+            logger.error(f"Search calls failed: {status}")
             return []
 
         data = response.json()

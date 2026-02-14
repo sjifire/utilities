@@ -51,33 +51,27 @@ def _format_timestamp(ts: str | None) -> str:
 def cmd_list(args) -> int:
     """List recent calls."""
     with ISpyFireClient() as client:
-        summaries = client.get_calls(days=args.days)
+        calls = client.get_calls(days=args.days)
 
-        if not summaries:
+        if not calls:
             print("No calls found.")
             return 0
 
-        # Fetch details for each summary to show useful info
         print(f"\n{'Dispatch ID':<15} {'Date/Time':<22} {'Nature':<25} {'Address':<30} {'Units'}")
         print("-" * 110)
 
-        for summary in summaries:
-            detail = client.get_call_details(summary.id)
-            if detail:
-                status = "" if detail.is_completed else " [OPEN]"
-                city = f", {detail.city}" if detail.city else ""
-                print(
-                    f"{detail.long_term_call_id:<15} "
-                    f"{_fmt_dt(detail.time_reported):<22} "
-                    f"{detail.nature:<25} "
-                    f"{detail.address}{city:<30} "
-                    f"{detail.responding_units}{status}"
-                )
-            else:
-                ts = _format_timestamp(summary.ispy_timestamp)
-                print(f"{'?':<15} {ts:<22} (details unavailable)")
+        for call in calls:
+            status = "" if call.is_completed else " [OPEN]"
+            city = f", {call.city}" if call.city else ""
+            print(
+                f"{call.long_term_call_id:<15} "
+                f"{_fmt_dt(call.time_reported):<22} "
+                f"{call.nature:<25} "
+                f"{call.address}{city:<30} "
+                f"{call.responding_units}{status}"
+            )
 
-        print(f"\nTotal: {len(summaries)} calls in last {args.days} days")
+        print(f"\nTotal: {len(calls)} calls in last {args.days} days")
         return 0
 
 
@@ -160,32 +154,25 @@ def cmd_open(args) -> int:
 def cmd_archive(args) -> int:
     """Archive completed calls to Cosmos DB."""
     with ISpyFireClient() as client:
-        summaries = client.get_calls(days=args.days)
+        all_calls = client.get_calls(days=args.days)
 
-        if not summaries:
+        if not all_calls:
             print("No calls found.")
             return 0
 
         # Check which calls are already archived
-        summary_ids = [s.id for s in summaries]
-        existing = asyncio.run(_get_existing_ids(summary_ids))
-        new_summaries = [s for s in summaries if s.id not in existing]
+        call_ids = [c.id for c in all_calls]
+        existing = asyncio.run(_get_existing_ids(call_ids))
+        new_calls = [c for c in all_calls if c.id not in existing]
 
         print(
-            f"Found {len(summaries)} calls in last {args.days} days "
-            f"({len(existing)} already archived, {len(new_summaries)} new)"
+            f"Found {len(all_calls)} calls in last {args.days} days "
+            f"({len(existing)} already archived, {len(new_calls)} new)"
         )
 
-        if new_summaries:
-            # Only fetch details for new calls
-            calls = []
-            for summary in new_summaries:
-                detail = client.get_call_details(summary.id)
-                if detail:
-                    calls.append(detail)
-
-            completed = [c for c in calls if c.is_completed]
-            open_calls = len(calls) - len(completed)
+        if new_calls:
+            completed = [c for c in new_calls if c.is_completed]
+            open_calls = len(new_calls) - len(completed)
 
             if open_calls:
                 print(f"  {open_calls} still open (will archive when completed)")

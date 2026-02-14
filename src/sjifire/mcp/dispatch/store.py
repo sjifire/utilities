@@ -548,8 +548,7 @@ class DispatchStore:
         from sjifire.ispyfire.client import ISpyFireClient
 
         with ISpyFireClient() as client:
-            summaries = client.get_calls(days=days)
-            return [d for s in summaries if (d := client.get_call_details(s.id))]
+            return client.get_calls(days=days)
 
     @staticmethod
     def _fetch_open() -> list[DispatchCall]:
