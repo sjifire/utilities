@@ -316,6 +316,39 @@ class DispatchStore:
 
         return items
 
+    async def list_all(self, *, max_items: int = 2000) -> list[DispatchCallDocument]:
+        """List all dispatch calls across all partitions.
+
+        Used for backup export. Returns all calls sorted by time_reported
+        descending.
+
+        Args:
+            max_items: Maximum number of results
+
+        Returns:
+            List of all dispatch call documents
+        """
+        if self._in_memory:
+            results = [DispatchCallDocument.from_cosmos(data) for data in self._memory.values()]
+            results.sort(
+                key=lambda d: d.time_reported.isoformat() if d.time_reported else "",
+                reverse=True,
+            )
+            return results[:max_items]
+
+        query = "SELECT * FROM c ORDER BY c.time_reported DESC"
+
+        items = []
+        async for item in self._container.query_items(
+            query=query,
+            max_item_count=max_items,
+        ):
+            items.append(DispatchCallDocument.from_cosmos(item))
+            if len(items) >= max_items:
+                break
+
+        return items
+
     async def get_existing_ids(self, ids: list[str]) -> set[str]:
         """Check which call UUIDs already exist in the store.
 

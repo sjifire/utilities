@@ -265,9 +265,7 @@ def main() -> int:
 
     # list command
     list_parser = subparsers.add_parser("list", help="List recent calls")
-    list_parser.add_argument(
-        "--days", type=int, default=30, help="Days to look back (default: 30)"
-    )
+    list_parser.add_argument("--days", type=int, default=30, help="Days to look back (default: 30)")
     list_parser.set_defaults(func=cmd_list)
 
     # detail command

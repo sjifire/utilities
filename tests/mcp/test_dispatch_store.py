@@ -303,6 +303,47 @@ class TestListRecent:
         assert len(results) == 15
 
 
+class TestListAll:
+    async def test_returns_all_calls(self):
+        doc1 = _make_doc(id="uuid-1", time_reported=datetime(2026, 2, 10, 10, 0))
+        doc2 = _make_doc(id="uuid-2", time_reported=datetime(2026, 2, 12, 14, 30))
+
+        async with DispatchStore() as store:
+            await store.upsert(doc1)
+            await store.upsert(doc2)
+            results = await store.list_all()
+
+        assert len(results) == 2
+
+    async def test_sorted_desc_by_time(self):
+        doc1 = _make_doc(id="uuid-1", time_reported=datetime(2026, 2, 10, 10, 0))
+        doc2 = _make_doc(id="uuid-2", time_reported=datetime(2026, 2, 12, 14, 30))
+
+        async with DispatchStore() as store:
+            await store.upsert(doc1)
+            await store.upsert(doc2)
+            results = await store.list_all()
+
+        assert results[0].id == "uuid-2"  # Later date first
+        assert results[1].id == "uuid-1"
+
+    async def test_respects_max_items(self):
+        for i in range(5):
+            doc = _make_doc(id=f"uuid-{i}", time_reported=datetime(2026, 2, 10 + i, 10, 0))
+            async with DispatchStore() as store:
+                await store.upsert(doc)
+
+        async with DispatchStore() as store:
+            results = await store.list_all(max_items=3)
+
+        assert len(results) == 3
+
+    async def test_empty_store(self):
+        async with DispatchStore() as store:
+            results = await store.list_all()
+        assert results == []
+
+
 class TestGetExistingIds:
     async def test_returns_matching_ids(self):
         doc1 = _make_doc(id="uuid-1")
@@ -695,9 +736,7 @@ class TestFetchAndStoreRecent:
         open_call = _make_call(id="uuid-far-2", is_completed=False)
 
         async with DispatchStore() as store:
-            with patch.object(
-                DispatchStore, "_fetch_recent", return_value=[completed, open_call]
-            ):
+            with patch.object(DispatchStore, "_fetch_recent", return_value=[completed, open_call]):
                 docs = await store.fetch_and_store_recent(7)
 
         assert len(docs) == 2
@@ -717,9 +756,7 @@ class TestFetchAndStoreRecent:
         open_call = _make_call(id="uuid-far-4", is_completed=False, nature="Medical Aid")
 
         async with DispatchStore() as store:
-            with patch.object(
-                DispatchStore, "_fetch_recent", return_value=[completed, open_call]
-            ):
+            with patch.object(DispatchStore, "_fetch_recent", return_value=[completed, open_call]):
                 docs = await store.fetch_and_store_recent(30)
 
         assert all(isinstance(d, DispatchCallDocument) for d in docs)
@@ -775,8 +812,7 @@ class TestFetchOpen:
 
     async def test_multiple_open_calls(self):
         calls = [
-            _make_call(id=f"uuid-fo-{i}", is_completed=False, nature=f"Call {i}")
-            for i in range(3)
+            _make_call(id=f"uuid-fo-{i}", is_completed=False, nature=f"Call {i}") for i in range(3)
         ]
         async with DispatchStore() as store:
             with patch.object(DispatchStore, "_fetch_open", return_value=calls):

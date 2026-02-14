@@ -116,6 +116,46 @@ class TestDelete:
             await store.delete("nonexistent-id", "2026")
 
 
+class TestListAll:
+    async def test_returns_all_including_submitted(self):
+        doc1 = _make_doc(incident_number="26-001")
+        doc2 = _make_doc(incident_number="26-002", status="submitted")
+        doc3 = _make_doc(incident_number="26-003", status="in_progress")
+        async with IncidentStore() as store:
+            await store.create(doc1)
+            await store.create(doc2)
+            await store.create(doc3)
+            results = await store.list_all()
+        assert len(results) == 3
+        statuses = {r.status for r in results}
+        assert "submitted" in statuses
+
+    async def test_sorted_by_incident_date_asc(self):
+        doc_feb = _make_doc(incident_number="26-002", incident_date=date(2026, 2, 15))
+        doc_jan = _make_doc(incident_number="26-001", incident_date=date(2026, 1, 10))
+        doc_mar = _make_doc(incident_number="26-003", incident_date=date(2026, 3, 20))
+        async with IncidentStore() as store:
+            await store.create(doc_feb)
+            await store.create(doc_mar)
+            await store.create(doc_jan)
+            results = await store.list_all()
+        assert [r.incident_number for r in results] == ["26-001", "26-002", "26-003"]
+
+    async def test_respects_max_items(self):
+        for i in range(5):
+            doc = _make_doc(incident_number=f"26-{i:03d}", incident_date=date(2026, 1, 1 + i))
+            async with IncidentStore() as store:
+                await store.create(doc)
+        async with IncidentStore() as store:
+            results = await store.list_all(max_items=3)
+        assert len(results) == 3
+
+    async def test_empty_store(self):
+        async with IncidentStore() as store:
+            results = await store.list_all()
+        assert results == []
+
+
 class TestListByStatus:
     async def test_unfiltered(self):
         doc1 = _make_doc(incident_number="26-001")

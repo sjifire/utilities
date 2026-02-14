@@ -291,20 +291,12 @@ class TestCmdArchive:
 class TestCLIArgParsing:
     """Test CLI argument parsing via main()."""
 
-    def test_archive_defaults_to_2_days(self, capsys):
-        mock_client = MagicMock()
-        mock_client.get_calls.return_value = []
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-
+    def test_archive_requires_days(self, capsys):
         with (
-            patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client),
             patch.object(sys, "argv", ["ispyfire-dispatch", "archive"]),
+            pytest.raises(SystemExit, match="2"),
         ):
-            result = main()
-
-        assert result == 0
-        mock_client.get_calls.assert_called_once_with(days=2)
+            main()
 
     def test_archive_days_30(self, capsys):
         mock_client = MagicMock()
@@ -331,7 +323,7 @@ class TestCLIArgParsing:
 
         with (
             patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client),
-            patch.object(sys, "argv", ["ispyfire-dispatch", "archive", "--dry-run"]),
+            patch.object(sys, "argv", ["ispyfire-dispatch", "archive", "--days", "2", "--dry-run"]),
         ):
             result = main()
 

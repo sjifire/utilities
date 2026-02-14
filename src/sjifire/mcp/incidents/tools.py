@@ -13,6 +13,8 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from cachetools import TTLCache
+
 from sjifire.core.config import get_org_config
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.incidents.models import CrewAssignment, IncidentDocument, Narratives
@@ -21,6 +23,99 @@ from sjifire.mcp.incidents.store import IncidentStore
 logger = logging.getLogger(__name__)
 
 _EDITABLE_STATUSES = {"draft", "in_progress", "ready_review"}
+_RESETTABLE_STATUSES = {"draft", "in_progress"}
+
+# One reset per user per 24 hours (server-side enforced).
+# Resets on server restart — acceptable for accidental-destruction prevention.
+_reset_cooldowns: TTLCache[str, str] = TTLCache(maxsize=1024, ttl=86400)
+
+
+def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
+    """Extract NERIS event timestamps from dispatch responder details.
+
+    Maps iSpyFire responder status changes to NERIS timestamp fields:
+    - time_reported → psap_answer (from call creation)
+    - First "Dispatch" → first_unit_dispatched
+    - First "Enroute" → first_unit_enroute
+    - First "On Scene" → first_unit_arrived
+
+    Args:
+        responder_details: List of responder status dicts from dispatch
+
+    Returns:
+        Dict of NERIS timestamp field → ISO datetime string
+    """
+    timestamps: dict[str, str] = {}
+    status_map = {
+        "Dispatch": "first_unit_dispatched",
+        "Dispatched": "first_unit_dispatched",
+        "Enroute": "first_unit_enroute",
+        "On Scene": "first_unit_arrived",
+    }
+
+    for detail in responder_details:
+        status = detail.get("status", "")
+        time_str = detail.get("time_of_status_change", "")
+        if not status or not time_str:
+            continue
+
+        neris_field = status_map.get(status)
+        if neris_field and neris_field not in timestamps:
+            timestamps[neris_field] = str(time_str)
+
+    return timestamps
+
+
+async def _prefill_from_dispatch(incident_number: str) -> dict:
+    """Look up dispatch data and return pre-fill fields for an incident.
+
+    Both ``create_incident`` and ``reset_incident`` call this to populate
+    address, coordinates, and timestamps from dispatch records.
+
+    Args:
+        incident_number: Dispatch ID (e.g. "26-000944")
+
+    Returns:
+        Dict of pre-fill field values, or empty dict if dispatch not found
+    """
+    from sjifire.mcp.dispatch.store import DispatchStore
+
+    try:
+        async with DispatchStore() as store:
+            dispatch = await store.get_by_dispatch_id(incident_number)
+    except Exception:
+        logger.warning("Failed to look up dispatch for %s", incident_number, exc_info=True)
+        return {}
+
+    if dispatch is None:
+        return {}
+
+    prefill: dict = {}
+
+    if dispatch.address:
+        prefill["address"] = dispatch.address
+    if dispatch.city:
+        prefill["city"] = dispatch.city
+    if dispatch.state:
+        prefill["state"] = dispatch.state
+
+    # Parse geo_location "lat,lon" string
+    if dispatch.geo_location and "," in dispatch.geo_location:
+        parts = dispatch.geo_location.split(",")
+        try:
+            prefill["latitude"] = float(parts[0].strip())
+            prefill["longitude"] = float(parts[1].strip())
+        except (ValueError, IndexError):
+            pass
+
+    # Extract timestamps from responder details
+    ts = _extract_timestamps(dispatch.responder_details)
+    if dispatch.time_reported:
+        ts["psap_answer"] = dispatch.time_reported.isoformat()
+    if ts:
+        prefill["timestamps"] = ts
+
+    return prefill
 
 
 def _check_view_access(doc: IncidentDocument, user_email: str, is_officer: bool) -> bool:
@@ -62,6 +157,9 @@ async def create_incident(
     """
     user = get_current_user()
 
+    # Pre-fill from dispatch data (address, coordinates, timestamps)
+    prefill = await _prefill_from_dispatch(incident_number)
+
     crew_assignments = [
         CrewAssignment(
             name=c["name"],
@@ -78,8 +176,13 @@ async def create_incident(
         incident_number=incident_number,
         incident_date=datetime.strptime(incident_date, "%Y-%m-%d").date(),
         incident_type=incident_type,
-        address=address,
+        address=address if address is not None else prefill.get("address"),
+        city=prefill.get("city", ""),
+        state=prefill.get("state", ""),
+        latitude=prefill.get("latitude"),
+        longitude=prefill.get("longitude"),
         crew=crew_assignments,
+        timestamps=prefill.get("timestamps", {}),
         created_by=user.email,
     )
 
@@ -364,6 +467,79 @@ async def submit_incident(incident_id: str) -> dict:
         "incident_id": incident_id,
         "neris_incident_id": doc.neris_incident_id,
     }
+
+
+async def reset_incident(incident_id: str) -> dict:
+    """Reset a draft incident so the user can start over.
+
+    Clears all content fields (type, crew, narratives, unit responses,
+    notes) and re-populates address/timestamps from dispatch data — the
+    same state as initial creation. Identity fields (id, number, date,
+    station, creator) are preserved.
+
+    Guards:
+    - Only the incident creator or officers can reset
+    - Only "draft" or "in_progress" incidents can be reset
+    - One reset per user per 24 hours
+
+    Args:
+        incident_id: The incident document ID
+
+    Returns:
+        The reset incident document, or an error
+    """
+    user = get_current_user()
+
+    # Check 24hr cooldown BEFORE loading the incident
+    if user.email in _reset_cooldowns:
+        return {
+            "error": "You already reset an incident in the last 24 hours. "
+            "Please wait before resetting another."
+        }
+
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+        if doc is None:
+            return {"error": "Incident not found"}
+
+        if not _check_edit_access(doc, user.email, user.is_officer):
+            return {"error": "You don't have permission to reset this incident"}
+
+        if doc.status not in _RESETTABLE_STATUSES:
+            return {
+                "error": f"Cannot reset an incident in '{doc.status}' status. "
+                f"Only draft or in_progress incidents can be reset."
+            }
+
+        # Pre-fill from dispatch (same as creation)
+        prefill = await _prefill_from_dispatch(doc.incident_number)
+
+        # Clear content fields
+        doc.incident_type = None
+        doc.crew = []
+        doc.unit_responses = []
+        doc.narratives = Narratives()
+        doc.internal_notes = ""
+
+        # Apply dispatch pre-fill
+        doc.address = prefill.get("address")
+        doc.city = prefill.get("city", "")
+        doc.state = prefill.get("state", "")
+        doc.latitude = prefill.get("latitude")
+        doc.longitude = prefill.get("longitude")
+        doc.timestamps = prefill.get("timestamps", {})
+
+        # Reset status to draft
+        doc.status = "draft"
+        doc.updated_at = datetime.now(UTC)
+
+        updated = await store.update(doc)
+
+    # Record cooldown AFTER successful update
+    _reset_cooldowns[user.email] = incident_id
+    logger.info("User %s reset incident %s", user.email, incident_id)
+    return updated.model_dump(mode="json")
 
 
 async def list_neris_incidents() -> dict:

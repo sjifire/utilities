@@ -298,6 +298,35 @@ class IncidentStore:
 
         return items
 
+    async def list_all(self, *, max_items: int = 500) -> list[IncidentDocument]:
+        """List all incidents across all partitions.
+
+        Used for backup export. Returns all statuses including submitted.
+
+        Args:
+            max_items: Maximum number of results
+
+        Returns:
+            List of all incident documents, sorted by incident_date ascending
+        """
+        if self._in_memory:
+            results = [IncidentDocument.from_cosmos(data) for data in self._memory.values()]
+            results.sort(key=lambda doc: doc.incident_date)
+            return results[:max_items]
+
+        query = "SELECT * FROM c ORDER BY c.incident_date ASC"
+
+        items = []
+        async for item in self._container.query_items(
+            query=query,
+            max_item_count=max_items,
+        ):
+            items.append(IncidentDocument.from_cosmos(item))
+            if len(items) >= max_items:
+                break
+
+        return items
+
     def _filter_memory(
         self,
         *,

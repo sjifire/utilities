@@ -39,6 +39,7 @@ m365-group-scan = "sjifire.scripts.m365_group_scan:main"
 duty-calendar-sync = "sjifire.scripts.duty_calendar_sync:main"
 personal-calendar-sync = "sjifire.scripts.personal_calendar_sync:main"
 mcp-server = "sjifire.mcp.server:main"
+backup-cosmos = "sjifire.scripts.backup_cosmos:main"
 
 [dependency-groups]
 dev = [
@@ -87,6 +88,7 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "src/sjifire/mcp/incidents/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
+"src/sjifire/mcp/dispatch/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
 "src/sjifire/mcp/token_store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
 "src/sjifire/mcp/server.py" = ["S104"]  # Binding to 0.0.0.0 is intentional for container
 "src/sjifire/scripts/*.py" = ["T201"]  # CLI scripts use print for output
