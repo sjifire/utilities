@@ -774,7 +774,16 @@ function reportsApp() {
         const res = await fetch('/chat/stream', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({message: text})
+          body: JSON.stringify({
+            message: text,
+            context: {
+              calls: this.calls.map(c => ({
+                id: c.id, nature: c.nature, address: c.address,
+                date: c.date, time: c.time, ic: c.ic,
+                report_source: c.report_source, report_status: c.report_status
+              }))
+            }
+          })
         });
 
         if (!res.ok) {

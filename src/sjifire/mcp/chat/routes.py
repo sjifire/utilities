@@ -305,8 +305,10 @@ async def general_chat_stream_endpoint(request: Request) -> Response:
     if len(message) > 5000:
         return JSONResponse({"error": "Message too long (max 5000 chars)"}, status_code=400)
 
+    context = body.get("context")
+
     async def event_generator():
-        async for event in stream_general_chat(message, user):
+        async for event in stream_general_chat(message, user, context=context):
             yield event
 
     return StreamingResponse(

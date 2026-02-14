@@ -12,6 +12,7 @@ import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from anthropic import AsyncAnthropic, RateLimitError
 
@@ -538,13 +539,18 @@ def _sse(event: str, data: dict) -> str:
 _GENERAL_CONVERSATION_PREFIX = "general:"
 
 
-def _build_general_system_prompt() -> str:
+def _build_general_system_prompt(context: dict | None = None) -> str:
     """Build the system prompt for the general operations assistant."""
     org = get_org_config()
-    return (
+    tz = ZoneInfo(org.timezone) if org.timezone else UTC
+    now = datetime.now(tz)
+
+    parts = [
         f"You are an operations assistant for {org.company_name}. "
         "You help firefighters look up dispatch calls, crew schedules, "
         "NERIS reporting codes, and incident report status.\n\n"
+        f"TODAY: {now.strftime('%A, %B %d, %Y')}  "
+        f"TIME: {now.strftime('%H:%M')} ({org.timezone})\n\n"
         "RULES:\n"
         "- Be concise and helpful.\n"
         "- Use tools to look up data — don't guess.\n"
@@ -552,13 +558,31 @@ def _build_general_system_prompt() -> str:
         'click "Edit Report" on the reports table for that call.\n'
         "- You can answer questions about schedules, call history, "
         "NERIS codes, and report status.\n"
-        "- Format responses using markdown for readability."
-    )
+        "- Format responses using markdown for readability.\n"
+        "- When the user asks about calls visible on the page, use the "
+        "PAGE CONTEXT below before calling tools.",
+    ]
+
+    if context and context.get("calls"):
+        calls = context["calls"]
+        rows = ["ID | Date | Time | Nature | Address | IC | Report"]
+        rows.append("---|------|------|--------|---------|----|---------")
+        for c in calls:
+            status = c.get("report_status") or c.get("report_source") or "--"
+            rows.append(
+                f"{c.get('id', '')} | {c.get('date', '')} | {c.get('time', '')} | "
+                f"{c.get('nature', '')} | {c.get('address', '')} | "
+                f"{c.get('ic', '')} | {status}"
+            )
+        parts.append("\nPAGE CONTEXT — Dispatch calls visible to the user:\n" + "\n".join(rows))
+
+    return "\n".join(parts)
 
 
 async def stream_general_chat(
     user_message: str,
     user: UserContext,
+    context: dict | None = None,
 ) -> AsyncGenerator[str]:
     r"""Stream a general chat response as Server-Sent Events.
 
@@ -592,7 +616,7 @@ async def stream_general_chat(
         )
         return
 
-    system_prompt = _build_general_system_prompt()
+    system_prompt = _build_general_system_prompt(context)
 
     # Build messages for Claude API
     api_messages = []

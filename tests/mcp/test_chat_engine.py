@@ -8,6 +8,7 @@ import pytest
 
 from sjifire.mcp.auth import UserContext
 from sjifire.mcp.chat.engine import (
+    _build_general_system_prompt,
     _build_system_prompt,
     _sse,
     _summarize_tool_result,
@@ -267,6 +268,66 @@ class TestStreamChat:
         assert len(events) == 1
         assert "RuntimeError" in events[0]
         assert "dispatch store down" in events[0]
+
+
+class TestBuildGeneralSystemPrompt:
+    def test_includes_todays_date(self):
+        prompt = _build_general_system_prompt()
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from sjifire.core.config import get_org_config
+
+        org = get_org_config()
+        tz = ZoneInfo(org.timezone) if org.timezone else datetime.now().astimezone().tzinfo
+        today_str = datetime.now(tz).strftime("%B %d, %Y")
+        assert today_str in prompt
+
+    def test_includes_time(self):
+        prompt = _build_general_system_prompt()
+        assert "TIME:" in prompt
+        assert "TODAY:" in prompt
+
+    def test_no_context_no_calls_table(self):
+        prompt = _build_general_system_prompt()
+        assert "Dispatch calls visible to the user" not in prompt
+
+    def test_includes_calls_context(self):
+        context = {
+            "calls": [
+                {
+                    "id": "26-001234",
+                    "nature": "Fire-Structure",
+                    "address": "123 MAIN ST",
+                    "date": "Feb 13",
+                    "time": "14:30",
+                    "ic": "Smith",
+                    "report_source": "local",
+                    "report_status": "draft",
+                },
+                {
+                    "id": "26-001235",
+                    "nature": "EMS-Medical",
+                    "address": "456 OAK AVE",
+                    "date": "Feb 14",
+                    "time": "09:15",
+                    "ic": "",
+                    "report_source": None,
+                    "report_status": None,
+                },
+            ]
+        }
+        prompt = _build_general_system_prompt(context)
+        assert "PAGE CONTEXT" in prompt
+        assert "26-001234" in prompt
+        assert "Fire-Structure" in prompt
+        assert "123 MAIN ST" in prompt
+        assert "26-001235" in prompt
+        assert "EMS-Medical" in prompt
+
+    def test_empty_calls_no_calls_table(self):
+        prompt = _build_general_system_prompt({"calls": []})
+        assert "Dispatch calls visible to the user" not in prompt
 
 
 class TestParallelToolExecution:
