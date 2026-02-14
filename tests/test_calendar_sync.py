@@ -20,8 +20,8 @@ class TestIsOperationalSection:
     """Tests for is_operational_section function.
 
     Uses a denylist approach: all sections are included except known
-    non-operational ones (Administration, Operations, Prevention,
-    Training, Trades, Time Off).
+    non-operational ones (Administration, Prevention, Training,
+    Trades, Time Off).
     """
 
     def test_station_s31_is_operational(self):
@@ -84,9 +84,9 @@ class TestIsOperationalSection:
         """Administration is not operational."""
         assert is_operational_section("Administration") is False
 
-    def test_operations_is_not_operational(self):
-        """Operations (admin) is not operational."""
-        assert is_operational_section("Operations") is False
+    def test_operations_is_operational(self):
+        """Operations section is operational."""
+        assert is_operational_section("Operations") is True
 
     def test_prevention_is_not_operational(self):
         """Prevention is not operational."""

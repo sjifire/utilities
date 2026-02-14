@@ -170,7 +170,6 @@ def is_operational_section(section: str) -> bool:
 
     Non-operational sections (excluded):
     - Administration
-    - Operations (administrative operations)
     - Prevention (fire prevention programs)
     - Training
     - Trades (maintenance)
@@ -180,7 +179,6 @@ def is_operational_section(section: str) -> bool:
 
     non_operational = {
         "administration",
-        "operations",
         "prevention",
         "training",
         "trades",
