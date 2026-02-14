@@ -116,3 +116,39 @@ def detect_shift_change_hour(entries: list[HasShiftTimes]) -> int | None:
     most_common, count = hour_counts.most_common(1)[0]
     logger.info("Detected shift change hour: %02d:00 (%d entries)", most_common, count)
     return most_common
+
+
+def resolve_duty_date(
+    target_date: "date",
+    shift_change_hour: int | None,
+    hour: int | None = None,
+) -> tuple["date", "date | None"]:
+    """Determine which day's crew is actually on duty at a given time.
+
+    Before the shift change hour, the *previous* day's crew is still
+    on duty.  At or after the shift change, the target date's crew
+    has taken over.
+
+    This is the single source of truth for shift-change date resolution,
+    used by MCP schedule tools and the chat engine.
+
+    Args:
+        target_date: The calendar date to look up.
+        shift_change_hour: Hour (0-23) when shifts change, or None if
+            unknown (returns ``target_date`` unchanged).
+        hour: Hour of day (0-23) to evaluate against the shift change.
+            If None, returns ``target_date`` unchanged (no time context).
+
+    Returns:
+        Tuple of ``(duty_date, upcoming_date)``.  ``upcoming_date`` is
+        the next shift's date when shift-change logic is applied, or
+        None when no time context is available.
+    """
+    from datetime import timedelta
+
+    if shift_change_hour is not None and hour is not None:
+        if hour < shift_change_hour:
+            return target_date - timedelta(days=1), target_date
+        return target_date, target_date + timedelta(days=1)
+
+    return target_date, None

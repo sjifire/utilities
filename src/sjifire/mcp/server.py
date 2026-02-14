@@ -32,6 +32,8 @@ from sjifire.mcp.chat.routes import (
     chat_stream,
     conversation_history,
     create_report,
+    general_chat_history,
+    general_chat_stream_endpoint,
     reports_list,
 )
 from sjifire.mcp.dispatch import tools as dispatch_tools
@@ -238,6 +240,10 @@ app.routes.insert(0, Route("/reports/{incident_id}/conversation", conversation_h
 app.routes.insert(0, Route("/reports/{incident_id}", chat_page))
 app.routes.insert(0, Route("/reports/new", create_report, methods=["POST"]))
 app.routes.insert(0, Route("/reports", reports_list))
+
+# General chat routes (not tied to an incident)
+app.routes.insert(0, Route("/chat/stream", general_chat_stream_endpoint, methods=["POST"]))
+app.routes.insert(0, Route("/chat/history", general_chat_history))
 
 # Dev mode: inject synthetic user context on every request
 if provider is None:

@@ -18,9 +18,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from sjifire.mcp.auth import UserContext, get_easyauth_user, set_current_user
-from sjifire.mcp.chat.engine import stream_chat
+from sjifire.mcp.chat.engine import stream_chat, stream_general_chat
 from sjifire.mcp.chat.store import ConversationStore
 from sjifire.mcp.dashboard import get_dashboard_data
+from sjifire.mcp.dispatch.store import DispatchStore
 from sjifire.mcp.incidents.store import IncidentStore
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,9 @@ async def reports_list(request: Request) -> Response:
         neris_count=data.get("neris_count", 0),
         local_draft_count=data.get("local_draft_count", 0),
         missing_reports=data.get("missing_reports", 0),
+        date_display=data.get("date_display", ""),
+        updated_time=data.get("updated_time", ""),
+        open_calls=data.get("open_calls", 0),
         today=date.today().isoformat(),
         active_page="reports",
     )
@@ -141,11 +145,38 @@ async def chat_page(request: Request) -> Response:
     if doc is None:
         return JSONResponse({"error": "Incident not found"}, status_code=404)
 
+    # Fetch dispatch data for the summary panel
+    dispatch_context: dict = {}
+    try:
+        async with DispatchStore() as dstore:
+            dispatch = await dstore.get_by_dispatch_id(doc.incident_number)
+        if dispatch:
+            dispatch_context = {
+                "nature": dispatch.nature,
+                "address": dispatch.address,
+                "time_reported": (
+                    dispatch.time_reported.strftime("%b %d, %Y %H:%M")
+                    if dispatch.time_reported
+                    else ""
+                ),
+                "responding_units": dispatch.responding_units,
+                "ic": (
+                    dispatch.analysis.incident_commander_name
+                    or dispatch.analysis.incident_commander
+                ),
+                "short_dsc": dispatch.analysis.short_dsc,
+                "summary": dispatch.analysis.summary,
+            }
+    except Exception:
+        logger.debug("Failed to load dispatch data for %s", doc.incident_number, exc_info=True)
+
     template = _jinja_env.get_template("chat.html")
     html = template.render(
         incident_id=incident_id,
         incident_number=doc.incident_number,
         incident_status=doc.status,
+        completeness=doc.completeness(),
+        dispatch=dispatch_context,
     )
     return Response(html, media_type="text/html")
 
@@ -241,6 +272,102 @@ async def chat_stream(request: Request) -> Response:
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+async def general_chat_stream_endpoint(request: Request) -> Response:
+    """Handle a general chat message and stream the response as SSE."""
+    user = _get_user(request)
+
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    if not user:
+        from sjifire.mcp.auth import _current_user
+
+        user = _current_user.get()
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    message = body.get("message", "").strip()
+    if not message:
+        return JSONResponse({"error": "Message is required"}, status_code=400)
+
+    if len(message) > 5000:
+        return JSONResponse({"error": "Message too long (max 5000 chars)"}, status_code=400)
+
+    async def event_generator():
+        async for event in stream_general_chat(message, user):
+            yield event
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def general_chat_history(request: Request) -> Response:
+    """Return the general conversation history as JSON."""
+    user = _get_user(request)
+
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    if not user:
+        from sjifire.mcp.auth import _current_user
+
+        user = _current_user.get()
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    conversation_key = f"general:{user.email}"
+
+    async with ConversationStore() as store:
+        conversation = await store.get_by_incident(conversation_key)
+
+    if conversation is None:
+        return JSONResponse({"messages": [], "turn_count": 0})
+
+    messages = [
+        {
+            "role": msg.role,
+            "content": msg.content,
+            "tool_use": msg.tool_use,
+            "tool_results": [
+                {"name": tr.get("name", "tool"), "summary": _result_summary(tr)}
+                for tr in (msg.tool_results or [])
+            ]
+            if msg.tool_results
+            else None,
+            "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+        }
+        for msg in conversation.messages
+        if msg.content or msg.tool_use
+    ]
+
+    return JSONResponse(
+        {
+            "messages": messages,
+            "turn_count": conversation.turn_count,
+        }
     )
 
 

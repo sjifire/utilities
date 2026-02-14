@@ -4,107 +4,120 @@
 
 {% block extra_styles %}
 <style>
-/* Animations */
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+    /* Animations */
+    @keyframes shimmer {
+      0%   { background-position: -400px 0; }
+      100% { background-position:  400px 0; }
+    }
 
-/* Status pill */
-.status-pill{display:inline-flex;align-items:center;gap:6px;margin-top:4px;border-radius:20px;padding:3px 12px;border:1px solid;font-size:12px;font-weight:600}
-.status-pill.ok{background:var(--green-alpha);border-color:rgba(34,197,94,.3);color:var(--color-green)}
-.status-pill.ok .pulse-dot{background:var(--color-green)}
-.status-pill.active{background:var(--red-alpha);border-color:rgba(220,38,38,.3);color:var(--color-error)}
-.status-pill.active .pulse-dot{background:var(--color-error)}
-.pulse-dot{width:7px;height:7px;border-radius:50%;display:inline-block;animation:pulse 2s ease-in-out infinite}
-.updated-row{margin-top:6px;display:flex;align-items:center;justify-content:flex-end;gap:8px}
-.refresh-hint{font-size:11px;font-weight:600;color:var(--color-blue);background:var(--blue-alpha);padding:2px 10px;border-radius:12px}
+    /* Content wrapper */
+    .content-wrap { max-width: 1200px; margin: 0 auto; }
 
-/* Content wrapper */
-.content-wrap{max-width:1200px;margin:0 auto}
+    /* ── Grid layouts ── */
+    .grid-4, .grid-3, .grid-overview { display: grid; gap: 16px; }
+    .grid-4        { grid-template-columns: repeat(4, 1fr); }
+    .grid-3        { grid-template-columns: repeat(3, 1fr); }
+    .grid-overview { grid-template-columns: 1fr 1.6fr; gap: 20px; }
 
-/* Grid layouts */
-.grid-4,.grid-3,.grid-overview{display:grid;gap:16px}
-.grid-4{grid-template-columns:repeat(4,1fr)}
-.grid-3{grid-template-columns:repeat(3,1fr)}
-.grid-overview{grid-template-columns:1fr 1.6fr;gap:20px}
+    /* ── Overview rows ── */
+    .overview-row {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .overview-row:last-child,
+    .call-card:last-child { border-bottom: none; }
 
-/* Overview rows */
-.overview-row{padding:12px 18px;border-bottom:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center}
-.overview-row:last-child,.call-card:last-child{border-bottom:none}
+    /* ── Call cards ── */
+    .call-card {
+      padding: 14px 18px;
+      border-left: 3px solid;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .call-card[data-s="high"] {
+      border-left-color: var(--color-red);
+      background: rgba(220, 38, 38, .1);
+    }
+    .call-card[data-s="medium"] {
+      border-left-color: var(--color-amber-dark);
+      background: rgba(245, 158, 11, .08);
+    }
+    .call-card[data-s="low"] {
+      border-left-color: var(--color-gray);
+      background: rgba(107, 114, 128, .08);
+    }
+    .call-card-right { text-align: right; flex-shrink: 0; }
 
-/* Call cards */
-.call-card{padding:14px 18px;border-left:3px solid;border-bottom:1px solid var(--border-subtle)}
-.call-card[data-s="high"]{border-left-color:var(--color-red);background:rgba(220,38,38,.1)}
-.call-card[data-s="medium"]{border-left-color:var(--color-amber-dark);background:rgba(245,158,11,.08)}
-.call-card[data-s="low"]{border-left-color:var(--color-gray);background:rgba(107,114,128,.08)}
-.call-card-right{text-align:right;flex-shrink:0}
+    /* ── Crew ── */
+    .crew-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .crew-table td, .crew-table th { white-space: nowrap; }
+    .crew-table .shift { text-align: right; }
+    .section-header {
+      padding: 8px 18px;
+      background: rgba(255, 255, 255, .02);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .contact-link {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-decoration: none;
+    }
+    .contact-link:hover {
+      color: var(--color-blue);
+      text-decoration: underline;
+    }
+    .contact-link + .contact-link::before {
+      content: " | ";
+      color: var(--text-faint);
+    }
 
-/* Crew */
-.crew-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.crew-table td,.crew-table th{white-space:nowrap}
-.crew-table .shift{text-align:right}
-.section-header{padding:8px 18px;background:rgba(255,255,255,.02);border-bottom:1px solid var(--border-subtle)}
-.contact-link{font-size:11px;color:var(--text-dim);text-decoration:none}
-.contact-link:hover{color:var(--color-blue);text-decoration:underline}
-.contact-link+.contact-link::before{content:" | ";color:var(--text-faint)}
+    /* Address link */
+    .address-link { color: var(--text-muted); text-decoration: none; }
+    .address-link:hover { color: var(--color-blue); text-decoration: underline; }
 
-/* Address link */
-.address-link{color:var(--text-muted);text-decoration:none}
-.address-link:hover{color:var(--color-blue);text-decoration:underline}
+    /* ── Skeleton loading ── */
+    .skeleton {
+      background: linear-gradient(90deg,
+        var(--border-subtle) 25%,
+        var(--border-medium) 50%,
+        var(--border-subtle) 75%);
+      background-size: 800px 100%;
+      animation: shimmer 1.5s ease-in-out infinite;
+      border-radius: 4px;
+    }
+    .skeleton-stat { height: 100px; }
+    .skeleton-text { height: 16px; border-radius: 4px; }
+    .skeleton-row  { height: 48px; border-bottom: 1px solid var(--border-subtle); }
 
-/* Skeleton loading */
-.skeleton{background:linear-gradient(90deg,var(--border-subtle) 25%,var(--border-medium) 50%,var(--border-subtle) 75%);background-size:800px 100%;animation:shimmer 1.5s ease-in-out infinite;border-radius:4px}
-.skeleton-stat{height:100px}
-.skeleton-text{height:16px;border-radius:4px}
-.skeleton-row{height:48px;border-bottom:1px solid var(--border-subtle)}
+    /* Footer */
+    .dashboard-footer {
+      padding: 16px 24px 32px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-faint);
+    }
 
-/* Help section */
-.help-row{padding:14px 18px;border-top:1px solid var(--border-subtle);display:flex;gap:16px;align-items:flex-start}
-.help-label{flex-shrink:0;min-width:280px}
-.help-cmd{font-size:12px;background:rgba(96,165,250,.1);color:var(--color-blue);padding:4px 10px;border-radius:4px;font-family:'SF Mono','Fira Code',monospace;font-weight:600}
-.help-intro{padding:16px 18px 8px}
-.help-footer{padding:16px 18px;border-top:1px solid var(--border-default)}
-
-/* Footer */
-.dashboard-footer{padding:16px 24px 32px;display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint)}
-
-/* Dashboard responsive */
-@media(max-width:768px){
-  .grid-4{grid-template-columns:repeat(2,1fr)}
-  .grid-3,.grid-overview,.crew-grid{grid-template-columns:1fr}
-  .dashboard-main{padding:12px}
-  .data-table-wrap{-webkit-overflow-scrolling:touch}
-  .help-row{flex-direction:column;gap:6px}
-  .help-label{min-width:0}
-  .dashboard-footer{flex-direction:column;gap:4px}
-}
+    /* ── Dashboard responsive ── */
+    @media (max-width: 768px) {
+      .grid-4             { grid-template-columns: repeat(2, 1fr); }
+      .grid-3,
+      .grid-overview,
+      .crew-grid           { grid-template-columns: 1fr; }
+      .dashboard-main      { padding: 12px; }
+      .data-table-wrap     { -webkit-overflow-scrolling: touch; }
+      .dashboard-footer    { flex-direction: column; gap: 4px; }
+    }
 </style>
 {% endblock %}
 
 {% block body_attrs %}x-cloak x-data="dashboard()"{% endblock %}
 
-{% block page_title %}SJIF&amp;R Operations Dashboard{% endblock %}
-
-{% block header_right %}
-<nav class="header-nav">
-  <a href="/dashboard" class="header-nav-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
-  <a href="/reports" class="header-nav-link {% if active_page == 'reports' %}active{% endif %}">Reports</a>
-</nav>
-<div style="text-align:right" x-show="!loading">
-  <div style="font-size:13px;color:var(--text-muted)" x-text="D.date_display"></div>
-  <div class="status-pill" :class="D.open_calls ? 'active' : 'ok'">
-    <span class="pulse-dot"></span>
-    <span x-text="D.open_calls ? D.open_calls + ' Active Call' + (D.open_calls > 1 ? 's' : '') : 'No Active Calls'"></span>
-  </div>
-  <div class="updated-row">
-    <span style="font-size:11px;color:var(--text-dim)" x-text="'Updated ' + D.updated_time"></span>
-    <span class="refresh-hint">Auto-updates every hour</span>
-  </div>
-</div>
-{% endblock %}
-
 {% block tab_bar %}
 <nav class="nav-bar">
-  <div class="content-wrap" style="display:flex">
+  <div class="nav-bar-left">
     <template x-for="t in tabs" :key="t.id">
       <button class="nav-tab" :class="{'active': activeTab === t.id}" @click="activeTab = t.id; location.hash = t.id" x-text="t.label"></button>
     </template>
@@ -114,6 +127,18 @@
 
 {% block body %}
 <main class="content-wrap dashboard-main" style="padding:24px">
+
+  <!-- Status bar (moved from header for consistency) -->
+  <div x-show="!loading && !error" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div style="font-size:13px;color:var(--text-muted)" x-text="D.date_display"></div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div class="status-pill" :class="D.open_calls ? 'active' : 'ok'">
+        <span class="pulse-dot"></span>
+        <span x-text="D.open_calls ? D.open_calls + ' Active Call' + (D.open_calls > 1 ? 's' : '') : 'No Active Calls'"></span>
+      </div>
+      <span style="font-size:11px;color:var(--text-dim)" x-text="'Updated ' + D.updated_time"></span>
+    </div>
+  </div>
 
   <!-- LOADING SKELETON -->
   <div x-show="loading">
@@ -443,38 +468,16 @@
                     <a class="action-btn edit" :href="'/reports/' + c.incident_id">Edit Report</a>
                   </template>
                   <template x-if="c.report_source === 'neris'">
-                    <a href="/reports" class="action-btn import">Import from NERIS</a>
+                    <button class="action-btn import" @click="startReport(c)">Import from NERIS</button>
                   </template>
                   <template x-if="!c.report_source">
-                    <a href="/reports" class="action-btn start">Start Report</a>
+                    <button class="action-btn start" @click="startReport(c)">Start Report</button>
                   </template>
                 </td>
               </tr>
             </template>
           </tbody>
         </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- HELP TAB -->
-  <div x-show="!loading && !error && activeTab === 'help'">
-    <div class="panel">
-      <div class="panel-header">
-        <span style="font-size:14px;color:var(--text-primary)" class="font-semibold">Claude Commands</span>
-        <span style="font-size:11px;color:var(--text-dim)">Type these in the chat</span>
-      </div>
-      <div class="help-intro">
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5">Use these commands to interact with dispatch, crew, and reporting.</p>
-      </div>
-      <template x-for="h in helpCommands" :key="h[0]">
-        <div class="help-row">
-          <div class="help-label"><code class="help-cmd" x-text="h[0]"></code></div>
-          <div style="font-size:12px;color:var(--text-muted);line-height:1.5" x-text="h[1]"></div>
-        </div>
-      </template>
-      <div class="help-footer">
-        <p style="font-size:12px;color:var(--text-faint);line-height:1.5">You can also ask Claude anything in natural language.</p>
       </div>
     </div>
   </div>
@@ -502,24 +505,12 @@ function dashboard() {
     },
     loading: true,
     error: false,
-    activeTab: ['overview','calls','crew','reporting','help'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview',
+    activeTab: ['overview','calls','crew','reporting'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview',
     tabs: [
       {id: 'overview', label: 'Overview'},
       {id: 'calls', label: 'Recent Calls'},
       {id: 'crew', label: 'On Duty'},
-      {id: 'reporting', label: 'Reporting'},
-      {id: 'help', label: 'Help'}
-    ],
-    helpCommands: [
-      ['refresh', 'Refresh dashboard'],
-      ['Start a report for 26-XXXXXX', 'Create incident report'],
-      ['Import NERIS data for 26-XXXXXX', 'Pull existing NERIS submission into a draft'],
-      ['Show me call 26-XXXXXX', 'Get dispatch call details'],
-      ['Who was on duty Jan 15?', 'Look up crew for any date'],
-      ['List incidents', 'Show draft/in-progress reports'],
-      ['Submit incident for [ID]', 'Submit to NERIS'],
-      ['Search calls from Jan 1 to Jan 31', 'Search dispatch archive'],
-      ['Show open calls', 'Check active calls']
+      {id: 'reporting', label: 'Reporting'}
     ],
 
     async init() {
@@ -550,6 +541,33 @@ function dashboard() {
     mapsUrl(addr) {
       return 'https://www.google.com/maps/search/?api=1&query=' +
         encodeURIComponent((addr || '') + ', San Juan Island, WA');
+    },
+
+    startReport(call) {
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/reports/new';
+      const fields = {
+        incident_number: call.id,
+        incident_date: this.parseDate(call.date),
+        station: 'S31'
+      };
+      for (const [k, v] of Object.entries(fields)) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = k;
+        input.value = v;
+        form.appendChild(input);
+      }
+      document.body.appendChild(form);
+      form.submit();
+    },
+
+    parseDate(dateStr) {
+      if (!dateStr) return '';
+      const d = new Date(dateStr + ' ' + new Date().getFullYear());
+      if (isNaN(d)) return '';
+      return d.toISOString().split('T')[0];
     }
   };
 }

@@ -16,7 +16,7 @@ import logging
 from datetime import date, datetime, timedelta
 
 from sjifire.core.config import get_timezone
-from sjifire.core.schedule import detect_shift_change_hour, should_exclude_section
+from sjifire.core.schedule import detect_shift_change_hour, resolve_duty_date, should_exclude_section
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.schedule.models import DayScheduleCache, ScheduleEntryCache
 from sjifire.mcp.schedule.store import ScheduleStore
@@ -147,6 +147,7 @@ async def _ensure_cache(
 async def get_on_duty_crew(
     target_date: str | None = None,
     include_admin: bool = False,
+    target_hour: int | None = None,
 ) -> dict:
     """Get the crew on duty for a specific date or right now.
 
@@ -157,8 +158,13 @@ async def get_on_duty_crew(
     previous day's crew is still on duty.  The response also includes
     an ``upcoming`` block with the next shift's crew.
 
-    When ``target_date`` is provided the function returns that date's
-    assigned crew (no time-based filtering).
+    When ``target_date`` is provided with ``target_hour``, the function
+    applies the same shift-change logic using the given hour instead of
+    the current time. This is useful for historical lookups (e.g., an
+    incident at 16:48 before an 18:00 shift change).
+
+    When ``target_date`` is provided without ``target_hour``, the
+    function returns that date's assigned crew (no time-based filtering).
 
     By default, administration staff and Time Off entries are excluded
     — pass ``include_admin=True`` to see everyone.
@@ -169,6 +175,7 @@ async def get_on_duty_crew(
     Args:
         target_date: Date in YYYY-MM-DD format. Defaults to today (time-aware).
         include_admin: Include administration staff (default: False).
+        target_hour: Hour of day (0-23) for shift-change-aware historical lookups.
 
     Returns:
         Dict with date, platoon, crew list, shift_change_hour, and
@@ -180,7 +187,7 @@ async def get_on_duty_crew(
         dt = datetime.strptime(target_date, "%Y-%m-%d").date() if target_date else date.today()
     except ValueError:
         return {"error": f"Invalid date format: {target_date!r}. Expected YYYY-MM-DD."}
-    logger.info("Schedule lookup for %s (user: %s)", dt.isoformat(), user.email)
+    logger.info("Schedule lookup for %s hour=%s (user: %s)", dt.isoformat(), target_hour, user.email)
 
     # Request target date +/- 1 day for shift-change coverage
     needed = [
@@ -195,20 +202,13 @@ async def get_on_duty_crew(
     # Detect shift change hour from full-shift entries in the cached data
     shift_change_hour = _detect_shift_change_hour_from_cache(cached)
 
-    upcoming_date: date | None = None
+    # Determine effective hour: current local time for "now", or explicit target_hour
+    effective_hour: int | None = target_hour
     if target_date is None and shift_change_hour is not None:
-        # Time-aware: pick the day whose crew is actually on duty now
         tz = get_timezone()
-        now = datetime.now(tz)
-        if now.hour < shift_change_hour:
-            # Before shift change — previous day's crew is still on duty
-            duty_date = dt - timedelta(days=1)
-            upcoming_date = dt
-        else:
-            duty_date = dt
-            upcoming_date = dt + timedelta(days=1)
-    else:
-        duty_date = dt
+        effective_hour = datetime.now(tz).hour
+
+    duty_date, upcoming_date = resolve_duty_date(dt, shift_change_hour, effective_hour)
 
     duty_str = duty_date.isoformat()
     day = cached.get(duty_str)
