@@ -395,19 +395,19 @@
 {% block tab_bar %}
 <div class="nav-bar">
   <div class="nav-bar-left">
-    <button class="nav-tab" :class="{ active: filter === 'all' }" @click="filter = 'all'">
+    <button class="nav-tab" :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">
       All <span style="opacity:.6" x-text="'(' + calls.length + ')'"></span>
     </button>
-    <button class="nav-tab" :class="{ active: filter === 'missing' }" @click="filter = 'missing'">
+    <button class="nav-tab" :class="{ active: activeTab === 'missing' }" @click="activeTab = 'missing'">
       Missing Report <span style="opacity:.6" x-text="'(' + countByFilter('missing') + ')'"></span>
     </button>
-    <button class="nav-tab" :class="{ active: filter === 'local' }" @click="filter = 'local'">
+    <button class="nav-tab" :class="{ active: activeTab === 'local' }" @click="activeTab = 'local'">
       In Progress <span style="opacity:.6" x-text="'(' + countByFilter('local') + ')'"></span>
     </button>
-    <button class="nav-tab" :class="{ active: filter === 'neris' }" @click="filter = 'neris'">
+    <button class="nav-tab" :class="{ active: activeTab === 'neris' }" @click="activeTab = 'neris'">
       Submitted <span style="opacity:.6" x-text="'(' + countByFilter('neris') + ')'"></span>
     </button>
-    <button class="nav-tab" :class="{ active: filter === 'help' }" @click="filter = 'help'">
+    <button class="nav-tab" :class="{ active: activeTab === 'help' }" @click="activeTab = 'help'">
       Help
     </button>
   </div>
@@ -425,7 +425,7 @@
 {% block body %}
 <div class="reports-main">
   <!-- Stats (hidden on help tab) -->
-  <div class="reports-stats" x-show="filter !== 'help'">
+  <div class="reports-stats" x-show="activeTab !== 'help'">
     <div class="stat-card accent-blue">
       <div class="stat-label">In Progress</div>
       <div class="stat-value">{{ local_draft_count }}</div>
@@ -444,7 +444,7 @@
   </div>
 
   <!-- Help panel -->
-  <div x-show="filter === 'help'">
+  <div x-show="activeTab === 'help'">
     <div class="panel">
       <div class="panel-header">
         <span style="font-size:14px;color:var(--text-primary)" class="font-semibold">Assistant Commands</span>
@@ -466,7 +466,7 @@
   </div>
 
   <!-- Table -->
-  <template x-if="filter !== 'help' && filtered().length > 0">
+  <template x-if="activeTab !== 'help' && filtered().length > 0">
     <div class="panel data-table-wrap">
       <table class="data-table">
         <thead>
@@ -540,7 +540,7 @@
   </template>
 
   <!-- Empty state -->
-  <template x-if="filter !== 'help' && filtered().length === 0">
+  <template x-if="activeTab !== 'help' && filtered().length === 0">
     <div class="empty-state" style="padding:60px 20px">
       <h2>No calls match this filter</h2>
       <p>Try a different filter or check back later.</p>
@@ -644,7 +644,7 @@
 function reportsApp() {
   return {
     calls: {{ calls | tojson }},
-    filter: 'all',
+    ...hashTab(['all','missing','local','neris','help'], 'all'),
     showModal: false,
     submitting: false,
     modalCallId: '',
@@ -671,10 +671,10 @@ function reportsApp() {
     chatLoaded: false,
 
     filtered() {
-      if (this.filter === 'all') return this.calls;
-      if (this.filter === 'missing') return this.calls.filter(c => !c.has_report);
-      if (this.filter === 'local') return this.calls.filter(c => c.report_source === 'local');
-      if (this.filter === 'neris') return this.calls.filter(c => c.report_source === 'neris');
+      if (this.activeTab === 'all') return this.calls;
+      if (this.activeTab === 'missing') return this.calls.filter(c => !c.has_report);
+      if (this.activeTab === 'local') return this.calls.filter(c => c.report_source === 'local');
+      if (this.activeTab === 'neris') return this.calls.filter(c => c.report_source === 'neris');
       return this.calls;
     },
 

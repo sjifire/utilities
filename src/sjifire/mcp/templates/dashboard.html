@@ -119,7 +119,7 @@
 <nav class="nav-bar">
   <div class="nav-bar-left">
     <template x-for="t in tabs" :key="t.id">
-      <button class="nav-tab" :class="{'active': activeTab === t.id}" @click="activeTab = t.id; location.hash = t.id" x-text="t.label"></button>
+      <button class="nav-tab" :class="{'active': activeTab === t.id}" @click="activeTab = t.id" x-text="t.label"></button>
     </template>
   </div>
   <div class="nav-bar-right" x-data="headerStatus()" x-cloak>
@@ -501,7 +501,7 @@ function dashboard() {
     },
     loading: true,
     error: false,
-    activeTab: ['overview','calls','crew','reporting'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview',
+    ...hashTab(['overview','calls','crew','reporting'], 'overview'),
     tabs: [
       {id: 'overview', label: 'Overview'},
       {id: 'calls', label: 'Recent Calls'},
@@ -510,6 +510,7 @@ function dashboard() {
     ],
 
     async init() {
+      hashTab(['overview','calls','crew','reporting'], 'overview').init.call(this);
       await this.refresh();
       setInterval(() => this.refresh(), 3600000);
     },
