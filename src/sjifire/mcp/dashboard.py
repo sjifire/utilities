@@ -16,6 +16,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
+from sjifire.calendar.models import position_sort_key
 from sjifire.core.config import get_org_config, get_timezone
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.dispatch.store import DispatchStore
@@ -24,6 +25,10 @@ from sjifire.mcp.incidents.store import IncidentStore
 from sjifire.mcp.schedule import tools as schedule_tools
 
 logger = logging.getLogger(__name__)
+
+# NERIS cache refresh tracking — live API fetch every _NERIS_REFRESH_INTERVAL
+_NERIS_REFRESH_INTERVAL = timedelta(hours=24)
+_neris_last_refresh: datetime | None = None
 
 # Path to docs directory — try source tree first, then /app (Docker).
 _SRC_DOCS = Path(__file__).resolve().parents[3] / "docs"
@@ -101,11 +106,13 @@ def _build_crew_list(
     contacts = contact_lookup or {}
     crew = []
     for c in raw_crew:
+        raw_position = c["position"]
         contact = contacts.get(c["name"].lower(), {})
         crew.append(
             {
                 "name": c["name"],
-                "position": c["position"],
+                "position": "AO" if raw_position == "Apparatus Operator" else raw_position,
+                "_sort_key": position_sort_key(raw_position),
                 "section": c["section"],
                 "shift": f"{c.get('start_time', '')}-{c.get('end_time', '')}",
                 "email": contact.get("email", ""),
@@ -113,7 +120,7 @@ def _build_crew_list(
             }
         )
 
-    # Group by section (preserve order)
+    # Group by section (preserve order), sorted by position seniority
     section_members: dict[str, list] = {}
     seen_sections: list[str] = []
     for c in crew:
@@ -122,6 +129,8 @@ def _build_crew_list(
             section_members[sec] = []
             seen_sections.append(sec)
         section_members[sec].append(c)
+    for members in section_members.values():
+        members.sort(key=lambda c: c["_sort_key"])
 
     sections = [
         {"key": k, "label": _SECTION_LABELS.get(k, k), "members": section_members[k]}
@@ -168,9 +177,31 @@ def _build_template_context(
 
     unique_crew_count = len({c["name"] for c in crew})
 
-    # Shift end time for "until HH:MM" badge
+    # Shift end time for "until HH:MM" badge — append "tomorrow" if end is next day
     end_times = [c.get("end_time", "") for c in raw_current_crew if c.get("end_time")]
-    shift_until = max(set(end_times), key=end_times.count).replace(":", "") if end_times else ""
+    shift_until = ""
+    crew_date = on_duty.get("date", "")
+    if end_times:
+        most_common_end = max(set(end_times), key=end_times.count)
+        shift_until = most_common_end.replace(":", "")
+        # If crew date is known, check whether the shift end falls tomorrow
+        if crew_date:
+            try:
+                crew_dt = datetime.strptime(crew_date, "%Y-%m-%d").date()
+                end_h = int(most_common_end.split(":")[0])
+                start_times = [
+                    c.get("start_time", "") for c in raw_current_crew if c.get("start_time")
+                ]
+                if start_times:
+                    most_common_start = max(set(start_times), key=start_times.count)
+                    start_h = int(most_common_start.split(":")[0])
+                    # Shift wraps to next day when end <= start (e.g. 18:00-12:00)
+                    if end_h <= start_h:
+                        tomorrow = crew_dt + timedelta(days=1)
+                        if ts.date() < tomorrow:
+                            shift_until += " tomorrow"
+            except (ValueError, IndexError):
+                pass
 
     # Chief officer last name
     chief_officer = ""
@@ -180,10 +211,9 @@ def _build_template_context(
             chief_officer = parts[-1] if parts else ""
             break
 
-    # Recent calls — separate dispatch calls from NERIS-only entries.
-    # get_dashboard() appends unmatched NERIS reports (address=None) to
-    # the dispatch calls list; we filter them out so stats and tables
-    # only reflect actual dispatch activity.
+    # Recent calls — dispatch calls with cross-referenced reports.
+    # NERIS-only entries (old ESO reports with 26SJ/numeric IDs that
+    # don't match any dispatch call) are excluded from the dashboard.
     raw_calls = dashboard_data.get("recent_calls", [])
     if isinstance(raw_calls, dict):
         raw_calls = []  # error case
@@ -193,7 +223,7 @@ def _build_template_context(
     local_draft_count = 0
 
     for call in raw_calls:
-        # Skip NERIS-only entries (no matching dispatch call)
+        # Skip NERIS-only entries (old ESO reports with no dispatch match)
         if call.get("address") is None:
             continue
 
@@ -257,6 +287,7 @@ def _build_template_context(
                 "ic": ic_display,
                 "summary": call.get("analysis_summary", ""),
                 "outcome": call.get("analysis_outcome", ""),
+                "short_dsc": call.get("short_dsc", ""),
                 "date": call_date,
                 "time": call_time,
                 "severity": severity,
@@ -271,7 +302,6 @@ def _build_template_context(
         )
 
     # Crew date range (e.g., "Feb 12-13")
-    crew_date = on_duty.get("date", "")
     crew_date_range = ""
     if crew_date:
         try:
@@ -563,6 +593,7 @@ async def get_dashboard() -> dict:
                 "incident_commander_name": call.analysis.incident_commander_name,
                 "analysis_summary": call.analysis.summary,
                 "analysis_outcome": call.analysis.outcome,
+                "short_dsc": call.analysis.short_dsc,
                 "is_completed": call.is_completed,
             }
             # Cross-reference: local draft takes priority, then NERIS
@@ -587,6 +618,7 @@ async def get_dashboard() -> dict:
                 "incident_commander_name": "",
                 "analysis_summary": "",
                 "analysis_outcome": "",
+                "short_dsc": "",
                 "report": nr,
                 "is_completed": True,
             }
@@ -675,6 +707,7 @@ async def _get_dashboard_cached() -> dict:
                 "incident_commander_name": call.analysis.incident_commander_name,
                 "analysis_summary": call.analysis.summary,
                 "analysis_outcome": call.analysis.outcome,
+                "short_dsc": call.analysis.short_dsc,
                 "is_completed": call.is_completed,
             }
             normalized = _normalize_incident_number(call.long_term_call_id)
@@ -696,6 +729,7 @@ async def _get_dashboard_cached() -> dict:
                 "incident_commander_name": "",
                 "analysis_summary": "",
                 "analysis_outcome": "",
+                "short_dsc": "",
                 "report": nr,
                 "is_completed": True,
             }
@@ -757,6 +791,7 @@ def _list_neris_reports() -> dict:
 
         neris_id = inc.get("neris_id", "")
         incident_number = dispatch.get("incident_number", "")
+        determinant_code = str(dispatch.get("determinant_code") or "")
         status = status_info.get("status", "")
         incident_type = types[0].get("type", "") if types else ""
         call_create = dispatch.get("call_create", "")
@@ -765,6 +800,7 @@ def _list_neris_reports() -> dict:
             "source": "neris",
             "neris_id": neris_id,
             "incident_number": incident_number,
+            "determinant_code": determinant_code,
             "status": status,
             "incident_type": incident_type,
             "call_create": call_create,
@@ -772,9 +808,14 @@ def _list_neris_reports() -> dict:
 
         reports.append(summary)
 
-        # Build lookup by normalized incident number for cross-referencing
+        # Build lookup by normalized incident number for cross-referencing.
+        # Also index by determinant_code — ESO-originated NERIS reports
+        # store the dispatch ID there instead of in incident_number.
         normalized = _normalize_incident_number(incident_number)
         lookup[normalized] = summary
+        if determinant_code and determinant_code != normalized:
+            det_normalized = _normalize_incident_number(determinant_code)
+            lookup[det_normalized] = summary
 
     return {"lookup": lookup, "reports": reports}
 
@@ -785,6 +826,8 @@ async def _fetch_neris_reports() -> dict:
     Also writes summaries to NerisReportStore as a side effect,
     so the cache can serve them without hitting the API.
     """
+    global _neris_last_refresh
+
     from sjifire.mcp.neris.store import NerisReportStore
 
     result = await asyncio.to_thread(_list_neris_reports)
@@ -795,11 +838,26 @@ async def _fetch_neris_reports() -> dict:
     except Exception:
         logger.warning("Failed to write NERIS cache", exc_info=True)
 
+    _neris_last_refresh = datetime.now(UTC)
     return result
 
 
 async def _fetch_neris_cache() -> dict:
-    """Read cached NERIS report summaries from Cosmos DB (no API call)."""
+    """Read NERIS reports, auto-refreshing from the live API periodically.
+
+    On the first call or after ``_NERIS_REFRESH_INTERVAL`` has elapsed,
+    fetches from the NERIS API (which also writes to the Cosmos cache).
+    Otherwise reads from the Cosmos cache for speed.
+    """
+    global _neris_last_refresh
+
+    now = datetime.now(UTC)
+    if _neris_last_refresh is None or (now - _neris_last_refresh) > _NERIS_REFRESH_INTERVAL:
+        logger.info("NERIS cache stale — refreshing from live API")
+        result = await _fetch_neris_reports()
+        _neris_last_refresh = now
+        return result
+
     from sjifire.mcp.neris.store import NerisReportStore
 
     async with NerisReportStore() as store:

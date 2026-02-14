@@ -393,7 +393,7 @@ class DispatchStore:
         try:
             doc.analysis = await enrich_dispatch(doc)
         except Exception:
-            logger.warning("Enrichment failed for %s", doc.long_term_call_id, exc_info=True)
+            logger.error("Enrichment failed for %s", doc.long_term_call_id, exc_info=True)
         return doc
 
     async def store_call(self, call: DispatchCall) -> DispatchCallDocument:

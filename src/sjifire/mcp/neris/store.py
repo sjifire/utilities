@@ -115,6 +115,7 @@ class NerisReportStore:
                 year=year,
                 neris_id=r.get("neris_id", ""),
                 incident_number=incident_number,
+                determinant_code=r.get("determinant_code", ""),
                 status=r.get("status", ""),
                 incident_type=r.get("incident_type", ""),
                 call_create=r.get("call_create", ""),
@@ -168,6 +169,11 @@ class NerisReportStore:
             normalized = _normalize_incident_number(doc.incident_number)
             if normalized:
                 lookup[normalized] = summary
+            # ESO-originated reports store the dispatch ID in determinant_code
+            if doc.determinant_code:
+                det_normalized = _normalize_incident_number(doc.determinant_code)
+                if det_normalized and det_normalized != normalized:
+                    lookup[det_normalized] = summary
 
         return {"lookup": lookup, "reports": reports}
 

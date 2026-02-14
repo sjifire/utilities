@@ -81,6 +81,9 @@ class DispatchAnalysis(BaseModel):
     outcome: str = ""
     """Brief outcome: "transported", "fire controlled", "false alarm", etc."""
 
+    short_dsc: str = ""
+    """4-6 word description, e.g. 'chimney fire, false alarm'."""
+
 
 class DispatchCallDocument(BaseModel):
     """Dispatch call stored in Cosmos DB.

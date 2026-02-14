@@ -8,6 +8,7 @@ Given a dispatch call's radio log and CAD comments, extract the following as JSO
 {
   "incident_commander": "Unit code with incident command (e.g. 'BN31'). Use arrow for transfers: 'E31 → BN31'. Empty string if no command established.",
   "incident_commander_name": "Full name of the primary (most senior) IC from the on-duty crew list. Empty string if no IC or crew list not provided.",
+  "short_dsc": "4-6 word description (e.g. 'patient fall, transported to hospital')",
   "summary": "1-2 sentence factual narrative of what happened.",
   "actions_taken": ["Key actions taken, one per entry, chronological order"],
   "patient_count": 0,
@@ -18,6 +19,7 @@ Given a dispatch call's radio log and CAD comments, extract the following as JSO
 
 Rules:
 - Return ONLY valid JSON. No markdown, no explanation, no code fences.
+- Include ALL fields shown in the schema above. Every field is required in the response.
 - Use unit codes as they appear in the radio log (e.g. BN31, E31, M31).
 - For incident_commander, only include units that explicitly took or were given command.
 - For incident_commander_name, match the IC unit code to the on-duty crew list (if provided) to find the person's name. If command transferred (e.g. "BN31 → L31"), use the most senior officer in the chain — typically the chief officer over a company officer.

@@ -9,6 +9,7 @@ to produce a fully enriched ``DispatchAnalysis``.
 
 import logging
 import re
+from datetime import timedelta
 
 from sjifire.calendar.models import position_sort_key
 from sjifire.core.config import get_org_config
@@ -51,8 +52,12 @@ async def enrich_dispatch(doc: DispatchCallDocument) -> DispatchAnalysis:
     # Attach the crew roster
     analysis.on_duty_crew = crew
 
-    # Deterministic: resolve IC unit code to person name via schedule
-    analysis.incident_commander_name = _resolve_ic_name(analysis, entries)
+    # Deterministic: resolve IC unit code to person name via schedule.
+    # Only overwrite the LLM's answer if we find a match — preserves
+    # the LLM's name as fallback when the schedule lookup can't match.
+    resolved_name = _resolve_ic_name(analysis, entries)
+    if resolved_name:
+        analysis.incident_commander_name = resolved_name
 
     # Deterministic: extract SJF3 unit timing from responder_details
     _extract_unit_times(doc, analysis)
@@ -70,17 +75,23 @@ async def _get_on_duty_entries(
 ) -> list[ScheduleEntryCache]:
     """Fetch schedule entries for everyone on duty at the call time.
 
-    Delegates shift boundary logic and time filtering to
-    ``ScheduleStore.get_for_time()``.
+    Ensures the schedule cache is populated (fetching from Aladtec if
+    needed) before querying, so older calls get IC names resolved.
     """
     if doc.time_reported is None:
         return []
 
     try:
         from sjifire.mcp.schedule.store import ScheduleStore
+        from sjifire.mcp.schedule.tools import _ensure_cache
+
+        dt = doc.time_reported
+        today_str = dt.strftime("%Y-%m-%d")
+        yesterday_str = (dt - timedelta(days=1)).strftime("%Y-%m-%d")
 
         async with ScheduleStore() as store:
-            return await store.get_for_time(doc.time_reported)
+            await _ensure_cache(store, [yesterday_str, today_str])
+            return await store.get_for_time(dt)
     except Exception:
         logger.debug("Schedule unavailable for %s", doc.time_reported, exc_info=True)
         return []
