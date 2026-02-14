@@ -1,5 +1,10 @@
 # NERIS Value Sets — Quick Reference
 
+> Auto-generated from `neris-api-client`. These are the 35 most commonly used
+> value sets (592 values) for incident reporting. The full package contains
+> 88 value sets with 1605 total values — use `list_neris_value_sets`
+> and `get_neris_values` tools for the complete set.
+
 Reference data for the most commonly used NERIS value sets in incident reporting.
 For other value sets, use the `get_neris_values` MCP tool.
 
@@ -505,39 +510,26 @@ Values use `||` as hierarchy separator.
 
 ---
 
-# Response Mode
-
-NERIS value set: `TypeResponseModeValue` (2 values)
-
-- `EMERGENT` — Emergent
-- `NON_EMERGENT` — Non Emergent
-
----
-
 # No Action Reason
 
 NERIS value set: `TypeNoactionValue` (3 values)
-
 - `CANCELLED` — Cancelled
 - `STAGED_STANDBY` — Staged Standby
 - `NO_INCIDENT_FOUND` — No Incident Found
 
 ---
 
-# Yes / No / Unknown
+# Response Mode
 
-NERIS value set: `TypeYesNoUnknownValue` (3 values)
-
-- `YES` — Yes
-- `NO` — No
-- `UNKNOWN` — Unknown
+NERIS value set: `TypeResponseModeValue` (2 values)
+- `EMERGENT` — Emergent
+- `NON_EMERGENT` — Non Emergent
 
 ---
 
 # Special Incident Modifiers
 
 NERIS value set: `TypeSpecialModifierValue` (7 values)
-
 - `ACTIVE_ASSAILANT` — Active Assailant
 - `MCI` — Mci
 - `FEDERAL_DECLARED_DISASTER` — Federal Declared Disaster
@@ -548,48 +540,142 @@ NERIS value set: `TypeSpecialModifierValue` (7 values)
 
 ---
 
-# Fire Condition on Arrival
+# Yes / No / Unknown
 
-NERIS value set: `TypeFireConditionArrivalValue` (6 values)
-
-- `NO_SMOKE_FIRE_SHOWING` — No Smoke Fire Showing
-- `SMOKE_SHOWING` — Smoke Showing
-- `SMOKE_FIRE_SHOWING` — Smoke Fire Showing
-- `STRUCTURE_INVOLVED` — Structure Involved
-- `FIRE_SPREAD_BEYOND_STRUCTURE` — Fire Spread Beyond Structure
-- `FIRE_OUT_UPON_ARRIVAL` — Fire Out Upon Arrival
+NERIS value set: `TypeYesNoUnknownValue` (3 values)
+- `YES` — Yes
+- `NO` — No
+- `UNKNOWN` — Unknown
 
 ---
 
-# Medical Patient Care Disposition
+# Unit Types
 
-NERIS value set: `TypeMedicalPatientCareValue` (6 values)
-
-- `PATIENT_EVALUATED_CARE_PROVIDED` — Patient Evaluated Care Provided
-- `PATIENT_EVALUATED_REFUSED_CARE` — Patient Evaluated Refused Care
-- `PATIENT_EVALUATED_NO_CARE_REQUIRED` — Patient Evaluated No Care Required
-- `PATIENT_REFUSED_EVALUATION_CARE` — Patient Refused Evaluation Care
-- `PATIENT_SUPPORT_SERVICES_PROVIDED` — Patient Support Services Provided
-- `PATIENT_DEAD_ON_ARRIVAL` — Patient Dead On Arrival
+NERIS value set: `TypeUnitValue` (49 values)
+- `CREW_TRANS` — Crew Trans
+- `ENGINE_STRUCT` — Engine Struct
+- `ENGINE_WUI` — Engine Wui
+- `BOAT` — Boat
+- `BOAT_LARGE` — Boat Large
+- `LADDER_SMALL` — Ladder Small
+- `LADDER_QUINT` — Ladder Quint
+- `LADDER_TALL` — Ladder Tall
+- `QUINT_TALL` — Quint Tall
+- `PLATFORM` — Platform
+- `PLATFORM_QUINT` — Platform Quint
+- `LADDER_TILLER` — Ladder Tiller
+- `ARFF` — Arff
+- `FOAM` — Foam
+- `TENDER` — Tender
+- `CREW` — Crew
+- `HELO_GENERAL` — Helo General
+- `HELO_FIRE` — Helo Fire
+- `HELO_RESCUE` — Helo Rescue
+- `UAS_FIRE` — Uas Fire
+- `UAS_RECON` — Uas Recon
+- `AIR_TANKER` — Air Tanker
+- `AIR_EMS` — Air Ems
+- `AIR_RECON` — Air Recon
+- `ALS_AMB` — Als Amb
+- `BLS_AMB` — Bls Amb
+- `EMS_NOTRANS` — Ems Notrans
+- `EMS_SUPV` — Ems Supv
+- `MAB` — Mab
+- `CHIEF_STAFF_COMMAND` — Chief Staff Command
+- `HAZMAT` — Hazmat
+- `DECON` — Decon
+- `POV` — Pov
+- `RESCUE_HEAVY` — Rescue Heavy
+- `RESCUE_MEDIUM` — Rescue Medium
+- `RESCUE_LIGHT` — Rescue Light
+- `RESCUE_USAR` — Rescue Usar
+- `RESCUE_WATER` — Rescue Water
+- `SCBA` — Scba
+- `AIR_LIGHT` — Air Light
+- `REHAB` — Rehab
+- `MOBILE_ICP` — Mobile Icp
+- `MOBILE_COMMS` — Mobile Comms
+- `DOZER` — Dozer
+- `OTHER_GROUND` — Other Ground
+- `ATV_EMS` — Atv Ems
+- `ATV_FIRE` — Atv Fire
+- `INVEST` — Invest
+- `UTIL` — Util
 
 ---
 
-# Medical Transport Disposition
+# FD Services
 
-NERIS value set: `TypeMedicalTransportValue` (5 values)
+NERIS value set: `TypeServFdValue` (37 values)
+- `STRUCTURAL_FIREFIGHTING` — Structural Firefighting
+- `HIGHRISE_FIREFIGHTING` — Highrise Firefighting
+- `WILDLAND_FIREFIGHTING` — Wildland Firefighting
+- `PETROCHEM_FIREFIGHTING` — Petrochem Firefighting
+- `ARFF_FIREFIGHTING` — Arff Firefighting
+- `MARINE_FIREFIGHTING` — Marine Firefighting
+- `HAZMAT_OPS` — Hazmat Ops
+- `HAZMAT_TECHNICIAN` — Hazmat Technician
+- `ROPE_RESCUE` — Rope Rescue
+- `COLLAPSE_RESCUE` — Collapse Rescue
+- `VEHICLE_RESCUE` — Vehicle Rescue
+- `ANIMAL_TECHRESCUE` — Animal Techrescue
+- `WILDERNESS_SAR` — Wilderness Sar
+- `TRENCH_RESCUE` — Trench Rescue
+- `CONFINED_SPACE` — Confined Space
+- `MACHINERY_RESCUE` — Machinery Rescue
+- `CAVE_SAR` — Cave Sar
+- `MINE_SAR` — Mine Sar
+- `HELO_SAR` — Helo Sar
+- `WATER_SAR` — Water Sar
+- `SWIFTWATER_SAR` — Swiftwater Sar
+- `DIVE_SAR` — Dive Sar
+- `ICE_RESCUE` — Ice Rescue
+- `SURF_RESCUE` — Surf Rescue
+- `WATERCRAFT_RESCUE` — Watercraft Rescue
+- `FLOOD_SAR` — Flood Sar
+- `TOWER_SAR` — Tower Sar
+- `REHABILITATION` — Rehabilitation
+- `RRD_EXISTING` — Rrd Existing
+- `RRD_NEWCONST` — Rrd Newconst
+- `RRD_PUBLICED` — Rrd Publiced
+- `RRD_PLANS` — Rrd Plans
+- `CAUSE_ORIGIN` — Cause Origin
+- `TRAINING_ELF` — Training Elf
+- `TRAINING_VETFF` — Training Vetff
+- `TRAINING_OD` — Training Od
+- `TRAINING_DRIVER` — Training Driver
 
-- `TRANSPORT_BY_EMS_UNIT` — Transport By Ems Unit
-- `OTHER_AGENCY_TRANSPORT` — Other Agency Transport
-- `PATIENT_REFUSED_TRANSPORT` — Patient Refused Transport
-- `NONPATIENT_TRANSPORT` — Nonpatient Transport
-- `NO_TRANSPORT` — No Transport
+---
+
+# EMS Services
+
+NERIS value set: `TypeServEmsValue` (7 values)
+- `NO_MEDICAL` — No Medical
+- `BLS_NO_TRANSPORT` — Bls No Transport
+- `ALS_NO_TRANSPORT` — Als No Transport
+- `BLS_TRANSPORT` — Bls Transport
+- `ALS_TRANSPORT` — Als Transport
+- `AERO_TRANSPORT` — Aero Transport
+- `COMMUNITY_MED` — Community Med
+
+---
+
+# Duty Status
+
+NERIS value set: `TypeDutyValue` (7 values)
+- `RESPONDING_TO_EMERGENCY_INCIDENT` — Responding To Emergency Incident
+- `WORKING_AT_SCENE_OF_FIRE_INCIDENT` — Working At Scene Of Fire Incident
+- `WORKING_AT_SCENE_OF_NONFIRE_INCIDENT` — Working At Scene Of Nonfire Incident
+- `RETURNING_FROM_EMERGENCY_INCIDENT` — Returning From Emergency Incident
+- `TRAINING` — Training
+- `AFTER_INCIDENT` — After Incident
+- `OTHER_ON_DUTY_INCIDENT` — Other On Duty Incident
 
 ---
 
 # Aid Type
 
 NERIS value set: `TypeAidValue` (3 values)
-
 - `SUPPORT_AID` — Support Aid
 - `IN_LIEU_AID` — In Lieu Aid
 - `ACTING_AS_AID` — Acting As Aid
@@ -599,9 +685,314 @@ NERIS value set: `TypeAidValue` (3 values)
 # Aid Direction
 
 NERIS value set: `TypeAidDirectionValue` (2 values)
-
 - `GIVEN` — Given
 - `RECEIVED` — Received
 
 ---
 
+# Fire Condition on Arrival
+
+NERIS value set: `TypeFireConditionArrivalValue` (6 values)
+- `NO_SMOKE_FIRE_SHOWING` — No Smoke Fire Showing
+- `SMOKE_SHOWING` — Smoke Showing
+- `SMOKE_FIRE_SHOWING` — Smoke Fire Showing
+- `STRUCTURE_INVOLVED` — Structure Involved
+- `FIRE_SPREAD_BEYOND_STRUCTURE` — Fire Spread Beyond Structure
+- `FIRE_OUT_UPON_ARRIVAL` — Fire Out Upon Arrival
+
+---
+
+# Indoor Cause of Ignition
+
+NERIS value set: `TypeFireCauseInValue` (13 values)
+- `OPERATING_EQUIPMENT` — Operating Equipment
+- `ELECTRICAL` — Electrical
+- `BATTERY_POWER_STORAGE` — Battery Power Storage
+- `HEAT_FROM_ANOTHER_OBJECT` — Heat From Another Object
+- `EXPLOSIVES_FIREWORKS` — Explosives Fireworks
+- `SMOKING_MATERIALS_ILLICIT_DRUGS` — Smoking Materials Illicit Drugs
+- `OPEN_FLAME` — Open Flame
+- `COOKING` — Cooking
+- `CHEMICAL` — Chemical
+- `ACT_OF_NATURE` — Act Of Nature
+- `INCENDIARY` — Incendiary
+- `OTHER_HEAT_SOURCE` — Other Heat Source
+- `UNABLE_TO_BE_DETERMINED` — Unable To Be Determined
+
+---
+
+# Outdoor Cause of Ignition
+
+NERIS value set: `TypeFireCauseOutValue` (14 values)
+- `NATURAL` — Natural
+- `EQUIPMENT_VEHICLE_USE` — Equipment Vehicle Use
+- `SMOKING_MATERIALS_ILLICIT_DRUGS` — Smoking Materials Illicit Drugs
+- `RECREATION_CEREMONY` — Recreation Ceremony
+- `DEBRIS_OPEN_BURNING` — Debris Open Burning
+- `RAILROAD_OPS_MAINTENANCE` — Railroad Ops Maintenance
+- `FIREARMS_EXPLOSIVES` — Firearms Explosives
+- `FIREWORKS` — Fireworks
+- `POWER_GEN_TRANS_DIST` — Power Gen Trans Dist
+- `STRUCTURE` — Structure
+- `INCENDIARY` — Incendiary
+- `BATTERY_POWER_STORAGE` — Battery Power Storage
+- `SPREAD_FROM_CONTROLLED_BURN` — Spread From Controlled Burn
+- `UNABLE_TO_BE_DETERMINED` — Unable To Be Determined
+
+---
+
+# Fire Building Damage
+
+NERIS value set: `TypeFireBldgDamageValue` (4 values)
+- `NO_DAMAGE` — No Damage
+- `MINOR_DAMAGE` — Minor Damage
+- `MODERATE_DAMAGE` — Moderate Damage
+- `MAJOR_DAMAGE` — Major Damage
+
+---
+
+# Fire Investigation
+
+NERIS value set: `TypeFireInvestValue` (8 values)
+- `INVESTIGATED_ON_SCENE_RESOURCE` — Investigated On Scene Resource
+- `INVESTIGATED_BY_ARSON_FIRE_INVESTIGATOR` — Investigated By Arson Fire Investigator
+- `INVESTIGATED_BY_OUTSIDE_AGENCY` — Investigated By Outside Agency
+- `INVESTIGATED_BY_STATE_FIRE_MARSHAL` — Investigated By State Fire Marshal
+- `INVESTIGATED_BY_INSURANCE` — Investigated By Insurance
+- `INVESTIGATED_BY_NONFIRE_LAW_ENFORCEMENT` — Investigated By Nonfire Law Enforcement
+- `INVESTIGATED_BY_OTHER` — Investigated By Other
+- `NONE` — None
+
+---
+
+# Fire Investigation Need
+
+NERIS value set: `TypeFireInvestNeedValue` (6 values)
+- `YES` — Yes
+- `NO` — No
+- `NOT_EVALUATED` — Not Evaluated
+- `NOT_APPLICABLE` — Not Applicable
+- `NO_CAUSE_OBVIOUS` — No Cause Obvious
+- `OTHER` — Other
+
+---
+
+# Room of Origin
+
+NERIS value set: `TypeRoomValue` (14 values)
+- `ASSEMBLY` — Assembly
+- `BATHROOM` — Bathroom
+- `BEDROOM` — Bedroom
+- `KITCHEN` — Kitchen
+- `LIVING_SPACE` — Living Space
+- `HALLWAY_FOYER` — Hallway Foyer
+- `GARAGE` — Garage
+- `BALCONY_PORCH_DECK` — Balcony Porch Deck
+- `BASEMENT` — Basement
+- `ATTIC` — Attic
+- `OFFICE` — Office
+- `UTILITY_ROOM` — Utility Room
+- `OTHER` — Other
+- `UNKNOWN` — Unknown
+
+---
+
+# Water Supply
+
+NERIS value set: `TypeWaterSupplyValue` (9 values)
+- `HYDRANT_LESS_500` — Hydrant Less 500
+- `HYDRANT_GREATER_500` — Hydrant Greater 500
+- `TANK_WATER` — Tank Water
+- `WATER_TENDER_SHUTTLE` — Water Tender Shuttle
+- `NURSE_OTHER_APPARATUS` — Nurse Other Apparatus
+- `DRAFT_FROM_STATIC_SOURCE` — Draft From Static Source
+- `SUPPLY_FROM_FIRE_BOAT` — Supply From Fire Boat
+- `FOAM_ADDITIVE` — Foam Additive
+- `NONE` — None
+
+---
+
+# Suppression Appliances
+
+NERIS value set: `TypeSuppressApplianceValue` (12 values)
+- `FIRE_EXTINGUISHER` — Fire Extinguisher
+- `BOOSTER_FIRE_HOSE` — Booster Fire Hose
+- `SMALL_DIAMETER_FIRE_HOSE` — Small Diameter Fire Hose
+- `MEDIUM_DIAMETER_FIRE_HOSE` — Medium Diameter Fire Hose
+- `GROUND_MONITOR` — Ground Monitor
+- `MASTER_STREAM` — Master Stream
+- `ELEVATED_MASTER_STREAM_STANDPIPE` — Elevated Master Stream Standpipe
+- `BUILDING_STANDPIPE` — Building Standpipe
+- `BUILDING_FDC` — Building Fdc
+- `AIRATTACK_HELITACK` — Airattack Helitack
+- `OTHER` — Other
+- `NONE` — None
+
+---
+
+# Fire Suppression Type
+
+NERIS value set: `TypeSuppressFireValue` (8 values)
+- `WET_PIPE_SPRINKLER_SYSTEM` — Wet Pipe Sprinkler System
+- `DRY_PIPE_SPRINKLER_SYSTEM` — Dry Pipe Sprinkler System
+- `PRE_ACTION_SYSTEM` — Pre Action System
+- `DELUGE_SYSTEM` — Deluge System
+- `CLEAN_AGENT_SYSTEM` — Clean Agent System
+- `INDUSTRIAL_DRY_CHEM_SYSTEM` — Industrial Dry Chem System
+- `OTHER` — Other
+- `UNKNOWN` — Unknown
+
+---
+
+# Suppression Operation
+
+NERIS value set: `TypeSuppressOperationValue` (3 values)
+- `OPERATED_EFFECTIVE` — Operated Effective
+- `OPERATED_NOT_EFFECTIVE` — Operated Not Effective
+- `NO_OPERATION` — No Operation
+
+---
+
+# Medical Patient Care Disposition
+
+NERIS value set: `TypeMedicalPatientCareValue` (6 values)
+- `PATIENT_EVALUATED_CARE_PROVIDED` — Patient Evaluated Care Provided
+- `PATIENT_EVALUATED_REFUSED_CARE` — Patient Evaluated Refused Care
+- `PATIENT_EVALUATED_NO_CARE_REQUIRED` — Patient Evaluated No Care Required
+- `PATIENT_REFUSED_EVALUATION_CARE` — Patient Refused Evaluation Care
+- `PATIENT_SUPPORT_SERVICES_PROVIDED` — Patient Support Services Provided
+- `PATIENT_DEAD_ON_ARRIVAL` — Patient Dead On Arrival
+
+---
+
+# Medical Patient Status
+
+NERIS value set: `TypeMedicalPatientStatusValue` (3 values)
+- `IMPROVED` — Improved
+- `UNCHANGED` — Unchanged
+- `WORSE` — Worse
+
+---
+
+# Medical Transport Disposition
+
+NERIS value set: `TypeMedicalTransportValue` (5 values)
+- `TRANSPORT_BY_EMS_UNIT` — Transport By Ems Unit
+- `OTHER_AGENCY_TRANSPORT` — Other Agency Transport
+- `PATIENT_REFUSED_TRANSPORT` — Patient Refused Transport
+- `NONPATIENT_TRANSPORT` — Nonpatient Transport
+- `NO_TRANSPORT` — No Transport
+
+---
+
+# Casualty Activity
+
+NERIS value set: `TypeCasualtyActionValue` (13 values)
+- `SEARCH_RESCUE` — Search Rescue
+- `CARRYING_SETTINGUP_EQUIPMENT` — Carrying Settingup Equipment
+- `ADVANCING_OPERATING_HOSELINE` — Advancing Operating Hoseline
+- `VEHICLE_EXTRICATION` — Vehicle Extrication
+- `VENTILATION` — Ventilation
+- `FORCIBLE_ENTRY` — Forcible Entry
+- `PUMP_OPERATIONS` — Pump Operations
+- `EMS_PATIENT_CARE` — Ems Patient Care
+- `DURING_INCIDENT_RESPONSE` — During Incident Response
+- `SCENE_SAFETY_DIRECTING_TRAFFIC` — Scene Safety Directing Traffic
+- `STANDBY` — Standby
+- `INCIDENT_COMMAND` — Incident Command
+- `OTHER` — Other
+
+---
+
+# Casualty Cause
+
+NERIS value set: `TypeCasualtyCauseValue` (9 values)
+- `CAUGHT_TRAPPED_BY_FIRE_EXPLOSION` — Caught Trapped By Fire Explosion
+- `FALL_JUMP` — Fall Jump
+- `STRESS_OVEREXERTION` — Stress Overexertion
+- `COLLAPSE` — Collapse
+- `CAUGHT_TRAPPED_BY_OBJECT` — Caught Trapped By Object
+- `STRUCK_CONTACT_WITH_OBJECT` — Struck Contact With Object
+- `EXPOSURE` — Exposure
+- `VEHICLE_COLLISION` — Vehicle Collision
+- `OTHER` — Other
+
+---
+
+# Casualty PPE
+
+NERIS value set: `TypeCasualtyPpeValue` (14 values)
+- `TURNOUT_COAT` — Turnout Coat
+- `BUNKER_PANTS` — Bunker Pants
+- `PROTECTIVE_HOOD` — Protective Hood
+- `GLOVES` — Gloves
+- `FACE_SHIELD_GOGGLES` — Face Shield Goggles
+- `HELMET` — Helmet
+- `SCBA` — Scba
+- `PASS_DEVICE` — Pass Device
+- `RUBBER_KNEE_BOOTS` — Rubber Knee Boots
+- `3_4_BOOTS` — 3 4 Boots
+- `BRUSH_GEAR` — Brush Gear
+- `REFLECTIVE_VEST` — Reflective Vest
+- `OTHER_SPECIAL_EQUIPMENT` — Other Special Equipment
+- `NONE` — None
+
+---
+
+# Casualty Timeline
+
+NERIS value set: `TypeCasualtyTimelineValue` (6 values)
+- `RESPONDING` — Responding
+- `INITIAL_RESPONSE` — Initial Response
+- `CONTINUING_OPERATIONS` — Continuing Operations
+- `EXTENDED_OPERATIONS` — Extended Operations
+- `AFTER_CONCLUSION_OF_INCIDENT` — After Conclusion Of Incident
+- `UNKNOWN` — Unknown
+
+---
+
+# Rescue Actions
+
+NERIS value set: `TypeRescueActionValue` (9 values)
+- `VENTILATION` — Ventilation
+- `HYDRAULIC_TOOL_USE` — Hydraulic Tool Use
+- `UNDERWATER_DIVE` — Underwater Dive
+- `ROPE_RIGGING` — Rope Rigging
+- `BREAK_BREACH_WALL` — Break Breach Wall
+- `BRACE_WALL_INFRASTRUCTURE` — Brace Wall Infrastructure
+- `TRENCH_SHORING` — Trench Shoring
+- `SUPPLY_AIR` — Supply Air
+- `NONE` — None
+
+---
+
+# Rescue Elevation
+
+NERIS value set: `TypeRescueElevationValue` (4 values)
+- `ON_FLOOR` — On Floor
+- `ON_BED` — On Bed
+- `ON_FURNITURE` — On Furniture
+- `OTHER` — Other
+
+---
+
+# Rescue Impediment
+
+NERIS value set: `TypeRescueImpedimentValue` (6 values)
+- `HOARDING_CONDITIONS` — Hoarding Conditions
+- `ACCESS_LIMITATIONS` — Access Limitations
+- `PHYSICAL_MEDICAL_CONDITIONS_PERSON` — Physical Medical Conditions Person
+- `IMPAIRED_PERSON` — Impaired Person
+- `OTHER` — Other
+- `NONE` — None
+
+---
+
+# Rescue Mode
+
+NERIS value set: `TypeRescueModeValue` (5 values)
+- `REMOVAL_FROM_STRUCTURE` — Removal From Structure
+- `EXTRICATION` — Extrication
+- `DISENTANGLEMENT` — Disentanglement
+- `RECOVERY` — Recovery
+- `OTHER` — Other

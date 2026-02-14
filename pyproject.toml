@@ -40,6 +40,7 @@ duty-calendar-sync = "sjifire.scripts.duty_calendar_sync:main"
 personal-calendar-sync = "sjifire.scripts.personal_calendar_sync:main"
 mcp-server = "sjifire.mcp.server:main"
 backup-cosmos = "sjifire.scripts.backup_cosmos:main"
+generate-neris-reference = "sjifire.scripts.generate_neris_reference:main"
 
 [dependency-groups]
 dev = [
