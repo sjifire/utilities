@@ -4,14 +4,8 @@ from datetime import date
 
 import pytest
 
-from sjifire.calendar.models import (
-    AllDayDutyEvent,
-    CrewMember,
-    SyncResult,
-    clean_position,
-    position_sort_key,
-    section_sort_key,
-)
+from sjifire.calendar.models import AllDayDutyEvent, CrewMember, SyncResult
+from sjifire.core.schedule import clean_position, position_sort_key, section_sort_key
 
 
 class TestSectionSortKey:
@@ -293,6 +287,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew=sample_crew,
             from_crew=sample_crew,
+            shift_change_hour=18,
             until_platoon="A",
             from_platoon="B",
         )
@@ -304,6 +299,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew=sample_crew,
             from_crew={},
+            shift_change_hour=18,
             until_platoon="A",
             from_platoon="B",
         )
@@ -318,6 +314,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew={},
             from_crew=sample_crew,
+            shift_change_hour=18,
             until_platoon="",
             from_platoon="B",
         )
@@ -332,6 +329,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew=sample_crew,
             from_crew=sample_crew,
+            shift_change_hour=18,
             until_platoon="A",
             from_platoon="B",
         )
@@ -346,6 +344,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew=sample_crew,
             from_crew={},
+            shift_change_hour=18,
             until_platoon="A",
             from_platoon="",
         )
@@ -360,6 +359,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew=sample_crew,
             from_crew={},
+            shift_change_hour=18,
             until_platoon="A",
             from_platoon="",
         )
@@ -375,6 +375,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew=sample_crew,
             from_crew={},
+            shift_change_hour=18,
             until_platoon="A",
             from_platoon="",
         )
@@ -390,6 +391,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew=sample_crew,
             from_crew={},
+            shift_change_hour=18,
             until_platoon="A",
             from_platoon="",
         )
@@ -405,6 +407,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew=sample_crew,
             from_crew={},
+            shift_change_hour=18,
             until_platoon="A",
             from_platoon="",
         )
@@ -419,6 +422,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew=sample_crew,
             from_crew=sample_crew,
+            shift_change_hour=18,
             until_platoon="A",
             from_platoon="B",
         )
@@ -433,6 +437,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew=sample_crew,
             from_crew={},
+            shift_change_hour=18,
             until_platoon="A",
             from_platoon="",
         )
@@ -447,6 +452,7 @@ class TestAllDayDutyEvent:
             event_date=date(2026, 2, 1),
             until_crew={"S31": [CrewMember(name="Test", position="FF")]},
             from_crew={},
+            shift_change_hour=18,
             until_platoon="",
             from_platoon="",
         )

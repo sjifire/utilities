@@ -168,6 +168,8 @@ class OrgConfig:
     default_city: str = ""
     default_state: str = ""
     officer_group_name: str = ""
+    position_order: tuple[str, ...] = ()
+    schedule_excluded_sections: frozenset[str] = field(default_factory=frozenset)
     schedule_section_order: tuple[str, ...] = ()
     schedule_section_labels: dict[str, str] = field(default_factory=dict)
     duty_event_subject: str = ""
@@ -248,6 +250,10 @@ def load_org_config() -> OrgConfig:
         default_city=config_data.get("default_city", ""),
         default_state=config_data.get("default_state", ""),
         officer_group_name=config_data.get("officer_group_name", ""),
+        position_order=tuple(config_data.get("position_order", ())),
+        schedule_excluded_sections=frozenset(
+            s.lower() for s in config_data.get("schedule_excluded_sections", ())
+        ),
         schedule_section_order=tuple(config_data.get("schedule_section_order", ())),
         schedule_section_labels=config_data.get("schedule_section_labels", {}),
         duty_event_subject=config_data.get("duty_event_subject", ""),

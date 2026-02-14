@@ -11,8 +11,8 @@ import logging
 import re
 from datetime import timedelta
 
-from sjifire.calendar.models import position_sort_key
 from sjifire.core.config import get_org_config
+from sjifire.core.schedule import position_sort_key
 from sjifire.mcp.dispatch.models import (
     CrewOnDuty,
     DispatchAnalysis,

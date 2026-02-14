@@ -31,6 +31,19 @@
   "default_city": "Friday Harbor",
   "default_state": "WA",
   "officer_group_name": "MCP Incident Officers",
+  "position_order": [
+    "Chief",
+    "Captain",
+    "Lieutenant",
+    "Apparatus Operator",
+    "Firefighter",
+    "EMT",
+    "Support",
+    "Marine Pilot",
+    "Marine Mate",
+    "Backup Duty Officer"
+  ],
+  "schedule_excluded_sections": ["administration", "time off", "trades"],
   "schedule_section_order": ["chief", "e31", "s31", "station 31", "backup", "fb", "fireboat", "support"],
   "schedule_section_labels": {
     "S31": "Station 31",

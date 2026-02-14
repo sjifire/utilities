@@ -11,13 +11,13 @@ Report status is cross-referenced from two sources:
 import asyncio
 import logging
 import os
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
-from sjifire.calendar.models import position_sort_key, section_sort_key
 from sjifire.core.config import get_org_config, get_timezone
+from sjifire.core.schedule import position_sort_key, section_sort_key
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.dispatch.store import DispatchStore
 from sjifire.mcp.incidents import tools as incident_tools
@@ -142,7 +142,6 @@ def _build_template_context(
     dashboard_data: dict,
     incidents_data: dict,
     *,
-    upcoming: dict | None = None,
     contacts: dict[str, dict] | None = None,
 ) -> dict:
     """Transform raw API data into template variables."""
@@ -271,6 +270,9 @@ def _build_template_context(
         else:
             ic_display = ic_unit
 
+        # Completeness for local drafts (e.g., "3/5")
+        completeness = report.get("completeness") if report else None
+
         recent_calls.append(
             {
                 "id": dispatch_id,
@@ -287,6 +289,8 @@ def _build_template_context(
                 "has_report": report is not None,
                 "report_source": report_source,
                 "neris_id": neris_id,
+                "incident_id": report.get("incident_id", "") if report else "",
+                "completeness": completeness,
                 "report_label": report_label,
                 "report_prompt": report_prompt,
                 "report_status": report.get("status", "").replace("_", " ") if report else "",
@@ -305,17 +309,18 @@ def _build_template_context(
 
     missing_reports = len(recent_calls) - neris_count - local_draft_count
 
-    # Upcoming crew (browser-only enrichment)
+    # Upcoming crew — embedded in the on_duty response by get_on_duty_crew()
     upcoming_platoon = ""
     upcoming_crew: list[dict] = []
     upcoming_sections: list[dict] = []
     upcoming_date_range = ""
     upcoming_shift_starts = ""
-    if upcoming and isinstance(upcoming, dict) and "error" not in upcoming:
-        upcoming_platoon = upcoming.get("platoon", "")
-        raw_upcoming_crew = upcoming.get("crew", [])
+    upcoming_data = on_duty.get("upcoming")
+    if upcoming_data and isinstance(upcoming_data, dict):
+        upcoming_platoon = upcoming_data.get("platoon", "")
+        raw_upcoming_crew = upcoming_data.get("crew", [])
         upcoming_crew, upcoming_sections = _build_crew_list(raw_upcoming_crew, contacts)
-        up_date = upcoming.get("date", "")
+        up_date = upcoming_data.get("date", "")
         if up_date:
             try:
                 d = datetime.strptime(up_date, "%Y-%m-%d")
@@ -474,10 +479,9 @@ async def get_dashboard_data() -> dict:
     Uses cached NERIS data (Cosmos DB) instead of hitting the NERIS API,
     making this endpoint fast for browser polling.
     """
-    dashboard_data, incidents_data, upcoming = await asyncio.gather(
+    dashboard_data, incidents_data = await asyncio.gather(
         _get_dashboard_cached(),
         incident_tools.list_incidents(),
-        _fetch_upcoming_schedule(),
         return_exceptions=True,
     )
     if isinstance(dashboard_data, BaseException):
@@ -486,10 +490,7 @@ async def get_dashboard_data() -> dict:
     if isinstance(incidents_data, BaseException):
         logger.warning("Incidents unavailable: %s", incidents_data)
         incidents_data = {"incidents": []}
-    if isinstance(upcoming, BaseException):
-        logger.warning("Upcoming schedule unavailable: %s", upcoming)
-        upcoming = None
-    return _build_template_context(dashboard_data, incidents_data, upcoming=upcoming)
+    return _build_template_context(dashboard_data, incidents_data)
 
 
 def _normalize_incident_number(number: str) -> str:
@@ -854,9 +855,3 @@ async def _fetch_neris_cache() -> dict:
 
     async with NerisReportStore() as store:
         return await store.list_as_lookup()
-
-
-async def _fetch_upcoming_schedule() -> dict:
-    """Fetch tomorrow's on-duty crew via the schedule tool."""
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
-    return await schedule_tools.get_on_duty_crew(target_date=tomorrow)

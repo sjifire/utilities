@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from sjifire.aladtec.client import AladtecClient
+from sjifire.core.schedule import is_filled_entry
 
 logger = logging.getLogger(__name__)
 
@@ -78,19 +79,27 @@ class DaySchedule:
             sections[entry.section].append(entry)
         return sections
 
-    def get_filled_positions(
-        self, exclude_sections: list[str] | None = None
-    ) -> list[ScheduleEntry]:
-        """Get all filled positions, optionally excluding certain sections.
+    def get_filled_positions(self) -> list[ScheduleEntry]:
+        """Get all filled positions, deduplicating by (name, position, section).
 
-        Args:
-            exclude_sections: Section names to exclude (e.g., ["Administration"])
+        Filters out unfilled entries (empty names and ``"Section / Position"``
+        placeholders) and removes duplicates that occasionally appear in
+        Aladtec data.
 
         Returns:
-            List of entries with names assigned
+            List of unique entries with real person names assigned.
         """
-        exclude = set(exclude_sections or [])
-        return [e for e in self.entries if e.name and e.section not in exclude]
+        seen: set[tuple[str, str, str]] = set()
+        result: list[ScheduleEntry] = []
+        for e in self.entries:
+            if not is_filled_entry(e.name):
+                continue
+            key = (e.name, e.position, e.section)
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(e)
+        return result
 
 
 class AladtecScheduleScraper(AladtecClient):

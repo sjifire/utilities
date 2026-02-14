@@ -6,59 +6,20 @@ from html import escape
 
 from sjifire.aladtec.client import get_aladtec_credentials
 from sjifire.core.config import get_org_config
+from sjifire.core.schedule import (
+    clean_position,
+    position_sort_key,
+    section_sort_key,
+)
 
-# Position ordering: officers first, then AO, then firefighters
-POSITION_ORDER = {
-    "Chief": 0,
-    "Captain": 1,
-    "Lieutenant": 2,
-    "Apparatus Operator": 3,
-    "Firefighter": 4,
-    "EMT": 5,
-    "Support": 6,
-    "Marine Pilot": 7,
-    "Marine Mate": 8,
-    "Backup Duty Officer": 9,
-}
+# Re-export so existing importers (tests, dashboard, enrich) keep working.
+__all__ = ["clean_position", "position_sort_key", "section_sort_key"]
 
 
 def get_aladtec_url() -> str:
     """Get Aladtec URL from credentials."""
     url, _, _ = get_aladtec_credentials()
     return url
-
-
-def section_sort_key(section: str) -> tuple[int, str]:
-    """Sort key for sections using config-driven priority order.
-
-    Reads ``schedule_section_order`` from organization.json — a list of
-    keywords checked case-insensitively against the section name.  The
-    first matching keyword determines priority (position in the list).
-    Unmatched sections sort alphabetically at the end.
-    """
-    from sjifire.core.config import get_org_config
-
-    section_lower = section.lower()
-    for i, keyword in enumerate(get_org_config().schedule_section_order):
-        if keyword.lower() in section_lower:
-            return (i, section)
-
-    # Unmatched sections sort after all configured ones
-    return (len(get_org_config().schedule_section_order), section)
-
-
-def position_sort_key(position: str) -> int:
-    """Sort key for positions within a section."""
-    cleaned = clean_position(position)
-    for key, order in POSITION_ORDER.items():
-        if key in cleaned:
-            return order
-    return 99
-
-
-def clean_position(position: str) -> str:
-    """Clean up position title - remove colons."""
-    return position.replace(":", "").strip()
 
 
 @dataclass
@@ -198,9 +159,9 @@ class AllDayDutyEvent:
     event_date: date
     until_crew: dict[str, list[CrewMember]]  # section -> list of CrewMember
     from_crew: dict[str, list[CrewMember]]  # section -> list of CrewMember
+    shift_change_hour: int  # Detected from data by detect_shift_change_hour()
     until_platoon: str = ""
     from_platoon: str = ""
-    shift_change_hour: int = 18  # Hour when shifts change (e.g., 18 = 6 PM)
     event_id: str | None = None  # M365 event ID if already created
 
     @property

@@ -4,12 +4,19 @@ Schedule data flows: Aladtec → Cosmos DB cache → MCP tool.
 The cache auto-refreshes from Aladtec when stale (>24 hours old)
 or missing for the requested dates. The cache covers the target
 date +/- 1 day to capture crew around shift changes.
+
+Shift-change logic: fire department shifts typically run 24 hours
+(e.g. 18:00 to 18:00). Before the shift change hour, the previous
+day's crew is still on duty. The shift change hour is detected from
+the data (full-shift entries where start_time == end_time).
 """
 
 import asyncio
 import logging
 from datetime import date, datetime, timedelta
 
+from sjifire.core.config import get_timezone
+from sjifire.core.schedule import detect_shift_change_hour, should_exclude_section
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.schedule.models import DayScheduleCache, ScheduleEntryCache
 from sjifire.mcp.schedule.store import ScheduleStore
@@ -19,8 +26,36 @@ logger = logging.getLogger(__name__)
 # Maximum cache age before triggering an Aladtec refresh
 CACHE_MAX_AGE_HOURS = 24.0
 
-# Sections hidden from on-duty crew by default (shown with include_admin=True)
-_HIDDEN_SECTIONS = {"administration", "time off"}
+
+
+def _detect_shift_change_hour_from_cache(cached: dict[str, DayScheduleCache]) -> int | None:
+    """Detect shift change hour from cached schedule days.
+
+    Flattens all entries across cached days and delegates to the
+    shared ``detect_shift_change_hour`` utility.
+    """
+    all_entries = [e for day in cached.values() for e in day.entries]
+    return detect_shift_change_hour(all_entries)
+
+
+def _build_crew_list(
+    day: DayScheduleCache,
+    include_admin: bool,
+) -> list[dict]:
+    """Build the crew list from a day's schedule entries."""
+    entries = day.entries
+    if not include_admin:
+        entries = [e for e in entries if not should_exclude_section(e.section)]
+    return [
+        {
+            "name": e.name,
+            "position": e.position,
+            "section": e.section,
+            "start_time": e.start_time,
+            "end_time": e.end_time,
+        }
+        for e in entries
+    ]
 
 
 def _fetch_from_aladtec(start: date, end: date) -> list[DayScheduleCache]:
@@ -114,23 +149,31 @@ async def get_on_duty_crew(
     target_date: str | None = None,
     include_admin: bool = False,
 ) -> dict:
-    """Get the crew that was on duty for a specific date.
+    """Get the crew on duty for a specific date or right now.
 
-    Returns who was scheduled on each section for the given date,
-    plus the day before and after to capture shift-change context.
-    By default, administration staff and Time Off entries are
-    excluded — pass ``include_admin=True`` to see everyone.
+    When ``target_date`` is omitted the function is **time-aware**:
+    it detects the shift-change hour from the data (full-shift entries
+    where ``start_time == end_time``) and picks the correct day's crew
+    based on the current local time.  Before the shift change, the
+    previous day's crew is still on duty.  The response also includes
+    an ``upcoming`` block with the next shift's crew.
+
+    When ``target_date`` is provided the function returns that date's
+    assigned crew (no time-based filtering).
+
+    By default, administration staff and Time Off entries are excluded
+    — pass ``include_admin=True`` to see everyone.
 
     Data is cached in Cosmos DB and auto-refreshes from Aladtec
     if the cache is more than 24 hours old.
 
     Args:
-        target_date: Date in YYYY-MM-DD format. Defaults to today.
+        target_date: Date in YYYY-MM-DD format. Defaults to today (time-aware).
         include_admin: Include administration staff (default: False).
 
     Returns:
-        Dict with "date" and "crew" list containing name, position,
-        section, and shift times for each person on duty.
+        Dict with date, platoon, crew list, shift_change_hour, and
+        (when target_date is omitted) an upcoming block.
     """
     user = get_current_user()
 
@@ -150,40 +193,59 @@ async def get_on_duty_crew(
     async with ScheduleStore() as store:
         cached = await _ensure_cache(store, needed)
 
-    # Return the target date's crew
-    target_str = dt.isoformat()
-    day = cached.get(target_str)
+    # Detect shift change hour from full-shift entries in the cached data
+    shift_change_hour = _detect_shift_change_hour_from_cache(cached)
+
+    upcoming_date: date | None = None
+    if target_date is None and shift_change_hour is not None:
+        # Time-aware: pick the day whose crew is actually on duty now
+        tz = get_timezone()
+        now = datetime.now(tz)
+        if now.hour < shift_change_hour:
+            # Before shift change — previous day's crew is still on duty
+            duty_date = dt - timedelta(days=1)
+            upcoming_date = dt
+        else:
+            duty_date = dt
+            upcoming_date = dt + timedelta(days=1)
+    else:
+        duty_date = dt
+
+    duty_str = duty_date.isoformat()
+    day = cached.get(duty_str)
 
     if day is None:
         return {
-            "date": target_str,
+            "date": duty_str,
             "crew": [],
             "count": 0,
+            "shift_change_hour": shift_change_hour,
             "note": "No schedule data available for this date.",
         }
 
-    entries = day.entries
-    if not include_admin:
-        entries = [e for e in entries if e.section.lower() not in _HIDDEN_SECTIONS]
+    crew = _build_crew_list(day, include_admin)
 
-    crew = [
-        {
-            "name": e.name,
-            "position": e.position,
-            "section": e.section,
-            "start_time": e.start_time,
-            "end_time": e.end_time,
-        }
-        for e in entries
-    ]
-
-    return {
-        "date": target_str,
+    result: dict = {
+        "date": duty_str,
         "platoon": day.platoon,
         "crew": crew,
         "count": len(crew),
+        "shift_change_hour": shift_change_hour,
         "cache_age_hours": round(
             (datetime.now(day.fetched_at.tzinfo) - day.fetched_at).total_seconds() / 3600,
             1,
         ),
     }
+
+    # Include upcoming shift when showing current crew (no target_date)
+    if upcoming_date is not None:
+        upcoming_str = upcoming_date.isoformat()
+        upcoming_day = cached.get(upcoming_str)
+        if upcoming_day:
+            result["upcoming"] = {
+                "date": upcoming_str,
+                "platoon": upcoming_day.platoon,
+                "crew": _build_crew_list(upcoming_day, include_admin),
+            }
+
+    return result
