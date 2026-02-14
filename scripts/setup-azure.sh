@@ -353,18 +353,18 @@ if should_run 2; then
     store_secret "COSMOS-ENDPOINT" "$COSMOS_ENDPOINT"
     store_secret "COSMOS-KEY" "$COSMOS_KEY"
 
+    # ---- Backup: Continuous PITR (7-day) + Azure Backup vault (1-year) ----
+    #
+    # Two layers of protection:
+    #   1. Continuous backup — built-in 7-day point-in-time restore (any second)
+    #   2. Azure Backup vault — daily snapshots with 1-year retention (~$5/mo)
+    #
+    # NOTE: Migration from periodic → continuous is ONE-WAY (cannot revert).
+
     COSMOS_RESOURCE_ID=$(az cosmosdb show \
         --name "$COSMOS_ACCOUNT" \
         --resource-group "$RESOURCE_GROUP" \
         --query id -o tsv)
-
-    # ---- Backup: Continuous mode (30-day PITR) + Azure Backup vault (90-day) ----
-    #
-    # Two layers of protection:
-    #   1. Continuous backup — built-in 7-day point-in-time restore (any second)
-    #   2. Azure Backup vault — daily snapshots with 1-year retention
-    #
-    # NOTE: Migration from periodic → continuous is ONE-WAY (cannot revert).
 
     CURRENT_BACKUP_TYPE=$(az cosmosdb show \
         --name "$COSMOS_ACCOUNT" \
@@ -374,7 +374,7 @@ if should_run 2; then
     if [ "$CURRENT_BACKUP_TYPE" = "Continuous" ]; then
         ok "Already using continuous backup"
     else
-        info "Migrating to continuous backup (30-day PITR)..."
+        info "Migrating to continuous backup (7-day PITR)..."
         info "This is a one-way migration and may take several minutes..."
         az cosmosdb update \
             --name "$COSMOS_ACCOUNT" \
@@ -423,7 +423,7 @@ if should_run 2; then
         --output none 2>/dev/null || true
     ok "Backup vault RBAC configured"
 
-    # Create backup policy (daily snapshots, 90-day vault retention)
+    # Create backup policy (daily snapshots, 1-year vault retention)
     if az dataprotection backup-policy show \
         --vault-name "$BACKUP_VAULT" \
         --resource-group "$RESOURCE_GROUP" \
