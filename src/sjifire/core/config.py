@@ -4,6 +4,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -147,12 +148,22 @@ class DispatchConfig:
 
 @dataclass
 class OrgConfig:
-    """Organization configuration."""
+    """Organization configuration loaded from config/organization.json.
+
+    All org-specific data lives here rather than in code, so
+    customization requires only editing the JSON file.
+    """
 
     company_name: str
     domain: str
     service_email: str
-    timezone: str = "America/Los_Angeles"
+    timezone: str = ""
+    cosmos_database: str = ""
+    rank_hierarchy: tuple[str, ...] = ()
+    officer_positions: tuple[str, ...] = ()
+    operational_positions: frozenset[str] = field(default_factory=frozenset)
+    marine_positions: frozenset[str] = field(default_factory=frozenset)
+    chief_unit_prefixes: frozenset[str] = field(default_factory=frozenset)
     skip_emails: list[str] = field(default_factory=list)
 
 
@@ -218,7 +229,13 @@ def load_org_config() -> OrgConfig:
         company_name=config_data["company_name"],
         domain=config_data["domain"],
         service_email=config_data["service_email"],
-        timezone=config_data.get("timezone", "America/Los_Angeles"),
+        timezone=config_data.get("timezone", ""),
+        cosmos_database=config_data.get("cosmos_database", ""),
+        rank_hierarchy=tuple(config_data.get("rank_hierarchy", ())),
+        officer_positions=tuple(config_data.get("officer_positions", ())),
+        operational_positions=frozenset(config_data.get("operational_positions", ())),
+        marine_positions=frozenset(config_data.get("marine_positions", ())),
+        chief_unit_prefixes=frozenset(config_data.get("chief_unit_prefixes", ())),
         skip_emails=config_data.get("skip_emails", []),
     )
 
@@ -250,3 +267,22 @@ def get_domain() -> str:
 def get_service_email() -> str:
     """Get service account email from config."""
     return get_org_config().service_email
+
+
+def get_cosmos_database() -> str:
+    """Get Cosmos DB database name.
+
+    Reads from ``COSMOS_DATABASE`` env var first (for Container Apps),
+    falls back to ``organization.json``.
+    """
+    return os.getenv("COSMOS_DATABASE") or get_org_config().cosmos_database
+
+
+def get_timezone() -> ZoneInfo:
+    """Get organization timezone as a ZoneInfo object."""
+    return ZoneInfo(get_org_config().timezone)
+
+
+def get_timezone_name() -> str:
+    """Get organization timezone name string (e.g. 'America/Los_Angeles')."""
+    return get_org_config().timezone

@@ -2,14 +2,9 @@
 
 from dataclasses import dataclass, field
 
-from sjifire.core.constants import (
-    MARINE_POSITIONS,
-    OPERATIONAL_POSITIONS,
-    RANK_HIERARCHY,
-)
+from sjifire.core.config import get_org_config
 
-# Re-export for backwards compatibility
-__all__ = ["MARINE_POSITIONS", "OPERATIONAL_POSITIONS", "RANK_HIERARCHY", "Member"]
+__all__ = ["Member"]
 
 
 @dataclass
@@ -64,10 +59,11 @@ class Member:
         Returns the full rank (e.g., "Battalion Chief") for extensionAttribute1.
         """
         # Check Title first (more specific), then Employee Type
+        rank_hierarchy = get_org_config().rank_hierarchy
         for field_value in (self.title, self.employee_type):
             if not field_value:
                 continue
-            for rank in RANK_HIERARCHY:
+            for rank in rank_hierarchy:
                 if rank.lower() == field_value.lower():
                     return rank
         return None
@@ -104,7 +100,7 @@ class Member:
             return None
 
         # Check if title is a rank
-        for rank in RANK_HIERARCHY:
+        for rank in get_org_config().rank_hierarchy:
             if rank.lower() == self.title.lower():
                 return None
 

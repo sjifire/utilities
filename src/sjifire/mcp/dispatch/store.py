@@ -5,20 +5,28 @@ beyond iSpyFire's 30-day retention window.
 
 When ``COSMOS_ENDPOINT`` is not set, falls back to an in-memory store
 for local development and testing with ``mcp dev``.
+
+This module is the **single source of truth** for all dispatch data
+operations: Cosmos CRUD, iSpyFire fetching, and enrichment. Callers
+(MCP tools, CLI scripts) should use store methods rather than calling
+``enrich_dispatch`` or ``ISpyFireClient`` directly.
 """
 
+import asyncio
 import logging
 import os
+import re
+from datetime import UTC, datetime
 from typing import ClassVar, Self
 
 from dotenv import load_dotenv
 
+from sjifire.core.config import get_cosmos_database
 from sjifire.ispyfire.models import DispatchCall
 from sjifire.mcp.dispatch.models import DispatchCallDocument
 
 logger = logging.getLogger(__name__)
 
-DATABASE_NAME = "sjifire-incidents"
 CONTAINER_NAME = "dispatch-calls"
 
 
@@ -67,9 +75,9 @@ class DispatchStore:
             self._in_memory = True
             return self
 
-        database = self._client.get_database_client(DATABASE_NAME)
+        database = self._client.get_database_client(get_cosmos_database())
         self._container = database.get_container_client(CONTAINER_NAME)
-        logger.info("Connected to Cosmos DB: %s/%s", DATABASE_NAME, CONTAINER_NAME)
+        logger.info("Connected to Cosmos DB: %s/%s", get_cosmos_database(), CONTAINER_NAME)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -81,6 +89,10 @@ class DispatchStore:
             await self._credential.close()
             self._credential = None
         self._container = None
+
+    # ------------------------------------------------------------------
+    # Core CRUD
+    # ------------------------------------------------------------------
 
     async def get(self, call_uuid: str, year: str) -> DispatchCallDocument | None:
         """Point-read a dispatch call by UUID and year (partition key).
@@ -162,6 +174,10 @@ class DispatchStore:
         result = await self._container.upsert_item(body=doc.to_cosmos())
         logger.debug("Upserted dispatch call %s", doc.id)
         return DispatchCallDocument.from_cosmos(result)
+
+    # ------------------------------------------------------------------
+    # Queries
+    # ------------------------------------------------------------------
 
     async def list_by_date_range(
         self,
@@ -331,11 +347,76 @@ class DispatchStore:
 
         return existing
 
-    async def store_completed(self, calls: list[DispatchCall]) -> int:
-        """Store completed dispatch calls.
+    # ------------------------------------------------------------------
+    # Lookup (unified UUID or dispatch ID)
+    # ------------------------------------------------------------------
 
-        Skips calls that are not completed. Upserts each completed call
-        to Cosmos DB.
+    async def lookup(self, call_id: str) -> DispatchCallDocument | None:
+        """Look up a call in Cosmos DB by UUID or dispatch ID.
+
+        Dispatch IDs (e.g. "26-001678") route to ``get_by_dispatch_id``.
+        UUIDs try the current year, then the previous year.
+
+        Args:
+            call_id: Call UUID or dispatch ID
+
+        Returns:
+            DispatchCallDocument if found, None otherwise
+        """
+        if re.match(r"\d{2}-\d+", call_id):
+            return await self.get_by_dispatch_id(call_id)
+
+        current_year = str(datetime.now(UTC).year)
+        doc = await self.get(call_id, current_year)
+        if doc:
+            return doc
+        prev_year = str(int(current_year) - 1)
+        return await self.get(call_id, prev_year)
+
+    # ------------------------------------------------------------------
+    # Enrichment (single source of truth for enrich_dispatch calls)
+    # ------------------------------------------------------------------
+
+    async def _enrich(self, doc: DispatchCallDocument) -> DispatchCallDocument:
+        """Enrich a document with AI analysis, crew roster, and timing.
+
+        This is the ONLY place ``enrich_dispatch`` should be called.
+
+        Args:
+            doc: Document to enrich
+
+        Returns:
+            The enriched document (same instance, mutated)
+        """
+        from sjifire.mcp.dispatch.enrich import enrich_dispatch
+
+        try:
+            doc.analysis = await enrich_dispatch(doc)
+        except Exception:
+            logger.warning("Enrichment failed for %s", doc.long_term_call_id, exc_info=True)
+        return doc
+
+    async def store_call(self, call: DispatchCall) -> DispatchCallDocument:
+        """Convert, enrich, and store a single dispatch call.
+
+        Enriches unless the document already has analysis data.
+
+        Args:
+            call: Raw DispatchCall dataclass from iSpyFire
+
+        Returns:
+            The stored and (possibly) enriched document
+        """
+        doc = DispatchCallDocument.from_dispatch_call(call)
+        if not doc.analysis.incident_commander:
+            await self._enrich(doc)
+        await self.upsert(doc)
+        return doc
+
+    async def store_completed(self, calls: list[DispatchCall]) -> int:
+        """Store completed dispatch calls with enrichment.
+
+        Skips calls that are not completed.
 
         Args:
             calls: List of DispatchCall dataclasses
@@ -347,10 +428,133 @@ class DispatchStore:
         for call in calls:
             if not call.is_completed:
                 continue
-            doc = DispatchCallDocument.from_dispatch_call(call)
-            await self.upsert(doc)
+            await self.store_call(call)
             count += 1
 
         if count:
             logger.info("Stored %d completed dispatch calls", count)
         return count
+
+    async def enrich_stored(
+        self, *, force: bool = False, limit: int = 100
+    ) -> list[DispatchCallDocument]:
+        """Re-enrich stored documents.
+
+        Processes documents missing analysis, or all documents when
+        ``force=True``.
+
+        Args:
+            force: Re-analyze all documents, even those with existing analysis
+            limit: Maximum number of documents to process
+
+        Returns:
+            All targeted documents (enriched or not). Check
+            ``doc.analysis.incident_commander`` to see if enrichment
+            produced results.
+        """
+        docs = await self.list_recent(limit=limit)
+
+        if not force:
+            docs = [d for d in docs if not d.analysis.incident_commander and not d.analysis.summary]
+
+        for doc in docs:
+            await self._enrich(doc)
+            if doc.analysis.incident_commander or doc.analysis.summary:
+                await self.upsert(doc)
+
+        return docs
+
+    # ------------------------------------------------------------------
+    # iSpyFire integration (fetch + store in one step)
+    # ------------------------------------------------------------------
+
+    async def get_or_fetch(self, call_id: str) -> DispatchCallDocument | None:
+        """Get a call from Cosmos DB, falling back to iSpyFire.
+
+        Checks the store first. If not found, fetches from iSpyFire.
+        Completed calls are automatically enriched and stored.
+
+        Args:
+            call_id: Call UUID or dispatch ID (e.g. "26-001678")
+
+        Returns:
+            DispatchCallDocument if found in either source, None otherwise
+        """
+        doc = await self.lookup(call_id)
+        if doc:
+            return doc
+
+        call = await asyncio.to_thread(self._fetch_call, call_id)
+        if call is None:
+            return None
+
+        if call.is_completed:
+            return await self.store_call(call)
+        return DispatchCallDocument.from_dispatch_call(call)
+
+    async def fetch_and_store_recent(self, days: int) -> list[DispatchCallDocument]:
+        """Fetch recent calls from iSpyFire and store completed ones.
+
+        Returns all calls as documents (both open and completed).
+        Completed calls are enriched and stored as a side effect.
+
+        Args:
+            days: Number of days to look back
+
+        Returns:
+            List of DispatchCallDocuments for all fetched calls
+        """
+        calls = await asyncio.to_thread(self._fetch_recent, days)
+        stored = 0
+        docs = []
+        for call in calls:
+            if call.is_completed:
+                doc = await self.store_call(call)
+                stored += 1
+            else:
+                doc = DispatchCallDocument.from_dispatch_call(call)
+            docs.append(doc)
+
+        if stored:
+            logger.info("Stored %d completed calls from listing", stored)
+        return docs
+
+    async def fetch_open(self) -> list[DispatchCallDocument]:
+        """Fetch currently open calls from iSpyFire.
+
+        Open calls are not stored (they're mutable until completed).
+
+        Returns:
+            List of DispatchCallDocuments for open calls
+        """
+        calls = await asyncio.to_thread(self._fetch_open)
+        return [DispatchCallDocument.from_dispatch_call(c) for c in calls]
+
+    # ------------------------------------------------------------------
+    # iSpyFire client helpers (sync, run via asyncio.to_thread)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _fetch_call(call_id: str) -> DispatchCall | None:
+        """Fetch a single call from iSpyFire (blocking)."""
+        from sjifire.ispyfire.client import ISpyFireClient
+
+        with ISpyFireClient() as client:
+            return client.get_call_details(call_id)
+
+    @staticmethod
+    def _fetch_recent(days: int) -> list[DispatchCall]:
+        """Fetch recent calls with full details from iSpyFire (blocking)."""
+        from sjifire.ispyfire.client import ISpyFireClient
+
+        with ISpyFireClient() as client:
+            summaries = client.get_calls(days=days)
+            return [d for s in summaries if (d := client.get_call_details(s.id))]
+
+    @staticmethod
+    def _fetch_open() -> list[DispatchCall]:
+        """Fetch currently open calls from iSpyFire (blocking)."""
+        from sjifire.ispyfire.client import ISpyFireClient
+
+        with ISpyFireClient() as client:
+            return client.get_open_calls()

@@ -8,6 +8,80 @@ from pydantic import BaseModel, Field
 from sjifire.ispyfire.models import DispatchCall
 
 
+class CrewOnDuty(BaseModel):
+    """A person on duty at the time of a dispatch call."""
+
+    name: str
+    """Person's name."""
+
+    position: str
+    """Schedule position, e.g. "Captain", "Firefighter"."""
+
+    section: str
+    """Schedule section, e.g. "S31", "Chief Officer"."""
+
+
+class UnitTiming(BaseModel):
+    """Timing breakdown for a single responding unit (SJF only)."""
+
+    unit: str
+    """Unit code, e.g. "E31", "BN31"."""
+
+    paged: str = ""
+    """ISO timestamp when this unit was paged, or empty if not paged."""
+
+    enroute: str = ""
+    """ISO timestamp when this unit went enroute."""
+
+    arrived: str = ""
+    """ISO timestamp when this unit arrived on scene."""
+
+    completed: str = ""
+    """ISO timestamp when this unit cleared/completed the call."""
+
+
+class DispatchAnalysis(BaseModel):
+    """AI-extracted structured analysis of a dispatch call.
+
+    Populated by ``analyze_dispatch()`` at ingestion time. All fields
+    default to empty/zero so existing Cosmos documents deserialize
+    without migration.
+    """
+
+    incident_commander: str = ""
+    """Unit code with command, e.g. "BN31" or "E31 → BN31" for transfers."""
+
+    incident_commander_name: str = ""
+    """Resolved person name from on-duty schedule, e.g. "Kyle Dodd"."""
+
+    alarm_time: str = ""
+    """ISO timestamp when SJF3 was first paged. Empty if no page."""
+
+    first_enroute: str = ""
+    """ISO timestamp when first SJF3 unit went enroute."""
+
+    unit_times: list[UnitTiming] = []
+    """Per-unit timing for SJF3 units (paged/enroute/arrived)."""
+
+    on_duty_crew: list[CrewOnDuty] = []
+    """Everyone on duty at the time of the call (from schedule)."""
+
+    summary: str = ""
+    """1-2 sentence factual narrative of the incident."""
+
+    actions_taken: list[str] = []
+    """Key actions in chronological order."""
+
+    patient_count: int = 0
+    """Number of patients (0 for non-medical calls)."""
+
+    escalated: bool = False
+    """True if mutual aid, additional alarms, or significant escalation."""
+
+    outcome: str = ""
+    """Brief outcome: "transported", "fire controlled", "false alarm", etc."""
+
+
 class DispatchCallDocument(BaseModel):
     """Dispatch call stored in Cosmos DB.
 
@@ -35,6 +109,7 @@ class DispatchCallDocument(BaseModel):
     state: str = ""
     zip_code: str = ""
     geo_location: str = ""
+    analysis: DispatchAnalysis = Field(default_factory=DispatchAnalysis)
     created_timestamp: int | None = None
     stored_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -91,8 +166,8 @@ class DispatchCallDocument(BaseModel):
     def to_dict(self) -> dict:
         """Convert to tool-output dict, stripping Cosmos-only fields.
 
-        Returns the same shape as the original ``_call_to_dict()`` output
-        so existing tool consumers see no change.
+        Strips Cosmos-only fields (``year``, ``stored_at``) so the
+        output matches the shape tool consumers expect.
         """
         d = self.model_dump(mode="json")
         # Remove Cosmos storage fields not in the original DispatchCall

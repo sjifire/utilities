@@ -13,11 +13,10 @@ import logging
 import os
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader
 
-from sjifire.core.config import get_org_config
+from sjifire.core.config import get_org_config, get_timezone
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.dispatch.store import DispatchStore
 from sjifire.mcp.incidents import tools as incident_tools
@@ -38,10 +37,6 @@ _jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=Tru
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _local_tz() -> ZoneInfo:
-    return ZoneInfo(get_org_config().timezone)
 
 
 def _server_url() -> str:
@@ -153,9 +148,9 @@ def _build_template_context(
     # Parse timestamp and convert to Pacific
     ts_str = dashboard_data.get("timestamp", "")
     try:
-        ts = datetime.fromisoformat(ts_str).astimezone(_local_tz())
+        ts = datetime.fromisoformat(ts_str).astimezone(get_timezone())
     except (ValueError, TypeError):
-        ts = datetime.now(_local_tz())
+        ts = datetime.now(get_timezone())
 
     date_display = f"{ts.strftime('%A')}, {ts.strftime('%B')} {ts.day}, {ts.year}"
     hour = ts.hour % 12 or 12
@@ -195,6 +190,7 @@ def _build_template_context(
     recent_calls = []
     open_calls = 0
     neris_count = 0
+    local_draft_count = 0
 
     for call in raw_calls:
         # Skip NERIS-only entries (no matching dispatch call)
@@ -213,45 +209,66 @@ def _build_template_context(
             try:
                 dt = datetime.fromisoformat(date_str)
                 if dt.tzinfo:
-                    dt = dt.astimezone(_local_tz())
+                    dt = dt.astimezone(get_timezone())
                 call_date = f"{dt.strftime('%b')} {dt.day}"
                 call_time = dt.strftime("%H:%M")
             except (ValueError, TypeError):
                 call_date = str(date_str)
 
         report = call.get("report")
-        has_report = report is not None
-        if has_report:
+        report_source = report.get("source", "") if report else ""
+        if report_source == "neris":
             neris_count += 1
+        elif report_source == "local":
+            local_draft_count += 1
         if not call.get("is_completed", True):
             open_calls += 1
 
         dispatch_id = call.get("dispatch_id", "")
         neris_id = report.get("neris_id", "") if report else ""
+
+        # Report label and prompt depend on source
+        if report_source == "neris":
+            report_label = "View NERIS Record"
+            report_prompt = (
+                f"Show NERIS record {neris_id}" if neris_id else f"Show report for {dispatch_id}"
+            )
+        elif report_source == "local":
+            report_label = "View Draft"
+            report_prompt = f"Show incident {dispatch_id}"
+        else:
+            report_label = "Start Report"
+            report_prompt = f"Start a report for {dispatch_id}"
+
+        ic_unit = call.get("incident_commander", "")
+        ic_name = call.get("incident_commander_name", "")
+        if ic_name and ic_unit:
+            ic_display = f"{ic_name} ({ic_unit})"
+        elif ic_name:
+            ic_display = ic_name
+        else:
+            ic_display = ic_unit
+
         recent_calls.append(
             {
                 "id": dispatch_id,
                 "nature": nature,
                 "address": call.get("address") or "",
+                "ic": ic_display,
+                "summary": call.get("analysis_summary", ""),
+                "outcome": call.get("analysis_outcome", ""),
                 "date": call_date,
                 "time": call_time,
                 "severity": severity,
                 "icon": icon,
-                "has_report": has_report,
+                "has_report": report is not None,
+                "report_source": report_source,
                 "neris_id": neris_id,
-                "report_label": "View NERIS Record" if has_report else "Start Report",
-                "report_prompt": (
-                    f"Show NERIS record {neris_id}"
-                    if neris_id
-                    else f"Start a report for {dispatch_id}"
-                ),
+                "report_label": report_label,
+                "report_prompt": report_prompt,
                 "report_status": report.get("status", "").replace("_", " ") if report else "",
             }
         )
-
-    # Local reports count
-    incidents = incidents_data.get("incidents", [])
-    local_reports = len(incidents)
 
     # Crew date range (e.g., "Feb 12-13")
     crew_date = on_duty.get("date", "")
@@ -264,7 +281,7 @@ def _build_template_context(
         except ValueError:
             pass
 
-    missing_reports = len(recent_calls) - neris_count - local_reports
+    missing_reports = len(recent_calls) - neris_count - local_draft_count
 
     # Upcoming crew (browser-only enrichment)
     upcoming_platoon = ""
@@ -301,7 +318,7 @@ def _build_template_context(
         "open_calls": open_calls,
         "recent_calls": recent_calls,
         "neris_count": neris_count,
-        "local_reports": local_reports,
+        "local_draft_count": local_draft_count,
         "missing_reports": max(missing_reports, 0),
         "sections": sections,
         "crew_date_range": crew_date_range,
@@ -344,11 +361,18 @@ def _build_summary(ctx: dict) -> str:
 
     for c in rc[:8]:
         neris_id = c.get("neris_id", "")
-        fallback = "NERIS" if c["has_report"] else "No report"
-        status = f"NERIS `{neris_id}`" if neris_id else fallback
+        source = c.get("report_source", "")
+        if source == "neris":
+            status = f"NERIS `{neris_id}`" if neris_id else "NERIS"
+        elif source == "local":
+            status = f"Draft ({c.get('report_status', 'draft')})"
+        else:
+            status = "No report"
+        ic_part = f" IC: {c['ic']}" if c.get("ic") else ""
+        summary_part = f" — {c['summary']}" if c.get("summary") else ""
         lines.append(
             f"- {c['icon']} **{c['id']}** {c['nature']} — "
-            f"{c['address']} ({c['date']} {c['time']}) *{status}*"
+            f"{c['address']} ({c['date']} {c['time']}){ic_part}{summary_part} *{status}*"
         )
     if len(rc) > 8:
         lines.append(f"- *...and {len(rc) - 8} more*")
@@ -425,24 +449,25 @@ async def render_for_browser() -> str:
 async def get_dashboard_data() -> dict:
     """Fetch all data and return template context for client-side refresh.
 
-    Includes upcoming crew and personnel contacts for the browser dashboard.
+    Uses cached NERIS data (Cosmos DB) instead of hitting the NERIS API,
+    making this endpoint fast for browser polling.
     """
-    dashboard_data, incidents_data, upcoming, contacts = await asyncio.gather(
-        get_dashboard(),
+    dashboard_data, incidents_data, upcoming = await asyncio.gather(
+        _get_dashboard_cached(),
         incident_tools.list_incidents(),
         _fetch_upcoming_schedule(),
-        _fetch_personnel_contacts(),
         return_exceptions=True,
     )
+    if isinstance(dashboard_data, BaseException):
+        logger.exception("Dashboard data fetch failed", exc_info=dashboard_data)
+        dashboard_data = {"timestamp": datetime.now(UTC).isoformat(), "user": {}}
+    if isinstance(incidents_data, BaseException):
+        logger.warning("Incidents unavailable: %s", incidents_data)
+        incidents_data = {"incidents": []}
     if isinstance(upcoming, BaseException):
         logger.warning("Upcoming schedule unavailable: %s", upcoming)
         upcoming = None
-    if isinstance(contacts, BaseException):
-        logger.warning("Personnel contacts unavailable: %s", contacts)
-        contacts = None
-    return _build_template_context(
-        dashboard_data, incidents_data, upcoming=upcoming, contacts=contacts
-    )
+    return _build_template_context(dashboard_data, incidents_data, upcoming=upcoming)
 
 
 def _normalize_incident_number(number: str) -> str:
@@ -534,6 +559,10 @@ async def get_dashboard() -> dict:
                 "date": call.time_reported.isoformat() if call.time_reported else None,
                 "nature": call.nature,
                 "address": call.address,
+                "incident_commander": call.analysis.incident_commander,
+                "incident_commander_name": call.analysis.incident_commander_name,
+                "analysis_summary": call.analysis.summary,
+                "analysis_outcome": call.analysis.outcome,
                 "is_completed": call.is_completed,
             }
             # Cross-reference: local draft takes priority, then NERIS
@@ -554,6 +583,10 @@ async def get_dashboard() -> dict:
                 "date": nr.get("call_create"),
                 "nature": nr.get("incident_type", ""),
                 "address": None,
+                "incident_commander": "",
+                "incident_commander_name": "",
+                "analysis_summary": "",
+                "analysis_outcome": "",
                 "report": nr,
                 "is_completed": True,
             }
@@ -562,6 +595,115 @@ async def get_dashboard() -> dict:
 
         result["recent_calls"] = recent_calls
         result["call_count"] = len(calls_result)  # dispatch calls only
+
+    return result
+
+
+async def _get_dashboard_cached() -> dict:
+    """Like ``get_dashboard()`` but reads NERIS from cache (Cosmos only).
+
+    Used by ``get_dashboard_data()`` (browser endpoint) to avoid the
+    ~2 s NERIS API call on every page load.
+    """
+    user = get_current_user()
+    t0 = datetime.now(UTC)
+
+    calls_result, schedule_result, incidents_result, neris_result = await asyncio.gather(
+        _fetch_recent_calls(),
+        _fetch_schedule(),
+        _fetch_incidents(user.email, user.is_officer),
+        _fetch_neris_cache(),
+        return_exceptions=True,
+    )
+
+    elapsed = (datetime.now(UTC) - t0).total_seconds()
+    labels = ["dispatch", "schedule", "incidents", "neris_cache"]
+    statuses = [
+        "err" if isinstance(r, BaseException) else "ok"
+        for r in (calls_result, schedule_result, incidents_result, neris_result)
+    ]
+    logger.info(
+        "_get_dashboard_cached fetched in %.1fs (%s)",
+        elapsed,
+        ", ".join(f"{name}={s}" for name, s in zip(labels, statuses, strict=True)),
+    )
+
+    result: dict = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "user": {
+            "email": user.email,
+            "name": user.name,
+            "is_officer": user.is_officer,
+        },
+    }
+
+    # --- Schedule section ---
+    if isinstance(schedule_result, BaseException):
+        logger.exception("Dashboard cached: schedule fetch failed", exc_info=schedule_result)
+        result["on_duty"] = {"error": str(schedule_result)}
+    else:
+        result["on_duty"] = schedule_result
+
+    # --- Build incident lookup (local drafts) ---
+    incident_lookup: dict[str, dict] = {}
+    if isinstance(incidents_result, BaseException):
+        logger.exception("Dashboard cached: incidents fetch failed", exc_info=incidents_result)
+    else:
+        incident_lookup = incidents_result
+
+    # --- Build NERIS report lookup ---
+    neris_lookup: dict[str, dict] = {}
+    if isinstance(neris_result, BaseException):
+        logger.exception("Dashboard cached: NERIS cache read failed", exc_info=neris_result)
+    else:
+        neris_lookup = dict(neris_result["lookup"])
+
+    # --- Unified recent calls list ---
+    if isinstance(calls_result, BaseException):
+        logger.exception("Dashboard cached: dispatch fetch failed", exc_info=calls_result)
+        result["recent_calls"] = {"error": str(calls_result)}
+        result["call_count"] = 0
+    else:
+        recent_calls = []
+        for call in calls_result:
+            entry: dict = {
+                "dispatch_id": call.long_term_call_id,
+                "date": call.time_reported.isoformat() if call.time_reported else None,
+                "nature": call.nature,
+                "address": call.address,
+                "incident_commander": call.analysis.incident_commander,
+                "incident_commander_name": call.analysis.incident_commander_name,
+                "analysis_summary": call.analysis.summary,
+                "analysis_outcome": call.analysis.outcome,
+                "is_completed": call.is_completed,
+            }
+            normalized = _normalize_incident_number(call.long_term_call_id)
+            report = incident_lookup.get(call.long_term_call_id)
+            if report is None:
+                report = neris_lookup.pop(normalized, None)
+            else:
+                neris_lookup.pop(normalized, None)
+            entry["report"] = report
+            recent_calls.append(entry)
+
+        recent_calls.extend(
+            {
+                "dispatch_id": nr.get("incident_number", ""),
+                "date": nr.get("call_create"),
+                "nature": nr.get("incident_type", ""),
+                "address": None,
+                "incident_commander": "",
+                "incident_commander_name": "",
+                "analysis_summary": "",
+                "analysis_outcome": "",
+                "report": nr,
+                "is_completed": True,
+            }
+            for nr in neris_lookup.values()
+        )
+
+        result["recent_calls"] = recent_calls
+        result["call_count"] = len(calls_result)
 
     return result
 
@@ -638,51 +780,33 @@ def _list_neris_reports() -> dict:
 
 
 async def _fetch_neris_reports() -> dict:
-    """Fetch NERIS reports via thread pool (blocking API)."""
-    return await asyncio.to_thread(_list_neris_reports)
+    """Fetch NERIS reports via thread pool (blocking API).
+
+    Also writes summaries to NerisReportStore as a side effect,
+    so the cache can serve them without hitting the API.
+    """
+    from sjifire.mcp.neris.store import NerisReportStore
+
+    result = await asyncio.to_thread(_list_neris_reports)
+
+    try:
+        async with NerisReportStore() as store:
+            await store.bulk_upsert(result["reports"])
+    except Exception:
+        logger.warning("Failed to write NERIS cache", exc_info=True)
+
+    return result
+
+
+async def _fetch_neris_cache() -> dict:
+    """Read cached NERIS report summaries from Cosmos DB (no API call)."""
+    from sjifire.mcp.neris.store import NerisReportStore
+
+    async with NerisReportStore() as store:
+        return await store.list_as_lookup()
 
 
 async def _fetch_upcoming_schedule() -> dict:
     """Fetch tomorrow's on-duty crew via the schedule tool."""
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     return await schedule_tools.get_on_duty_crew(target_date=tomorrow)
-
-
-async def _fetch_personnel_contacts() -> dict[str, dict]:
-    """Fetch personnel with contact info from Graph API.
-
-    Returns dict mapping lowercased display name to contact dict
-    with ``email`` and ``mobile`` fields.
-    """
-    from kiota_abstractions.base_request_configuration import RequestConfiguration
-    from msgraph.generated.users.users_request_builder import UsersRequestBuilder
-
-    from sjifire.core.msgraph_client import get_graph_client
-
-    client = get_graph_client()
-    query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
-        select=["displayName", "mail", "userPrincipalName", "mobilePhone"],
-        filter="accountEnabled eq true",
-        top=100,
-    )
-    config = RequestConfiguration(query_parameters=query_params)
-    result = await client.users.get(request_configuration=config)
-
-    contacts: dict[str, dict] = {}
-
-    def collect(page):
-        if not page or not page.value:
-            return
-        for u in page.value:
-            name = u.display_name or ""
-            email = (u.mail or u.user_principal_name or "").lower()
-            mobile = u.mobile_phone or ""
-            if name and email:
-                contacts[name.lower()] = {"email": email, "mobile": mobile}
-
-    collect(result)
-    while result and result.odata_next_link:
-        result = await client.users.with_url(result.odata_next_link).get()
-        collect(result)
-
-    return contacts

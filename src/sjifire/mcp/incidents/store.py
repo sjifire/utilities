@@ -13,11 +13,10 @@ from typing import ClassVar, Self
 
 from dotenv import load_dotenv
 
+from sjifire.core.config import get_cosmos_database
 from sjifire.mcp.incidents.models import IncidentDocument
 
 logger = logging.getLogger(__name__)
-
-DATABASE_NAME = "sjifire-incidents"
 CONTAINER_NAME = "incidents"
 
 
@@ -67,9 +66,9 @@ class IncidentStore:
             self._in_memory = True
             return self
 
-        database = self._client.get_database_client(DATABASE_NAME)
+        database = self._client.get_database_client(get_cosmos_database())
         self._container = database.get_container_client(CONTAINER_NAME)
-        logger.info("Connected to Cosmos DB: %s/%s", DATABASE_NAME, CONTAINER_NAME)
+        logger.info("Connected to Cosmos DB: %s/%s", get_cosmos_database(), CONTAINER_NAME)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:

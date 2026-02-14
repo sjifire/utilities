@@ -2,9 +2,7 @@
 
 import asyncio
 import logging
-import os
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 
 import msal
 from azure.core.credentials import AccessToken, TokenCredential
@@ -29,6 +27,8 @@ from sjifire.core.config import (
     get_graph_credentials,
     get_service_account_credentials,
     get_service_email,
+    get_timezone,
+    get_timezone_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -153,9 +153,7 @@ def format_shift_hour(hour: int) -> str:
     return f"{hour:02d}00"
 
 
-# Timezone for all operations (configurable via TIMEZONE env var)
-TIMEZONE_NAME = os.getenv("TIMEZONE", "America/Los_Angeles")
-TIMEZONE = ZoneInfo(TIMEZONE_NAME)
+# Timezone loaded from organization.json via get_timezone() / get_timezone_name().
 
 # Concurrency limit for parallel API calls (avoid rate limiting)
 MAX_CONCURRENT_REQUESTS = 10
@@ -581,9 +579,9 @@ class DutyCalendarSync:
             Dict mapping event date to (event_id, body_content) tuple
         """
         # Extend end date to capture full range
-        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=TIMEZONE)
+        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=get_timezone())
         end_dt = datetime.combine(
-            end_date + timedelta(days=1), datetime.min.time(), tzinfo=TIMEZONE
+            end_date + timedelta(days=1), datetime.min.time(), tzinfo=get_timezone()
         )
 
         # Check if this is a group calendar
@@ -677,11 +675,11 @@ class DutyCalendarSync:
             ),
             start=DateTimeTimeZone(
                 date_time=start_date,
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             end=DateTimeTimeZone(
                 date_time=end_date,
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             is_all_day=True,
             is_reminder_on=False,
@@ -719,11 +717,11 @@ class DutyCalendarSync:
             ),
             start=DateTimeTimeZone(
                 date_time=start_date,
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             end=DateTimeTimeZone(
                 date_time=end_date,
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             is_all_day=True,
             is_reminder_on=False,

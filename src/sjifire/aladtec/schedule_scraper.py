@@ -41,8 +41,8 @@ class ScheduleEntry:
 
     @property
     def is_full_shift(self) -> bool:
-        """Check if this is a full 24-hour shift (1800-1800)."""
-        return self.start_time == "18:00" and self.end_time == "18:00"
+        """Check if this is a full 24-hour shift (start == end, e.g. 18:00-18:00)."""
+        return self.start_time == self.end_time
 
     @property
     def start_datetime(self) -> datetime:

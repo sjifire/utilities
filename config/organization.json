@@ -3,6 +3,30 @@
   "domain": "sjifire.org",
   "service_email": "svc-automations@sjifire.org",
   "timezone": "America/Los_Angeles",
+  "cosmos_database": "sjifire-incidents",
+  "rank_hierarchy": [
+    "Chief",
+    "Division Chief",
+    "Battalion Chief",
+    "Captain",
+    "Lieutenant"
+  ],
+  "officer_positions": ["Chief", "Captain", "Lieutenant"],
+  "operational_positions": [
+    "Firefighter",
+    "Apparatus Operator",
+    "Support",
+    "Wildland Firefighter",
+    "Marine: Deckhand",
+    "Marine: Mate",
+    "Marine: Pilot"
+  ],
+  "marine_positions": [
+    "Marine: Deckhand",
+    "Marine: Mate",
+    "Marine: Pilot"
+  ],
+  "chief_unit_prefixes": ["BN", "CH", "OPS"],
   "skip_emails": [
     "aladtec.admin@sjifire.org",
     "api@sjifire.org"

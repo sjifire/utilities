@@ -5,6 +5,7 @@ description = "SJI Fire District utilities for integrations"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "anthropic>=0.79.0",
     "azure-cosmos>=4.14.0",
     "azure-identity>=1.19.0",
     "beautifulsoup4>=4.12.0",
@@ -15,6 +16,7 @@ dependencies = [
     "mcp[cli]>=1.26.0",
     "msgraph-sdk>=1.12.0",
     "neris-api-client>=1.5.1",
+    "openai>=2.20.0",
     "phonenumbers>=9.0.22",
     "PyJWT[crypto]>=2.8.0",
     "python-dateutil>=2.9.0",

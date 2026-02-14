@@ -6,15 +6,15 @@ for local development and testing with ``mcp dev``.
 
 import logging
 import os
+from datetime import date, datetime, timedelta
 from typing import ClassVar, Self
 
 from dotenv import load_dotenv
 
-from sjifire.mcp.schedule.models import DayScheduleCache
+from sjifire.core.config import get_cosmos_database
+from sjifire.mcp.schedule.models import DayScheduleCache, ScheduleEntryCache
 
 logger = logging.getLogger(__name__)
-
-DATABASE_NAME = "sjifire-incidents"
 CONTAINER_NAME = "schedules"
 
 
@@ -62,9 +62,9 @@ class ScheduleStore:
             self._in_memory = True
             return self
 
-        database = self._client.get_database_client(DATABASE_NAME)
+        database = self._client.get_database_client(get_cosmos_database())
         self._container = database.get_container_client(CONTAINER_NAME)
-        logger.info("Connected to Cosmos DB: %s/%s", DATABASE_NAME, CONTAINER_NAME)
+        logger.info("Connected to Cosmos DB: %s/%s", get_cosmos_database(), CONTAINER_NAME)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -128,3 +128,77 @@ class ScheduleStore:
             if cached is not None:
                 result[date_str] = cached
         return result
+
+    async def get_for_time(self, dt: datetime) -> list[ScheduleEntryCache]:
+        """Get schedule entries for everyone on duty at a specific time.
+
+        Fetches both today's and yesterday's schedules and filters each
+        entry by whether its shift window actually covers ``dt``. No
+        hardcoded shift change hour — the entry start/end times determine
+        coverage.
+
+        Args:
+            dt: The datetime to query (e.g. call time)
+
+        Returns:
+            Schedule entries on duty at that time. Empty list if no
+            schedule is cached for either day.
+        """
+        today_str = dt.strftime("%Y-%m-%d")
+        yesterday_str = (dt - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        today = await self.get(today_str)
+        yesterday = await self.get(yesterday_str)
+
+        results: list[ScheduleEntryCache] = []
+
+        if yesterday:
+            query_date = date.fromisoformat(yesterday_str)
+            results.extend(e for e in yesterday.entries if _entry_covers_time(e, query_date, dt))
+        if today:
+            query_date = date.fromisoformat(today_str)
+            results.extend(e for e in today.entries if _entry_covers_time(e, query_date, dt))
+
+        return results
+
+
+def _entry_covers_time(
+    entry: ScheduleEntryCache,
+    schedule_date: date,
+    dt: datetime,
+) -> bool:
+    """Check if a schedule entry's shift window covers a given time.
+
+    Computes absolute start/end from the schedule date and the entry's
+    HH:MM times. If end_time <= start_time, the shift wraps to the next
+    day (e.g. 18:00-12:00 = 18:00 today to 12:00 tomorrow).
+
+    Args:
+        entry: Schedule entry with start_time/end_time as HH:MM
+        schedule_date: The date this entry belongs to
+        dt: The datetime to check
+
+    Returns:
+        True if dt falls within [start, end).
+    """
+    if not entry.start_time or not entry.end_time:
+        return False
+
+    try:
+        start_h, start_m = (int(x) for x in entry.start_time.split(":"))
+        end_h, end_m = (int(x) for x in entry.end_time.split(":"))
+    except (ValueError, AttributeError):
+        return False
+
+    # Minutes since schedule_date midnight for start, end, and query time
+    start_offset = start_h * 60 + start_m
+    end_offset = end_h * 60 + end_m
+
+    days_from_schedule = (dt.date() - schedule_date).days
+    query_offset = days_from_schedule * 24 * 60 + dt.hour * 60 + dt.minute
+
+    # If end <= start, shift wraps to next day (e.g. 18:00-12:00)
+    if end_offset <= start_offset:
+        end_offset += 24 * 60
+
+    return start_offset <= query_offset < end_offset

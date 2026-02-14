@@ -112,7 +112,7 @@
   </style>
 </head>
 <body>
-  <div x-cloak x-data="dashboard()" x-init="init()" class="root">
+  <div x-cloak x-data="dashboard()" class="root">
 
     <!-- HEADER -->
     <header class="hdr">
@@ -207,8 +207,8 @@
           <!-- Crew panel -->
           <div class="pnl">
             <div class="phdr">
-              <span class="f14 b t1" x-text="'On Duty \u2014 ' + D.platoon + (D.shift_until ? ' \u2014 until ' + D.shift_until : '')"></span>
-              <span class="f11 t4" x-text="D.crew_date_range"></span>
+              <span class="f14 b t1" x-text="'On Duty \u2014 ' + D.platoon"></span>
+              <span class="bdg" x-show="D.shift_until" x-text="'until ' + D.shift_until"></span>
             </div>
             <template x-if="D.crew.length">
               <div>
@@ -243,6 +243,8 @@
                         <div>
                           <div class="f13 b t2" x-text="c.nature"></div>
                           <a :href="mapsUrl(c.address)" target="_blank" rel="noopener" class="f12 addr-link mt2" style="display:block" x-text="c.address"></a>
+                          <div x-show="c.ic" class="f11 t3 mt2">IC: <span class="b" x-text="c.ic"></span><span x-show="c.outcome" class="t4"> &middot; </span><span x-text="c.outcome" class="t4"></span></div>
+                          <div x-show="c.summary" class="f11 t4 mt2" x-text="c.summary"></div>
                         </div>
                       </div>
                       <div class="call-r">
@@ -250,8 +252,9 @@
                         <div class="f11 t4" x-text="c.time"></div>
                         <div class="f10 t5 mt4 mono" x-text="c.id"></div>
                         <div class="mt4">
-                          <span x-show="c.has_report" class="f11 grn-t">&#10003; NERIS</span>
-                          <span x-show="!c.has_report" class="f11 amb-t">&#9888; No report</span>
+                          <span x-show="c.report_source === 'neris'" class="f11 grn-t">&#10003; NERIS</span>
+                          <span x-show="c.report_source === 'local'" class="f11 blu-t">&#9998; Draft</span>
+                          <span x-show="!c.report_source" class="f11 amb-t">&#9888; No report</span>
                         </div>
                       </div>
                     </div>
@@ -282,6 +285,8 @@
                   <th class="th">Date/Time</th>
                   <th class="th">Nature</th>
                   <th class="th">Address</th>
+                  <th class="th">IC</th>
+                  <th class="th">Outcome</th>
                 </tr>
               </thead>
               <tbody>
@@ -292,6 +297,8 @@
                     <td class="td t2 nw" x-text="c.date + ' ' + c.time"></td>
                     <td class="td t1 b nw"><span x-text="c.icon + ' ' + c.nature"></span></td>
                     <td class="td"><a :href="mapsUrl(c.address)" target="_blank" rel="noopener" class="addr-link" x-text="c.address"></a></td>
+                    <td class="td f12 t2 b nw" x-text="c.ic || '\u2014'"></td>
+                    <td class="td f12 t3 nw" x-text="c.outcome || '\u2014'"></td>
                   </tr>
                 </template>
               </tbody>
@@ -313,23 +320,34 @@
               <template x-for="s in D.sections" :key="s.key">
                 <div>
                   <div class="sechdr f11 t4 b up" x-text="s.label"></div>
-                  <template x-for="c in s.members" :key="c.name + c.shift">
-                    <div class="crow">
-                      <div class="fx" style="align-items:center;gap:8px;flex-wrap:wrap">
-                        <span class="f13 b t2" x-text="c.name"></span>
-                        <span class="bdg" :data-p="c.position" x-text="c.position"></span>
-                        <span x-show="c.email || c.mobile">
-                          <template x-if="c.email">
-                            <a class="clink" :href="'mailto:' + c.email">email</a>
-                          </template>
-                          <template x-if="c.mobile">
-                            <a class="clink" :href="'tel:' + c.mobile">mobile</a>
-                          </template>
-                        </span>
-                      </div>
-                      <span class="f12 t4 mono" x-text="c.shift"></span>
-                    </div>
-                  </template>
+                  <div class="tbl-wrap">
+                    <table class="tbl">
+                      <thead><tr>
+                        <th class="th">Position</th>
+                        <th class="th">Name</th>
+                        <th class="th">Shift</th>
+                      </tr></thead>
+                      <tbody>
+                        <template x-for="c in s.members" :key="c.name + c.shift">
+                          <tr>
+                            <td class="td"><span class="bdg" :data-p="c.position" x-text="c.position"></span></td>
+                            <td class="td f13 b t2">
+                              <span x-text="c.name"></span>
+                              <span x-show="c.email || c.mobile" class="f11">
+                                <template x-if="c.email">
+                                  <a class="clink" :href="'mailto:' + c.email">email</a>
+                                </template>
+                                <template x-if="c.mobile">
+                                  <a class="clink" :href="'tel:' + c.mobile">mobile</a>
+                                </template>
+                              </span>
+                            </td>
+                            <td class="td f12 t4 mono" x-text="c.shift"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </template>
             </div>
@@ -349,23 +367,34 @@
               <template x-for="s in D.upcoming_sections" :key="s.key">
                 <div>
                   <div class="sechdr f11 t4 b up" x-text="s.label"></div>
-                  <template x-for="c in s.members" :key="c.name + c.shift">
-                    <div class="crow">
-                      <div class="fx" style="align-items:center;gap:8px;flex-wrap:wrap">
-                        <span class="f13 b t2" x-text="c.name"></span>
-                        <span class="bdg" :data-p="c.position" x-text="c.position"></span>
-                        <span x-show="c.email || c.mobile">
-                          <template x-if="c.email">
-                            <a class="clink" :href="'mailto:' + c.email">email</a>
-                          </template>
-                          <template x-if="c.mobile">
-                            <a class="clink" :href="'tel:' + c.mobile">mobile</a>
-                          </template>
-                        </span>
-                      </div>
-                      <span class="f12 t4 mono" x-text="c.shift"></span>
-                    </div>
-                  </template>
+                  <div class="tbl-wrap">
+                    <table class="tbl">
+                      <thead><tr>
+                        <th class="th">Position</th>
+                        <th class="th">Name</th>
+                        <th class="th">Shift</th>
+                      </tr></thead>
+                      <tbody>
+                        <template x-for="c in s.members" :key="c.name + c.shift">
+                          <tr>
+                            <td class="td"><span class="bdg" :data-p="c.position" x-text="c.position"></span></td>
+                            <td class="td f13 b t2">
+                              <span x-text="c.name"></span>
+                              <span x-show="c.email || c.mobile" class="f11">
+                                <template x-if="c.email">
+                                  <a class="clink" :href="'mailto:' + c.email">email</a>
+                                </template>
+                                <template x-if="c.mobile">
+                                  <a class="clink" :href="'tel:' + c.mobile">mobile</a>
+                                </template>
+                              </span>
+                            </td>
+                            <td class="td f12 t4 mono" x-text="c.shift"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </template>
             </div>
@@ -378,7 +407,7 @@
         <div class="g3 mb24">
           <div class="stat" data-a="blu">
             <div class="up t4 f11 mb8">In Progress</div>
-            <div class="bb f28 t1 lh1" x-text="D.local_reports"></div>
+            <div class="bb f28 t1 lh1" x-text="D.local_draft_count"></div>
             <div class="f12 t3 mt6">Drafts &amp; reviews</div>
           </div>
           <div class="stat" data-a="amb">
@@ -405,6 +434,7 @@
                   <th class="th">ID</th>
                   <th class="th">Date</th>
                   <th class="th">Nature</th>
+                  <th class="th">IC</th>
                   <th class="th">Status</th>
                   <th class="th">Action</th>
                 </tr>
@@ -416,8 +446,9 @@
                     <td class="td mono t3 f12" x-text="c.id"></td>
                     <td class="td t2 nw" x-text="c.date + ' ' + c.time"></td>
                     <td class="td t1 b nw"><span x-text="c.icon + ' ' + c.nature"></span></td>
+                    <td class="td f12 t2 b nw" x-text="c.ic || '\u2014'"></td>
                     <td class="td">
-                      <template x-if="c.has_report">
+                      <template x-if="c.report_source === 'neris'">
                         <div>
                           <span class="f11 grn-t b">&#10003; <span x-text="c.report_status"></span></span>
                           <template x-if="c.neris_id">
@@ -425,7 +456,10 @@
                           </template>
                         </div>
                       </template>
-                      <template x-if="!c.has_report">
+                      <template x-if="c.report_source === 'local'">
+                        <span class="f11 blu-t b">&#9998; <span x-text="c.report_status || 'draft'"></span></span>
+                      </template>
+                      <template x-if="!c.report_source">
                         <span class="f11 amb-t">&#9888; Missing</span>
                       </template>
                     </td>
@@ -483,7 +517,7 @@ function dashboard() {
       date_display: '', updated_time: '', is_business_hours: false,
       user_name: '', platoon: '', crew: [], unique_crew_count: 0,
       chief_officer: '', open_calls: 0, recent_calls: [],
-      neris_count: 0, local_reports: 0, missing_reports: 0,
+      neris_count: 0, local_draft_count: 0, missing_reports: 0,
       sections: [], crew_date_range: '', shift_until: '',
       upcoming_platoon: '', upcoming_crew: [], upcoming_sections: [],
       upcoming_date_range: '', upcoming_shift_starts: ''

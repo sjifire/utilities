@@ -3,7 +3,7 @@
 import os
 import sys
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,8 +11,8 @@ from sjifire.ispyfire.models import CallSummary, DispatchCall, UnitResponse
 from sjifire.mcp.dispatch.models import DispatchCallDocument
 from sjifire.mcp.dispatch.store import DispatchStore
 from sjifire.scripts.ispyfire_dispatch import (
-    _archive_to_cosmos,
     _get_existing_ids,
+    _store_completed,
     cmd_archive,
     main,
 )
@@ -20,8 +20,11 @@ from sjifire.scripts.ispyfire_dispatch import (
 
 @pytest.fixture(autouse=True)
 def _no_cosmos():
-    """Ensure in-memory mode by clearing COSMOS_ENDPOINT."""
-    with patch.dict(os.environ, {"COSMOS_ENDPOINT": "", "COSMOS_KEY": ""}, clear=False):
+    """Ensure in-memory mode and skip enrichment (needs LLM + schedule)."""
+    with (
+        patch.dict(os.environ, {"COSMOS_ENDPOINT": "", "COSMOS_KEY": ""}, clear=False),
+        patch.object(DispatchStore, "_enrich", new_callable=AsyncMock, side_effect=lambda doc: doc),
+    ):
         yield
     DispatchStore._memory.clear()
 
@@ -60,12 +63,12 @@ def _make_summary(call_id: str) -> CallSummary:
     return CallSummary(id=call_id, ispy_timestamp="1739388600")
 
 
-class TestArchiveToCosmos:
+class TestStoreCompleted:
     async def test_stores_completed_calls(self):
         completed = _make_call(id="uuid-done", is_completed=True)
         open_call = _make_call(id="uuid-open", is_completed=False)
 
-        count = await _archive_to_cosmos([completed, open_call])
+        count = await _store_completed([completed, open_call])
         assert count == 1
 
         async with DispatchStore() as store:
@@ -77,7 +80,7 @@ class TestArchiveToCosmos:
             assert doc is None
 
     async def test_empty_list(self):
-        count = await _archive_to_cosmos([])
+        count = await _store_completed([])
         assert count == 0
 
     async def test_multiple_completed_calls(self):
@@ -86,7 +89,7 @@ class TestArchiveToCosmos:
             for i in range(1, 4)
         ]
 
-        count = await _archive_to_cosmos(calls)
+        count = await _store_completed(calls)
         assert count == 3
 
         async with DispatchStore() as store:

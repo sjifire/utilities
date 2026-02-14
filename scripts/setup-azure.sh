@@ -8,7 +8,7 @@
 #
 # Usage:
 #   ./scripts/setup-azure.sh              # Provision everything
-#   ./scripts/setup-azure.sh --phase N    # Run only phase N (1-6)
+#   ./scripts/setup-azure.sh --phase N    # Run only phase N (1-7)
 #
 # Existing Azure Resources (reference — NOT created by this script):
 # ┌────────────────────┬──────────────────────────────┬──────────────────────────────┐
@@ -57,7 +57,7 @@ TENANT_ID="4122848f-c317-4267-9c07-7c504150d1bd"
 
 # Cosmos DB
 COSMOS_ACCOUNT="sjifire-mcp-cosmos"
-COSMOS_DB="sjifire-incidents"
+COSMOS_DATABASE="sjifire-incidents"
 
 # Container Registry + Container Apps
 ACR_NAME="sjifiremcp"
@@ -119,7 +119,7 @@ info "Using subscription: $SUB_ID"
 info "Tenant: $TENANT_ID"
 
 # Register resource providers (idempotent, no-op if already registered)
-for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App; do
+for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices; do
     STATE=$(az provider show --namespace "$ns" --query registrationState -o tsv 2>/dev/null || echo "NotRegistered")
     if [ "$STATE" != "Registered" ]; then
         info "Registering provider $ns..."
@@ -127,7 +127,7 @@ for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App; do
     fi
 done
 # Wait for registration to complete
-for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App; do
+for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices; do
     STATE=$(az provider show --namespace "$ns" --query registrationState -o tsv)
     if [ "$STATE" != "Registered" ]; then
         info "Waiting for $ns to register..."
@@ -283,14 +283,14 @@ if should_run 2; then
     fi
 
     # Database
-    info "Creating database $COSMOS_DB..."
-    if az cosmosdb sql database show --account-name "$COSMOS_ACCOUNT" --resource-group "$RESOURCE_GROUP" --name "$COSMOS_DB" &>/dev/null; then
-        warn "Database $COSMOS_DB already exists"
+    info "Creating database $COSMOS_DATABASE..."
+    if az cosmosdb sql database show --account-name "$COSMOS_ACCOUNT" --resource-group "$RESOURCE_GROUP" --name "$COSMOS_DATABASE" &>/dev/null; then
+        warn "Database $COSMOS_DATABASE already exists"
     else
         az cosmosdb sql database create \
             --account-name "$COSMOS_ACCOUNT" \
             --resource-group "$RESOURCE_GROUP" \
-            --name "$COSMOS_DB" \
+            --name "$COSMOS_DATABASE" \
             --output none
         ok "Database created"
     fi
@@ -302,14 +302,14 @@ if should_run 2; then
         if az cosmosdb sql container show \
             --account-name "$COSMOS_ACCOUNT" \
             --resource-group "$RESOURCE_GROUP" \
-            --database-name "$COSMOS_DB" \
+            --database-name "$COSMOS_DATABASE" \
             --name "$name" &>/dev/null; then
             warn "Container '$name' already exists"
         else
             az cosmosdb sql container create \
                 --account-name "$COSMOS_ACCOUNT" \
                 --resource-group "$RESOURCE_GROUP" \
-                --database-name "$COSMOS_DB" \
+                --database-name "$COSMOS_DATABASE" \
                 --name "$name" \
                 --partition-key-path "$pk" \
                 "$@" \
@@ -329,6 +329,10 @@ if should_run 2; then
     # Container: dispatch-calls (partition key: /year)
     info "Creating container 'dispatch-calls'..."
     create_container "dispatch-calls" "/year"
+
+    # Container: neris-reports (partition key: /year)
+    info "Creating container 'neris-reports'..."
+    create_container "neris-reports" "/year"
 
     # Container: oauth-tokens (partition key: /token_type, per-document TTL)
     info "Creating container 'oauth-tokens'..."
@@ -447,6 +451,7 @@ if should_run 3; then
                 "ENTRA_MCP_API_TENANT_ID=$MS_GRAPH_TENANT_ID" \
                 "ENTRA_MCP_API_CLIENT_ID=$ENTRA_MCP_CLIENT_ID" \
                 "ENTRA_MCP_OFFICER_GROUP_ID=$ENTRA_MCP_OFFICER_GROUP" \
+                "COSMOS_DATABASE=$COSMOS_DATABASE" \
                 "COSMOS_ENDPOINT=$COSMOS_ENDPOINT_VAL" \
                 "MS_GRAPH_TENANT_ID=$MS_GRAPH_TENANT_ID" \
                 "MS_GRAPH_CLIENT_ID=$MS_GRAPH_CLIENT_ID" \
@@ -542,6 +547,7 @@ if should_run 4; then
         "ALADTEC-URL"
         "ALADTEC-USERNAME"
         "ALADTEC-PASSWORD"
+        "ANTHROPIC-API-KEY"
     )
 
     ALL_OK=true
@@ -686,6 +692,123 @@ if should_run 6; then
     echo ""
     ok "Custom domain ready: https://$CUSTOM_DOMAIN"
     ok "Phase 6 complete"
+    echo ""
+fi
+
+# =============================================================================
+# Phase 7: AI Provider for Dispatch Analysis
+# =============================================================================
+#
+# The MCP server uses an LLM to extract structured data (IC, summary, outcome)
+# from dispatch radio logs at ingestion time. Provider selection is automatic
+# based on which env var is set:
+#
+#   ANTHROPIC_API_KEY       → Anthropic Claude (current default)
+#   AZURE_OPENAI_ENDPOINT   → Azure OpenAI (requires subscription approval)
+#
+# To switch to Azure OpenAI later, apply at https://aka.ms/oai/access, then
+# uncomment the Azure OpenAI section below and run: ./scripts/setup-azure.sh --phase 7
+
+if should_run 7; then
+    echo -e "${CYAN}━━━ Phase 7: AI Provider (dispatch analysis) ━━━${NC}"
+
+    # -------------------------------------------------------------------------
+    # Option A: Anthropic Claude (active)
+    # -------------------------------------------------------------------------
+
+    EXISTING_KEY=$(az keyvault secret show --vault-name "$KEY_VAULT" --name "ANTHROPIC-API-KEY" --query value -o tsv 2>/dev/null || true)
+    if [ -n "$EXISTING_KEY" ]; then
+        ok "ANTHROPIC-API-KEY already in Key Vault"
+    else
+        echo ""
+        echo -e "${YELLOW}Anthropic API key required${NC}"
+        echo "  Get one at https://console.anthropic.com/settings/keys"
+        echo ""
+        read -s -p "  Paste your Anthropic API key (sk-ant-...): " ANTHROPIC_KEY
+        echo ""
+        if [ -z "$ANTHROPIC_KEY" ]; then
+            warn "No key entered — skipping"
+        else
+            store_secret "ANTHROPIC-API-KEY" "$ANTHROPIC_KEY"
+            EXISTING_KEY="$ANTHROPIC_KEY"
+        fi
+    fi
+
+    # Add env var to Container App
+    if [ -n "$EXISTING_KEY" ]; then
+        if az containerapp show --name "$CA_APP" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+            info "Adding Anthropic API key to Container App..."
+            az containerapp secret set \
+                --name "$CA_APP" \
+                --resource-group "$RESOURCE_GROUP" \
+                --secrets "anthropic-api-key=$EXISTING_KEY" \
+                --output none 2>/dev/null || true
+            az containerapp update \
+                --name "$CA_APP" \
+                --resource-group "$RESOURCE_GROUP" \
+                --set-env-vars "ANTHROPIC_API_KEY=secretref:anthropic-api-key" \
+                --output none
+            ok "Container App updated with Anthropic config"
+        else
+            warn "Container App not found — run phase 3 first, then re-run phase 7"
+        fi
+    fi
+
+    # -------------------------------------------------------------------------
+    # Option B: Azure OpenAI (uncomment when subscription is approved)
+    # -------------------------------------------------------------------------
+    # Requires: Azure OpenAI access approved (https://aka.ms/oai/access)
+    #
+    # OPENAI_ACCOUNT="sjifire-openai"
+    # OPENAI_MODEL="gpt-4o"
+    #
+    # info "Creating Azure OpenAI account ($OPENAI_ACCOUNT)..."
+    # az cognitiveservices account create \
+    #     --name "$OPENAI_ACCOUNT" \
+    #     --resource-group "$RESOURCE_GROUP" \
+    #     --kind OpenAI \
+    #     --sku S0 \
+    #     --location "$LOCATION" \
+    #     --output none
+    #
+    # MODEL_VERSION=$(az cognitiveservices model list \
+    #     --location "$LOCATION" \
+    #     --query "sort_by([?model.name=='$OPENAI_MODEL' && model.format=='OpenAI'], &model.version)[-1].model.version" \
+    #     -o tsv)
+    #
+    # az cognitiveservices account deployment create \
+    #     --name "$OPENAI_ACCOUNT" \
+    #     --resource-group "$RESOURCE_GROUP" \
+    #     --deployment-name "$OPENAI_MODEL" \
+    #     --model-name "$OPENAI_MODEL" \
+    #     --model-version "$MODEL_VERSION" \
+    #     --model-format OpenAI \
+    #     --sku-capacity 10 \
+    #     --sku-name GlobalStandard \
+    #     --version-upgrade-option OnceCurrentVersionExpired \
+    #     --output none
+    #
+    # OPENAI_ENDPOINT=$(az cognitiveservices account show \
+    #     --name "$OPENAI_ACCOUNT" --resource-group "$RESOURCE_GROUP" \
+    #     --query properties.endpoint -o tsv)
+    # OPENAI_KEY=$(az cognitiveservices account keys list \
+    #     --name "$OPENAI_ACCOUNT" --resource-group "$RESOURCE_GROUP" \
+    #     --query key1 -o tsv)
+    #
+    # store_secret "AZURE-OPENAI-ENDPOINT" "$OPENAI_ENDPOINT"
+    # store_secret "AZURE-OPENAI-API-KEY" "$OPENAI_KEY"
+    #
+    # az containerapp secret set --name "$CA_APP" --resource-group "$RESOURCE_GROUP" \
+    #     --secrets "azure-openai-api-key=$OPENAI_KEY" --output none
+    # az containerapp update --name "$CA_APP" --resource-group "$RESOURCE_GROUP" \
+    #     --set-env-vars \
+    #         "AZURE_OPENAI_ENDPOINT=$OPENAI_ENDPOINT" \
+    #         "AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key" \
+    #         "AZURE_OPENAI_DEPLOYMENT=$OPENAI_MODEL" \
+    #     --output none
+
+    echo ""
+    ok "Phase 7 complete"
     echo ""
 fi
 

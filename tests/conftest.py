@@ -45,7 +45,7 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("MS_GRAPH_TENANT_ID", "test-tenant-id")
     monkeypatch.setenv("MS_GRAPH_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("MS_GRAPH_CLIENT_SECRET", "test-client-secret")
-    monkeypatch.setenv("TIMEZONE", "America/Los_Angeles")
+
 
 
 @pytest.fixture

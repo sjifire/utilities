@@ -3,8 +3,7 @@
 import logging
 from dataclasses import dataclass, field
 
-from sjifire.core.config import get_domain
-from sjifire.core.constants import MARINE_POSITIONS, OPERATIONAL_POSITIONS
+from sjifire.core.config import get_domain, get_org_config
 from sjifire.core.normalize import normalize_email, normalize_name, normalize_phone
 from sjifire.entra.users import EntraUser
 from sjifire.ispyfire.models import ISpyFirePerson
@@ -56,7 +55,7 @@ def get_responder_types(user: EntraUser) -> list[str]:
         responder_types.append("Tender Ops")
 
     # Marine: any marine position
-    if positions & MARINE_POSITIONS:
+    if positions & get_org_config().marine_positions:
         responder_types.append("Marine")
 
     return sorted(responder_types)
@@ -115,7 +114,7 @@ def is_operational(user: EntraUser) -> bool:
         True if user qualifies for iSpyFire access
     """
     positions = get_user_positions(user)
-    if positions & OPERATIONAL_POSITIONS:
+    if positions & get_org_config().operational_positions:
         return True
 
     # Also check qualifying schedules for non-operational staff

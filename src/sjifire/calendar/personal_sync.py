@@ -4,7 +4,6 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
 
 from azure.identity import ClientSecretCredential
 from msgraph import GraphServiceClient
@@ -18,16 +17,14 @@ from msgraph.generated.users.item.calendars.item.events.events_request_builder i
 
 from sjifire.aladtec.schedule_scraper import ScheduleEntry
 from sjifire.calendar.models import get_aladtec_url
-from sjifire.core.config import get_graph_credentials
+from sjifire.core.config import get_graph_credentials, get_timezone, get_timezone_name
 
 logger = logging.getLogger(__name__)
 
 # Category for Aladtec events in primary calendar
 ALADTEC_CATEGORY = "Aladtec"
 
-# Timezone for all operations
-TIMEZONE_NAME = "America/Los_Angeles"
-TIMEZONE = ZoneInfo(TIMEZONE_NAME)
+# Timezone loaded from organization.json via get_timezone() / get_timezone_name().
 
 # Concurrency limit for parallel API calls
 MAX_CONCURRENT_REQUESTS = 5
@@ -238,7 +235,7 @@ class PersonalCalendarSync:
                             from zoneinfo import ZoneInfo
 
                             event_dt = event_dt.replace(tzinfo=ZoneInfo("UTC"))
-                            event_dt = event_dt.astimezone(TIMEZONE)
+                            event_dt = event_dt.astimezone(get_timezone())
                         elif event_tz:
                             # Try to use the specified timezone
                             try:
@@ -246,13 +243,13 @@ class PersonalCalendarSync:
 
                                 tz = ZoneInfo(event_tz)
                                 event_dt = event_dt.replace(tzinfo=tz)
-                                event_dt = event_dt.astimezone(TIMEZONE)
+                                event_dt = event_dt.astimezone(get_timezone())
                             except KeyError:
                                 # Unknown timezone, assume local
-                                event_dt = event_dt.replace(tzinfo=TIMEZONE)
+                                event_dt = event_dt.replace(tzinfo=get_timezone())
                         else:
                             # No timezone - assume local
-                            event_dt = event_dt.replace(tzinfo=TIMEZONE)
+                            event_dt = event_dt.replace(tzinfo=get_timezone())
 
                         event_date = event_dt.date()
                     except ValueError:
@@ -272,16 +269,16 @@ class PersonalCalendarSync:
                                 end_tz = event.end.time_zone
                                 if end_tz and end_tz.upper() == "UTC":
                                     end_dt = end_dt.replace(tzinfo=ZoneInfo("UTC"))
-                                    end_dt = end_dt.astimezone(TIMEZONE)
+                                    end_dt = end_dt.astimezone(get_timezone())
                                 elif end_tz:
                                     try:
                                         tz = ZoneInfo(end_tz)
                                         end_dt = end_dt.replace(tzinfo=tz)
-                                        end_dt = end_dt.astimezone(TIMEZONE)
+                                        end_dt = end_dt.astimezone(get_timezone())
                                     except KeyError:
-                                        end_dt = end_dt.replace(tzinfo=TIMEZONE)
+                                        end_dt = end_dt.replace(tzinfo=get_timezone())
                                 else:
-                                    end_dt = end_dt.replace(tzinfo=TIMEZONE)
+                                    end_dt = end_dt.replace(tzinfo=get_timezone())
                                 end_time_str = end_dt.strftime("%H:%M")
                             except ValueError:
                                 pass
@@ -325,11 +322,11 @@ class PersonalCalendarSync:
             ),
             start=DateTimeTimeZone(
                 date_time=start_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             end=DateTimeTimeZone(
                 date_time=end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             is_reminder_on=False,
             categories=categories,
@@ -370,11 +367,11 @@ class PersonalCalendarSync:
             ),
             start=DateTimeTimeZone(
                 date_time=start_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             end=DateTimeTimeZone(
                 date_time=end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             is_reminder_on=False,
             categories=categories,

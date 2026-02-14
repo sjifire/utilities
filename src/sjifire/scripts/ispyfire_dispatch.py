@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 # Silence noisy libraries
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("anthropic").setLevel(logging.WARNING)
 
 
 def _fmt_dt(dt: datetime | None) -> str:
@@ -154,36 +157,6 @@ def cmd_open(args) -> int:
         return 0
 
 
-async def _get_existing_ids(summary_ids: list[str]) -> set[str]:
-    """Check which call UUIDs already exist in Cosmos DB.
-
-    Args:
-        summary_ids: List of iSpyFire call UUIDs from the summary list
-
-    Returns:
-        Set of UUIDs already stored
-    """
-    from sjifire.mcp.dispatch.store import DispatchStore
-
-    async with DispatchStore() as store:
-        return await store.get_existing_ids(summary_ids)
-
-
-async def _archive_to_cosmos(calls: list) -> int:
-    """Store completed calls to Cosmos DB via DispatchStore.
-
-    Args:
-        calls: List of completed DispatchCall objects
-
-    Returns:
-        Number of calls archived
-    """
-    from sjifire.mcp.dispatch.store import DispatchStore
-
-    async with DispatchStore() as store:
-        return await store.store_completed(calls)
-
-
 def cmd_archive(args) -> int:
     """Archive completed calls to Cosmos DB."""
     with ISpyFireClient() as client:
@@ -203,37 +176,94 @@ def cmd_archive(args) -> int:
             f"({len(existing)} already archived, {len(new_summaries)} new)"
         )
 
-        if not new_summaries:
+        if new_summaries:
+            # Only fetch details for new calls
+            calls = []
+            for summary in new_summaries:
+                detail = client.get_call_details(summary.id)
+                if detail:
+                    calls.append(detail)
+
+            completed = [c for c in calls if c.is_completed]
+            open_calls = len(calls) - len(completed)
+
+            if open_calls:
+                print(f"  {open_calls} still open (will archive when completed)")
+
+            if completed:
+                if args.dry_run:
+                    print(f"[DRY RUN] Would archive {len(completed)} completed calls to Cosmos DB")
+                    for call in completed:
+                        print(
+                            f"  {call.long_term_call_id}  "
+                            f"{_fmt_dt(call.time_reported)}  {call.nature}"
+                        )
+                    return 0
+
+                stored = asyncio.run(_store_completed(completed))
+                print(f"Archived {stored} completed calls to Cosmos DB")
+            else:
+                print("No new completed calls to archive.")
+        else:
             print("All calls already archived.")
-            return 0
 
-        # Only fetch details for new calls
-        calls = []
-        for summary in new_summaries:
-            detail = client.get_call_details(summary.id)
-            if detail:
-                calls.append(detail)
-
-        completed = [c for c in calls if c.is_completed]
-        open_calls = len(calls) - len(completed)
-
-        if open_calls:
-            print(f"  {open_calls} still open (will archive when completed)")
-
-        if not completed:
-            print("No new completed calls to archive.")
-            return 0
-
-        if args.dry_run:
-            print(f"[DRY RUN] Would archive {len(completed)} completed calls to Cosmos DB")
-            for call in completed:
-                print(f"  {call.long_term_call_id}  {_fmt_dt(call.time_reported)}  {call.nature}")
-            return 0
-
-        stored = asyncio.run(_archive_to_cosmos(completed))
-        print(f"Archived {stored} completed calls to Cosmos DB")
+    # Enrich any archived docs that are missing structured analysis
+    if not getattr(args, "dry_run", False):
+        force = getattr(args, "force", False)
+        enriched = asyncio.run(_enrich_stored(force=force))
+        if enriched:
+            _print_enrichment_results(enriched)
+            count = sum(1 for d in enriched if d.analysis.incident_commander or d.analysis.summary)
+            print(f"\nEnriched {count} calls with structured analysis")
 
     return 0
+
+
+def _print_enrichment_results(docs) -> None:
+    """Print per-call enrichment results."""
+    label = "Re-analyzing" if len(docs) > 0 else "Enriching"
+    print(f"\n{label} {len(docs)} calls...")
+
+    for doc in docs:
+        if doc.analysis.incident_commander or doc.analysis.summary:
+            ic_name = doc.analysis.incident_commander_name
+            ic = doc.analysis.incident_commander or "-"
+            ic_display = f"{ic_name} ({ic})" if ic_name else ic
+            alarm = doc.analysis.alarm_time[11:16] if doc.analysis.alarm_time else ""
+            enrt = doc.analysis.first_enroute[11:16] if doc.analysis.first_enroute else ""
+            times = f"  page:{alarm or '-':>5} enrt:{enrt or '-':>5}" if enrt else ""
+            print(
+                f"  {doc.long_term_call_id}  {doc.nature:<25} "
+                f"IC: {ic_display:<20} {doc.analysis.outcome}{times}"
+            )
+        else:
+            print(f"  {doc.long_term_call_id}  {doc.nature:<25} (no data extracted)")
+
+
+# ---------------------------------------------------------------------------
+# Async helpers — delegate to DispatchStore
+# ---------------------------------------------------------------------------
+
+
+async def _get_existing_ids(summary_ids: list[str]) -> set[str]:
+    from sjifire.mcp.dispatch.store import DispatchStore
+
+    async with DispatchStore() as store:
+        return await store.get_existing_ids(summary_ids)
+
+
+async def _store_completed(calls: list) -> int:
+    from sjifire.mcp.dispatch.store import DispatchStore
+
+    async with DispatchStore() as store:
+        return await store.store_completed(calls)
+
+
+async def _enrich_stored(*, force: bool = False) -> list:
+    from sjifire.mcp.dispatch.store import DispatchStore
+
+    async with DispatchStore() as store:
+        return await store.enrich_stored(force=force)
 
 
 def main() -> int:
@@ -273,6 +303,9 @@ def main() -> int:
     )
     archive_parser.add_argument(
         "--dry-run", action="store_true", help="Show what would be archived without writing"
+    )
+    archive_parser.add_argument(
+        "--force", action="store_true", help="Re-analyze all calls, even those already enriched"
     )
     archive_parser.set_defaults(func=cmd_archive)
 
