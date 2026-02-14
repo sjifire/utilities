@@ -164,43 +164,30 @@ MAX_CONCURRENT_REQUESTS = 10
 def is_operational_section(section: str) -> bool:
     """Check if section is operational (should appear in calendar).
 
-    Operational sections are those involved in emergency response:
-    - Stations (S31, S32, S33, etc.)
-    - Chief/Command positions
-    - Backup Duty
-    - Support
-    - State Mobe (wildland mobilization)
-    - Marine operations
+    Uses a denylist approach: all sections are included except known
+    non-operational ones. This ensures new crew types (standby, support,
+    backup, etc.) automatically appear on the duty calendar.
 
-    Non-operational sections (administration, training, trades, etc.)
-    are filtered out automatically by this pattern-based approach.
+    Non-operational sections (excluded):
+    - Administration
+    - Operations (administrative operations)
+    - Prevention (fire prevention programs)
+    - Training
+    - Trades (maintenance)
+    - Time Off (leave/vacation)
     """
     section_lower = section.lower()
 
-    # Stations: S31, S32, S33, Station 31, etc.
-    if section_lower.startswith("s3") and section_lower[2:].isdigit():
-        return True
-    if "station" in section_lower:
-        return True
+    non_operational = {
+        "administration",
+        "operations",
+        "prevention",
+        "training",
+        "trades",
+        "time off",
+    }
 
-    # Chief positions (Chief Officer, Chief on Call, etc.)
-    if "chief" in section_lower:
-        return True
-
-    # Backup duty
-    if "backup" in section_lower:
-        return True
-
-    # Support section
-    if section_lower == "support":
-        return True
-
-    # State Mobe (wildland mobilization)
-    if "mobe" in section_lower or "mobilization" in section_lower:
-        return True
-
-    # Marine operations
-    return "marine" in section_lower
+    return section_lower not in non_operational
 
 
 def should_exclude_section(section: str) -> bool:

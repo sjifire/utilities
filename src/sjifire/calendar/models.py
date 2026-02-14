@@ -57,6 +57,10 @@ def section_sort_key(section: str) -> tuple[int, int, str]:
     if "support" in section_lower:
         return (3, 0, section)
 
+    # Priority 3.5: Standby (soft match)
+    if "standby" in section_lower:
+        return (3, 1, section)
+
     # Priority 4: Other stations (sorted by number)
     station_match = re.match(r"^S(\d+)$", section, re.IGNORECASE)
     if station_match:

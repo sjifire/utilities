@@ -19,13 +19,9 @@ from sjifire.calendar.models import AllDayDutyEvent, CrewMember
 class TestIsOperationalSection:
     """Tests for is_operational_section function.
 
-    Operational sections are those involved in emergency response:
-    - Stations (S31, S32, etc.)
-    - Chief positions
-    - Backup Duty
-    - Support
-    - State Mobe (wildland mobilization)
-    - Marine operations
+    Uses a denylist approach: all sections are included except known
+    non-operational ones (Administration, Operations, Prevention,
+    Training, Trades, Time Off).
     """
 
     def test_station_s31_is_operational(self):
@@ -79,6 +75,10 @@ class TestIsOperationalSection:
     def test_marine_is_operational(self):
         """Marine section is operational."""
         assert is_operational_section("Marine") is True
+
+    def test_standby_is_operational(self):
+        """Standby section is operational."""
+        assert is_operational_section("Standby") is True
 
     def test_administration_is_not_operational(self):
         """Administration is not operational."""
