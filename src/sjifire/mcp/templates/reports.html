@@ -411,6 +411,14 @@
       Help
     </button>
   </div>
+  <div class="nav-bar-right" x-data="headerStatus()" x-cloak>
+    <span class="nav-status-date" x-show="date_display" x-text="date_display"></span>
+    <div class="status-pill" :class="open_calls ? 'active' : 'ok'" x-show="loaded">
+      <span class="pulse-dot"></span>
+      <span x-text="open_calls ? open_calls + ' Active Call' + (open_calls > 1 ? 's' : '') : 'No Active Calls'"></span>
+    </div>
+    <span class="nav-status-updated" x-show="updated_time" x-text="'Updated ' + updated_time"></span>
+  </div>
 </div>
 {% endblock %}
 

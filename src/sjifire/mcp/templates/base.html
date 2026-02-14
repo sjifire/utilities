@@ -102,19 +102,12 @@
       align-items: center;
       gap: 4px;
     }
-    .header-status {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      border-left: 1px solid rgba(255, 255, 255, .1);
-      padding-left: 16px;
-    }
-    .header-date {
+    .nav-status-date {
       font-size: 12px;
       color: var(--text-muted);
       white-space: nowrap;
     }
-    .header-updated {
+    .nav-status-updated {
       font-size: 11px;
       color: var(--text-dim);
       white-space: nowrap;
@@ -168,12 +161,19 @@
       padding: 0 24px;
       display: flex;
       align-items: center;
+      justify-content: space-between;
       view-transition-name: tabs;
     }
     .nav-bar-left {
       display: flex;
       gap: 0;
       overflow-x: auto;
+    }
+    .nav-bar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
     }
     .nav-tab {
       background: none;
@@ -386,9 +386,9 @@
       .nav-page-link    { font-size: 11px; padding: 4px 8px; }
       .nav-bar          { padding: 0 12px; }
       .nav-tab          { padding: 12px 14px; font-size: 11px; }
-      .header-date      { display: none; }
-      .header-updated   { display: none; }
-      .header-status    { padding-left: 8px; gap: 6px; }
+      .nav-status-date    { display: none; }
+      .nav-status-updated { display: none; }
+      .nav-bar-right      { gap: 6px; }
     }
   </style>
   {% block extra_styles %}{% endblock %}
@@ -408,14 +408,6 @@
         <a href="/dashboard" class="nav-page-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
         <a href="/reports" class="nav-page-link {% if active_page == 'reports' %}active{% endif %}">Reports</a>
       </nav>
-      <div class="header-status" x-data="headerStatus()" x-cloak>
-        <span class="header-date" x-show="date_display" x-text="date_display"></span>
-        <div class="status-pill" :class="open_calls ? 'active' : 'ok'" x-show="loaded">
-          <span class="pulse-dot"></span>
-          <span x-text="open_calls ? open_calls + ' Active Call' + (open_calls > 1 ? 's' : '') : 'No Active Calls'"></span>
-        </div>
-        <span class="header-updated" x-show="updated_time" x-text="'Updated ' + updated_time"></span>
-      </div>
     </div>
   </header>
   {% endblock %}
