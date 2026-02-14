@@ -8,6 +8,7 @@ When ``COSMOS_ENDPOINT`` is not set, falls back to an in-memory dict
 for local development with ``mcp dev``.
 """
 
+import asyncio
 import contextlib
 import logging
 import os
@@ -264,12 +265,26 @@ class TokenStore:
 # ---------------------------------------------------------------------------
 
 _instance: TokenStore | None = None
+_init_lock: asyncio.Lock | None = None
+
+
+def _get_init_lock() -> asyncio.Lock:
+    """Get or create the init lock (must be called within a running event loop)."""
+    global _init_lock
+    if _init_lock is None:
+        _init_lock = asyncio.Lock()
+    return _init_lock
 
 
 async def get_token_store() -> TokenStore:
     """Get or create the shared TokenStore singleton."""
     global _instance
-    if _instance is None:
-        _instance = TokenStore()
-        await _instance.initialize()
+    if _instance is not None:
+        return _instance
+    async with _get_init_lock():
+        # Re-check after acquiring lock
+        if _instance is None:
+            store = TokenStore()
+            await store.initialize()
+            _instance = store
     return _instance

@@ -8,17 +8,19 @@ Flow::
 
     Claude.ai  ←→  MCP Server (OAuth AS)  ←→  Entra ID (user login)
 
-Tokens are stored in Cosmos DB (shared across replicas, survives restarts)
-with a per-replica L1 TTLCache for fast reads on every tool call.
-Client registrations and pending auth states remain in-memory (short-lived,
-re-created on each connection).
+All state (tokens, auth codes, client registrations, pending auth flows)
+is stored in Cosmos DB so it survives restarts and works across replicas.
+A per-replica L1 TTLCache in the TokenStore reduces Cosmos reads.
 """
+
+from __future__ import annotations
 
 import base64
 import hashlib
 import logging
 import secrets
 import time
+from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 import httpx
@@ -34,14 +36,43 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from sjifire.mcp.auth import EntraTokenValidator, set_current_user
-from sjifire.mcp.token_store import TokenStore, _deserialize_user, _serialize_user, get_token_store
+from sjifire.mcp.token_store import _deserialize_user, _serialize_user, get_token_store
+
+if TYPE_CHECKING:
+    from sjifire.mcp.token_store import TokenStore
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_auth_params(params: AuthorizationParams) -> dict:
+    """Convert AuthorizationParams to a JSON-safe dict for Cosmos storage."""
+    return {
+        "state": params.state,
+        "scopes": params.scopes,
+        "code_challenge": params.code_challenge,
+        "redirect_uri": str(params.redirect_uri),
+        "redirect_uri_provided_explicitly": params.redirect_uri_provided_explicitly,
+        "resource": str(params.resource) if params.resource else None,
+    }
+
+
+def _deserialize_auth_params(data: dict) -> AuthorizationParams:
+    """Reconstruct AuthorizationParams from a stored dict."""
+    return AuthorizationParams(
+        state=data.get("state"),
+        scopes=data.get("scopes", ["mcp.access"]),
+        code_challenge=data.get("code_challenge"),
+        redirect_uri=data.get("redirect_uri"),
+        redirect_uri_provided_explicitly=data.get("redirect_uri_provided_explicitly", True),
+        resource=data.get("resource"),
+    )
 
 # Token lifetimes (seconds)
 ACCESS_TOKEN_TTL = 3600  # 1 hour
 REFRESH_TOKEN_TTL = 86400  # 24 hours
 AUTH_CODE_TTL = 300  # 5 minutes
+CLIENT_REG_TTL = 86400  # 24 hours
+PENDING_AUTH_TTL = 300  # 5 minutes (matches auth code)
 
 
 class EntraOAuthProvider:
@@ -68,12 +99,7 @@ class EntraOAuthProvider:
 
         self._validator = EntraTokenValidator(tenant_id, api_client_id)
 
-        # In-memory only (short-lived, re-created on each connection)
-        self._clients: dict[str, OAuthClientInformationFull] = {}
-        # Entra state → {mcp_params, client_id, entra_code_verifier}
-        self._pending_auth: dict[str, dict] = {}
-
-        # Lazy-initialized Cosmos-backed store
+        # Lazy-initialized Cosmos-backed store (shared across replicas)
         self._token_store: TokenStore | None = None
 
     async def _store(self) -> TokenStore:
@@ -87,13 +113,23 @@ class EntraOAuthProvider:
     # ------------------------------------------------------------------
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        """Look up a dynamically registered client."""
-        return self._clients.get(client_id)
+        """Look up a dynamically registered client from Cosmos DB."""
+        store = await self._store()
+        doc = await store.get("client_reg", client_id)
+        if doc is None:
+            return None
+        return OAuthClientInformationFull.model_validate(doc["client_data"])
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
-        """Save a dynamically registered client (RFC 7591)."""
+        """Save a dynamically registered client (RFC 7591) to Cosmos DB."""
         if client_info.client_id:
-            self._clients[client_info.client_id] = client_info
+            store = await self._store()
+            await store.set(
+                "client_reg",
+                client_info.client_id,
+                {"client_data": client_info.model_dump()},
+                CLIENT_REG_TTL,
+            )
 
     # ------------------------------------------------------------------
     # Authorization — redirect to Entra ID
@@ -113,11 +149,19 @@ class EntraOAuthProvider:
         digest = hashlib.sha256(entra_code_verifier.encode()).digest()
         entra_code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
-        self._pending_auth[entra_state] = {
-            "mcp_params": params,
-            "client_id": client.client_id,
-            "entra_code_verifier": entra_code_verifier,
-        }
+        # Store pending auth in Cosmos so any replica can handle the callback
+        store = await self._store()
+        await store.set(
+            "pending_auth",
+            entra_state,
+            {
+                "mcp_params": _serialize_auth_params(params),
+                "client_id": client.client_id,
+                "entra_code_verifier": entra_code_verifier,
+                "expires_at": time.time() + PENDING_AUTH_TTL,
+            },
+            PENDING_AUTH_TTL,
+        )
 
         entra_params = {
             "client_id": self.api_client_id,
@@ -158,11 +202,13 @@ class EntraOAuthProvider:
         if not entra_code or not entra_state:
             return Response("Missing code or state", status_code=400)
 
-        pending = self._pending_auth.pop(entra_state, None)
+        store = await self._store()
+        pending = await store.get("pending_auth", entra_state)
         if not pending:
             return Response("Invalid or expired state", status_code=400)
+        await store.delete("pending_auth", entra_state)
 
-        mcp_params: AuthorizationParams = pending["mcp_params"]
+        mcp_params = _deserialize_auth_params(pending["mcp_params"])
         client_id: str = pending["client_id"]
         entra_code_verifier: str = pending["entra_code_verifier"]
 
@@ -261,9 +307,12 @@ class EntraOAuthProvider:
         """Mint MCP access + refresh tokens and associate with user identity."""
         store = await self._store()
 
-        # Get the user from the auth code document before deleting it
+        # Get the user from the auth code document before deleting it.
+        # If the code was already consumed (race), reject the exchange.
         code_doc = await store.get("auth_code", authorization_code.code)
-        user_data = code_doc.get("user") if code_doc else None
+        if code_doc is None:
+            raise ValueError("Authorization code already consumed or expired")
+        user_data = code_doc.get("user")
         await store.delete("auth_code", authorization_code.code)
 
         now = int(time.time())

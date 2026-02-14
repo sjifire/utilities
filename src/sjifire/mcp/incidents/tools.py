@@ -13,21 +13,19 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-from cachetools import TTLCache
-
 from sjifire.core.config import get_org_config
 from sjifire.mcp.auth import get_current_user
 from sjifire.mcp.incidents.models import CrewAssignment, IncidentDocument, Narratives
 from sjifire.mcp.incidents.store import IncidentStore
+from sjifire.mcp.token_store import get_token_store
 
 logger = logging.getLogger(__name__)
 
 _EDITABLE_STATUSES = {"draft", "in_progress", "ready_review"}
 _RESETTABLE_STATUSES = {"draft", "in_progress"}
 
-# One reset per user per 24 hours (server-side enforced).
-# Resets on server restart — acceptable for accidental-destruction prevention.
-_reset_cooldowns: TTLCache[str, str] = TTLCache(maxsize=1024, ttl=86400)
+# One reset per user per 24 hours (Cosmos DB backed, survives restarts)
+_RESET_COOLDOWN_TTL = 86400  # 24 hours
 
 
 def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
@@ -490,8 +488,10 @@ async def reset_incident(incident_id: str) -> dict:
     """
     user = get_current_user()
 
-    # Check 24hr cooldown BEFORE loading the incident
-    if user.email in _reset_cooldowns:
+    # Check 24hr cooldown BEFORE loading the incident (Cosmos-backed)
+    token_store = await get_token_store()
+    cooldown = await token_store.get("incident_reset_cooldown", user.email)
+    if cooldown is not None:
         return {
             "error": "You already reset an incident in the last 24 hours. "
             "Please wait before resetting another."
@@ -536,8 +536,20 @@ async def reset_incident(incident_id: str) -> dict:
 
         updated = await store.update(doc)
 
-    # Record cooldown AFTER successful update
-    _reset_cooldowns[user.email] = incident_id
+    # Record cooldown AFTER successful update (Cosmos TTL auto-expires)
+    now = datetime.now(UTC)
+    await token_store.set(
+        "incident_reset_cooldown",
+        user.email,
+        {
+            "incident_id": incident_id,
+            "user_email": user.email,
+            "user_name": user.name,
+            "reset_at": now.isoformat(),
+            "expires_at": now.timestamp() + _RESET_COOLDOWN_TTL,
+        },
+        _RESET_COOLDOWN_TTL,
+    )
     logger.info("User %s reset incident %s", user.email, incident_id)
     return updated.model_dump(mode="json")
 

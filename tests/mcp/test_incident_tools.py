@@ -13,7 +13,6 @@ from sjifire.mcp.incidents.tools import (
     _check_view_access,
     _extract_timestamps,
     _prefill_from_dispatch,
-    _reset_cooldowns,
     create_incident,
     get_incident,
     get_neris_incident,
@@ -425,11 +424,25 @@ class TestPrefillFromDispatch:
 
 class TestResetIncident:
     @pytest.fixture(autouse=True)
-    def _clear_cooldowns(self):
-        """Clear cooldown cache between tests."""
-        _reset_cooldowns.clear()
-        yield
-        _reset_cooldowns.clear()
+    def _mock_cooldown_store(self):
+        """Mock TokenStore for cooldown checks (in-memory dict per test)."""
+        cooldown_store: dict[str, dict] = {}
+
+        async def mock_get(token_type, token_id):
+            return cooldown_store.get(f"{token_type}:{token_id}")
+
+        async def mock_set(token_type, token_id, data, ttl):
+            cooldown_store[f"{token_type}:{token_id}"] = data
+
+        mock_store = AsyncMock()
+        mock_store.get = AsyncMock(side_effect=mock_get)
+        mock_store.set = AsyncMock(side_effect=mock_set)
+
+        async def mock_get_token_store():
+            return mock_store
+
+        with patch("sjifire.mcp.incidents.tools.get_token_store", mock_get_token_store):
+            yield
 
     @patch("sjifire.mcp.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.mcp.incidents.tools.IncidentStore")
