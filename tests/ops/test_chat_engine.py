@@ -45,7 +45,7 @@ _TEST_USER = UserContext(
 
 class TestBuildSystemPrompt:
     def test_includes_org_name(self):
-        prompt = _build_system_prompt("{}", "{}", "[]", "Test User", "test@sjifire.org")
+        prompt = _build_system_prompt("{}", "{}", "[]", "[]", "Test User", "test@sjifire.org")
         assert (
             "San Juan" in prompt
             or "sjifire" in prompt.lower()
@@ -54,18 +54,28 @@ class TestBuildSystemPrompt:
 
     def test_includes_incident_data(self):
         incident_json = '{"incident_number": "26-001234"}'
-        prompt = _build_system_prompt(incident_json, "{}", "[]", "Test User", "test@sjifire.org")
+        prompt = _build_system_prompt(
+            incident_json, "{}", "[]", "[]", "Test User", "test@sjifire.org"
+        )
         assert "26-001234" in prompt
 
     def test_includes_rules(self):
-        prompt = _build_system_prompt("{}", "{}", "[]", "Test User", "test@sjifire.org")
+        prompt = _build_system_prompt("{}", "{}", "[]", "[]", "Test User", "test@sjifire.org")
         assert "RULES" in prompt
         assert "WORKFLOW" in prompt
 
     def test_includes_user_identity(self):
-        prompt = _build_system_prompt("{}", "{}", "[]", "Jordan Pollack", "jpollack@sjifire.org")
+        prompt = _build_system_prompt(
+            "{}", "{}", "[]", "[]", "Jordan Pollack", "jpollack@sjifire.org"
+        )
         assert "Jordan Pollack" in prompt
         assert "jpollack@sjifire.org" in prompt
+
+    def test_includes_personnel_roster(self):
+        roster = '[{"name": "Jane Doe", "email": "jdoe@sjifire.org"}]'
+        prompt = _build_system_prompt("{}", "{}", "[]", roster, "Test User", "test@sjifire.org")
+        assert "Jane Doe" in prompt
+        assert "PERSONNEL ROSTER" in prompt
 
 
 class TestTrimMessages:

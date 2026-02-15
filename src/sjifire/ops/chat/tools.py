@@ -204,6 +204,18 @@ TOOL_SCHEMAS: list[dict] = [
             "required": ["value_set"],
         },
     },
+    {
+        "name": "get_personnel",
+        "description": (
+            "Get a list of ALL active personnel (names + emails). Use this "
+            "only if you cannot match a name from the pre-loaded operational "
+            "roster — e.g. for admin staff or volunteers not in the roster."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
 ]
 
 # Set of allowed tool names for validation
@@ -270,6 +282,12 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
             prefix=tool_input.get("prefix"),
             search=tool_input.get("search"),
         )
+
+    if name == "get_personnel":
+        from sjifire.ops.personnel import tools as personnel_tools
+
+        result = await personnel_tools.get_personnel()
+        return {"personnel": result, "count": len(result)}
 
     return {"error": f"Unknown tool: {name}"}
 

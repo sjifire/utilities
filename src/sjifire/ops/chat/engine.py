@@ -86,6 +86,7 @@ def _build_system_prompt(
     incident_json: str,
     dispatch_json: str,
     crew_json: str,
+    personnel_json: str,
     user_name: str,
     user_email: str,
 ) -> str:
@@ -132,7 +133,12 @@ Cross-reference their name against the dispatch data \
 data shows them as IC, say "It looks like you were IC on this \
 call — is that right?" If the crew roster shows their position \
 (e.g. Captain on E31), use that context. Only ask their role \
-from scratch if you truly cannot determine it from the data."""
+from scratch if you truly cannot determine it from the data.
+- CREW NAME MATCHING: When dispatch data or user input contains \
+last names only (e.g. "Stanger, See, Vos"), use the PERSONNEL \
+ROSTER below to resolve each last name to a full name and email. \
+Never ask the user for first names if you can match from the roster. \
+If a name is not in the roster, call get_personnel for a wider search."""
 
     workflow = """\
 WORKFLOW:
@@ -155,6 +161,7 @@ before saving.
         f"CURRENT INCIDENT STATE:\n{incident_json}",
         f"DISPATCH DATA:\n{dispatch_json}",
         f"CREW ON DUTY:\n{crew_json}",
+        "PERSONNEL ROSTER (use to match last names to full names + emails):\n" + personnel_json,
         _get_all_neris_incident_types(),
     ]
     return "\n\n".join(sections)
@@ -208,14 +215,15 @@ def _get_all_neris_incident_types() -> str:
     return _neris_incident_types_cache
 
 
-async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str, str]:
-    """Fetch incident, dispatch, and crew data for the system prompt."""
+async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str, str, str]:
+    """Fetch incident, dispatch, crew, and personnel for the system prompt."""
     from sjifire.ops.auth import set_current_user
 
     set_current_user(user)
 
     from sjifire.ops.dispatch.store import DispatchStore
     from sjifire.ops.incidents.store import IncidentStore
+    from sjifire.ops.personnel import tools as personnel_tools
     from sjifire.ops.schedule import tools as schedule_tools
 
     # Get incident (must be first — dispatch and crew depend on it)
@@ -252,7 +260,15 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
         dispatch_json = "{}"
         crew_json = "[]"
 
-    return incident_json, dispatch_json, crew_json
+    # Fetch operational personnel for name matching (last name → full name + email)
+    personnel_json = "[]"
+    try:
+        personnel = await personnel_tools.get_operational_personnel()
+        personnel_json = json.dumps(personnel, indent=2, default=str)
+    except Exception:
+        logger.warning("Failed to fetch personnel", exc_info=True)
+
+    return incident_json, dispatch_json, crew_json, personnel_json
 
 
 async def stream_chat(
@@ -309,12 +325,14 @@ async def stream_chat(
 
     # Build system prompt with context
     try:
-        incident_json, dispatch_json, crew_json = await _fetch_context(incident_id, user)
+        incident_json, dispatch_json, crew_json, personnel_json = await _fetch_context(
+            incident_id, user
+        )
     except Exception as exc:
         yield _sse("error", {"message": _user_error("context", exc)})
         return
     system_prompt = _build_system_prompt(
-        incident_json, dispatch_json, crew_json, user.name, user.email
+        incident_json, dispatch_json, crew_json, personnel_json, user.name, user.email
     )
 
     # Build messages for Claude API
@@ -585,6 +603,10 @@ def _summarize_tool_result(name: str, data: dict) -> str:
     if name == "list_dispatch_calls":
         count = data.get("count", 0)
         return f"{count} dispatch call(s)"
+
+    if name == "get_personnel":
+        count = data.get("count", 0)
+        return f"{count} personnel"
 
     if name == "list_incidents":
         incidents = data if isinstance(data, list) else data.get("incidents", [])

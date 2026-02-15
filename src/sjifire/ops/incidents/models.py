@@ -86,7 +86,7 @@ class IncidentDocument(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
     neris_incident_id: str | None = None  # Set after NERIS submission
-    internal_notes: str = Field(default="", max_length=MAX_NARRATIVE_LENGTH)  # Never sent to NERIS
+    internal_notes: str | None = Field(default="", max_length=MAX_NARRATIVE_LENGTH)  # Never sent to NERIS
     edit_history: list[EditEntry] = Field(default_factory=list, max_length=MAX_EDIT_HISTORY)
 
     @model_validator(mode="after")
