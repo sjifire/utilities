@@ -110,9 +110,7 @@ class IncidentDocument(BaseModel):
         """Deserialize from Cosmos DB document."""
         # Strip None values from timestamps — the LLM may have stored nulls
         if "timestamps" in data and isinstance(data["timestamps"], dict):
-            data["timestamps"] = {
-                k: v for k, v in data["timestamps"].items() if v is not None
-            }
+            data["timestamps"] = {k: v for k, v in data["timestamps"].items() if v is not None}
         return cls.model_validate(data)
 
     def to_neris_payload(self) -> dict:
