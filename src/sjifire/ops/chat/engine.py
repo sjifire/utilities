@@ -107,9 +107,13 @@ timestamps, responding units), save immediately without asking.
 - After each save, confirm what was saved and move to the \
 next section.
 - The person writing this report is {user_name} ({user_email}). \
-Do NOT assume they held a specific role on scene (e.g. IC, \
-command). Ask what their role was if relevant. They may or \
-may not be the incident commander listed in CAD data."""
+Cross-reference their name against the dispatch data \
+(incident_commander_name, responding_units) and crew roster \
+(position, section) to infer their likely role. If the dispatch \
+data shows them as IC, say "It looks like you were IC on this \
+call — is that right?" If the crew roster shows their position \
+(e.g. Captain on E31), use that context. Only ask their role \
+from scratch if you truly cannot determine it from the data."""
 
     workflow = """\
 WORKFLOW:
