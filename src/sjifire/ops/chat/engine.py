@@ -88,7 +88,6 @@ def _build_system_prompt(
     crew_json: str,
     user_name: str,
     user_email: str,
-    neris_suggestions: str = "",
 ) -> str:
     """Build the scoped system prompt for Claude."""
     org = get_org_config()
@@ -111,14 +110,13 @@ or help with tasks unrelated to this incident report.
 - Format data readably: use bullet points or line breaks for \
 lists (crew members, units, timestamps). Never dump everything \
 in a single paragraph.
-- NERIS CODES: If a "SUGGESTED NERIS INCIDENT TYPES" section is \
-provided below, pick the best match from that list — no tool call \
-needed. Present the human-readable label (e.g. "Chimney Fire") \
-with your reasoning. If none fit or the user wants other options, \
-call get_neris_values to search. For OTHER NERIS fields (location_use, \
-action_tactic, etc.), call get_neris_values before suggesting. \
-NEVER invent or guess a NERIS code. Do not guess at addresses or \
-timestamps.
+- NERIS CODES: All 128 incident type codes are listed below — pick \
+from that list directly, no tool call needed. Present the \
+human-readable label (e.g. "Chimney Fire") with your reasoning. \
+If the user wants a different option, show others from the same \
+category. For OTHER NERIS fields (location_use, action_tactic, \
+etc.), call get_neris_values. NEVER invent a NERIS code. Do not \
+guess at addresses or timestamps.
 - IMPORTANT: If you ask the user a question or present a choice \
 for confirmation, WAIT for their response before saving. Do NOT \
 call update_incident in the same turn as asking a question. \
@@ -157,10 +155,8 @@ before saving.
         f"CURRENT INCIDENT STATE:\n{incident_json}",
         f"DISPATCH DATA:\n{dispatch_json}",
         f"CREW ON DUTY:\n{crew_json}",
+        _get_all_neris_incident_types(),
     ]
-    if neris_suggestions:
-        sections.append(neris_suggestions)
-    sections.append(_get_neris_cheat_sheet())
     return "\n\n".join(sections)
 
 
@@ -171,72 +167,49 @@ def _trim_messages(messages: list[dict]) -> list[dict]:
     return messages[-(MAX_CONTEXT_MESSAGES * 2) :]
 
 
-def _suggest_neris_codes(nature: str) -> str:
-    """Map dispatch nature to pre-fetched NERIS incident type codes.
+_neris_incident_types_cache: str = ""
 
-    Returns a formatted string of matching codes the agent can pick from
-    without making a tool call, or empty string if no mapping found.
+
+def _get_all_neris_incident_types() -> str:
+    """Return all 128 NERIS incident type codes, grouped by category.
+
+    Cached after first call. Included in the system prompt so the agent
+    can pick the right code without any tool calls.
     """
-    from sjifire.ops.neris.tools import _VALUE_SETS, _enum_to_list
+    global _neris_incident_types_cache
+    if _neris_incident_types_cache:
+        return _neris_incident_types_cache
+
+    from sjifire.ops.neris.tools import _VALUE_SETS, _humanize
 
     incident_enum = _VALUE_SETS.get("incident")
     if not incident_enum:
         return ""
 
-    # Map dispatch nature keywords to NERIS prefixes
-    n = nature.upper()
-    prefixes: list[str] = []
-    if "STRUCTURE" in n or "CHIMNEY" in n:
-        prefixes = ["FIRE||STRUCTURE_FIRE||"]
-    elif "VEHICLE" in n and "FIRE" in n:
-        prefixes = ["FIRE||TRANSPORTATION_FIRE||"]
-    elif "FIRE" in n:
-        prefixes = ["FIRE||"]
-    elif "CPR" in n or "ALS" in n:
-        prefixes = ["MEDICAL||ILLNESS||"]
-    elif "BLS" in n:
-        prefixes = ["MEDICAL||ILLNESS||", "MEDICAL||INJURY||"]
-    elif "MEDICAL" in n or "SICK" in n:
-        prefixes = ["MEDICAL||"]
-    elif "ACCIDENT" in n or "MVC" in n or "MVI" in n:
-        prefixes = ["HAZSIT||HAZARD_NONCHEM||", "MEDICAL||INJURY||"]
-    elif "ALARM" in n:
-        prefixes = ["PUBSERV||ALARMS_NONMED||", "NOEMERG||FALSE_ALARM||"]
-    elif "GAS" in n or "LEAK" in n or "SPILL" in n or "HAZMAT" in n:
-        prefixes = ["HAZSIT||HAZARDOUS_MATERIALS||"]
-    elif "SMOKE" in n and "INVEST" in n:
-        prefixes = ["HAZSIT||INVESTIGATION||"]
-    elif "BURN" in n:
-        prefixes = ["NOEMERG||GOOD_INTENT||", "HAZSIT||INVESTIGATION||"]
-    elif "LIFT" in n or "ASSIST" in n:
-        prefixes = ["PUBSERV||CITIZEN_ASSIST||"]
-    elif "RESCUE" in n:
-        prefixes = ["RESCUE||"]
+    # Group by top-level category
+    categories: dict[str, list[tuple[str, str]]] = {}
+    for member in incident_enum:
+        value = str(member.value)
+        parts = value.split("||")
+        cat = parts[0]
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append((value, _humanize(value)))
 
-    if not prefixes:
-        return ""
+    lines = [
+        "ALL NERIS INCIDENT TYPES (128 codes):",
+        "Pick from this list. No tool call needed for incident type.",
+    ]
+    for cat, codes in categories.items():
+        lines.append(f"\n{_humanize(cat)}:")
+        lines.extend(f"  - {label}  ({value})" for value, label in codes)
 
-    codes = []
-    for prefix in prefixes:
-        codes.extend(_enum_to_list(incident_enum, prefix=prefix))
-
-    if not codes:
-        return ""
-
-    lines = ["SUGGESTED NERIS INCIDENT TYPES (based on dispatch nature):"]
-    lines.append("Pick the best match from this list. No tool call needed.")
-    lines.extend(f"- {c['label']}  ({c['value']})" for c in codes)
-    lines.append("")
-    lines.append(
-        "If the user rejects your suggestion, show the other options from "
-        "this list before calling get_neris_values. Example: \"Here are the "
-        "other structure fire types — do any of these fit better?\""
-    )
-    return "\n".join(lines)
+    _neris_incident_types_cache = "\n".join(lines)
+    return _neris_incident_types_cache
 
 
-async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str, str, str]:
-    """Fetch incident, dispatch, crew, and suggested NERIS codes for the system prompt."""
+async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str, str]:
+    """Fetch incident, dispatch, and crew data for the system prompt."""
     from sjifire.ops.auth import set_current_user
 
     set_current_user(user)
@@ -247,7 +220,6 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
 
     # Get incident (must be first — dispatch and crew depend on it)
     incident_json = "{}"
-    neris_suggestions = ""
     async with IncidentStore() as store:
         doc = await store.get_by_id(incident_id)
     if doc:
@@ -263,9 +235,6 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
                 dispatch_json = json.dumps(dispatch.to_dict(), indent=2, default=str)
                 if dispatch.time_reported:
                     incident_hour = dispatch.time_reported.hour
-                # Pre-fetch NERIS codes based on dispatch nature
-                if dispatch.nature and not doc.incident_type:
-                    neris_suggestions = _suggest_neris_codes(dispatch.nature)
         except Exception:
             logger.warning("Failed to fetch dispatch for %s", doc.incident_number, exc_info=True)
 
@@ -283,7 +252,7 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
         dispatch_json = "{}"
         crew_json = "[]"
 
-    return incident_json, dispatch_json, crew_json, neris_suggestions
+    return incident_json, dispatch_json, crew_json
 
 
 async def stream_chat(
@@ -340,14 +309,12 @@ async def stream_chat(
 
     # Build system prompt with context
     try:
-        incident_json, dispatch_json, crew_json, neris_suggestions = await _fetch_context(
-            incident_id, user
-        )
+        incident_json, dispatch_json, crew_json = await _fetch_context(incident_id, user)
     except Exception as exc:
         yield _sse("error", {"message": _user_error("context", exc)})
         return
     system_prompt = _build_system_prompt(
-        incident_json, dispatch_json, crew_json, user.name, user.email, neris_suggestions
+        incident_json, dispatch_json, crew_json, user.name, user.email
     )
 
     # Build messages for Claude API
