@@ -937,26 +937,27 @@ class TestCreateIncidentWithNeris:
 
 
 class TestResetIncident:
-    @pytest.fixture(autouse=True)
-    def _mock_cooldown_store(self):
-        """Mock TokenStore for cooldown checks (in-memory dict per test)."""
-        cooldown_store: dict[str, dict] = {}
-
-        async def mock_get(token_type, token_id):
-            return cooldown_store.get(f"{token_type}:{token_id}")
-
-        async def mock_set(token_type, token_id, data, ttl):
-            cooldown_store[f"{token_type}:{token_id}"] = data
-
-        mock_store = AsyncMock()
-        mock_store.get = AsyncMock(side_effect=mock_get)
-        mock_store.set = AsyncMock(side_effect=mock_set)
-
-        async def mock_get_token_store():
-            return mock_store
-
-        with patch("sjifire.ops.incidents.tools.get_token_store", mock_get_token_store):
-            yield
+    # TODO: Re-enable _mock_cooldown_store fixture when cooldown is restored.
+    # @pytest.fixture(autouse=True)
+    # def _mock_cooldown_store(self):
+    #     """Mock TokenStore for cooldown checks (in-memory dict per test)."""
+    #     cooldown_store: dict[str, dict] = {}
+    #
+    #     async def mock_get(token_type, token_id):
+    #         return cooldown_store.get(f"{token_type}:{token_id}")
+    #
+    #     async def mock_set(token_type, token_id, data, ttl):
+    #         cooldown_store[f"{token_type}:{token_id}"] = data
+    #
+    #     mock_store = AsyncMock()
+    #     mock_store.get = AsyncMock(side_effect=mock_get)
+    #     mock_store.set = AsyncMock(side_effect=mock_set)
+    #
+    #     async def mock_get_token_store():
+    #         return mock_store
+    #
+    #     with patch("sjifire.ops.incidents.tools.get_token_store", mock_get_token_store):
+    #         yield
 
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
@@ -1074,6 +1075,8 @@ class TestResetIncident:
         assert "error" in result
         assert "submitted" in result["error"]
 
+    # TODO: Re-enable these tests when 24hr cooldown is re-enabled.
+    @pytest.mark.skip(reason="Reset cooldown temporarily disabled for testing")
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_cooldown_blocks_second_reset(self, mock_store_cls, mock_prefill, regular_user):
@@ -1101,6 +1104,7 @@ class TestResetIncident:
         assert "error" in result2
         assert "24 hours" in result2["error"]
 
+    @pytest.mark.skip(reason="Reset cooldown temporarily disabled for testing")
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_cooldown_is_per_user(self, mock_store_cls, mock_prefill, regular_user):

@@ -22,7 +22,9 @@ from sjifire.ops.incidents.models import (
     Narratives,
 )
 from sjifire.ops.incidents.store import IncidentStore
-from sjifire.ops.token_store import get_token_store
+
+# TODO: Re-enable when cooldown is restored
+# from sjifire.ops.token_store import get_token_store
 
 logger = logging.getLogger(__name__)
 
@@ -653,14 +655,15 @@ async def reset_incident(incident_id: str) -> dict:
     """
     user = get_current_user()
 
+    # TODO: Re-enable 24hr cooldown after testing phase.
     # Check 24hr cooldown BEFORE loading the incident (Cosmos-backed)
-    token_store = await get_token_store()
-    cooldown = await token_store.get("incident_reset_cooldown", user.email)
-    if cooldown is not None:
-        return {
-            "error": "You already reset an incident in the last 24 hours. "
-            "Please wait before resetting another."
-        }
+    # token_store = await get_token_store()
+    # cooldown = await token_store.get("incident_reset_cooldown", user.email)
+    # if cooldown is not None:
+    #     return {
+    #         "error": "You already reset an incident in the last 24 hours. "
+    #         "Please wait before resetting another."
+    #     }
 
     async with IncidentStore() as store:
         doc = await store.get_by_id(incident_id)
@@ -710,20 +713,21 @@ async def reset_incident(incident_id: str) -> dict:
 
         updated = await store.update(doc)
 
+    # TODO: Re-enable cooldown recording after testing phase.
     # Record cooldown AFTER successful update (Cosmos TTL auto-expires)
-    now = datetime.now(UTC)
-    await token_store.set(
-        "incident_reset_cooldown",
-        user.email,
-        {
-            "incident_id": incident_id,
-            "user_email": user.email,
-            "user_name": user.name,
-            "reset_at": now.isoformat(),
-            "expires_at": now.timestamp() + _RESET_COOLDOWN_TTL,
-        },
-        _RESET_COOLDOWN_TTL,
-    )
+    # now = datetime.now(UTC)
+    # await token_store.set(
+    #     "incident_reset_cooldown",
+    #     user.email,
+    #     {
+    #         "incident_id": incident_id,
+    #         "user_email": user.email,
+    #         "user_name": user.name,
+    #         "reset_at": now.isoformat(),
+    #         "expires_at": now.timestamp() + _RESET_COOLDOWN_TTL,
+    #     },
+    #     _RESET_COOLDOWN_TTL,
+    # )
     # Clear chat conversation so the assistant starts fresh
     try:
         from sjifire.ops.chat.store import ConversationStore
