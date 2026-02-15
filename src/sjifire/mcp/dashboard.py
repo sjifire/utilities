@@ -230,31 +230,30 @@ def _build_template_context(
 
     unique_crew_count = len({c["name"] for c in crew})
 
-    # Shift end time for "until HH:MM" badge — append "tomorrow" if end is next day
+    # Shift end — ISO datetime for client-side relative formatting
     end_times = [c.get("end_time", "") for c in raw_current_crew if c.get("end_time")]
-    shift_until = ""
+    shift_end = ""
     crew_date = on_duty.get("date", "")
-    if end_times:
+    if end_times and crew_date:
         most_common_end = max(set(end_times), key=end_times.count)
-        shift_until = most_common_end.replace(":", "")
-        # If crew date is known, check whether the shift end falls tomorrow
-        if crew_date:
-            try:
-                crew_dt = datetime.strptime(crew_date, "%Y-%m-%d").date()
-                end_h = int(most_common_end.split(":")[0])
-                start_times = [
-                    c.get("start_time", "") for c in raw_current_crew if c.get("start_time")
-                ]
-                if start_times:
-                    most_common_start = max(set(start_times), key=start_times.count)
-                    start_h = int(most_common_start.split(":")[0])
-                    # Shift wraps to next day when end <= start (e.g. 18:00-12:00)
-                    if end_h <= start_h:
-                        tomorrow = crew_dt + timedelta(days=1)
-                        if ts.date() < tomorrow:
-                            shift_until += " tomorrow"
-            except (ValueError, IndexError):
-                pass
+        try:
+            tz = get_timezone()
+            crew_dt = datetime.strptime(crew_date, "%Y-%m-%d").date()
+            end_parts = most_common_end.split(":")
+            end_h, end_m = int(end_parts[0]), int(end_parts[1]) if len(end_parts) > 1 else 0
+            shift_end_dt = datetime(
+                crew_dt.year, crew_dt.month, crew_dt.day, end_h, end_m, tzinfo=tz
+            )
+            # If shift wraps to next day (end <= start), add one day
+            start_times = [c.get("start_time", "") for c in raw_current_crew if c.get("start_time")]
+            if start_times:
+                most_common_start = max(set(start_times), key=start_times.count)
+                start_h = int(most_common_start.split(":")[0])
+                if end_h <= start_h:
+                    shift_end_dt += timedelta(days=1)
+            shift_end = shift_end_dt.isoformat()
+        except (ValueError, IndexError):
+            pass
 
     # Chief officer last name
     chief_officer = ""
@@ -411,7 +410,7 @@ def _build_template_context(
         "missing_reports": max(missing_reports, 0),
         "sections": sections,
         "crew_date_range": crew_date_range,
-        "shift_until": shift_until,
+        "shift_end": shift_end,
         "upcoming_platoon": upcoming_platoon,
         "upcoming_crew": upcoming_crew,
         "upcoming_sections": upcoming_sections,

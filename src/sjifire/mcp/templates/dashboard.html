@@ -194,7 +194,7 @@
       <div class="panel">
         <div class="panel-header">
           <span style="font-size:14px;color:var(--text-primary)" class="font-semibold" x-text="'On Duty \u2014 ' + D.platoon"></span>
-          <span class="badge" x-show="D.shift_until" x-text="'until ' + D.shift_until"></span>
+          <span class="badge" x-show="D.shift_end" x-text="formatShiftEnd(D.shift_end)"></span>
         </div>
         <template x-if="D.crew.length">
           <div>
@@ -299,7 +299,7 @@
     <div class="panel">
       <div class="panel-header">
         <span style="font-size:14px;color:var(--text-primary)" class="font-semibold" x-text="D.platoon + ' \u2014 ' + D.crew_date_range"></span>
-        <span class="badge" x-text="D.shift_until ? 'until ' + D.shift_until : 'On duty'"></span>
+        <span class="badge" x-text="formatShiftEnd(D.shift_end) || 'On duty'"></span>
       </div>
       <template x-if="D.sections.length">
         <div class="data-table-wrap">
@@ -399,7 +399,7 @@
 
   <!-- REPORTING TAB -->
   <div x-show="!loading && !error && activeTab === 'reporting'">
-    <div class="grid-3" style="margin-bottom:24px">
+    <div class="grid-3 stats-compact" style="margin-bottom:24px">
       <div class="stat-card accent-blue">
         <div class="stat-label">In Progress</div>
         <div class="stat-value" x-text="D.local_draft_count"></div>
@@ -494,7 +494,7 @@ function dashboard() {
       user_name: '', platoon: '', crew: [], unique_crew_count: 0,
       chief_officer: '', open_calls: 0, recent_calls: [],
       neris_count: 0, local_draft_count: 0, missing_reports: 0,
-      sections: [], crew_date_range: '', shift_until: '',
+      sections: [], crew_date_range: '', shift_end: '',
       upcoming_platoon: '', upcoming_crew: [], upcoming_sections: [],
       upcoming_date_range: '', upcoming_shift_starts: ''
     },
@@ -532,6 +532,18 @@ function dashboard() {
         this.error = true;
         this.loading = false;
       }
+    },
+
+    formatShiftEnd(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      const hhmm = String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0');
+      const now = new Date();
+      const endDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const diffDays = Math.round((endDay - today) / 86400000);
+      if (diffDays === 1) return 'until ' + hhmm + ' tomorrow';
+      return 'until ' + hhmm;
     },
 
     mapsUrl(addr) {

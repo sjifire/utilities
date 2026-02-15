@@ -383,6 +383,31 @@
       .nav-tab          { padding: 12px 14px; font-size: 11px; }
       .nav-status-date    { display: none; }
       .nav-bar-right      { gap: 6px; }
+
+      /* Compact stat cards */
+      .stats-compact { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+      .stats-compact .stat-card { padding: 12px 10px; }
+      .stats-compact .stat-value { font-size: 22px; }
+      .stats-compact .stat-label { font-size: 10px; margin-bottom: 4px; }
+      .stats-compact .stat-desc { display: none; }
+
+      /* Table → card layout on mobile */
+      .data-table.mobile-cards thead { display: none; }
+      .data-table.mobile-cards,
+      .data-table.mobile-cards tbody,
+      .data-table.mobile-cards tr,
+      .data-table.mobile-cards td { display: block; }
+      .data-table.mobile-cards tr {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border-default);
+        position: relative;
+      }
+      .data-table.mobile-cards td { padding: 0; border: none; }
+      .data-table.mobile-cards td.dot-cell {
+        position: absolute; top: 14px; left: 14px; width: auto;
+      }
+      .data-table.mobile-cards .mobile-hide { display: none; }
+      .action-btn { min-width: 0; }
     }
   </style>
   {% block extra_styles %}{% endblock %}

@@ -379,56 +379,16 @@
     /* ── Reports responsive ── */
     @media (max-width: 768px) {
       .reports-main { padding: 12px; }
-      .reports-stats { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
-      .reports-stats .stat-card { padding: 12px 10px; }
-      .reports-stats .stat-value { font-size: 22px; }
-      .reports-stats .stat-label { font-size: 10px; margin-bottom: 4px; }
-      .reports-stats .stat-desc { display: none; }
 
-      /* Switch table to card layout */
-      .data-table thead { display: none; }
-      .data-table, .data-table tbody, .data-table tr, .data-table td {
-        display: block;
-      }
-      .data-table tr {
-        padding: 12px 14px;
-        border-bottom: 1px solid var(--border-default);
-        position: relative;
-      }
-      .data-table td { padding: 0; border: none; }
-      .data-table td.dot-cell {
-        position: absolute;
-        top: 14px;
-        left: 14px;
-        width: auto;
-      }
-      .data-table td.call-id { display: none; }
-      .data-table td:nth-child(3) { /* date/time */
-        font-size: 11px;
-        color: var(--text-dim);
-        margin-bottom: 2px;
-        padding-left: 18px;
-      }
-      .data-table td:nth-child(3) .dt-time { display: inline; }
-      .data-table td:nth-child(3) .dt-time::before { content: ' \b7 '; }
-      .data-table td:nth-child(4) { /* nature */
-        padding-left: 18px;
-        margin-bottom: 2px;
-      }
-      .data-table td:nth-child(4) .nature { font-size: 14px; }
-      .data-table td.address {
-        padding-left: 18px;
-        font-size: 12px;
-        margin-bottom: 6px;
-      }
-      .data-table td:nth-child(6) { /* status */
-        display: inline-block;
-      }
-      .data-table td:nth-child(7) { /* action */
-        display: inline-block;
-        float: right;
-      }
-      .action-btn { min-width: 0; font-size: 11px; padding: 4px 10px; }
+      /* Card layout tweaks for reports table */
+      .data-table.mobile-cards .dt { font-size: 11px; color: var(--text-dim); padding-left: 18px; margin-bottom: 2px; }
+      .data-table.mobile-cards .dt .dt-time { display: inline; }
+      .data-table.mobile-cards .dt .dt-time::before { content: ' \b7 '; }
+      .data-table.mobile-cards td:nth-child(4) { padding-left: 18px; margin-bottom: 2px; }
+      .data-table.mobile-cards td:nth-child(4) .nature { font-size: 14px; }
+      .data-table.mobile-cards td.address { padding-left: 18px; font-size: 12px; margin-bottom: 6px; }
+      .data-table.mobile-cards td:nth-child(6) { display: inline-block; }
+      .data-table.mobile-cards td:nth-child(7) { display: inline-block; float: right; }
 
       .help-row { flex-direction: column; gap: 6px; }
       .help-label { min-width: 0; }
@@ -479,7 +439,7 @@
 {% block body %}
 <div class="reports-main">
   <!-- Stats (hidden on help tab) -->
-  <div class="reports-stats" x-show="activeTab !== 'help'">
+  <div class="reports-stats stats-compact" x-show="activeTab !== 'help'">
     <div class="stat-card accent-blue">
       <div class="stat-label">In Progress</div>
       <div class="stat-value" x-text="countByFilter('local')"></div>
@@ -522,7 +482,7 @@
   <!-- Table -->
   <template x-if="activeTab !== 'help' && filtered().length > 0">
     <div class="panel data-table-wrap">
-      <table class="data-table">
+      <table class="data-table mobile-cards">
         <thead>
           <tr>
             <th class="dot-cell"></th>
@@ -538,7 +498,7 @@
           <template x-for="c in filtered()" :key="c.id">
             <tr>
               <td class="dot-cell"><span class="severity-dot" :class="c.severity"></span></td>
-              <td class="call-id" x-text="c.id"></td>
+              <td class="call-id mobile-hide" x-text="c.id"></td>
               <td class="dt">
                 <div x-text="c.date"></div>
                 <div class="dt-time" x-text="c.time"></div>
