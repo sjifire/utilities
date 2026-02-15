@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,6 +40,26 @@ RATE_LIMIT_BASE_DELAY = 15  # seconds — generous for token-per-minute limits
 _SRC_DOCS = Path(__file__).resolve().parents[4] / "docs"
 _APP_DOCS = Path("/app/docs")
 _DOCS_DIR = _SRC_DOCS if _SRC_DOCS.is_dir() else _APP_DOCS
+
+
+_ERROR_MESSAGES = {
+    "budget": "Unable to check usage limits. Please try again.",
+    "conversation": "Unable to load conversation. Please try again.",
+    "context": "Unable to load incident data. Please try again.",
+    "stream": "Something went wrong. Please try again.",
+    "save": "Unable to save conversation. Your message was processed but may not appear on reload.",
+}
+
+
+def _user_error(category: str, exc: Exception) -> str:
+    """Build a user-friendly error message with a reference ID for debugging.
+
+    Logs the full exception; returns only a short message + error ID.
+    """
+    error_id = uuid.uuid4().hex[:8]
+    logger.error("Chat error [%s] %s: %s: %s", error_id, category, type(exc).__name__, exc)
+    friendly = _ERROR_MESSAGES.get(category, "Something went wrong.")
+    return f"{friendly} (ref: {error_id})"
 
 
 def _get_instructions() -> str:
@@ -203,11 +224,13 @@ def _suggest_neris_codes(nature: str) -> str:
         return ""
 
     lines = ["SUGGESTED NERIS INCIDENT TYPES (based on dispatch nature):"]
-    lines.append("Pick from this list if a good match exists. No tool call needed.")
+    lines.append("Pick the best match from this list. No tool call needed.")
     lines.extend(f"- {c['label']}  ({c['value']})" for c in codes)
     lines.append("")
     lines.append(
-        "If none of these fit, call get_neris_values to search other categories."
+        "If the user rejects your suggestion, show the other options from "
+        "this list before calling get_neris_values. Example: \"Here are the "
+        "other structure fire types — do any of these fit better?\""
     )
     return "\n".join(lines)
 
@@ -283,8 +306,7 @@ async def stream_chat(
     try:
         budget_status = await check_budget(user.email)
     except Exception as exc:
-        logger.exception("Budget check failed for %s", user.email)
-        yield _sse("error", {"message": f"Budget check failed: {type(exc).__name__}: {exc}"})
+        yield _sse("error", {"message": _user_error("budget", exc)})
         return
     if not budget_status.allowed:
         yield _sse("error", {"message": budget_status.reason})
@@ -295,8 +317,7 @@ async def stream_chat(
         async with ConversationStore() as store:
             conversation = await store.get_by_incident(incident_id)
     except Exception as exc:
-        logger.exception("Failed to load conversation for %s", incident_id)
-        yield _sse("error", {"message": f"Conversation load failed: {type(exc).__name__}: {exc}"})
+        yield _sse("error", {"message": _user_error("conversation", exc)})
         return
 
     is_new = conversation is None
@@ -323,8 +344,7 @@ async def stream_chat(
             incident_id, user
         )
     except Exception as exc:
-        logger.exception("Failed to fetch context for %s", incident_id)
-        yield _sse("error", {"message": f"Context fetch failed: {type(exc).__name__}: {exc}"})
+        yield _sse("error", {"message": _user_error("context", exc)})
         return
     system_prompt = _build_system_prompt(
         incident_json, dispatch_json, crew_json, user.name, user.email, neris_suggestions
@@ -366,9 +386,7 @@ async def stream_chat(
             yield event_str
 
     except Exception as exc:
-        logger.exception("Chat streaming error for incident %s", incident_id)
-        detail = f"{type(exc).__name__}: {exc}"
-        yield _sse("error", {"message": f"Error: {detail}"})
+        yield _sse("error", {"message": _user_error("stream", exc)})
         return
 
     # Calculate total tokens from this turn's messages
@@ -394,8 +412,7 @@ async def stream_chat(
             else:
                 await store.update(conversation)
     except Exception as exc:
-        logger.exception("Failed to save conversation for %s", incident_id)
-        yield _sse("error", {"message": f"Save failed: {type(exc).__name__}: {exc}"})
+        yield _sse("error", {"message": _user_error("save", exc)})
         return
 
     # Record budget usage
@@ -731,9 +748,7 @@ async def stream_general_chat(
             yield event_str
 
     except Exception as exc:
-        logger.exception("General chat streaming error for %s", user.email)
-        detail = f"{type(exc).__name__}: {exc}"
-        yield _sse("error", {"message": f"Error: {detail}"})
+        yield _sse("error", {"message": _user_error("stream", exc)})
         return
 
     turn_messages = [

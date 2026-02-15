@@ -214,8 +214,8 @@ class TestStreamChat:
         assert "error" in events[0]
         assert "limit" in events[0].lower()
 
-    async def test_budget_check_failure_yields_error_detail(self):
-        """When budget check raises, error should include exception details."""
+    async def test_budget_check_failure_yields_friendly_error(self):
+        """When budget check raises, error should be user-friendly with ref ID."""
         from sjifire.ops.chat.engine import stream_chat
 
         with patch(
@@ -225,11 +225,12 @@ class TestStreamChat:
             events = [e async for e in stream_chat("inc-789", "hello", _TEST_USER)]
 
         assert len(events) == 1
-        assert "ConnectionError" in events[0]
-        assert "Cosmos DB unavailable" in events[0]
+        assert "usage limits" in events[0]
+        assert "ref:" in events[0]
+        assert "ConnectionError" not in events[0]
 
-    async def test_conversation_load_failure_yields_error_detail(self):
-        """When conversation store raises, error should include details."""
+    async def test_conversation_load_failure_yields_friendly_error(self):
+        """When conversation store raises, error should be user-friendly."""
         from sjifire.ops.chat.budget import BudgetStatus
         from sjifire.ops.chat.engine import stream_chat
 
@@ -246,10 +247,12 @@ class TestStreamChat:
             events = [e async for e in stream_chat("inc-err", "hello", _TEST_USER)]
 
         assert len(events) == 1
-        assert "ConnectionError" in events[0]
+        assert "load conversation" in events[0]
+        assert "ref:" in events[0]
+        assert "ConnectionError" not in events[0]
 
-    async def test_context_fetch_failure_yields_error_detail(self):
-        """When _fetch_context raises, error should include details."""
+    async def test_context_fetch_failure_yields_friendly_error(self):
+        """When _fetch_context raises, error should be user-friendly."""
         from sjifire.ops.chat.budget import BudgetStatus
         from sjifire.ops.chat.engine import stream_chat
 
@@ -266,8 +269,9 @@ class TestStreamChat:
             events = [e async for e in stream_chat("inc-ctx", "hello", _TEST_USER)]
 
         assert len(events) == 1
-        assert "RuntimeError" in events[0]
-        assert "dispatch store down" in events[0]
+        assert "incident data" in events[0]
+        assert "ref:" in events[0]
+        assert "RuntimeError" not in events[0]
 
 
 class TestBuildGeneralSystemPrompt:
