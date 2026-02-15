@@ -23,4 +23,4 @@ RUN uv sync --frozen --no-dev --no-editable
 EXPOSE 8000
 
 # Use the installed entry point (goes through main() for logging setup)
-CMD [".venv/bin/mcp-server"]
+CMD [".venv/bin/ops-server"]

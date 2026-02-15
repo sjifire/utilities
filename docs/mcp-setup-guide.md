@@ -13,7 +13,7 @@
 4. Click **"Add more integrations"**
 5. Enter this URL:
    ```
-   https://mcp.sjifire.org/mcp
+   https://ops.sjifire.org/mcp
    ```
 6. Click **Connect** — you'll be redirected to Microsoft login
 7. Sign in with your **@sjifire.org** account
@@ -53,7 +53,7 @@ Users in the **MCP Incident Officers** Entra group can also:
 A full visual dashboard is available at:
 
 ```
-https://mcp.sjifire.org/dashboard
+https://ops.sjifire.org/dashboard
 ```
 
 Sign in with your @sjifire.org Microsoft account (same SSO as Outlook/Teams). The dashboard shows on-duty crew, recent dispatch calls, reporting status, and upcoming crew — and auto-refreshes every hour.

@@ -233,21 +233,21 @@ def _print_enrichment_results(docs) -> None:
 
 
 async def _get_existing_ids(summary_ids: list[str]) -> set[str]:
-    from sjifire.mcp.dispatch.store import DispatchStore
+    from sjifire.ops.dispatch.store import DispatchStore
 
     async with DispatchStore() as store:
         return await store.get_existing_ids(summary_ids)
 
 
 async def _store_completed(calls: list) -> int:
-    from sjifire.mcp.dispatch.store import DispatchStore
+    from sjifire.ops.dispatch.store import DispatchStore
 
     async with DispatchStore() as store:
         return await store.store_completed(calls)
 
 
 async def _enrich_stored(*, force: bool = False) -> list:
-    from sjifire.mcp.dispatch.store import DispatchStore
+    from sjifire.ops.dispatch.store import DispatchStore
 
     async with DispatchStore() as store:
         return await store.enrich_stored(force=force)

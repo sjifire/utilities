@@ -109,7 +109,7 @@ src/sjifire/
 │   ├── models.py          # OnDutyEvent, SyncResult dataclasses
 │   ├── duty_sync.py       # DutyCalendarSync for shared mailbox (On Duty events)
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
-├── mcp/                   # Remote MCP server for Claude.ai
+├── ops/                   # Operations server (dashboard, reports, MCP tools)
 │   ├── server.py          # FastMCP app, auth config, tool registration
 │   ├── auth.py            # Entra JWT validation, EasyAuth header parsing, UserContext, RBAC
 │   ├── oauth_provider.py  # OAuth AS proxy: Claude.ai ↔ Entra ID
@@ -133,11 +133,11 @@ src/sjifire/
 └── scripts/               # CLI entry points
 ```
 
-### MCP Server (Remote, for Claude.ai)
+### Ops Server (Remote, for Claude.ai)
 
-Remote MCP server at `https://mcp.sjifire.org/mcp` providing fire district tools to Claude.ai users. Deployed on Azure Container Apps.
+Operations platform at `https://ops.sjifire.org` providing fire district tools, dashboard, and incident reporting. Also serves MCP tools at `/mcp` for Claude.ai. Deployed on Azure Container Apps.
 
-**Auth flow**: Claude.ai → MCP Server (OAuth AS) → Entra ID. The server implements `OAuthAuthorizationServerProvider` from the MCP SDK to bridge Claude.ai's Dynamic Client Registration with Entra ID. See `oauth_provider.py`.
+**Auth flow**: Claude.ai → Ops Server (OAuth AS) → Entra ID. The server implements `OAuthAuthorizationServerProvider` from the MCP SDK to bridge Claude.ai's Dynamic Client Registration with Entra ID. See `oauth_provider.py`.
 
 **Access control**:
 - Any `@sjifire.org` Entra user can connect (sign-in audience: `AzureADMyOrg`)
@@ -165,11 +165,11 @@ Remote MCP server at `https://mcp.sjifire.org/mcp` providing fire district tools
 
 **Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
 
-**Cosmos DB backup**: Continuous 30-day PITR (any-second point-in-time restore). For ad-hoc JSON exports beyond 30 days, use `uv run backup-cosmos`. Infrastructure provisioned via `./scripts/setup-azure.sh --phase 2`.
+**Cosmos DB backup**: Continuous 30-day PITR (any-second point-in-time restore). For ad-hoc JSON exports beyond 30 days, use `uv run backup-cosmos`. Infrastructure provisioned via `./scripts/setup-azure-ops.sh --phase 2`.
 
 **Deployment**:
-- Dev: `./scripts/deploy-mcp.sh` (builds via ACR, deploys, configures EasyAuth, health check, ACR purge)
-- Prod: `.github/workflows/mcp-deploy.yml` (on push to main — calls `deploy-mcp.sh` with `TAG=${{ github.sha }}`)
+- Dev: `./scripts/deploy-ops.sh` (builds via ACR, deploys, configures EasyAuth, health check, ACR purge)
+- Prod: `.github/workflows/ops-deploy.yml` (on push to main — calls `deploy-ops.sh` with `TAG=${{ github.sha }}`)
 
 **Key env vars** (set on Container App, secrets via Key Vault references):
 - `ENTRA_MCP_API_CLIENT_ID`, `ENTRA_MCP_API_CLIENT_SECRET`, `ENTRA_MCP_OFFICER_GROUP_ID`
@@ -338,6 +338,6 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Sync every 30 minutes (Entra to iSpyFire), uploads backup artifacts
 - `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
-- `mcp-deploy.yml`: Deploy MCP server on push to main (paths: `src/sjifire/mcp/**`, `Dockerfile`, `pyproject.toml`)
+- `ops-deploy.yml`: Deploy ops server on push to main (paths: `src/sjifire/ops/**`, `Dockerfile`, `pyproject.toml`)
 
 All workflows authenticate via OIDC and fetch secrets from Key Vault (no GitHub secrets required).

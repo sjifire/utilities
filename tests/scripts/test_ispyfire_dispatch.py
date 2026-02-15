@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sjifire.ispyfire.models import DispatchCall, UnitResponse
-from sjifire.mcp.dispatch.models import DispatchCallDocument
-from sjifire.mcp.dispatch.store import DispatchStore
+from sjifire.ops.dispatch.models import DispatchCallDocument
+from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.scripts.ispyfire_dispatch import (
     _get_existing_ids,
     _store_completed,

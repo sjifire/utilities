@@ -161,20 +161,20 @@ The sync:
 - Use `--purge` to delete all Aladtec-categorized events
 - Use `--load-schedule` to skip Aladtec fetch and use cached schedule data
 
-### MCP Server (Remote, for Claude.ai)
+### Ops Server (Remote, for Claude.ai)
 
-Remote MCP server providing fire district tools to Claude.ai. Deployed on Azure Container Apps at `mcp.sjifire.org`. Users connect by adding the integration URL in Claude.ai Settings → Integrations.
+Operations platform (dashboard, incident reports, chat assistant) with MCP tools for Claude.ai. Deployed on Azure Container Apps at `ops.sjifire.org`. Users connect by adding the integration URL in Claude.ai Settings → Integrations.
 
 **Run locally (dev mode, no auth):**
 ```bash
-uv run mcp-server
+uv run ops-server
 ```
 
 **Deploy to Azure (dev):**
 ```bash
-./scripts/deploy-mcp.sh              # Build & deploy
-./scripts/deploy-mcp.sh --build-only # Build image only
-./scripts/deploy-mcp.sh --health     # Health check only
+./scripts/deploy-ops.sh              # Build & deploy
+./scripts/deploy-ops.sh --build-only # Build image only
+./scripts/deploy-ops.sh --health     # Health check only
 ```
 
 **Available tools for Claude.ai users:**
@@ -187,17 +187,17 @@ uv run mcp-server
 
 **Setup guide for end users:** See `docs/mcp-setup-guide.md`
 
-**Infrastructure setup:** See `scripts/setup-azure.sh` (one-time provisioning of ACR, Container Apps, Cosmos DB, Entra app registration, custom domain)
+**Infrastructure setup:** See `scripts/setup-azure-ops.sh` (one-time provisioning of ACR, Container Apps, Cosmos DB, Entra app registration, custom domain)
 
 #### Incident Report Assistant
 
-The MCP server powers a guided incident reporting workflow through Claude.ai. Users connect with their `@sjifire.org` Entra ID account and Claude walks them through completing NERIS-compliant reports — pulling dispatch data, crew schedules, and suggesting valid NERIS codes automatically.
+The ops server powers a guided incident reporting workflow through Claude.ai. Users connect with their `@sjifire.org` Entra ID account and Claude walks them through completing NERIS-compliant reports — pulling dispatch data, crew schedules, and suggesting valid NERIS codes automatically.
 
 **Setup (Pro plan — per user):**
 
 1. Each user needs a [Claude Pro](https://claude.ai/upgrade) subscription ($20/month)
 2. In Claude.ai, go to **Settings → Integrations → Add Integration**
-3. Enter the MCP server URL: `https://mcp.sjifire.org/mcp`
+3. Enter the server URL: `https://ops.sjifire.org/mcp`
 4. Sign in with your `@sjifire.org` Microsoft account
 5. Start a new chat — the integration provides prompts, resources, and tools automatically
 6. Select the **Operations Dashboard** prompt, or say "I need to write a report"
@@ -324,8 +324,8 @@ Runs every 30 minutes:
 - `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
 - `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
 
-### MCP Deploy (mcp-deploy.yml)
-Runs on push to main (paths: `src/sjifire/mcp/**`, `Dockerfile`, `pyproject.toml`):
+### Ops Deploy (ops-deploy.yml)
+Runs on push to main (paths: `src/sjifire/ops/**`, `Dockerfile`, `pyproject.toml`):
 - Builds Docker image via ACR
 - Configures Key Vault secret references
 - Deploys to Container Apps
@@ -411,7 +411,7 @@ src/sjifire/
 │   ├── models.py          # OnDutyEvent, SyncResult dataclasses
 │   ├── duty_sync.py       # DutyCalendarSync for shared mailbox
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
-├── mcp/               # Remote MCP server for Claude.ai
+├── ops/               # Operations server (dashboard, reports, MCP tools)
 │   ├── server.py          # FastMCP app, OAuth auth, tool registration
 │   ├── auth.py            # Entra JWT validation, EasyAuth header parsing, UserContext
 │   ├── oauth_provider.py  # OAuth proxy: Claude.ai ↔ Entra ID

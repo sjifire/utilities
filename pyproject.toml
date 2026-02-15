@@ -38,7 +38,7 @@ compare-groups = "sjifire.scripts.compare_group_memberships:main"
 m365-group-scan = "sjifire.scripts.m365_group_scan:main"
 duty-calendar-sync = "sjifire.scripts.duty_calendar_sync:main"
 personal-calendar-sync = "sjifire.scripts.personal_calendar_sync:main"
-mcp-server = "sjifire.mcp.server:main"
+ops-server = "sjifire.ops.server:main"
 backup-cosmos = "sjifire.scripts.backup_cosmos:main"
 generate-neris-reference = "sjifire.scripts.generate_neris_reference:main"
 
@@ -88,10 +88,10 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"src/sjifire/mcp/incidents/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
-"src/sjifire/mcp/dispatch/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
-"src/sjifire/mcp/token_store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
-"src/sjifire/mcp/server.py" = ["S104"]  # Binding to 0.0.0.0 is intentional for container
+"src/sjifire/ops/incidents/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
+"src/sjifire/ops/dispatch/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
+"src/sjifire/ops/token_store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
+"src/sjifire/ops/server.py" = ["S104"]  # Binding to 0.0.0.0 is intentional for container
 "src/sjifire/scripts/*.py" = ["T201"]  # CLI scripts use print for output
 "scripts/*.py" = ["T201"]  # Utility scripts use print for output
 "tests/**/*.py" = ["S101", "S105", "S106", "D101", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords, skip docstrings, allow long lines

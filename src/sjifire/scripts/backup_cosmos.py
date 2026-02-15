@@ -31,7 +31,7 @@ async def _backup_incidents(output_dir: Path, timestamp: str) -> int:
     Returns:
         Number of documents exported
     """
-    from sjifire.mcp.incidents.store import IncidentStore
+    from sjifire.ops.incidents.store import IncidentStore
 
     async with IncidentStore() as store:
         docs = await store.list_all()
@@ -50,7 +50,7 @@ async def _backup_dispatch(output_dir: Path, timestamp: str) -> int:
     Returns:
         Number of documents exported
     """
-    from sjifire.mcp.dispatch.store import DispatchStore
+    from sjifire.ops.dispatch.store import DispatchStore
 
     async with DispatchStore() as store:
         docs = await store.list_all()

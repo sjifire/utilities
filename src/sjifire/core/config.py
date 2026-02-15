@@ -3,6 +3,7 @@
 import json
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -308,3 +309,13 @@ def get_timezone() -> ZoneInfo:
 def get_timezone_name() -> str:
     """Get organization timezone name string (e.g. 'America/Los_Angeles')."""
     return get_org_config().timezone
+
+
+def local_now() -> datetime:
+    """Get the current datetime in the organization's configured timezone.
+
+    Use this instead of ``datetime.now()`` or ``date.today()`` in server
+    code — the container runs in UTC, so bare calls return the wrong
+    date/time after 4 PM Pacific.
+    """
+    return datetime.now(get_timezone())

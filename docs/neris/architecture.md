@@ -2,7 +2,7 @@
 
 ## Overview
 
-Claude-powered incident reporting via Claude.ai connected to the SJI Fire MCP server.
+Claude-powered incident reporting via Claude.ai connected to the SJI Fire ops server.
 Authenticated via Entra ID (group-gated). Stores in Cosmos DB, submits to NERIS API.
 
 ## Architecture
@@ -11,7 +11,7 @@ Claude.ai is the frontend — no custom SPA needed. The MCP server provides
 tools that Claude uses to manage incidents through natural conversation.
 
 ```
-Claude.ai  ←→  MCP Server (OAuth AS)  ←→  Entra ID (user login)
+Claude.ai  ←→  Ops Server (OAuth AS)  ←→  Entra ID (user login)
                     ↕                           ↕
                Cosmos DB                   Graph API
              (incidents,                  (personnel,
@@ -21,7 +21,7 @@ Claude.ai  ←→  MCP Server (OAuth AS)  ←→  Entra ID (user login)
 ```
 
 - **Frontend**: Claude.ai with MCP integration (no custom UI)
-- **Backend**: MCP server on Azure Container Apps (scales to zero)
+- **Backend**: Ops server on Azure Container Apps (scales to zero)
 - **Database**: Azure Cosmos DB (NoSQL, serverless) — incidents, schedules, dispatch calls, OAuth tokens
 - **Auth**: Entra ID → MCP OAuth proxy → Claude.ai (Dynamic Client Registration)
 - **RBAC**: Officer group (`MCP Incident Officers`) gates submit and view-all

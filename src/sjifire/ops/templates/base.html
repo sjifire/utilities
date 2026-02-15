@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SJIF&amp;R{% endblock %}</title>
+  <meta name="view-transition" content="same-origin">
+  {% block head_scripts %}
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
+  {% endblock %}
+  <style>
+    /* Alpine cloak */
+    [x-cloak] { display: none !important; }
+
+    /* Reset */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Design Tokens ── */
+    :root {
+      /* Borders */
+      --border-subtle: rgba(255, 255, 255, .04);
+      --border-default: rgba(255, 255, 255, .06);
+      --border-medium: rgba(255, 255, 255, .08);
+      --border-strong: rgba(255, 255, 255, .1);
+
+      /* Core colors */
+      --color-red: #dc2626;
+      --color-green: #4ade80;
+      --color-blue: #60a5fa;
+      --color-amber: #fbbf24;
+      --color-amber-dark: #f59e0b;
+      --color-purple: #c084fc;
+      --color-gray: #6b7280;
+      --color-error: #f87171;
+
+      /* Backgrounds */
+      --bg-page: #0c1829;
+      --bg-panel: #162033;
+      --bg-panel-alt: #1a2744;
+
+      /* Text */
+      --text-primary: #fff;
+      --text-secondary: #e2e8f0;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --text-faint: #475569;
+
+      /* Color alphas */
+      --blue-alpha: rgba(96, 165, 250, .12);
+      --amber-alpha: rgba(245, 158, 11, .12);
+      --green-alpha: rgba(34, 197, 94, .15);
+      --red-alpha: rgba(220, 38, 38, .15);
+      --purple-alpha: rgba(192, 132, 252, .12);
+    }
+
+    /* ── Base ── */
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: var(--bg-page);
+      font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+      color: var(--text-secondary);
+    }
+
+    /* ── Page Header ── */
+    .page-header {
+      background: linear-gradient(135deg, #0f2240, #1a3a5c);
+      border-bottom: 3px solid var(--color-red);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      view-transition-name: header;
+    }
+    .page-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+    .page-header h1 {
+      font-size: 20px;
+      color: var(--text-primary);
+      font-weight: 700;
+      letter-spacing: .02em;
+      line-height: 1.2;
+    }
+    .subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-top: 2px;
+    }
+    .page-header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .page-header-nav {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .nav-status-date {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    /* ── Status Pill ── */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .4; }
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 20px;
+      padding: 3px 12px;
+      border: 1px solid;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status-pill.ok {
+      background: var(--green-alpha);
+      border-color: rgba(34, 197, 94, .3);
+      color: var(--color-green);
+    }
+    .status-pill.ok .pulse-dot { background: var(--color-green); }
+    .status-pill.active {
+      background: var(--red-alpha);
+      border-color: rgba(220, 38, 38, .3);
+      color: var(--color-error);
+    }
+    .status-pill.active .pulse-dot { background: var(--color-error); }
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    /* ── View Transitions — header & tabs stay put, content crossfades ── */
+    ::view-transition-old(header),
+    ::view-transition-new(header) { animation: none; }
+    ::view-transition-old(tabs),
+    ::view-transition-new(tabs) { animation: none; }
+
+    /* ── Nav Bar (page-specific tabs) ── */
+    .nav-bar {
+      background: #111d32;
+      border-bottom: 1px solid var(--border-default);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      view-transition-name: tabs;
+    }
+    .nav-bar-left {
+      display: flex;
+      gap: 0;
+      overflow-x: auto;
+    }
+    .nav-bar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .nav-tab {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-dim);
+      padding: 12px 20px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      white-space: nowrap;
+    }
+    .nav-tab:hover { color: var(--text-muted); }
+    .nav-tab.active {
+      border-bottom-color: var(--color-red);
+      color: var(--text-primary);
+    }
+    .nav-page-link {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 6px;
+      transition: color .15s, background .15s;
+    }
+    .nav-page-link:hover {
+      color: var(--text-secondary);
+      background: rgba(255, 255, 255, .05);
+    }
+    .nav-page-link.active {
+      color: var(--color-blue);
+      background: var(--blue-alpha);
+    }
+
+    /* ── Panels ── */
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border-default);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* ── Stat Cards ── */
+    .stat-card {
+      background: linear-gradient(135deg, var(--bg-panel), var(--bg-panel-alt));
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      padding: 20px 18px;
+      border-left: 3px solid;
+    }
+    .stat-card.accent-green  { border-left-color: var(--color-green); }
+    .stat-card.accent-blue   { border-left-color: var(--color-blue); }
+    .stat-card.accent-amber  { border-left-color: var(--color-amber-dark); }
+    .stat-card.accent-purple { border-left-color: var(--color-purple); }
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .stat-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1;
+    }
+    .stat-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    /* ── Data Tables ── */
+    .data-table-wrap { overflow-x: auto; }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .data-table thead tr { border-bottom: 1px solid var(--border-medium); }
+    .data-table tbody tr { border-bottom: 1px solid var(--border-subtle); }
+    .data-table tbody tr:nth-child(even) { background: rgba(255, 255, 255, .015); }
+    .data-table th {
+      padding: 10px 14px;
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-weight: 600;
+      white-space: nowrap;
+      text-align: left;
+    }
+    .data-table td { padding: 12px 14px; }
+
+    /* ── Badges ── */
+    .badge {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-weight: 600;
+      background: var(--blue-alpha);
+      color: var(--color-blue);
+    }
+    .badge.amber { background: var(--amber-alpha); color: var(--color-amber); }
+    .badge.green { background: var(--green-alpha); color: var(--color-green); }
+    .badge[data-p="Captain"]    { background: var(--red-alpha); color: var(--color-error); }
+    .badge[data-p="Lieutenant"] { background: var(--amber-alpha); color: var(--color-amber); }
+    .badge[data-p="Chief"]      { background: var(--purple-alpha); color: var(--color-purple); }
+
+    /* ── Severity Dots ── */
+    .severity-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .severity-dot.high   { background: var(--color-red); }
+    .severity-dot.medium { background: var(--color-amber-dark); }
+    .severity-dot.low    { background: var(--color-gray); }
+    .dot-cell { width: 30px; }
+
+    /* ── Action Buttons ── */
+    .action-btn {
+      font-size: 11px;
+      padding: 5px 14px;
+      border-radius: 4px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid;
+      text-decoration: none;
+      display: inline-block;
+      text-align: center;
+      min-width: 100px;
+    }
+    .action-btn.start {
+      background: rgba(245, 158, 11, .15);
+      color: var(--color-amber);
+      border-color: rgba(245, 158, 11, .3);
+    }
+    .action-btn.start:hover { background: rgba(245, 158, 11, .25); }
+    .action-btn.edit {
+      background: var(--blue-alpha);
+      color: var(--color-blue);
+      border-color: rgba(96, 165, 250, .3);
+    }
+    .action-btn.edit:hover { background: rgba(96, 165, 250, .2); }
+    .action-btn.view {
+      background: var(--green-alpha);
+      color: var(--color-green);
+      border-color: rgba(34, 197, 94, .3);
+    }
+    .action-btn.view:hover { background: rgba(34, 197, 94, .25); }
+    .action-btn.import {
+      background: var(--purple-alpha);
+      color: var(--color-purple);
+      border-color: rgba(192, 132, 252, .3);
+    }
+    .action-btn.import:hover { background: rgba(192, 132, 252, .25); }
+
+    /* ── Report Status ── */
+    .report-status { font-size: 11px; font-weight: 600; }
+    .report-status.neris   { color: var(--color-green); }
+    .report-status.local   { color: var(--color-blue); }
+    .report-status.missing { color: var(--color-amber); }
+
+    /* ── Text Colors ── */
+    .text-green { color: var(--color-green); }
+    .text-amber { color: var(--color-amber); }
+    .text-blue  { color: var(--color-blue); }
+
+    /* ── Empty State ── */
+    .empty-state {
+      padding: 32px 18px;
+      text-align: center;
+      color: var(--text-faint);
+      font-size: 13px;
+    }
+    .empty-state h2 {
+      color: var(--text-muted);
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
+    .empty-state p { font-size: 14px; }
+
+    /* ── Utilities ── */
+    .mono         { font-family: monospace; }
+    .nowrap       { white-space: nowrap; }
+    .font-semibold { font-weight: 600; }
+    .font-bold    { font-weight: 700; }
+    .uppercase    { text-transform: uppercase; letter-spacing: .08em; }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .page-header      { padding: 12px; }
+      .page-header-right { gap: 8px; }
+      .page-header-nav  { gap: 2px; }
+      .nav-page-link    { font-size: 11px; padding: 4px 8px; }
+      .nav-bar          { padding: 0 12px; }
+      .nav-tab          { padding: 12px 14px; font-size: 11px; }
+      .nav-status-date    { display: none; }
+      .nav-bar-right      { gap: 6px; }
+
+      /* Compact stat cards */
+      .stats-compact { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+      .stats-compact .stat-card { padding: 12px 10px; }
+      .stats-compact .stat-value { font-size: 22px; }
+      .stats-compact .stat-label { font-size: 10px; margin-bottom: 4px; }
+      .stats-compact .stat-desc { display: none; }
+
+      /* Table → card layout on mobile */
+      .data-table.mobile-cards thead { display: none; }
+      .data-table.mobile-cards,
+      .data-table.mobile-cards tbody,
+      .data-table.mobile-cards tr,
+      .data-table.mobile-cards td { display: block; }
+      .data-table.mobile-cards tr {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border-default);
+        position: relative;
+      }
+      .data-table.mobile-cards td { padding: 0; border: none; }
+      .data-table.mobile-cards td.dot-cell {
+        position: absolute; top: 14px; left: 14px; width: auto;
+      }
+      .data-table.mobile-cards .mobile-hide { display: none; }
+      .action-btn { min-width: 0; }
+    }
+  </style>
+  {% block extra_styles %}{% endblock %}
+</head>
+<body {% block body_attrs %}{% endblock %}>
+  {% block header %}
+  <header class="page-header">
+    <a href="/dashboard" class="page-header-left" style="text-decoration:none">
+      <img src="https://res.cloudinary.com/san-juan-fire-district-3/image/fetch/f_auto/https://www.sjifire.org/assets/sjifire-logo-clear.png" alt="SJIF&amp;R" style="height:44px;width:44px;border-radius:4px">
+      <div>
+        <h1>SJIF&amp;R</h1>
+        <div class="subtitle">San Juan Island Fire &amp; Rescue</div>
+      </div>
+    </a>
+    <div class="page-header-right">
+      <nav class="page-header-nav">
+        <a href="/dashboard" class="nav-page-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
+        <a href="/reports" class="nav-page-link {% if active_page == 'reports' %}active{% endif %}">Reports</a>
+      </nav>
+    </div>
+  </header>
+  {% endblock %}
+  {% block tab_bar %}{% endblock %}
+  {% block body %}{% endblock %}
+  <script>
+  /** Sync an Alpine tab/filter variable with location.hash. */
+  function hashTab(validTabs, defaultTab) {
+    const h = location.hash.slice(1);
+    return {
+      _tab: validTabs.includes(h) ? h : defaultTab,
+      get activeTab() { return this._tab; },
+      set activeTab(v) { this._tab = v; location.hash = v; },
+      init() {
+        window.addEventListener('hashchange', () => {
+          const t = location.hash.slice(1);
+          if (validTabs.includes(t)) this._tab = t;
+        });
+      }
+    };
+  }
+
+  function headerStatus() {
+    return {
+      date_display: '', open_calls: 0, loaded: false,
+      async init() {
+        try {
+          const r = await fetch('/dashboard/data');
+          if (r.ok) {
+            const d = await r.json();
+            this.date_display = d.date_display || '';
+            this.open_calls = d.open_calls || 0;
+            this.loaded = true;
+          }
+        } catch(e) { /* silent */ }
+        setInterval(() => this.pollOpenCalls(), 5000);
+      },
+      async pollOpenCalls() {
+        try {
+          const r = await fetch('/api/open-calls');
+          if (r.ok) {
+            const d = await r.json();
+            this.open_calls = d.open_calls || 0;
+            this.loaded = true;
+          }
+        } catch(e) { /* silent */ }
+      }
+    };
+  }
+  </script>
+  {% block body_scripts %}{% endblock %}
+</body>
+</html>
