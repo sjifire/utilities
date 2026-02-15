@@ -482,6 +482,7 @@ function chatApp() {
       }
       this.streaming = false;
       this.scrollToBottom();
+      this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
     },
 
     handleEvent(type, data) {

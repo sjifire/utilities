@@ -378,13 +378,68 @@
 
     /* ── Reports responsive ── */
     @media (max-width: 768px) {
-      .reports-main { padding: 16px; }
-      .reports-stats { grid-template-columns: 1fr; }
-      .data-table th:nth-child(n+5),
-      .data-table td:nth-child(n+5) { display: none; }
+      .reports-main { padding: 12px; }
+      .reports-stats { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+      .reports-stats .stat-card { padding: 12px 10px; }
+      .reports-stats .stat-value { font-size: 22px; }
+      .reports-stats .stat-label { font-size: 10px; margin-bottom: 4px; }
+      .reports-stats .stat-desc { display: none; }
+
+      /* Switch table to card layout */
+      .data-table thead { display: none; }
+      .data-table, .data-table tbody, .data-table tr, .data-table td {
+        display: block;
+      }
+      .data-table tr {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border-default);
+        position: relative;
+      }
+      .data-table td { padding: 0; border: none; }
+      .data-table td.dot-cell {
+        position: absolute;
+        top: 14px;
+        left: 14px;
+        width: auto;
+      }
+      .data-table td.call-id { display: none; }
+      .data-table td:nth-child(3) { /* date/time */
+        font-size: 11px;
+        color: var(--text-dim);
+        margin-bottom: 2px;
+        padding-left: 18px;
+      }
+      .data-table td:nth-child(3) .dt-time { display: inline; }
+      .data-table td:nth-child(3) .dt-time::before { content: ' \b7 '; }
+      .data-table td:nth-child(4) { /* nature */
+        padding-left: 18px;
+        margin-bottom: 2px;
+      }
+      .data-table td:nth-child(4) .nature { font-size: 14px; }
+      .data-table td.address {
+        padding-left: 18px;
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+      .data-table td:nth-child(6) { /* status */
+        display: inline-block;
+      }
+      .data-table td:nth-child(7) { /* action */
+        display: inline-block;
+        float: right;
+      }
+      .action-btn { min-width: 0; font-size: 11px; padding: 4px 10px; }
+
       .help-row { flex-direction: column; gap: 6px; }
       .help-label { min-width: 0; }
-      .chat-drawer { width: calc(100vw - 16px); right: 8px; bottom: 8px; height: 70vh; }
+      .chat-drawer {
+        width: 100vw;
+        height: 100vh;
+        right: 0;
+        bottom: 0;
+        border-radius: 0;
+        border: none;
+      }
       .chat-fab { bottom: 16px; right: 16px; }
     }
 </style>
@@ -843,6 +898,7 @@ function reportsApp() {
       }
       this.chatStreaming = false;
       this.chatScrollToBottom();
+      this.$nextTick(() => { if (this.$refs.chatInput) this.$refs.chatInput.focus(); });
     },
 
     handleChatEvent(type, data) {
