@@ -8,7 +8,6 @@ persistence in Cosmos DB.
 import asyncio
 import json
 import logging
-import os
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -16,6 +15,7 @@ from pathlib import Path
 
 from anthropic import AsyncAnthropic, RateLimitError
 
+from sjifire.core.anthropic import MODEL, cached_system, get_client
 from sjifire.core.config import get_org_config, local_now
 from sjifire.ops.auth import UserContext
 from sjifire.ops.chat.budget import check_budget, record_usage
@@ -29,8 +29,6 @@ from sjifire.ops.chat.tools import (
 )
 
 logger = logging.getLogger(__name__)
-
-MODEL = "claude-sonnet-4-5-20250929"
 MAX_RESPONSE_TOKENS = 4096
 MAX_CONTEXT_MESSAGES = 20  # Keep last N turns to stay under token limits
 RATE_LIMIT_MAX_RETRIES = 3
@@ -167,6 +165,70 @@ before saving.
     return "\n\n".join(sections)
 
 
+def _format_unit_times_table(
+    unit_times: list[dict],
+    time_reported: str = "",
+) -> str:
+    """Format unit response times as a readable table for the system prompt.
+
+    Two sections:
+    1. **Incident timestamps** — derived from earliest unit times plus
+       time_reported. Maps to ``update_incident(timestamps={...})``.
+    2. **Per-unit times** — each apparatus with key timestamps for review.
+       Maps to ``update_incident(unit_responses=[...])``.
+    """
+
+    def _time(iso: str) -> str:
+        """Extract HH:MM:SS from an ISO timestamp, or '--' if empty."""
+        if not iso:
+            return "--"
+        if "T" in iso:
+            iso = iso.split("T", 1)[1]
+        for sep in ("+", "Z"):
+            if sep in iso:
+                iso = iso.split(sep, 1)[0]
+        return iso[:8]
+
+    def _earliest(field: str) -> str:
+        """Find the earliest non-empty value for a field across all units."""
+        values = [ut.get(field, "") for ut in unit_times if ut.get(field)]
+        return min(values) if values else ""
+
+    def _latest(field: str) -> str:
+        """Find the latest non-empty value for a field across all units."""
+        values = [ut.get(field, "") for ut in unit_times if ut.get(field)]
+        return max(values) if values else ""
+
+    # --- Incident-level timestamps (→ update_incident timestamps={}) ---
+    lines = [
+        "INCIDENT TIMESTAMPS (save via timestamps={...}):",
+        f"  Call Received (psap_answer):       {_time(time_reported)}",
+        f"  First Dispatched (first_unit_dispatched): {_time(_earliest('paged'))}",
+        f"  First Enroute (first_unit_enroute):    {_time(_earliest('enroute'))}",
+        f"  First On Scene (first_unit_arrived):   {_time(_earliest('arrived'))}",
+        f"  Last Unit Cleared (last_unit_cleared):  {_time(_latest('completed'))}",
+        f"  Last In Quarters (last_unit_in_quarters): {_time(_latest('in_quarters'))}",
+    ]
+
+    # --- Per-unit times (→ update_incident unit_responses=[]) ---
+    lines.append("")
+    lines.append("UNIT RESPONSE TIMES (save via unit_responses=[...]):")
+    lines.append("(-- = missing, needs to be filled in or confirmed N/A)")
+    header = "Unit     | Dispatched | Enroute  | On Scene | Cleared  | In Quarters"
+    divider = "---------|------------|----------|----------|----------|------------"
+    lines.extend([header, divider])
+    for ut in unit_times:
+        unit = (ut.get("unit") or "?").ljust(8)
+        paged = _time(ut.get("paged", "")).ljust(10)
+        enroute = _time(ut.get("enroute", "")).ljust(8)
+        arrived = _time(ut.get("arrived", "")).ljust(8)
+        completed = _time(ut.get("completed", "")).ljust(8)
+        in_quarters = _time(ut.get("in_quarters", ""))
+        lines.append(f"{unit} | {paged} | {enroute} | {arrived} | {completed} | {in_quarters}")
+
+    return "\n".join(lines)
+
+
 def _trim_messages(messages: list[dict]) -> list[dict]:
     """Keep only the last MAX_CONTEXT_MESSAGES turns to stay under token limits."""
     if len(messages) <= MAX_CONTEXT_MESSAGES * 2:
@@ -240,7 +302,27 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
             async with DispatchStore() as dstore:
                 dispatch = await dstore.get_by_dispatch_id(doc.incident_number)
             if dispatch:
-                dispatch_json = json.dumps(dispatch.to_dict(), indent=2, default=str)
+                # Slim dispatch: drop raw radio log (~8K chars) and redundant fields.
+                # The agent has get_dispatch_call if it needs full details.
+                slim: dict = {
+                    "id": dispatch.id,
+                    "nature": dispatch.nature,
+                    "address": dispatch.address,
+                    "time_reported": dispatch.time_reported,
+                    "geo_location": dispatch.geo_location,
+                    "cad_comments": dispatch.cad_comments,
+                }
+                if dispatch.analysis:
+                    analysis = dispatch.analysis
+                    # Include analysis fields minus unit_times (formatted separately)
+                    analysis_dict = analysis.model_dump(mode="json")
+                    unit_times = analysis_dict.pop("unit_times", [])
+                    slim["analysis"] = analysis_dict
+                    # Format unit_times as a readable table for easy review
+                    if unit_times:
+                        tr = dispatch.time_reported.isoformat() if dispatch.time_reported else ""
+                        slim["unit_times_table"] = _format_unit_times_table(unit_times, tr)
+                dispatch_json = json.dumps(slim, indent=2, default=str)
                 if dispatch.time_reported:
                     incident_hour = dispatch.time_reported.hour
         except Exception:
@@ -361,7 +443,7 @@ async def stream_chat(
     total_input = 0
     total_output = 0
 
-    client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    client = get_client()
 
     try:
         async for event_str in _stream_loop(
@@ -432,7 +514,7 @@ async def _stream_loop(
                 async with client.messages.stream(
                     model=MODEL,
                     max_tokens=MAX_RESPONSE_TOKENS,
-                    system=system_prompt,
+                    system=cached_system(system_prompt),
                     messages=api_messages,
                     tools=TOOL_SCHEMAS,
                 ) as stream:
@@ -476,6 +558,7 @@ async def _stream_loop(
                     if final_message.usage:
                         input_tokens = final_message.usage.input_tokens
                         output_tokens = final_message.usage.output_tokens
+                        _log_cache_stats(final_message.usage)
                 break  # Success — exit retry loop
             except RateLimitError:
                 if attempt < RATE_LIMIT_MAX_RETRIES - 1:
@@ -518,7 +601,9 @@ async def _stream_loop(
             *(execute_tool(tc["name"], tc["input"], user) for tc in tool_calls)
         )
 
-        tool_results: list[dict] = []
+        # Build full results for current API round and summaries for history
+        full_tool_results: list[dict] = []
+        summary_tool_results: list[dict] = []
         for tc, result_str in zip(tool_calls, result_strs, strict=True):
             try:
                 result_data = json.loads(result_str)
@@ -528,20 +613,27 @@ async def _stream_loop(
 
             yield _sse("tool_result", {"name": tc["name"], "summary": summary})
 
-            tool_results.append(
+            full_tool_results.append(
                 {
                     "type": "tool_result",
                     "tool_use_id": tc["id"],
                     "content": result_str,
                 }
             )
+            summary_tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tc["id"],
+                    "content": summary,
+                }
+            )
 
-        # Record tool results as a message
+        # Store summaries in conversation history (future turns get slim results)
         conversation.messages.append(
             ConversationMessage(
                 role="user",
                 content="",
-                tool_results=tool_results,
+                tool_results=summary_tool_results,
             )
         )
 
@@ -556,8 +648,8 @@ async def _stream_loop(
         )
         api_messages.append({"role": "assistant", "content": assistant_content})
 
-        # Tool results as user message
-        api_messages.append({"role": "user", "content": tool_results})
+        # Current turn uses full results for accurate tool-use reasoning
+        api_messages.append({"role": "user", "content": full_tool_results})
 
     # If we exhausted tool rounds
     logger.warning("Chat hit max tool rounds for incident %s", conversation.incident_id)
@@ -728,7 +820,7 @@ async def stream_general_chat(
     total_input = 0
     total_output = 0
 
-    client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    client = get_client()
 
     try:
         async for event_str in _stream_general_loop(
@@ -788,7 +880,7 @@ async def _stream_general_loop(
                 async with client.messages.stream(
                     model=MODEL,
                     max_tokens=MAX_RESPONSE_TOKENS,
-                    system=system_prompt,
+                    system=cached_system(system_prompt),
                     messages=api_messages,
                     tools=GENERAL_TOOL_SCHEMAS,
                 ) as stream:
@@ -831,6 +923,7 @@ async def _stream_general_loop(
                     if final_message.usage:
                         input_tokens = final_message.usage.input_tokens
                         output_tokens = final_message.usage.output_tokens
+                        _log_cache_stats(final_message.usage)
                 break  # Success — exit retry loop
             except RateLimitError:
                 if attempt < RATE_LIMIT_MAX_RETRIES - 1:
@@ -869,7 +962,8 @@ async def _stream_general_loop(
             *(execute_general_tool(tc["name"], tc["input"], user) for tc in tool_calls)
         )
 
-        tool_results: list[dict] = []
+        full_tool_results: list[dict] = []
+        summary_tool_results: list[dict] = []
         for tc, result_str in zip(tool_calls, result_strs, strict=True):
             try:
                 result_data = json.loads(result_str)
@@ -879,19 +973,27 @@ async def _stream_general_loop(
 
             yield _sse("tool_result", {"name": tc["name"], "summary": summary})
 
-            tool_results.append(
+            full_tool_results.append(
                 {
                     "type": "tool_result",
                     "tool_use_id": tc["id"],
                     "content": result_str,
                 }
             )
+            summary_tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tc["id"],
+                    "content": summary,
+                }
+            )
 
+        # Store summaries in conversation history (future turns get slim results)
         conversation.messages.append(
             ConversationMessage(
                 role="user",
                 content="",
-                tool_results=tool_results,
+                tool_results=summary_tool_results,
             )
         )
 
@@ -903,6 +1005,22 @@ async def _stream_general_loop(
             for tc in tool_calls
         )
         api_messages.append({"role": "assistant", "content": assistant_content})
-        api_messages.append({"role": "user", "content": tool_results})
+        # Current turn uses full results for accurate tool-use reasoning
+        api_messages.append({"role": "user", "content": full_tool_results})
 
     logger.warning("General chat hit max tool rounds for %s", user.email)
+
+
+def _log_cache_stats(usage: object) -> None:
+    """Log prompt cache performance metrics if available."""
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    cache_create = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    if cache_read or cache_create:
+        input_tokens = getattr(usage, "input_tokens", 0) or 0
+        logger.info(
+            "Cache: %d read, %d created, %d uncached (of %d total input)",
+            cache_read,
+            cache_create,
+            input_tokens - cache_read - cache_create,
+            input_tokens,
+        )

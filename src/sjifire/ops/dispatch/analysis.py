@@ -61,7 +61,6 @@ def _build_prompt(doc: DispatchCallDocument, crew_context: str = "") -> str:
 
 
 _azure_client = None
-_anthropic_client = None
 
 
 def _get_azure_client():
@@ -76,16 +75,6 @@ def _get_azure_client():
             api_version="2024-10-21",
         )
     return _azure_client
-
-
-def _get_anthropic_client():
-    """Get or create a reusable Anthropic client."""
-    global _anthropic_client
-    if _anthropic_client is None:
-        from anthropic import AsyncAnthropic
-
-        _anthropic_client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    return _anthropic_client
 
 
 async def _call_azure_openai(system: str, user_prompt: str) -> str:
@@ -107,12 +96,14 @@ async def _call_azure_openai(system: str, user_prompt: str) -> str:
 
 async def _call_anthropic(system: str, user_prompt: str) -> str:
     """Call Anthropic Claude with JSON output."""
-    client = _get_anthropic_client()
+    from sjifire.core.anthropic import MODEL, cached_system, get_client
+
+    client = get_client()
 
     response = await client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model=MODEL,
         max_tokens=10_280,
-        system=system,
+        system=cached_system(system),
         messages=[{"role": "user", "content": user_prompt}],
     )
     return response.content[0].text.strip()

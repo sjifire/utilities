@@ -93,7 +93,54 @@ If you're unsure, present the top-level categories and drill down:
 
 You can select up to 3 incident types (1 primary + 2 additional).
 
-### Step 4 — Actions Taken
+### Step 4 — Units, Times & Crew
+
+This step combines units, response times, and crew assignments — the core of the NERIS resources section. The dispatch data has most of this already.
+
+**4a — Responding Units & Times**
+
+Present the unit response timeline from dispatch data (`analysis.unit_times`). Show each unit with its timestamps:
+
+> Here are the responding units and their times from dispatch:
+>
+> | Unit | Dispatched | Enroute | On Scene | Cleared | In Quarters |
+> |------|-----------|---------|----------|---------|-------------|
+> | E31  | 14:30:15  | 14:31:02 | 14:38:45 | 15:22:00 | 15:35:00 |
+> | BN31 | 14:30:15  | 14:32:10 | 14:40:12 | 15:18:00 | 15:30:00 |
+> | M31  | 14:30:15  | 14:31:30 | 14:39:00 | 15:10:00 | --        |
+>
+> Do these look right? Any corrections?
+
+Save unit times via `update_incident(unit_responses=[...])` and the incident-level timestamps (earliest dispatched, first enroute, first on scene, last cleared) via `update_incident(timestamps={...})`.
+
+For fire incidents, also ask about: water on fire, fire under control, fire knocked down, primary search times.
+
+**4b — Crew Per Unit**
+
+Using the on-duty schedule, assign personnel to each responding unit. Present grouped by unit:
+
+> Based on the on-duty schedule, here's who I have for each unit:
+>
+> - **E31**: Smith (Captain), Jones (FF), Garcia (EMT)
+> - **BN31**: Dodd (Battalion Chief)
+> - **M31**: Williams (Paramedic)
+>
+> Does this look right?
+
+Save crew via `update_incident(crew=[{name, email, rank, position, unit}, ...])`. Each person needs a `unit` assignment.
+
+**4c — Additional Responders**
+
+Ask about anyone not on the schedule who responded:
+
+> Was anyone else on scene? For example:
+> - Off-duty personnel who responded?
+> - Mutual aid units from other agencies?
+> - Volunteers or other support?
+
+Add any additional responders to the crew list with their unit. For mutual aid, include the agency in the unit name (e.g., "E34-OIFR").
+
+### Step 5 — Actions Taken
 
 Ask what the crew did. Based on the incident type, suggest likely actions:
 
@@ -107,39 +154,14 @@ Ask what the crew did. Based on the incident type, suggest likely actions:
 
 Use `get_neris_values("action_tactic", prefix="EMERGENCY_MEDICAL_CARE||")` to show medical-specific options, etc.
 
-### Step 5 — Location Details
+### Step 6 — Location Details
 
 You already have the address from dispatch. Confirm and fill in:
 - **Location use type** — Ask: "What type of building/location was this?" and suggest based on address (residential street → single family dwelling, commercial area → office/retail, etc.)
 - **Lat/long** — From dispatch geo_location if available
 - **Cross streets** — Ask if not obvious
 
-### Step 6 — Incident Times
-
-Walk through the key timestamps. Many may be available from dispatch unit response data:
-
-> I have these times from dispatch:
-> - **Dispatch**: 14:30:15
-> - **Enroute** (E31): 14:31:02
-> - **On scene** (E31): 14:38:45
->
-> I still need:
-> - When was the incident cleared?
-> - Was incident command established? If so, when?
-
-For fire incidents, also ask about: water on fire, fire under control, fire knocked down, primary search times.
-
-### Step 7 — Resources
-
-Confirm units and personnel from the schedule data:
-
-> Based on the schedule, your crew was:
-> - **E31**: Smith (Captain), Jones (FF), Garcia (EMT)
-> - **M31**: Williams (Paramedic)
->
-> Was anyone else on scene? Any mutual aid units?
-
-### Step 8 — Narrative
+### Step 7 — Narrative
 
 Help draft the outcome narrative based on everything collected:
 
@@ -151,7 +173,7 @@ Help draft the outcome narrative based on everything collected:
 
 Also ask about impediments if relevant (access issues, weather, etc.).
 
-### Step 9 — Conditional Sections
+### Step 8 — Conditional Sections
 
 Based on incident type, ask about applicable sections:
 
@@ -172,7 +194,7 @@ Based on incident type, ask about applicable sections:
 **Rescue incidents:**
 - Rescue type, elevation, path, impediments
 
-### Step 10 — Review and Save
+### Step 9 — Review and Save
 
 Summarize everything and highlight any gaps:
 

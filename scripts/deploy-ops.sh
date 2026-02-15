@@ -233,7 +233,24 @@ az containerapp auth microsoft update \
     --tenant-id "$MS_GRAPH_TENANT_ID" \
     --yes \
     --output none
-ok "EasyAuth configured"
+# Extend EasyAuth session cookie to 72 hours (default is 8h).
+# authConfigs only supports PUT (not PATCH), so read-modify-write.
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+AUTH_URL="https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.App/containerApps/${CONTAINER_APP}/authConfigs/current?api-version=2024-03-01"
+AUTH_CONFIG=$(az rest --method get --url "$AUTH_URL" 2>/dev/null || echo '{}')
+UPDATED_CONFIG=$(echo "$AUTH_CONFIG" | python3 -c "
+import json, sys
+cfg = json.load(sys.stdin)
+props = cfg.setdefault('properties', {})
+login = props.setdefault('login', {})
+login['cookieExpiration'] = {
+    'convention': 'FixedTime',
+    'timeToExpiration': '3.00:00:00',
+}
+json.dump(cfg, sys.stdout)
+")
+az rest --method put --url "$AUTH_URL" --body "$UPDATED_CONFIG" --output none
+ok "EasyAuth configured (72h session)"
 
 # ---------------------------------------------------------------------------
 # Health check — verify the NEW version is serving

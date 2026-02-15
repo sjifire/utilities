@@ -4,7 +4,7 @@ All state is in Cosmos DB (no in-process caches) since containers
 are ephemeral with minReplicas: 0.
 
 Limits:
-- Monthly per-user: 2M tokens (~$30 at Sonnet pricing)
+- Monthly per-user: 30M tokens
 - Daily per-user: 1M tokens
 - Per-conversation: 50 turns (enforced in engine, not here)
 - Anthropic console: $100/month hard cap (external)
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 _INPUT_COST_PER_TOKEN = 3.0 / 1_000_000
 _OUTPUT_COST_PER_TOKEN = 15.0 / 1_000_000
 
-MONTHLY_TOKEN_LIMIT = 5_000_000
-DAILY_TOKEN_LIMIT = 1_000_000
+MONTHLY_TOKEN_LIMIT = 30_000_000
+DAILY_TOKEN_LIMIT = 5_000_000
 
 
 @dataclass(frozen=True)

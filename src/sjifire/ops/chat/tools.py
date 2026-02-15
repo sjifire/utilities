@@ -218,6 +218,9 @@ TOOL_SCHEMAS: list[dict] = [
     },
 ]
 
+# Mark last tool with cache_control so entire tool definition block is cached
+TOOL_SCHEMAS[-1]["cache_control"] = {"type": "ephemeral"}
+
 # Set of allowed tool names for validation
 _ALLOWED_TOOLS = {t["name"] for t in TOOL_SCHEMAS}
 
@@ -432,6 +435,9 @@ GENERAL_TOOL_SCHEMAS: list[dict] = [
         },
     },
 ]
+
+# Mark last general tool with cache_control so tool definitions are cached
+GENERAL_TOOL_SCHEMAS[-1]["cache_control"] = {"type": "ephemeral"}
 
 _ALLOWED_GENERAL_TOOLS = {t["name"] for t in GENERAL_TOOL_SCHEMAS}
 

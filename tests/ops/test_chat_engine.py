@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from unittest.mock import patch
 
 import pytest
@@ -10,12 +11,15 @@ from sjifire.ops.auth import UserContext
 from sjifire.ops.chat.engine import (
     _build_general_system_prompt,
     _build_system_prompt,
+    _format_unit_times_table,
+    _log_cache_stats,
     _sse,
     _summarize_tool_result,
     _trim_messages,
 )
 from sjifire.ops.chat.models import MAX_TURNS, ConversationDocument
 from sjifire.ops.chat.store import BudgetStore, ConversationStore
+from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.ops.incidents.store import IncidentStore
 
 
@@ -25,14 +29,17 @@ def _clear_memory_and_env(monkeypatch):
     ConversationStore._memory.clear()
     BudgetStore._memory.clear()
     IncidentStore._memory.clear()
+    DispatchStore._memory.clear()
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
     monkeypatch.setattr("sjifire.ops.chat.store.load_dotenv", lambda: None)
     monkeypatch.setattr("sjifire.ops.incidents.store.load_dotenv", lambda: None)
+    monkeypatch.setattr("sjifire.ops.dispatch.store.load_dotenv", lambda: None)
     yield
     ConversationStore._memory.clear()
     BudgetStore._memory.clear()
     IncidentStore._memory.clear()
+    DispatchStore._memory.clear()
 
 
 _TEST_USER = UserContext(
@@ -381,3 +388,301 @@ class TestParallelToolExecution:
             assert elapsed < 0.25  # generous margin, but proves parallelism
             for r in results:
                 assert json.loads(r)["status"] == "ok"
+
+
+class TestToolSchemaCacheControl:
+    """Verify cache_control is set on the last tool in each schema list."""
+
+    def test_incident_tools_last_has_cache_control(self):
+        from sjifire.ops.chat.tools import TOOL_SCHEMAS
+
+        last = TOOL_SCHEMAS[-1]
+        assert "cache_control" in last
+        assert last["cache_control"] == {"type": "ephemeral"}
+
+    def test_general_tools_last_has_cache_control(self):
+        from sjifire.ops.chat.tools import GENERAL_TOOL_SCHEMAS
+
+        last = GENERAL_TOOL_SCHEMAS[-1]
+        assert "cache_control" in last
+        assert last["cache_control"] == {"type": "ephemeral"}
+
+    def test_non_last_tools_have_no_cache_control(self):
+        from sjifire.ops.chat.tools import GENERAL_TOOL_SCHEMAS, TOOL_SCHEMAS
+
+        for schema in TOOL_SCHEMAS[:-1]:
+            assert "cache_control" not in schema, f"{schema['name']} should not have cache_control"
+        for schema in GENERAL_TOOL_SCHEMAS[:-1]:
+            assert "cache_control" not in schema, f"{schema['name']} should not have cache_control"
+
+
+class TestLogCacheStats:
+    """Verify _log_cache_stats logs correctly for different usage shapes."""
+
+    def test_logs_when_cache_fields_present(self, caplog):
+        class Usage:
+            input_tokens = 50000
+            cache_read_input_tokens = 35000
+            cache_creation_input_tokens = 10000
+
+        with caplog.at_level(logging.INFO, logger="sjifire.ops.chat.engine"):
+            _log_cache_stats(Usage())
+
+        assert "Cache:" in caplog.text
+        assert "35000 read" in caplog.text
+        assert "10000 created" in caplog.text
+        assert "5000 uncached" in caplog.text
+
+    def test_no_log_when_no_cache_fields(self, caplog):
+        class Usage:
+            input_tokens = 50000
+
+        with caplog.at_level(logging.INFO, logger="sjifire.ops.chat.engine"):
+            _log_cache_stats(Usage())
+
+        assert "Cache:" not in caplog.text
+
+    def test_no_log_when_cache_fields_are_zero(self, caplog):
+        class Usage:
+            input_tokens = 50000
+            cache_read_input_tokens = 0
+            cache_creation_input_tokens = 0
+
+        with caplog.at_level(logging.INFO, logger="sjifire.ops.chat.engine"):
+            _log_cache_stats(Usage())
+
+        assert "Cache:" not in caplog.text
+
+
+class TestSlimDispatchContext:
+    """Verify _fetch_context produces slim dispatch data."""
+
+    async def test_dispatch_excludes_responder_details(self):
+        """Slim dispatch should not include responder_details or responding_units."""
+        from sjifire.ops.chat.engine import _fetch_context
+        from sjifire.ops.dispatch.models import DispatchAnalysis, DispatchCallDocument
+        from sjifire.ops.dispatch.store import DispatchStore
+        from sjifire.ops.incidents.models import IncidentDocument
+
+        # Create test incident
+        incident = IncidentDocument(
+            id="test-inc-1",
+            incident_number="26-009999",
+            incident_date="2026-02-15",
+            station="S31",
+            created_by="test@sjifire.org",
+        )
+        async with IncidentStore() as store:
+            await store.create(incident)
+
+        # Create test dispatch with large responder_details
+        dispatch = DispatchCallDocument(
+            id="dispatch-uuid",
+            year="2026",
+            long_term_call_id="26-009999",
+            nature="Fire-Structure",
+            address="123 MAIN ST",
+            agency_code="SJF3",
+            responding_units="E31, BN31",
+            responder_details=[
+                {"unit_number": "E31", "status": "ENR", "radio_log": "x" * 5000},
+                {"unit_number": "BN31", "status": "ARV", "radio_log": "y" * 3000},
+            ],
+            cad_comments="Smoke visible",
+            geo_location="48.53,-123.01",
+            analysis=DispatchAnalysis(
+                incident_commander="BN31",
+                summary="Structure fire on Main St",
+                unit_times=[
+                    {
+                        "unit": "E31",
+                        "paged": "2026-02-15T14:30:00",
+                        "enroute": "2026-02-15T14:32:00",
+                        "arrived": "2026-02-15T14:38:00",
+                        "completed": "",
+                    },
+                    {
+                        "unit": "BN31",
+                        "paged": "2026-02-15T14:30:00",
+                        "enroute": "",
+                        "arrived": "2026-02-15T14:40:00",
+                        "completed": "",
+                    },
+                ],
+            ),
+        )
+        DispatchStore._memory[dispatch.id] = dispatch.to_cosmos()
+
+        with (
+            patch(
+                "sjifire.ops.schedule.tools.get_on_duty_crew",
+                return_value={"crew": [], "count": 0},
+            ),
+            patch(
+                "sjifire.ops.personnel.tools.get_operational_personnel",
+                return_value=[],
+            ),
+        ):
+            _, dispatch_json, _, _ = await _fetch_context("test-inc-1", _TEST_USER)
+
+        data = json.loads(dispatch_json)
+
+        # Should include slim fields
+        assert data["nature"] == "Fire-Structure"
+        assert data["address"] == "123 MAIN ST"
+        assert data["cad_comments"] == "Smoke visible"
+        assert data["geo_location"] == "48.53,-123.01"
+        assert "analysis" in data
+        assert data["analysis"]["incident_commander"] == "BN31"
+
+        # unit_times should be a readable table, not nested in analysis
+        assert "unit_times" not in data["analysis"]
+        assert "unit_times_table" in data
+        table = data["unit_times_table"]
+        assert "E31" in table
+        assert "BN31" in table
+        assert "14:30:00" in table
+        assert "--" in table  # missing timestamps shown as --
+
+        # Should NOT include bloaty fields
+        assert "responder_details" not in data
+        assert "responding_units" not in data
+        assert "agency_code" not in data
+        assert "zone_code" not in data
+
+
+class TestFormatUnitTimesTable:
+    """Verify _format_unit_times_table produces a readable table."""
+
+    def test_includes_incident_and_unit_sections(self):
+        unit_times = [
+            {
+                "unit": "E31",
+                "paged": "2026-02-15T14:30:00",
+                "enroute": "2026-02-15T14:32:00",
+                "arrived": "2026-02-15T14:38:00",
+                "completed": "2026-02-15T15:10:00",
+                "in_quarters": "2026-02-15T15:25:00",
+            },
+            {
+                "unit": "BN31",
+                "paged": "2026-02-15T14:30:00",
+                "enroute": "2026-02-15T14:35:00",
+                "arrived": "2026-02-15T14:40:00",
+                "completed": "",
+                "in_quarters": "",
+            },
+        ]
+        table = _format_unit_times_table(unit_times, "2026-02-15T14:29:30")
+
+        # Incident-level: human-readable labels with NERIS field names
+        assert "INCIDENT TIMESTAMPS" in table
+        assert "Call Received" in table
+        assert "psap_answer" in table
+        assert "14:29:30" in table
+        assert "First Dispatched" in table
+        assert "First Enroute" in table
+        assert "First On Scene" in table
+        assert "Last Unit Cleared" in table
+        assert "Last In Quarters" in table
+
+        # Per-unit section with human-readable column headers
+        assert "UNIT RESPONSE TIMES" in table
+        assert "On Scene" in table
+        assert "In Quarters" in table
+        assert "E31" in table
+        assert "BN31" in table
+
+        # E31 times present
+        assert "14:32:00" in table
+        assert "14:38:00" in table
+        assert "15:10:00" in table
+        assert "15:25:00" in table
+
+        # BN31 missing completed + in_quarters → --
+        assert "--" in table
+
+    def test_incident_timestamps_use_earliest_and_latest(self):
+        unit_times = [
+            {
+                "unit": "E31",
+                "paged": "2026-02-15T14:30:00",
+                "enroute": "2026-02-15T14:35:00",
+                "arrived": "2026-02-15T14:40:00",
+                "completed": "2026-02-15T15:10:00",
+                "in_quarters": "2026-02-15T15:30:00",
+            },
+            {
+                "unit": "BN31",
+                "paged": "2026-02-15T14:30:00",
+                "enroute": "2026-02-15T14:32:00",
+                "arrived": "2026-02-15T14:38:00",
+                "completed": "2026-02-15T15:05:00",
+                "in_quarters": "2026-02-15T15:20:00",
+            },
+        ]
+        table = _format_unit_times_table(unit_times)
+        lines = table.split("\n")
+
+        # first_unit_enroute = BN31's 14:32 (earliest)
+        enroute_line = next(line for line in lines if "first_unit_enroute" in line)
+        assert "14:32:00" in enroute_line
+
+        # first_unit_arrived = BN31's 14:38 (earliest)
+        arrived_line = next(line for line in lines if "first_unit_arrived" in line)
+        assert "14:38:00" in arrived_line
+
+        # last_unit_cleared = E31's 15:10 (latest)
+        cleared_line = next(line for line in lines if "last_unit_cleared" in line)
+        assert "15:10:00" in cleared_line
+
+        # last_in_quarters = E31's 15:30 (latest)
+        iq_line = next(line for line in lines if "last_unit_in_quarters" in line)
+        assert "15:30:00" in iq_line
+
+    def test_missing_timestamps_show_dashes(self):
+        unit_times = [
+            {
+                "unit": "M31",
+                "paged": "",
+                "enroute": "",
+                "arrived": "",
+                "completed": "",
+                "in_quarters": "",
+            },
+        ]
+        table = _format_unit_times_table(unit_times)
+        assert "First Dispatched" in table
+        assert "first_unit_dispatched" in table
+        # Unit row should have 5 dashes (dispatched, enroute, on scene, cleared, in quarters)
+        lines = table.split("\n")
+        unit_row = next(line for line in lines if "M31" in line)
+        assert unit_row.count("--") == 5
+
+    def test_no_time_reported_shows_dashes(self):
+        unit_times = [
+            {"unit": "E31", "paged": "2026-02-15T14:30:00"},
+        ]
+        table = _format_unit_times_table(unit_times)
+        psap_line = next(line for line in table.split("\n") if "psap_answer" in line)
+        assert psap_line.rstrip().endswith("--")
+
+    def test_handles_timezone_suffix(self):
+        unit_times = [
+            {
+                "unit": "E31",
+                "paged": "2026-02-15T14:30:00+00:00",
+                "enroute": "2026-02-15T14:32:00Z",
+            },
+        ]
+        table = _format_unit_times_table(unit_times)
+        assert "14:30:00" in table
+        assert "14:32:00" in table
+        assert "+00:00" not in table
+        assert "Z" not in table
+
+    def test_empty_list_still_shows_incident_section(self):
+        table = _format_unit_times_table([], "2026-02-15T14:29:30")
+        assert "INCIDENT TIMESTAMPS" in table
+        assert "14:29:30" in table
+        assert "UNIT RESPONSE TIMES" in table

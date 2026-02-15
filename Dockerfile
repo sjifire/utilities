@@ -2,6 +2,11 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
+# Pre-compile bytecode during install so Python skips compilation at launch
+ENV UV_COMPILE_BYTECODE=1
+# Disable uv runtime sync checks — everything is pre-installed
+ENV UV_NO_SYNC=1
+
 # Pin uv version for reproducible builds
 COPY --from=ghcr.io/astral-sh/uv:0.6 /uv /usr/local/bin/uv
 

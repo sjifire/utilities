@@ -86,7 +86,8 @@ class IncidentDocument(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
     neris_incident_id: str | None = None  # Set after NERIS submission
-    internal_notes: str | None = Field(default="", max_length=MAX_NARRATIVE_LENGTH)  # Never sent to NERIS
+    # Internal only — never sent to NERIS
+    internal_notes: str | None = Field(default="", max_length=MAX_NARRATIVE_LENGTH)
     edit_history: list[EditEntry] = Field(default_factory=list, max_length=MAX_EDIT_HISTORY)
 
     @model_validator(mode="after")
@@ -159,9 +160,10 @@ class IncidentDocument(BaseModel):
         """
         sections = {
             "incident_type": bool(self.incident_type),
+            "unit_responses": len(self.unit_responses) > 0,
             "crew": len(self.crew) > 0,
-            "narratives": bool(self.narratives.outcome or self.narratives.actions_taken),
             "timestamps": len(self.timestamps) > 0,
+            "narratives": bool(self.narratives.outcome or self.narratives.actions_taken),
             "address": bool(self.address),
         }
         filled = sum(sections.values())

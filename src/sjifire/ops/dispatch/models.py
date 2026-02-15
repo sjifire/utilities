@@ -39,6 +39,9 @@ class UnitTiming(BaseModel):
     completed: str = ""
     """ISO timestamp when this unit cleared/completed the call."""
 
+    in_quarters: str = ""
+    """ISO timestamp when this unit returned to quarters (RTQ status)."""
+
 
 class DispatchAnalysis(BaseModel):
     """AI-extracted structured analysis of a dispatch call.

@@ -128,7 +128,7 @@ class EntraOAuthProvider:
             await store.set(
                 "client_reg",
                 client_info.client_id,
-                {"client_data": client_info.model_dump()},
+                {"client_data": client_info.model_dump(mode="json")},
                 CLIENT_REG_TTL,
             )
 

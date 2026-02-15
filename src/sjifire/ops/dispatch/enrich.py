@@ -235,6 +235,7 @@ _STATUS_TO_FIELD: dict[str, str] = {
     "ENRT": "enroute",
     "ARRVD": "arrived",
     "CMPLT": "completed",
+    "RTQ": "in_quarters",
 }
 
 
@@ -289,6 +290,7 @@ def _extract_unit_times(
             enroute=times.get("enroute", ""),
             arrived=times.get("arrived", ""),
             completed=times.get("completed", ""),
+            in_quarters=times.get("in_quarters", ""),
         )
         for unit, times in unit_data.items()
         if not unit.startswith("SJF")

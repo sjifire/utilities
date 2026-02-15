@@ -41,6 +41,7 @@ personal-calendar-sync = "sjifire.scripts.personal_calendar_sync:main"
 ops-server = "sjifire.ops.server:main"
 backup-cosmos = "sjifire.scripts.backup_cosmos:main"
 generate-neris-reference = "sjifire.scripts.generate_neris_reference:main"
+ops-admin = "sjifire.scripts.ops_admin:main"
 
 [dependency-groups]
 dev = [
