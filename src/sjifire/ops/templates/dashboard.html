@@ -350,7 +350,7 @@
     <div class="panel" x-show="D.upcoming_sections.length">
       <div class="panel-header">
         <span style="font-size:14px;color:var(--text-primary)" class="font-semibold" x-text="'Upcoming \u2014 ' + D.upcoming_platoon + ' ' + D.upcoming_date_range"></span>
-        <span class="badge" x-text="D.upcoming_shift_starts ? 'starting at ' + D.upcoming_shift_starts : D.upcoming_crew.length + ' crew'"></span>
+        <span class="badge" x-text="formatShiftStart(D.upcoming_shift_starts) || D.upcoming_crew.length + ' crew'"></span>
       </div>
       <template x-if="D.upcoming_sections.length">
         <div class="data-table-wrap">
@@ -536,14 +536,26 @@ function dashboard() {
 
     formatShiftEnd(iso) {
       if (!iso) return '';
-      const d = new Date(iso);
-      const hhmm = String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0');
-      const now = new Date();
-      const endDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      const diffDays = Math.round((endDay - today) / 86400000);
-      if (diffDays === 1) return 'until ' + hhmm + ' tomorrow';
-      return 'until ' + hhmm;
+      const d = dayjs(iso);
+      const hhmm = d.format('HHmm');
+      const label = d.calendar(null, {
+        sameDay: '[today]', nextDay: '[tomorrow]',
+        nextWeek: 'ddd', lastDay: '[yesterday]',
+        lastWeek: '[last] ddd', sameElse: 'MMM D'
+      });
+      return label === 'today' ? 'until ' + hhmm : 'until ' + hhmm + ' ' + label;
+    },
+
+    formatShiftStart(iso) {
+      if (!iso) return '';
+      const d = dayjs(iso);
+      const hhmm = d.format('HHmm');
+      const label = d.calendar(null, {
+        sameDay: '[today]', nextDay: '[tomorrow]',
+        nextWeek: 'ddd', lastDay: '[yesterday]',
+        lastWeek: '[last] ddd', sameElse: 'MMM D'
+      });
+      return label === 'today' ? 'starting ' + hhmm : 'starting ' + hhmm + ' ' + label;
     },
 
     mapsUrl(addr) {

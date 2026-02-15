@@ -389,9 +389,19 @@ def _build_template_context(
             except ValueError:
                 pass
         start_times = [c.get("start_time", "") for c in raw_upcoming_crew if c.get("start_time")]
-        upcoming_shift_starts = (
-            max(set(start_times), key=start_times.count).replace(":", "") if start_times else ""
-        )
+        upcoming_shift_starts = ""
+        if start_times and up_date:
+            most_common_start = max(set(start_times), key=start_times.count)
+            try:
+                tz = get_timezone()
+                up_dt = datetime.strptime(up_date, "%Y-%m-%d").date()
+                sp = most_common_start.split(":")
+                s_h, s_m = int(sp[0]), int(sp[1]) if len(sp) > 1 else 0
+                upcoming_shift_starts = datetime(
+                    up_dt.year, up_dt.month, up_dt.day, s_h, s_m, tzinfo=tz
+                ).isoformat()
+            except (ValueError, IndexError):
+                upcoming_shift_starts = most_common_start.replace(":", "")
 
     return {
         "date_display": date_display,
