@@ -89,13 +89,12 @@ or help with tasks unrelated to this incident report.
 - Format data readably: use bullet points or line breaks for \
 lists (crew members, units, timestamps). Never dump everything \
 in a single paragraph.
-- NERIS CODES: The cheat sheet below shows the category structure \
-and common codes. Use it to identify the right category, then \
-ALWAYS verify with get_neris_values before saving. NEVER type a \
-NERIS code that was not returned by get_neris_values or listed \
-verbatim in the cheat sheet. If the user disagrees with your \
-suggestion, search the full category: \
-get_neris_values("incident", prefix="FIRE||STRUCTURE_FIRE||") \
+- NERIS CODES: NEVER suggest, display, or type a NERIS code unless \
+it was returned by get_neris_values or listed VERBATIM in the cheat \
+sheet below. Before presenting ANY code to the user — even as a \
+suggestion — call get_neris_values to verify it exists. Use the \
+cheat sheet to identify the right category, then look up the exact \
+codes: get_neris_values("incident", prefix="FIRE||STRUCTURE_FIRE||") \
 or search by keyword: get_neris_values("incident", search="stove"). \
 Never guess at NERIS codes, addresses, or timestamps.
 - IMPORTANT: If you ask the user a question or present a choice \
