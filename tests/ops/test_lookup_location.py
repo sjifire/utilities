@@ -33,6 +33,8 @@ def auth_user():
 
 NOMINATIM_RESPONSE = {
     "display_name": "589, Old Farm Road, San Juan County, Washington, 98250, United States",
+    "category": "building",
+    "type": "house",
     "address": {
         "house_number": "589",
         "road": "Old Farm Road",
@@ -210,6 +212,36 @@ class TestLookupLocation:
             result = await _lookup_location(48.5, -123.0)
 
         assert result["city"] == "Friday Harbor"
+
+    async def test_includes_property_type(self):
+        """Should return the OSM category/type as property_type."""
+        with patch("sjifire.ops.chat.tools.httpx.AsyncClient") as mock_client_cls:
+            client = AsyncMock()
+            client.get = AsyncMock(return_value=_mock_response(NOMINATIM_RESPONSE))
+            client.post = AsyncMock(return_value=_mock_response(OVERPASS_RESPONSE))
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            result = await _lookup_location(48.464012, -123.037876)
+
+        assert result["property_type"] == "building/house"
+
+    async def test_property_type_empty_when_no_category(self):
+        """If Nominatim returns no category, property_type should be empty."""
+        nominatim_no_cat = {
+            "display_name": "123 Rd, WA",
+            "address": {"road": "Main St", "city": "Friday Harbor", "state": "Washington"},
+        }
+        with patch("sjifire.ops.chat.tools.httpx.AsyncClient") as mock_client_cls:
+            client = AsyncMock()
+            client.get = AsyncMock(return_value=_mock_response(nominatim_no_cat))
+            client.post = AsyncMock(return_value=_mock_response({"elements": []}))
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            result = await _lookup_location(48.5, -123.0)
+
+        assert result["property_type"] == ""
 
 
 class TestLookupLocationDispatch:

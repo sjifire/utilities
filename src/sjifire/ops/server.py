@@ -37,6 +37,7 @@ from sjifire.ops.chat.routes import (
     create_report,
     general_chat_history,
     general_chat_stream_endpoint,
+    print_report,
     reports_list,
 )
 from sjifire.ops.dispatch import tools as dispatch_tools
@@ -251,6 +252,7 @@ app = mcp.streamable_http_app()
 # Order matters: exact paths before parameterized paths.
 app.routes.insert(0, Route("/reports/{incident_id}/chat", chat_stream, methods=["POST"]))
 app.routes.insert(0, Route("/reports/{incident_id}/conversation", conversation_history))
+app.routes.insert(0, Route("/reports/{incident_id}/print", print_report))
 app.routes.insert(0, Route("/reports/{incident_id}", chat_page))
 app.routes.insert(0, Route("/reports/new", create_report, methods=["POST"]))
 app.routes.insert(0, Route("/reports", reports_list))

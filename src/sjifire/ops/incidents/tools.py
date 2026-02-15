@@ -415,6 +415,7 @@ async def update_incident(
     station: str | None = None,
     status: str | None = None,
     incident_type: str | None = None,
+    location_use: str | None = None,
     address: str | None = None,
     city: str | None = None,
     latitude: float | None = None,
@@ -436,6 +437,7 @@ async def update_incident(
         station: Update station code (e.g., "S31")
         status: New status (draft, in_progress, ready_review)
         incident_type: NERIS incident type code
+        location_use: NERIS location use code (e.g., "RESIDENTIAL||MULTI_FAMILY_LOWRISE_DWELLING")
         address: Incident address
         city: City (defaults to Friday Harbor)
         latitude: GPS latitude
@@ -482,6 +484,9 @@ async def update_incident(
         if incident_type is not None:
             doc.incident_type = incident_type
             fields_changed.append("incident_type")
+        if location_use is not None:
+            doc.location_use = location_use
+            fields_changed.append("location_use")
         if address is not None:
             doc.address = address
             fields_changed.append("address")

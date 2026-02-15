@@ -126,6 +126,34 @@ async def create_report(request: Request) -> Response:
     return RedirectResponse(f"/reports/{result['id']}", status_code=303)
 
 
+async def print_report(request: Request) -> Response:
+    """Serve a print-optimized incident report."""
+    user = _get_user(request)
+
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=" + str(request.url.path))
+
+    incident_id = request.path_params["incident_id"]
+
+    set_current_user(user) if user else None
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+    if doc is None:
+        return JSONResponse({"error": "Incident not found"}, status_code=404)
+
+    template = _jinja_env.get_template("print_report.html")
+    html = template.render(
+        doc=doc.model_dump(mode="json"),
+        now=local_now().strftime("%b %d, %Y %H:%M"),
+    )
+    return Response(html, media_type="text/html")
+
+
 async def chat_page(request: Request) -> Response:
     """Serve the chat UI page for an incident."""
     user = _get_user(request)

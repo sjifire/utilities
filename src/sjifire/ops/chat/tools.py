@@ -243,9 +243,11 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "name": "lookup_location",
         "description": (
-            "Look up address details and cross streets from GPS coordinates. "
-            "Use this during the location step to find cross streets instead "
-            "of asking the user. Returns the verified address and nearby road names."
+            "Look up address details, cross streets, and property type from GPS coordinates. "
+            "Use this during the location step to find cross streets and property type instead "
+            "of asking the user. Returns the verified address, nearby road names, and a "
+            "property_type from OpenStreetMap (e.g. 'building/house', 'building/apartments'). "
+            "Map the property_type to the correct NERIS location_use code from the cheat sheet."
         ),
         "input_schema": {
             "type": "object",
@@ -624,6 +626,10 @@ async def _lookup_location(lat: float, lon: float) -> dict:
 
     nearby.sort(key=lambda r: r["rank"])
 
+    # Include OSM property classification so the AI can map to NERIS location_use
+    osm_category = geo.get("category", "")
+    osm_type = geo.get("type", "")
+
     return {
         "road": main_road,
         "cross_streets": [{"name": r["name"], "type": r["type"]} for r in nearby],
@@ -631,4 +637,5 @@ async def _lookup_location(lat: float, lon: float) -> dict:
         "county": address.get("county", ""),
         "state": address.get("state", ""),
         "display_address": geo.get("display_name", ""),
+        "property_type": f"{osm_category}/{osm_type}" if osm_category else "",
     }

@@ -67,6 +67,7 @@ class IncidentDocument(BaseModel):
     incident_number: str = Field(max_length=40)  # e.g., "26-000944"
     incident_date: date
     incident_type: str | None = Field(default=None, max_length=200)  # NERIS type code
+    location_use: str | None = Field(default=None, max_length=200)  # NERIS location use code
     address: str | None = Field(default=None, max_length=500)
     city: str = Field(default="", max_length=100)
     state: str = Field(default="", max_length=2)
@@ -126,6 +127,9 @@ class IncidentDocument(BaseModel):
 
         if self.incident_type:
             payload["type"] = {"code": self.incident_type}
+
+        if self.location_use:
+            payload["location_use"] = {"code": self.location_use}
 
         if self.address:
             payload["address"] = {
