@@ -121,6 +121,110 @@ async def _prefill_from_dispatch(incident_number: str) -> dict:
     return prefill
 
 
+def _address_from_neris_location(loc: dict) -> str:
+    """Assemble a street address from NERIS granular location fields.
+
+    NERIS locations have separate fields for number, direction prefix,
+    street name, and street suffix. This combines them into a single
+    address string like "94 Zepher Ln" or "1632 San Juan Rd".
+    """
+    parts: list[str] = []
+    number = loc.get("complete_number") or loc.get("number") or ""
+    if number:
+        parts.append(str(number).strip())
+    for field in ("street_prefix_direction", "street", "street_postfix"):
+        val = loc.get(field)
+        if val:
+            parts.append(str(val).strip())
+    return " ".join(parts)
+
+
+async def _prefill_from_neris(neris_id: str) -> dict:
+    """Fetch a NERIS incident and return pre-fill fields for a local draft.
+
+    Extracts incident type, narrative, location, unit responses, and
+    timestamps from the NERIS record. Returns an empty dict on any error
+    so creation can proceed with dispatch data alone.
+    """
+    try:
+        record = await asyncio.to_thread(_get_neris_incident, neris_id)
+    except Exception:
+        logger.warning("Failed to fetch NERIS incident %s for prefill", neris_id, exc_info=True)
+        return {}
+
+    if not record:
+        return {}
+
+    prefill: dict = {"neris_incident_id": neris_id}
+
+    # Incident type — first primary type
+    types = record.get("incident_types") or []
+    if types:
+        prefill["incident_type"] = types[0].get("type", "")
+
+    # Outcome narrative
+    base = record.get("base") or {}
+    if base.get("outcome_narrative"):
+        prefill["outcome_narrative"] = base["outcome_narrative"]
+
+    # Location — prefer base.location (corrected), fall back to dispatch
+    loc = base.get("location") or {}
+    if not loc:
+        dispatch = record.get("dispatch") or {}
+        loc = dispatch.get("location") or {}
+    if loc:
+        addr = _address_from_neris_location(loc)
+        if addr:
+            prefill["address"] = addr
+        city = loc.get("incorporated_municipality") or ""
+        if city:
+            prefill["city"] = city
+        state = loc.get("state") or ""
+        if state:
+            prefill["state"] = state
+
+    # Unit responses from dispatch
+    dispatch = record.get("dispatch") or {}
+    neris_units = dispatch.get("unit_responses") or []
+    if neris_units:
+        unit_responses = []
+        for u in neris_units:
+            unit = {
+                "unit_neris_id": u.get("unit_neris_id", ""),
+                "staffing": u.get("staffing"),
+                "dispatch": u.get("dispatch"),
+                "enroute_to_scene": u.get("enroute_to_scene"),
+                "on_scene": u.get("on_scene"),
+                "unit_clear": u.get("unit_clear"),
+                "response_mode": u.get("response_mode"),
+            }
+            # Strip None values
+            unit_responses.append({k: v for k, v in unit.items() if v is not None})
+        prefill["unit_responses"] = unit_responses
+
+    # Timestamps — from dispatch-level fields and earliest unit times
+    timestamps: dict[str, str] = {}
+    if dispatch.get("call_create"):
+        timestamps["psap_answer"] = dispatch["call_create"]
+    if dispatch.get("incident_clear"):
+        timestamps["incident_clear"] = dispatch["incident_clear"]
+
+    # Earliest unit dispatch/enroute/on_scene across all units
+    for field, ts_key in [
+        ("dispatch", "first_unit_dispatched"),
+        ("enroute_to_scene", "first_unit_enroute"),
+        ("on_scene", "first_unit_arrived"),
+    ]:
+        times = [u[field] for u in neris_units if u.get(field)]
+        if times:
+            timestamps[ts_key] = min(times)
+
+    if timestamps:
+        prefill["timestamps"] = timestamps
+
+    return prefill
+
+
 def _check_view_access(doc: IncidentDocument, user_email: str, is_officer: bool) -> bool:
     """Check if user can view this incident."""
     return is_officer or doc.created_by == user_email or user_email in doc.crew_emails()
@@ -139,6 +243,7 @@ async def create_incident(
     incident_type: str | None = None,
     address: str | None = None,
     crew: list[dict] | None = None,
+    neris_id: str | None = None,
 ) -> dict:
     """Create a new draft incident report.
 
@@ -154,6 +259,7 @@ async def create_incident(
         crew: List of crew members, each with "name", "email" (optional),
               "rank" (optional, snapshotted at incident time),
               "position" (optional), "unit" (optional)
+        neris_id: NERIS compound incident ID to import data from (optional)
 
     Returns:
         The created incident document with its ID
@@ -174,6 +280,11 @@ async def create_incident(
     # Pre-fill from dispatch data (address, coordinates, timestamps)
     prefill = await _prefill_from_dispatch(incident_number)
 
+    # If a NERIS ID was provided, fetch and merge NERIS data over dispatch
+    if neris_id:
+        neris_prefill = await _prefill_from_neris(neris_id)
+        prefill = {**prefill, **neris_prefill}
+
     crew_assignments = [
         CrewAssignment(
             name=c["name"],
@@ -185,18 +296,26 @@ async def create_incident(
         for c in (crew or [])
     ]
 
+    # Explicit args override prefill; prefill fills gaps
+    narratives = Narratives()
+    if prefill.get("outcome_narrative"):
+        narratives.outcome = prefill["outcome_narrative"]
+
     doc = IncidentDocument(
         station=station,
         incident_number=incident_number,
         incident_date=datetime.strptime(incident_date, "%Y-%m-%d").date(),
-        incident_type=incident_type,
+        incident_type=incident_type or prefill.get("incident_type"),
         address=address if address is not None else prefill.get("address"),
         city=prefill.get("city", ""),
         state=prefill.get("state", ""),
         latitude=prefill.get("latitude"),
         longitude=prefill.get("longitude"),
         crew=crew_assignments,
+        unit_responses=prefill.get("unit_responses", []),
         timestamps=prefill.get("timestamps", {}),
+        narratives=narratives,
+        neris_incident_id=prefill.get("neris_incident_id"),
         created_by=user.email,
     )
 
@@ -614,6 +733,114 @@ async def reset_incident(incident_id: str) -> dict:
         logger.warning("Failed to clear chat history for %s", incident_id, exc_info=True)
 
     logger.info("User %s reset incident %s", user.email, incident_id)
+    return updated.model_dump(mode="json")
+
+
+async def import_from_neris(
+    incident_id: str,
+    neris_id: str | None = None,
+) -> dict:
+    """Import or re-import data from a NERIS record into an existing incident.
+
+    Overwrites incident type, outcome narrative, location, unit responses,
+    and timestamps with values from the NERIS record. Timestamps are merged
+    (NERIS values overwrite matching keys, local-only keys preserved).
+    Does NOT overwrite actions_taken_narrative (local-only content).
+
+    Use this when a NERIS record has been updated and you want to sync
+    those changes back into the local draft.
+
+    Args:
+        incident_id: The incident document ID
+        neris_id: NERIS compound ID (optional if already set on incident)
+
+    Returns:
+        The updated incident document, or an error
+    """
+    user = get_current_user()
+
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+        if doc is None:
+            return {"error": "Incident not found"}
+
+        if not _check_edit_access(doc, user.email, user.is_officer):
+            return {"error": "You don't have permission to edit this incident"}
+
+        if doc.status == "submitted":
+            return {"error": "Cannot modify a submitted incident"}
+
+        # Determine which NERIS ID to use
+        effective_neris_id = neris_id or doc.neris_incident_id
+        if not effective_neris_id:
+            return {
+                "error": "No NERIS ID available. Provide a neris_id parameter "
+                "or set one on the incident first."
+            }
+
+        # Fetch NERIS data
+        prefill = await _prefill_from_neris(effective_neris_id)
+        if not prefill:
+            return {
+                "error": f"Failed to fetch NERIS record '{effective_neris_id}'. "
+                "The record may not exist or the NERIS API may be unavailable."
+            }
+
+        # Apply NERIS fields — overwrites existing values
+        fields_changed: list[str] = []
+
+        doc.neris_incident_id = prefill.get("neris_incident_id", effective_neris_id)
+        fields_changed.append("neris_incident_id")
+
+        if "incident_type" in prefill:
+            doc.incident_type = prefill["incident_type"]
+            fields_changed.append("incident_type")
+
+        if "outcome_narrative" in prefill:
+            doc.narratives = Narratives(
+                outcome=prefill["outcome_narrative"],
+                actions_taken=doc.narratives.actions_taken,
+            )
+            fields_changed.append("outcome_narrative")
+
+        if "address" in prefill:
+            doc.address = prefill["address"]
+            fields_changed.append("address")
+        if "city" in prefill:
+            doc.city = prefill["city"]
+            fields_changed.append("city")
+        if "state" in prefill:
+            doc.state = prefill["state"]
+            fields_changed.append("state")
+
+        if "unit_responses" in prefill:
+            doc.unit_responses = prefill["unit_responses"]
+            fields_changed.append("unit_responses")
+
+        if "timestamps" in prefill:
+            doc.timestamps = {**doc.timestamps, **prefill["timestamps"]}
+            fields_changed.append("timestamps")
+
+        # Record edit history
+        doc.edit_history.append(
+            EditEntry(
+                editor_email=user.email,
+                editor_name=user.name,
+                fields_changed=["neris_import"],
+            )
+        )
+
+        doc.updated_at = datetime.now(UTC)
+        updated = await store.update(doc)
+
+    logger.info(
+        "User %s imported NERIS data into incident %s from %s: %s",
+        user.email,
+        incident_id,
+        effective_neris_id,
+        fields_changed,
+    )
     return updated.model_dump(mode="json")
 
 

@@ -8,6 +8,8 @@ chat Claude — no create, delete, or submit operations.
 import json
 import logging
 
+import httpx
+
 from sjifire.ops.auth import UserContext, set_current_user
 
 logger = logging.getLogger(__name__)
@@ -119,6 +121,27 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
+        "name": "import_from_neris",
+        "description": (
+            "Import or re-import data from a NERIS record into this incident report. "
+            "Overwrites incident type, narrative, units, and timestamps with NERIS values."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID",
+                },
+                "neris_id": {
+                    "type": "string",
+                    "description": "NERIS compound ID (optional if already set on incident)",
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
         "name": "get_dispatch_call",
         "description": (
             "Get full details for a dispatch call including nature, address, "
@@ -207,13 +230,30 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "name": "get_personnel",
         "description": (
-            "Get a list of ALL active personnel (names + emails). Use this "
-            "only if you cannot match a name from the pre-loaded operational "
-            "roster — e.g. for admin staff or volunteers not in the roster."
+            "Get all active personnel (names + emails). Use this when you "
+            "cannot match a name from the pre-loaded operational roster — "
+            "e.g. for admin staff, volunteers, or when the user gives a "
+            "nickname, shorthand, or last name only."
         ),
         "input_schema": {
             "type": "object",
             "properties": {},
+        },
+    },
+    {
+        "name": "lookup_location",
+        "description": (
+            "Look up address details and cross streets from GPS coordinates. "
+            "Use this during the location step to find cross streets instead "
+            "of asking the user. Returns the verified address and nearby road names."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "latitude": {"type": "number", "description": "GPS latitude"},
+                "longitude": {"type": "number", "description": "GPS longitude"},
+            },
+            "required": ["latitude", "longitude"],
         },
     },
 ]
@@ -263,6 +303,12 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
     if name == "reset_incident":
         return await incident_tools.reset_incident(tool_input["incident_id"])
 
+    if name == "import_from_neris":
+        return await incident_tools.import_from_neris(
+            tool_input["incident_id"],
+            neris_id=tool_input.get("neris_id"),
+        )
+
     if name == "get_dispatch_call":
         return await dispatch_tools.get_dispatch_call(tool_input["call_id"])
 
@@ -291,6 +337,9 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
 
         result = await personnel_tools.get_personnel()
         return {"personnel": result, "count": len(result)}
+
+    if name == "lookup_location":
+        return await _lookup_location(tool_input["latitude"], tool_input["longitude"])
 
     return {"error": f"Unknown tool: {name}"}
 
@@ -505,3 +554,81 @@ async def _dispatch_general(name: str, tool_input: dict) -> dict:
         return await incident_tools.get_incident(tool_input["incident_id"])
 
     return {"error": f"Unknown tool: {name}"}
+
+
+# ---------------------------------------------------------------------------
+# Location lookup (Nominatim + Overpass — free, no API keys)
+# ---------------------------------------------------------------------------
+
+_OSM_HEADERS = {"User-Agent": "SJIFire-Ops/1.0 (incident-reporting)"}
+_NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
+_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+
+async def _lookup_location(lat: float, lon: float) -> dict:
+    """Reverse geocode and find nearby cross streets via OpenStreetMap.
+
+    Uses Nominatim for the address and Overpass for nearby road names.
+    """
+    async with httpx.AsyncClient(timeout=10, headers=_OSM_HEADERS) as client:
+        # Reverse geocode
+        resp = await client.get(
+            _NOMINATIM_URL,
+            params={"lat": lat, "lon": lon, "format": "json", "addressdetails": "1"},
+        )
+        resp.raise_for_status()
+        geo = resp.json()
+        address = geo.get("address", {})
+        main_road = address.get("road", "")
+
+        # Find nearby named roads via Overpass
+        query = f"[out:json][timeout:5];way(around:200,{lat},{lon})[highway][name];out tags;"
+        try:
+            resp2 = await client.post(_OVERPASS_URL, data={"data": query})
+            resp2.raise_for_status()
+            elements = resp2.json().get("elements", [])
+        except Exception:
+            logger.warning("Overpass query failed for %.6f,%.6f", lat, lon)
+            elements = []
+
+    # Rank roads by importance so main arteries sort first
+    road_rank = {
+        "motorway": 0,
+        "trunk": 1,
+        "primary": 2,
+        "secondary": 3,
+        "tertiary": 4,
+        "residential": 5,
+        "unclassified": 6,
+        "service": 7,
+        "track": 8,
+        "path": 9,
+    }
+
+    nearby: list[dict] = []
+    seen: set[str] = set()
+    for el in elements:
+        tags = el.get("tags", {})
+        name = tags.get("name", "")
+        if not name or name.lower() == main_road.lower() or name in seen:
+            continue
+        seen.add(name)
+        hw = tags.get("highway", "")
+        nearby.append(
+            {
+                "name": name,
+                "type": hw,
+                "rank": road_rank.get(hw, 99),
+            }
+        )
+
+    nearby.sort(key=lambda r: r["rank"])
+
+    return {
+        "road": main_road,
+        "cross_streets": [{"name": r["name"], "type": r["type"]} for r in nearby],
+        "city": address.get("city") or address.get("town") or address.get("village", ""),
+        "county": address.get("county", ""),
+        "state": address.get("state", ""),
+        "display_address": geo.get("display_name", ""),
+    }
