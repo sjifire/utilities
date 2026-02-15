@@ -102,6 +102,7 @@ async def create_report(request: Request) -> Response:
     incident_number = str(form.get("incident_number", "")).strip()
     incident_date = str(form.get("incident_date", "")).strip()
     station = str(form.get("station", "")).strip() or "S31"
+    neris_id = str(form.get("neris_id", "")).strip() or None
 
     if not incident_number or not incident_date:
         return JSONResponse({"error": "Incident number and date are required"}, status_code=400)
@@ -113,6 +114,7 @@ async def create_report(request: Request) -> Response:
         incident_number=incident_number,
         incident_date=incident_date,
         station=station,
+        neris_id=neris_id,
     )
 
     if "error" in result:
@@ -176,7 +178,7 @@ async def chat_page(request: Request) -> Response:
         incident_id=incident_id,
         incident_number=doc.incident_number,
         incident_status=doc.status,
-        completeness=doc.completeness(),
+        completeness=doc.completeness() if not doc.neris_incident_id else None,
         dispatch=dispatch_context,
     )
     return Response(html, media_type="text/html")
@@ -261,8 +263,29 @@ async def chat_stream(request: Request) -> Response:
     if len(message) > 5000:
         return JSONResponse({"error": "Message too long (max 5000 chars)"}, status_code=400)
 
+    # Parse optional image attachments
+    images: list[dict] | None = None
+    raw_images = body.get("images")
+    if raw_images:
+        allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+        if not isinstance(raw_images, list) or len(raw_images) > 3:
+            return JSONResponse({"error": "Maximum 3 images allowed"}, status_code=400)
+        images = []
+        for img in raw_images:
+            if not isinstance(img, dict):
+                return JSONResponse({"error": "Invalid image format"}, status_code=400)
+            media_type = img.get("media_type", "")
+            data = img.get("data", "")
+            if media_type not in allowed_types:
+                return JSONResponse(
+                    {"error": f"Unsupported image type: {media_type}"}, status_code=400
+                )
+            if len(data) > 2_000_000:  # ~1.5MB decoded
+                return JSONResponse({"error": "Image too large (max ~1.5MB)"}, status_code=400)
+            images.append({"media_type": media_type, "data": data})
+
     async def event_generator():
-        async for event in stream_chat(incident_id, message, user):
+        async for event in stream_chat(incident_id, message, user, images=images):
             yield event
 
     return StreamingResponse(

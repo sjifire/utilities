@@ -108,6 +108,11 @@ class IncidentDocument(BaseModel):
     @classmethod
     def from_cosmos(cls, data: dict) -> IncidentDocument:
         """Deserialize from Cosmos DB document."""
+        # Strip None values from timestamps — the LLM may have stored nulls
+        if "timestamps" in data and isinstance(data["timestamps"], dict):
+            data["timestamps"] = {
+                k: v for k, v in data["timestamps"].items() if v is not None
+            }
         return cls.model_validate(data)
 
     def to_neris_payload(self) -> dict:
@@ -163,7 +168,8 @@ class IncidentDocument(BaseModel):
             "unit_responses": len(self.unit_responses) > 0,
             "crew": len(self.crew) > 0,
             "timestamps": len(self.timestamps) > 0,
-            "narratives": bool(self.narratives.outcome or self.narratives.actions_taken),
+            "narrative": bool(self.narratives.outcome),
+            "actions_taken": bool(self.narratives.actions_taken),
             "address": bool(self.address),
         }
         filled = sum(sections.values())

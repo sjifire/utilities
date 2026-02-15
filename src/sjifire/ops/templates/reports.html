@@ -55,7 +55,7 @@
     }
 
     /* ── Cell styles ── */
-    .call-id { font-family: monospace; font-size: 12px; color: var(--text-muted); }
+    .call-id { font-family: monospace; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
     .nature  { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
     .address { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
     .dt      { white-space: nowrap; color: var(--text-secondary); }
@@ -513,7 +513,6 @@
                 <template x-if="c.report_source === 'neris'">
                   <div>
                     <div class="report-status neris" x-text="'\u2713 In NERIS'"></div>
-                    <div class="neris-id" x-text="c.neris_id || 'No local report'"></div>
                   </div>
                 </template>
                 <!-- Local draft -->
@@ -740,9 +739,24 @@ function reportsApp() {
     },
 
     startReport(call) {
-      this.modalCallId = call.id;
-      this.modalDate = this.parseCallDate(call.date) || '{{ today }}';
-      this.showModal = true;
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/reports/new';
+      const fields = {
+        incident_number: call.id,
+        incident_date: this.parseCallDate(call.date) || '{{ today }}',
+        station: 'S31',
+        neris_id: call.neris_id || ''
+      };
+      for (const [k, v] of Object.entries(fields)) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = k;
+        input.value = v;
+        form.appendChild(input);
+      }
+      document.body.appendChild(form);
+      form.submit();
     },
 
     parseCallDate(dateStr) {

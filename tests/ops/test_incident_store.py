@@ -80,6 +80,55 @@ class TestGetById:
         assert result is None
 
 
+class TestGetByNerisId:
+    async def test_finds_by_neris_id(self):
+        doc = _make_doc(neris_incident_id="FD53055879|26-000039|1767316361")
+        async with IncidentStore() as store:
+            await store.create(doc)
+            result = await store.get_by_neris_id("FD53055879|26-000039|1767316361")
+        assert result is not None
+        assert result.neris_incident_id == "FD53055879|26-000039|1767316361"
+        assert result.incident_number == "26-000944"
+
+    async def test_nonexistent_returns_none(self):
+        async with IncidentStore() as store:
+            result = await store.get_by_neris_id("FD|BOGUS|999")
+        assert result is None
+
+    async def test_returns_none_when_no_neris_id_set(self):
+        doc = _make_doc()  # neris_incident_id defaults to None
+        async with IncidentStore() as store:
+            await store.create(doc)
+            result = await store.get_by_neris_id("FD53055879|26-000039|1767316361")
+        assert result is None
+
+    async def test_finds_correct_among_multiple(self):
+        doc1 = _make_doc(
+            incident_number="26-001",
+            neris_incident_id="FD53055879|26-001|AAA",
+        )
+        doc2 = _make_doc(
+            incident_number="26-002",
+            neris_incident_id="FD53055879|26-002|BBB",
+        )
+        doc3 = _make_doc(incident_number="26-003")  # No NERIS ID
+        async with IncidentStore() as store:
+            await store.create(doc1)
+            await store.create(doc2)
+            await store.create(doc3)
+            result = await store.get_by_neris_id("FD53055879|26-002|BBB")
+        assert result is not None
+        assert result.incident_number == "26-002"
+
+    async def test_exact_match_only(self):
+        doc = _make_doc(neris_incident_id="FD53055879|26-000039|1767316361")
+        async with IncidentStore() as store:
+            await store.create(doc)
+            # Partial match should not find it
+            result = await store.get_by_neris_id("FD53055879|26-000039")
+        assert result is None
+
+
 class TestUpdate:
     async def test_update_changes_fields(self):
         doc = _make_doc()

@@ -87,6 +87,15 @@ class DispatchAnalysis(BaseModel):
     short_dsc: str = ""
     """4-6 word description, e.g. 'chimney fire, false alarm'."""
 
+    key_events: list[str] = []
+    """Condensed chronological log of significant events from the radio log.
+
+    Produced by the enrichment LLM from the full radio log. Includes scene
+    conditions, command changes, patient info, key decisions — everything
+    the incident reporter needs. Status changes (enroute, on scene, etc.)
+    are excluded since they're already in ``unit_times``.
+    """
+
 
 class DispatchCallDocument(BaseModel):
     """Dispatch call stored in Cosmos DB.

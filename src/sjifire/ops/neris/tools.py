@@ -125,6 +125,16 @@ async def get_neris_values(
     search_lower = search.lower() if search else None
     values = _enum_to_list(cls, prefix=prefix, search=search_lower)
 
+    if not values:
+        total = len(list(cls))
+        logger.warning(
+            "get_neris_values(%r, prefix=%r, search=%r) returned 0/%d values",
+            value_set,
+            prefix,
+            search,
+            total,
+        )
+
     return {
         "value_set": value_set,
         "values": values,

@@ -180,6 +180,33 @@ class IncidentStore:
 
         return None
 
+    async def get_by_neris_id(self, neris_incident_id: str) -> IncidentDocument | None:
+        """Find an incident by its NERIS incident ID (cross-partition).
+
+        Args:
+            neris_incident_id: NERIS compound ID (e.g. "FD53055879|26-000039|1767316361")
+
+        Returns:
+            IncidentDocument if found, None otherwise
+        """
+        if self._in_memory:
+            for data in self._memory.values():
+                if data.get("neris_incident_id") == neris_incident_id:
+                    return IncidentDocument.from_cosmos(data)
+            return None
+
+        query = "SELECT * FROM c WHERE c.neris_incident_id = @nid"
+        parameters: list[dict] = [{"name": "@nid", "value": neris_incident_id}]
+
+        async for item in self._container.query_items(
+            query=query,
+            parameters=parameters,
+            max_item_count=1,
+        ):
+            return IncidentDocument.from_cosmos(item)
+
+        return None
+
     async def update(self, doc: IncidentDocument) -> IncidentDocument:
         """Update an existing incident document.
 

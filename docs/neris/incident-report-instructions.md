@@ -117,21 +117,28 @@ For fire incidents, also ask about: water on fire, fire under control, fire knoc
 
 **4b — Crew Per Unit**
 
-Using the on-duty schedule, assign personnel to each responding unit. Present grouped by unit:
+Using the on-duty schedule, assign personnel to each responding unit. Present grouped by unit. **List every responding unit** — if you don't know who was on a unit, show it as needing assignment:
 
 > Based on the on-duty schedule, here's who I have for each unit:
 >
-> - **E31**: Smith (Captain), Jones (FF), Garcia (EMT)
-> - **BN31**: Dodd (Battalion Chief)
+> - **BN31**: Pollack (Chief) — IC
+> - **E31**: Chadwick (Lieutenant), Smith (AO)
 > - **M31**: Williams (Paramedic)
 >
-> Does this look right?
+> **Still need crew for:**
+> - **L31**: ?
+> - **T33**: ?
+> - **T36**: ?
+>
+> Who was on these units?
+
+Always list units needing crew **prominently** — don't bury them at the end of a paragraph. If the user gives a nickname, shorthand, or last name you can't match from the pre-loaded roster, call `get_personnel` to get the full list and match from there.
 
 Save crew via `update_incident(crew=[{name, email, rank, position, unit}, ...])`. Each person needs a `unit` assignment.
 
 **4c — Additional Responders**
 
-Ask about anyone not on the schedule who responded:
+After all units have crew, ask about anyone else:
 
 > Was anyone else on scene? For example:
 > - Off-duty personnel who responded?
@@ -156,10 +163,17 @@ Use `get_neris_values("action_tactic", prefix="EMERGENCY_MEDICAL_CARE||")` to sh
 
 ### Step 6 — Location Details
 
-You already have the address from dispatch. Confirm and fill in:
-- **Location use type** — Ask: "What type of building/location was this?" and suggest based on address (residential street → single family dwelling, commercial area → office/retail, etc.)
-- **Lat/long** — From dispatch geo_location if available
-- **Cross streets** — Ask if not obvious
+You already have the address and GPS from dispatch. Use `lookup_location` with the lat/long to find cross streets, then present everything for verification:
+
+> **Location**: 589 Old Farm Rd, Friday Harbor, WA
+> **GPS**: 48.464012, -123.037876
+> **Cross streets**: Cattle Point Rd, Pear Point Rd
+> **Property type**: Detached single-family dwelling
+>
+> Does this look right?
+
+- **Location use type** — Suggest based on address/context (residential street → single family dwelling, commercial area → office/retail, etc.). Use `get_neris_values("location_use")` if needed.
+- **Cross streets** — Always look up via `lookup_location` first. Only ask the user if the lookup returns no results.
 
 ### Step 7 — Narrative
 
@@ -202,14 +216,15 @@ Summarize everything and highlight any gaps:
 >
 > **Core**: Medical > Injury > Fall, Feb 12 2026
 > **Location**: 200 Spring St (Residential, detached single family)
-> **Actions**: Patient assessment, Provide BLS, Provide transport
 > **Units**: E31, M31 (4 personnel)
 > **Times**: Dispatch 14:30 → On scene 14:38 → Clear 15:22
+> **Actions**: Patient assessment, Provide BLS, Provide transport
+> **Narrative**: "Engine 31 and Medic 31 responded to 200 Spring St for a reported fall. On arrival, found a 72-year-old male who had fallen from a standing position. Patient was conscious and alert with complaint of left hip pain. BLS care was provided and patient was transported to PeaceHealth by M31. Scene cleared at 15:22."
 >
 > ✅ All required fields complete
 > ⚠️ Missing: Cross streets (optional)
 >
-> Ready to save?
+> Ready to mark as Ready for Review?
 
 Use `update_incident` to save all fields. Set status to `ready_review` when complete.
 
@@ -234,7 +249,9 @@ Use `update_incident` to save all fields. Set status to `ready_review` when comp
 - **Default city**: Friday Harbor, WA 98250
 - **Common positions**: Captain, Lieutenant, Firefighter, EMT, Paramedic
 - **Shifts**: A, B, C platoons
+- **Nicknames**: "Dutch" = Joran Bouwman
 - **Mutual aid**: Primarily from neighboring island departments and county resources
 - If the user seems unsure about a NERIS classification, offer to look up values: "Want me to show you all the options for [field]?"
 - Keep narratives factual, professional, and concise — avoid subjective language
 - Don't over-ask — if dispatch data answers a question, just confirm rather than re-asking
+- **Always show before saving** — When the user corrects, adjusts, or rewrites any content (narrative, actions, crew, etc.), show the revised version and ask for confirmation before calling `update_incident`. Never silently save corrections — the user needs to verify the change is right.

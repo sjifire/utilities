@@ -441,13 +441,12 @@
   function hashTab(validTabs, defaultTab) {
     const h = location.hash.slice(1);
     return {
-      _tab: validTabs.includes(h) ? h : defaultTab,
-      get activeTab() { return this._tab; },
-      set activeTab(v) { this._tab = v; location.hash = v; },
+      activeTab: validTabs.includes(h) ? h : defaultTab,
       init() {
+        this.$watch('activeTab', v => { location.hash = v; });
         window.addEventListener('hashchange', () => {
           const t = location.hash.slice(1);
-          if (validTabs.includes(t)) this._tab = t;
+          if (validTabs.includes(t)) this.activeTab = t;
         });
       }
     };

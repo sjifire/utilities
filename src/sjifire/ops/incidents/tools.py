@@ -526,7 +526,10 @@ async def update_incident(
             doc.unit_responses = unit_responses
             fields_changed.append("unit_responses")
         if timestamps is not None:
-            doc.timestamps = {**doc.timestamps, **timestamps}
+            # Filter out None values — the LLM may send null for timestamps
+            # that don't apply (e.g. first_unit_arrived when units were cancelled)
+            clean_ts = {k: v for k, v in timestamps.items() if v is not None}
+            doc.timestamps = {**doc.timestamps, **clean_ts}
             fields_changed.append("timestamps")
         if internal_notes is not None:
             doc.internal_notes = internal_notes

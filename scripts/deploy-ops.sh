@@ -178,6 +178,7 @@ az containerapp secret set \
         "neris-client-id=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-ID,identityref:system" \
         "neris-client-secret=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-SECRET,identityref:system" \
         "anthropic-api-key=keyvaultref:${VAULT_URL}/secrets/ANTHROPIC-API-KEY,identityref:system" \
+        "cosmos-key=keyvaultref:${VAULT_URL}/secrets/COSMOS-KEY,identityref:system" \
     --output none
 ok "Secrets linked to Key Vault"
 
@@ -196,6 +197,7 @@ az containerapp update \
         "ENTRA_MCP_OFFICER_GROUP_ID=${ENTRA_MCP_OFFICER_GROUP_ID}" \
         "ENTRA_MCP_API_CLIENT_SECRET=secretref:entra-mcp-api-client-secret" \
         "COSMOS_ENDPOINT=${COSMOS_ENDPOINT}" \
+        "COSMOS_KEY=secretref:cosmos-key" \
         "MS_GRAPH_TENANT_ID=${MS_GRAPH_TENANT_ID}" \
         "MS_GRAPH_CLIENT_ID=${MS_GRAPH_CLIENT_ID}" \
         "MS_GRAPH_CLIENT_SECRET=secretref:ms-graph-client-secret" \
@@ -233,24 +235,7 @@ az containerapp auth microsoft update \
     --tenant-id "$MS_GRAPH_TENANT_ID" \
     --yes \
     --output none
-# Extend EasyAuth session cookie to 72 hours (default is 8h).
-# authConfigs only supports PUT (not PATCH), so read-modify-write.
-SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-AUTH_URL="https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.App/containerApps/${CONTAINER_APP}/authConfigs/current?api-version=2024-03-01"
-AUTH_CONFIG=$(az rest --method get --url "$AUTH_URL" 2>/dev/null || echo '{}')
-UPDATED_CONFIG=$(echo "$AUTH_CONFIG" | python3 -c "
-import json, sys
-cfg = json.load(sys.stdin)
-props = cfg.setdefault('properties', {})
-login = props.setdefault('login', {})
-login['cookieExpiration'] = {
-    'convention': 'FixedTime',
-    'timeToExpiration': '3.00:00:00',
-}
-json.dump(cfg, sys.stdout)
-")
-az rest --method put --url "$AUTH_URL" --body "$UPDATED_CONFIG" --output none
-ok "EasyAuth configured (72h session)"
+ok "EasyAuth configured"
 
 # ---------------------------------------------------------------------------
 # Health check — verify the NEW version is serving

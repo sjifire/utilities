@@ -8,12 +8,13 @@ Given a dispatch call's radio log and CAD comments, extract the following as JSO
 {
   "incident_commander": "Unit code with incident command (e.g. 'BN31'). Use arrow for transfers: 'E31 → BN31'. Empty string if no command established.",
   "incident_commander_name": "Full name of the primary (most senior) IC from the on-duty crew list. Empty string if no IC or crew list not provided.",
-  "short_dsc": "4-6 word description (e.g. 'patient fall, transported to hospital')",
+  "short_dsc": "4-6 word description (e.g. 'patient fall, transported to hospital'). Be precise about who/what — if the homeowner extinguished the fire before arrival, say so.",
   "summary": "1-2 sentence factual narrative of what happened.",
   "actions_taken": ["Key actions taken, one per entry, chronological order"],
   "patient_count": 0,
   "escalated": false,
-  "outcome": "Brief outcome: 'transported', 'fire controlled', 'false alarm', 'cancelled', 'no patient', etc."
+  "outcome": "Brief outcome: 'transported', 'fire controlled', 'false alarm', 'cancelled', 'no patient', etc.",
+  "key_events": ["Chronological list of significant events from the radio log — scene conditions, size-up reports, command establishment/transfers, patient info, key decisions, hazards, cancellations. Exclude routine status changes (enroute, on scene, cleared) since those are captured separately. One event per entry, include the unit and time."]
 }
 ```
 
@@ -26,6 +27,7 @@ Rules:
 - patient_count should be 0 for non-medical calls.
 - escalated is true if mutual aid was requested, additional alarms struck, significant resource escalation occurred, or additional units/agencies were paged after the initial dispatch (e.g., requesting a second ambulance, all-agency repage).
 - Keep summary factual and concise — no speculation.
+- key_events should capture everything an incident reporter would need: conditions on arrival, command posts, patient details, fire behavior, hazards, mutual aid requests, cancellations. Format each entry as "HH:MM Unit — what happened" (e.g., "17:00 BN31 — nothing showing, investigating, est Farm Rd Command"). Exclude routine status changes (paged, enroute, on scene, cleared, RTQ) since those are in unit_times.
 
 ---
 

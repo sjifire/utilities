@@ -110,6 +110,11 @@
       .data-table-wrap     { -webkit-overflow-scrolling: touch; }
       .dashboard-footer    { flex-direction: column; gap: 4px; }
     }
+
+    /* ── Completeness bar ── */
+    .completeness-bar          { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .completeness-bar .bar     { display: inline-block; width: 40px; height: 5px; background: var(--border-medium); border-radius: 3px; overflow: hidden; vertical-align: middle; }
+    .completeness-bar .bar-fill { display: block; height: 100%; background: var(--color-blue); border-radius: 3px; }
 </style>
 {% endblock %}
 
@@ -184,9 +189,9 @@
         <div class="stat-desc" x-text="D.neris_count + ' submitted to NERIS'"></div>
       </div>
       <div class="stat-card accent-purple">
-        <div class="stat-label">Duty Officer</div>
-        <div class="stat-value" x-text="D.chief_officer || '\u2014'"></div>
-        <div class="stat-desc">Chief Officer</div>
+        <div class="stat-label">Fastest Enroute</div>
+        <div class="stat-value" x-text="D.fastest_turnout ? D.fastest_turnout.display : '\u2014'"></div>
+        <div class="stat-desc" x-text="D.fastest_turnout ? D.fastest_turnout.unit + ' \u2014 ' + D.fastest_turnout.nature + ' (' + D.fastest_turnout.date + ' ' + D.fastest_turnout.time + ')' : 'Page \u2192 enroute'"></div>
       </div>
     </div>
     <div class="grid-overview">
@@ -199,7 +204,7 @@
         <template x-if="D.crew.length">
           <div>
             <template x-for="c in D.crew" :key="c.name + c.shift">
-              <div class="overview-row">
+              <div class="overview-row" :style="c.section === 'Chief Officer' ? 'border-left:3px solid var(--color-amber-dark);background:rgba(245,158,11,.08)' : ''">
                 <div>
                   <div style="font-size:14px;font-weight:600;color:var(--text-primary)" x-text="c.name"></div>
                   <div style="font-size:12px;color:var(--text-muted);margin-top:2px" x-text="c.position"></div>
@@ -236,11 +241,6 @@
                   <div class="call-card-right">
                     <div class="nowrap font-semibold" style="font-size:12px;color:var(--text-muted)" x-text="c.date + ' ' + c.time"></div>
                     <div class="mono font-semibold" style="font-size:12px;color:var(--text-secondary);margin-top:4px" x-text="c.id"></div>
-                    <div style="margin-top:4px">
-                      <span x-show="c.report_source === 'neris'" class="text-green" style="font-size:11px">&#10003; NERIS</span>
-                      <span x-show="c.report_source === 'local'" class="text-blue" style="font-size:11px">&#9998; Draft</span>
-                      <span x-show="!c.report_source" class="text-amber" style="font-size:11px">&#9888; No report</span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -312,7 +312,7 @@
             <tbody>
               <template x-for="s in D.sections.slice().reverse()" :key="s.key">
                 <template x-for="(c, i) in [{_header: true, label: s.label}, ...s.members]" :key="c._header ? 'h-' + s.key : c.name + c.shift">
-                  <tr>
+                  <tr :style="!c._header && s.key === 'Chief Officer' ? 'border-left:3px solid var(--color-amber-dark);background:rgba(245,158,11,.08)' : ''">
                     <template x-if="c._header">
                       <td colspan="3" class="section-header uppercase font-semibold" style="font-size:11px;color:var(--text-dim)" x-text="c.label"></td>
                     </template>
@@ -363,7 +363,7 @@
             <tbody>
               <template x-for="s in D.upcoming_sections.slice().reverse()" :key="s.key">
                 <template x-for="(c, i) in [{_header: true, label: s.label}, ...s.members]" :key="c._header ? 'h-' + s.key : c.name + c.shift">
-                  <tr>
+                  <tr :style="!c._header && s.key === 'Chief Officer' ? 'border-left:3px solid var(--color-amber-dark);background:rgba(245,158,11,.08)' : ''">
                     <template x-if="c._header">
                       <td colspan="3" class="section-header uppercase font-semibold" style="font-size:11px;color:var(--text-dim)" x-text="c.label"></td>
                     </template>
@@ -438,7 +438,7 @@
             <template x-for="c in D.recent_calls" :key="'rp-' + c.id">
               <tr>
                 <td class="dot-cell"><span class="severity-dot" :class="c.severity"></span></td>
-                <td class="mono" style="font-size:12px;color:var(--text-muted)" x-text="c.id"></td>
+                <td class="mono nowrap" style="font-size:12px;color:var(--text-muted)" x-text="c.id"></td>
                 <td class="nowrap" style="color:var(--text-secondary)" x-text="c.date + ' ' + c.time"></td>
                 <td class="nowrap font-semibold" style="color:var(--text-primary)"><span x-text="c.icon + ' ' + c.nature"></span></td>
                 <td class="nowrap font-semibold" style="font-size:12px;color:var(--text-secondary)" x-text="c.ic || '\u2014'"></td>
@@ -452,7 +452,15 @@
                     </div>
                   </template>
                   <template x-if="c.report_source === 'local'">
-                    <span class="text-blue font-semibold" style="font-size:11px">&#9998; <span x-text="c.report_status || 'draft'"></span></span>
+                    <div>
+                      <span class="text-blue font-semibold" style="font-size:11px">&#9998; <span x-text="c.report_status || 'draft'"></span></span>
+                      <template x-if="c.completeness">
+                        <div class="completeness-bar">
+                          <span x-text="c.completeness.filled + '/' + c.completeness.total"></span>
+                          <span class="bar"><span class="bar-fill" :style="'width:' + (c.completeness.total ? (c.completeness.filled / c.completeness.total * 100) : 0) + '%'"></span></span>
+                        </div>
+                      </template>
+                    </div>
                   </template>
                   <template x-if="!c.report_source">
                     <span class="text-amber" style="font-size:11px">&#9888; Missing</span>
@@ -460,7 +468,7 @@
                 </td>
                 <td>
                   <template x-if="c.report_source === 'local' && c.incident_id">
-                    <a class="action-btn edit" :href="'/reports/' + c.incident_id">Edit Report</a>
+                    <a class="action-btn edit" :href="'/reports/' + c.incident_id" x-text="c.report_status === 'ready review' ? 'Finalize' : 'Edit Report'"></a>
                   </template>
                   <template x-if="c.report_source === 'neris'">
                     <button class="action-btn import" @click="startReport(c)">Import from NERIS</button>
@@ -496,7 +504,8 @@ function dashboard() {
       neris_count: 0, local_draft_count: 0, missing_reports: 0,
       sections: [], crew_date_range: '', shift_end: '',
       upcoming_platoon: '', upcoming_crew: [], upcoming_sections: [],
-      upcoming_date_range: '', upcoming_shift_starts: ''
+      upcoming_date_range: '', upcoming_shift_starts: '',
+      fastest_turnout: null
     },
     loading: true,
     error: false,
@@ -570,7 +579,8 @@ function dashboard() {
       const fields = {
         incident_number: call.id,
         incident_date: this.parseDate(call.date),
-        station: 'S31'
+        station: 'S31',
+        neris_id: call.neris_id || ''
       };
       for (const [k, v] of Object.entries(fields)) {
         const input = document.createElement('input');

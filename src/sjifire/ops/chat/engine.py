@@ -168,6 +168,7 @@ before saving.
 def _format_unit_times_table(
     unit_times: list[dict],
     time_reported: str = "",
+    alarm_time: str = "",
 ) -> str:
     """Format unit response times as a readable table for the system prompt.
 
@@ -176,7 +177,13 @@ def _format_unit_times_table(
        time_reported. Maps to ``update_incident(timestamps={...})``.
     2. **Per-unit times** — each apparatus with key timestamps for review.
        Maps to ``update_incident(unit_responses=[...])``.
+
+    The ``alarm_time`` (SJF3 PAGED) is used as the default dispatch time
+    for all units — the page goes out once and all units respond from it.
+    Falls back to ``time_reported`` if alarm_time is empty.
     """
+    # Default dispatch time: alarm (page) time, or call received time
+    default_dispatched = alarm_time or time_reported
 
     def _time(iso: str) -> str:
         """Extract HH:MM:SS from an ISO timestamp, or '--' if empty."""
@@ -200,10 +207,11 @@ def _format_unit_times_table(
         return max(values) if values else ""
 
     # --- Incident-level timestamps (→ update_incident timestamps={}) ---
+    dispatched = _earliest("paged") or default_dispatched
     lines = [
         "INCIDENT TIMESTAMPS (save via timestamps={...}):",
         f"  Call Received (psap_answer):       {_time(time_reported)}",
-        f"  First Dispatched (first_unit_dispatched): {_time(_earliest('paged'))}",
+        f"  First Dispatched (first_unit_dispatched): {_time(dispatched)}",
         f"  First Enroute (first_unit_enroute):    {_time(_earliest('enroute'))}",
         f"  First On Scene (first_unit_arrived):   {_time(_earliest('arrived'))}",
         f"  Last Unit Cleared (last_unit_cleared):  {_time(_latest('completed'))}",
@@ -219,7 +227,7 @@ def _format_unit_times_table(
     lines.extend([header, divider])
     for ut in unit_times:
         unit = (ut.get("unit") or "?").ljust(8)
-        paged = _time(ut.get("paged", "")).ljust(10)
+        paged = _time(ut.get("paged") or default_dispatched).ljust(10)
         enroute = _time(ut.get("enroute", "")).ljust(8)
         arrived = _time(ut.get("arrived", "")).ljust(8)
         completed = _time(ut.get("completed", "")).ljust(8)
@@ -302,7 +310,8 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
             async with DispatchStore() as dstore:
                 dispatch = await dstore.get_by_dispatch_id(doc.incident_number)
             if dispatch:
-                # Slim dispatch: drop raw radio log (~8K chars) and redundant fields.
+                # Slim dispatch: drop raw radio log (~8K chars). The enriched
+                # analysis.key_events has the condensed narrative instead.
                 # The agent has get_dispatch_call if it needs full details.
                 slim: dict = {
                     "id": dispatch.id,
@@ -321,7 +330,10 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
                     # Format unit_times as a readable table for easy review
                     if unit_times:
                         tr = dispatch.time_reported.isoformat() if dispatch.time_reported else ""
-                        slim["unit_times_table"] = _format_unit_times_table(unit_times, tr)
+                        at = analysis.alarm_time or ""
+                        slim["unit_times_table"] = _format_unit_times_table(
+                            unit_times, tr, alarm_time=at
+                        )
                 dispatch_json = json.dumps(slim, indent=2, default=str)
                 if dispatch.time_reported:
                     incident_hour = dispatch.time_reported.hour
@@ -357,6 +369,8 @@ async def stream_chat(
     incident_id: str,
     user_message: str,
     user: UserContext,
+    *,
+    images: list[dict] | None = None,
 ) -> AsyncGenerator[str]:
     r"""Stream a chat response as Server-Sent Events.
 
@@ -432,11 +446,26 @@ async def stream_chat(
             entry["content"] = msg.content or ""
         api_messages.append(entry)
 
-    # Add the new user message
-    api_messages.append({"role": "user", "content": user_message})
+    # Add the new user message (with optional image content blocks)
+    if images:
+        content_blocks: list[dict] = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img["media_type"],
+                    "data": img["data"],
+                },
+            }
+            for img in images
+        ]
+        content_blocks.append({"type": "text", "text": user_message})
+        api_messages.append({"role": "user", "content": content_blocks})
+    else:
+        api_messages.append({"role": "user", "content": user_message})
     api_messages = _trim_messages(api_messages)
 
-    # Record user message
+    # Record user message (text only — images are one-shot, not stored)
     conversation.messages.append(ConversationMessage(role="user", content=user_message))
 
     # Streaming loop (handles tool calls)
@@ -611,7 +640,27 @@ async def _stream_loop(
             except json.JSONDecodeError:
                 summary = result_str[:200]
 
-            yield _sse("tool_result", {"name": tc["name"], "summary": summary})
+            is_error = summary.startswith("Error")
+            evt = {"name": tc["name"], "summary": summary, "is_error": is_error}
+            yield _sse("tool_result", evt)
+
+            # After update_incident, emit live status update for the client
+            if tc["name"] == "update_incident":
+                try:
+                    result_data_raw = json.loads(result_str)
+                    if "error" not in result_data_raw:
+                        from sjifire.ops.incidents.models import IncidentDocument
+
+                        doc = IncidentDocument.from_cosmos(result_data_raw)
+                        yield _sse(
+                            "status_update",
+                            {
+                                "status": doc.status,
+                                "completeness": doc.completeness(),
+                            },
+                        )
+                except Exception:
+                    logger.debug("Failed to emit status_update", exc_info=True)
 
             full_tool_results.append(
                 {
@@ -703,6 +752,14 @@ def _summarize_tool_result(name: str, data: dict) -> str:
     if name == "list_incidents":
         incidents = data if isinstance(data, list) else data.get("incidents", [])
         return f"{len(incidents)} incident(s)"
+
+    if name == "lookup_location":
+        road = data.get("road", "")
+        cross = data.get("cross_streets", [])
+        if cross:
+            names = [c["name"] if isinstance(c, dict) else c for c in cross[:3]]
+            return f"{road} near {', '.join(names)}"
+        return f"{road} (no cross streets found)"
 
     return json.dumps(data, default=str)[:200]
 
@@ -971,7 +1028,9 @@ async def _stream_general_loop(
             except json.JSONDecodeError:
                 summary = result_str[:200]
 
-            yield _sse("tool_result", {"name": tc["name"], "summary": summary})
+            is_error = summary.startswith("Error")
+            evt = {"name": tc["name"], "summary": summary, "is_error": is_error}
+            yield _sse("tool_result", evt)
 
             full_tool_results.append(
                 {

@@ -143,7 +143,7 @@ class TestIncidentDocument:
         doc = self._make_doc()
         result = doc.completeness()
         assert result["filled"] == 0
-        assert result["total"] == 5
+        assert result["total"] == 7
         assert not any(result["sections"].values())
 
     def test_completeness_partial(self):
@@ -154,11 +154,12 @@ class TestIncidentDocument:
         )
         result = doc.completeness()
         assert result["filled"] == 3
-        assert result["total"] == 5
+        assert result["total"] == 7
         assert result["sections"]["incident_type"] is True
         assert result["sections"]["address"] is True
         assert result["sections"]["crew"] is True
-        assert result["sections"]["narratives"] is False
+        assert result["sections"]["narrative"] is False
+        assert result["sections"]["actions_taken"] is False
         assert result["sections"]["timestamps"] is False
 
     def test_completeness_full(self):
@@ -166,28 +167,32 @@ class TestIncidentDocument:
             incident_type="111",
             address="100 Spring St",
             crew=[CrewAssignment(name="John")],
-            narratives=Narratives(outcome="Contained"),
+            unit_responses=[{"unit": "E31"}],
+            narratives=Narratives(outcome="Contained", actions_taken="Deployed lines"),
             timestamps={"dispatch": "2026-02-12T10:00:00"},
         )
         result = doc.completeness()
-        assert result["filled"] == 5
-        assert result["total"] == 5
+        assert result["filled"] == 7
+        assert result["total"] == 7
         assert all(result["sections"].values())
 
-    def test_completeness_outcome_only_counts_as_narrative(self):
+    def test_completeness_outcome_only(self):
         doc = self._make_doc(narratives=Narratives(outcome="Contained"))
         result = doc.completeness()
-        assert result["sections"]["narratives"] is True
+        assert result["sections"]["narrative"] is True
+        assert result["sections"]["actions_taken"] is False
 
-    def test_completeness_actions_taken_only_counts_as_narrative(self):
+    def test_completeness_actions_taken_only(self):
         doc = self._make_doc(narratives=Narratives(actions_taken="Deployed lines"))
         result = doc.completeness()
-        assert result["sections"]["narratives"] is True
+        assert result["sections"]["narrative"] is False
+        assert result["sections"]["actions_taken"] is True
 
     def test_completeness_empty_narratives(self):
         doc = self._make_doc(narratives=Narratives(outcome="", actions_taken=""))
         result = doc.completeness()
-        assert result["sections"]["narratives"] is False
+        assert result["sections"]["narrative"] is False
+        assert result["sections"]["actions_taken"] is False
 
     def test_completeness_survives_cosmos_roundtrip(self):
         doc = self._make_doc(

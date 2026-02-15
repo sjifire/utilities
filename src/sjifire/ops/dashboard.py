@@ -403,6 +403,21 @@ def _build_template_context(
             except (ValueError, IndexError):
                 upcoming_shift_starts = most_common_start.replace(":", "")
 
+    # Fastest turnout stat
+    ft = dashboard_data.get("fastest_turnout")
+    fastest_turnout = (
+        {
+            "display": ft["display"],
+            "unit": ft["unit"],
+            "nature": ft["nature"],
+            "date": ft["date"],
+            "time": ft.get("time", ""),
+            "dispatch_id": ft["dispatch_id"],
+        }
+        if ft
+        else None
+    )
+
     return {
         "date_display": date_display,
         "updated_time": updated_time,
@@ -425,6 +440,7 @@ def _build_template_context(
         "upcoming_sections": upcoming_sections,
         "upcoming_date_range": upcoming_date_range,
         "upcoming_shift_starts": upcoming_shift_starts,
+        "fastest_turnout": fastest_turnout,
     }
 
 
@@ -589,19 +605,26 @@ async def get_dashboard() -> dict:
 
     # Fetch all four data sources in parallel.  return_exceptions=True
     # so a single failure doesn't block the others.
-    calls_result, schedule_result, incidents_result, neris_result = await asyncio.gather(
+    (
+        calls_result,
+        schedule_result,
+        incidents_result,
+        neris_result,
+        turnout_result,
+    ) = await asyncio.gather(
         _fetch_recent_calls(),
         _fetch_schedule(),
         _fetch_incidents(user.email, user.is_officer),
         _fetch_neris_reports(),
+        _fetch_fastest_enroute(),
         return_exceptions=True,
     )
 
     elapsed = (datetime.now(UTC) - t0).total_seconds()
-    labels = ["dispatch", "schedule", "incidents", "neris"]
+    labels = ["dispatch", "schedule", "incidents", "neris", "turnout"]
     statuses = [
         "err" if isinstance(r, BaseException) else "ok"
-        for r in (calls_result, schedule_result, incidents_result, neris_result)
+        for r in (calls_result, schedule_result, incidents_result, neris_result, turnout_result)
     ]
     logger.info(
         "get_dashboard fetched in %.1fs (%s)",
@@ -691,6 +714,12 @@ async def get_dashboard() -> dict:
         result["recent_calls"] = recent_calls
         result["call_count"] = len(calls_result)  # dispatch calls only
 
+    # --- Fastest turnout ---
+    if isinstance(turnout_result, BaseException):
+        logger.warning("Dashboard: turnout fetch failed: %s", turnout_result)
+    elif turnout_result:
+        result["fastest_turnout"] = turnout_result
+
     return result
 
 
@@ -703,19 +732,26 @@ async def _get_dashboard_cached(*, call_limit: int = 15) -> dict:
     user = get_current_user()
     t0 = datetime.now(UTC)
 
-    calls_result, schedule_result, incidents_result, neris_result = await asyncio.gather(
+    (
+        calls_result,
+        schedule_result,
+        incidents_result,
+        neris_result,
+        turnout_result,
+    ) = await asyncio.gather(
         _fetch_recent_calls(limit=call_limit),
         _fetch_schedule(),
         _fetch_incidents(user.email, user.is_officer),
         _fetch_neris_cache(),
+        _fetch_fastest_enroute(),
         return_exceptions=True,
     )
 
     elapsed = (datetime.now(UTC) - t0).total_seconds()
-    labels = ["dispatch", "schedule", "incidents", "neris_cache"]
+    labels = ["dispatch", "schedule", "incidents", "neris_cache", "turnout"]
     statuses = [
         "err" if isinstance(r, BaseException) else "ok"
-        for r in (calls_result, schedule_result, incidents_result, neris_result)
+        for r in (calls_result, schedule_result, incidents_result, neris_result, turnout_result)
     ]
     logger.info(
         "_get_dashboard_cached fetched in %.1fs (%s)",
@@ -802,6 +838,12 @@ async def _get_dashboard_cached(*, call_limit: int = 15) -> dict:
         result["recent_calls"] = recent_calls
         result["call_count"] = len(calls_result)
 
+    # --- Fastest turnout ---
+    if isinstance(turnout_result, BaseException):
+        logger.warning("Dashboard cached: turnout fetch failed: %s", turnout_result)
+    elif turnout_result:
+        result["fastest_turnout"] = turnout_result
+
     return result
 
 
@@ -809,6 +851,61 @@ async def _fetch_recent_calls(*, limit: int = 15):
     """Fetch recent dispatch calls from Cosmos DB."""
     async with DispatchStore() as store:
         return await store.list_recent(limit=limit)
+
+
+async def _fetch_fastest_enroute(*, unit: str = "E31", limit: int = 200) -> dict | None:
+    """Find the fastest enroute time (page → enroute) for a unit in recent calls.
+
+    Returns dict with seconds, display, call nature/date/id, or None if no data.
+    """
+    async with DispatchStore() as store:
+        calls = await store.list_recent(limit=limit)
+
+    best: dict | None = None
+    best_seconds = float("inf")
+
+    for call in calls:
+        if not call.analysis or not call.analysis.unit_times:
+            continue
+        alarm = call.analysis.alarm_time
+        if not alarm:
+            continue
+
+        for ut in call.analysis.unit_times:
+            if ut.unit != unit or not ut.enroute:
+                continue
+            # Use unit paged time if available, otherwise alarm time
+            paged = ut.paged or alarm
+            try:
+                t_paged = datetime.fromisoformat(paged)
+                t_enroute = datetime.fromisoformat(ut.enroute)
+                delta = (t_enroute - t_paged).total_seconds()
+            except (ValueError, TypeError):
+                continue
+            if delta <= 0 or delta > 600:
+                # Skip bogus data (negative or > 10 min)
+                continue
+            if delta < best_seconds:
+                best_seconds = delta
+                mins = int(delta) // 60
+                secs = int(delta) % 60
+                call_date = ""
+                call_time = ""
+                if call.time_reported:
+                    d = call.time_reported.astimezone(get_timezone())
+                    call_date = f"{d.strftime('%b')} {d.day}"
+                    call_time = d.strftime("%H:%M")
+                best = {
+                    "unit": unit,
+                    "seconds": int(delta),
+                    "display": f"{mins}:{secs:02d}",
+                    "nature": call.nature,
+                    "date": call_date,
+                    "time": call_time,
+                    "dispatch_id": call.long_term_call_id,
+                }
+
+    return best
 
 
 async def _fetch_schedule():

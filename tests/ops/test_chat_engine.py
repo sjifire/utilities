@@ -686,3 +686,130 @@ class TestFormatUnitTimesTable:
         assert "INCIDENT TIMESTAMPS" in table
         assert "14:29:30" in table
         assert "UNIT RESPONSE TIMES" in table
+
+
+class TestImageContentBlocks:
+    """Verify images are sent as content blocks and not stored in history."""
+
+    async def test_images_build_multipart_content(self):
+        """When images are passed, the API message should use content blocks."""
+        from sjifire.ops.chat.budget import BudgetStatus
+        from sjifire.ops.chat.engine import stream_chat
+
+        captured_messages: list = []
+
+        # Mock _stream_loop to capture the api_messages it receives
+        async def fake_stream_loop(client, system, api_messages, conv, user):
+            captured_messages.extend(api_messages)
+            yield _sse("text", {"content": "I can see the photo."})
+
+        with (
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
+            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine.get_client"),
+        ):
+            images = [{"media_type": "image/jpeg", "data": "abc123base64=="}]
+            events = [
+                e async for e in stream_chat("inc-img", "What is this?", _TEST_USER, images=images)
+            ]
+
+        # Should have produced text events
+        assert any("I can see the photo" in e for e in events)
+
+        # Last message in api_messages should have image + text content blocks
+        last_msg = captured_messages[-1]
+        assert last_msg["role"] == "user"
+        assert isinstance(last_msg["content"], list)
+        assert len(last_msg["content"]) == 2
+        assert last_msg["content"][0]["type"] == "image"
+        assert last_msg["content"][0]["source"]["media_type"] == "image/jpeg"
+        assert last_msg["content"][0]["source"]["data"] == "abc123base64=="
+        assert last_msg["content"][1]["type"] == "text"
+        assert last_msg["content"][1]["text"] == "What is this?"
+
+    async def test_multiple_images_build_multiple_blocks(self):
+        """Multiple images should produce multiple image content blocks."""
+        from sjifire.ops.chat.budget import BudgetStatus
+        from sjifire.ops.chat.engine import stream_chat
+
+        captured_messages: list = []
+
+        async def fake_stream_loop(client, system, api_messages, conv, user):
+            captured_messages.extend(api_messages)
+            yield _sse("text", {"content": "ok"})
+
+        with (
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
+            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine.get_client"),
+        ):
+            images = [
+                {"media_type": "image/jpeg", "data": "img1"},
+                {"media_type": "image/png", "data": "img2"},
+                {"media_type": "image/webp", "data": "img3"},
+            ]
+            _ = [
+                e async for e in stream_chat("inc-multi", "Check these", _TEST_USER, images=images)
+            ]
+
+        last_msg = captured_messages[-1]
+        content = last_msg["content"]
+        assert len(content) == 4  # 3 images + 1 text
+        assert all(c["type"] == "image" for c in content[:3])
+        assert content[3]["type"] == "text"
+
+    async def test_no_images_sends_plain_string(self):
+        """Without images, the API message should be a plain string."""
+        from sjifire.ops.chat.budget import BudgetStatus
+        from sjifire.ops.chat.engine import stream_chat
+
+        captured_messages: list = []
+
+        async def fake_stream_loop(client, system, api_messages, conv, user):
+            captured_messages.extend(api_messages)
+            yield _sse("text", {"content": "ok"})
+
+        with (
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
+            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine.get_client"),
+        ):
+            _ = [e async for e in stream_chat("inc-txt", "just text", _TEST_USER)]
+
+        last_msg = captured_messages[-1]
+        assert last_msg["role"] == "user"
+        assert last_msg["content"] == "just text"
+
+    async def test_images_not_stored_in_conversation(self):
+        """Images should be one-shot — not persisted in conversation messages."""
+        from sjifire.ops.chat.budget import BudgetStatus
+        from sjifire.ops.chat.engine import stream_chat
+
+        saved_conv = None
+
+        async def fake_stream_loop(client, system, api_messages, conv, user):
+            nonlocal saved_conv
+            saved_conv = conv
+            yield _sse("text", {"content": "Got it"})
+
+        with (
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
+            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine.get_client"),
+        ):
+            images = [{"media_type": "image/jpeg", "data": "photo123"}]
+            _ = [
+                e async for e in stream_chat("inc-store", "Look at this", _TEST_USER, images=images)
+            ]
+
+        # The stored user message should be text only
+        assert saved_conv is not None
+        user_msgs = [m for m in saved_conv.messages if m.role == "user"]
+        assert len(user_msgs) == 1
+        assert user_msgs[0].content == "Look at this"
+        # Content is a plain string, no image data
+        assert "photo123" not in str(user_msgs[0].model_dump())

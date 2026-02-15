@@ -348,7 +348,7 @@ class TestGetDashboard:
             "26-001678": {
                 "source": "local",
                 "status": "draft",
-                "completeness": {"filled": 2, "total": 5, "sections": {}},
+                "completeness": {"filled": 2, "total": 7, "sections": {}},
                 "incident_id": "inc-1",
             },
         }
@@ -358,7 +358,7 @@ class TestGetDashboard:
 
         report = result["recent_calls"][0]["report"]
         assert report["completeness"]["filled"] == 2
-        assert report["completeness"]["total"] == 5
+        assert report["completeness"]["total"] == 7
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +451,7 @@ class TestNerisCrossReference:
             "26-001678": {
                 "source": "local",
                 "status": "in_progress",
-                "completeness": {"filled": 3, "total": 5},
+                "completeness": {"filled": 3, "total": 7},
                 "incident_id": "local-id",
             },
         }
@@ -679,7 +679,7 @@ class TestFetchIncidents:
 
         comp = result["26-001678"]["completeness"]
         assert comp["filled"] == 3  # incident_type + address + crew
-        assert comp["total"] == 5
+        assert comp["total"] == 7
 
     @patch("sjifire.ops.dashboard.IncidentStore")
     async def test_empty_store_returns_empty_lookup(self, mock_store_cls, regular_user):
@@ -995,9 +995,10 @@ class TestDashboardIntegration:
 
         report = result["recent_calls"][0]["report"]
         assert report["status"] == "ready_review"
-        assert report["completeness"]["filled"] == 5
-        assert report["completeness"]["total"] == 5
-        assert all(report["completeness"]["sections"].values())
+        assert (
+            report["completeness"]["filled"] == 5
+        )  # type + address + crew + narrative + timestamps
+        assert report["completeness"]["total"] == 7
 
     @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)

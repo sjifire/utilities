@@ -197,7 +197,8 @@ def cmd_archive(args) -> int:
     # Enrich any archived docs that are missing structured analysis
     if not getattr(args, "dry_run", False):
         force = getattr(args, "force", False)
-        enriched = asyncio.run(_enrich_stored(force=force))
+        limit = 999 if force else 100
+        enriched = asyncio.run(_enrich_stored(force=force, limit=limit))
         if enriched:
             _print_enrichment_results(enriched)
             count = sum(1 for d in enriched if d.analysis.incident_commander or d.analysis.summary)
@@ -246,11 +247,11 @@ async def _store_completed(calls: list) -> int:
         return await store.store_completed(calls)
 
 
-async def _enrich_stored(*, force: bool = False) -> list:
+async def _enrich_stored(*, force: bool = False, limit: int = 100) -> list:
     from sjifire.ops.dispatch.store import DispatchStore
 
     async with DispatchStore() as store:
-        return await store.enrich_stored(force=force)
+        return await store.enrich_stored(force=force, limit=limit)
 
 
 def main() -> int:
