@@ -31,6 +31,8 @@
     .chat-header h1   { font-size: 16px; color: var(--text-primary); font-weight: 600; }
     .back-link         { color: var(--color-blue); text-decoration: none; font-size: 13px; opacity: .8; }
     .back-link:hover   { opacity: 1; }
+    .print-link        { color: var(--text-muted); text-decoration: none; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border-medium); border-radius: 4px; }
+    .print-link:hover  { color: var(--text-secondary); border-color: var(--color-blue); }
 
     .status-badge {
       font-size: 11px;
@@ -373,6 +375,7 @@
       <h1>{{ incident_number }}</h1>
       <span class="status-badge {{ incident_status }}" x-text="status">{{ incident_status }}</span>
     </div>
+    <a href="/reports/{{ incident_id }}/print" target="_blank" class="print-link">Print Report</a>
   </div>
 
   {% if dispatch %}
@@ -441,10 +444,12 @@
 
   <!-- Quick action chips -->
   <div class="chat-hints" x-show="!streaming">
+    <button class="chat-hint" @click="sendMessage('Show the dispatch log')">Show dispatch log</button>
     <button class="chat-hint" @click="sendMessage('Add today\'s on-duty crew')">Add today's crew</button>
     <button class="chat-hint" @click="sendMessage('Fill in timestamps from dispatch')">Fill in timestamps</button>
     <button class="chat-hint" @click="sendMessage('Write the narrative')">Write narrative</button>
     <button class="chat-hint" @click="sendMessage('What fields are still missing?')">What's missing?</button>
+    <button class="chat-hint" @click="sendMessage('Show the radio log')">Show radio log</button>
   </div>
 
   <!-- Image preview strip -->

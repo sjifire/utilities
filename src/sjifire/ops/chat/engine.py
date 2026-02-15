@@ -137,12 +137,14 @@ last names only (e.g. "Stanger, See, Vos"), use the PERSONNEL \
 ROSTER below to resolve each last name to a full name and email. \
 Never ask the user for first names if you can match from the roster. \
 If a name is not in the roster, call get_personnel for a wider search.
-- TERMINOLOGY: iSpyFire calls it the "radio log" but it is actually \
-the dispatch log — CAD comments, responder status changes, and unit \
-timeline. We do not have audio recordings. When the user asks for \
-the "radio log" or "dispatch log", show the CAD comments and \
-responder timeline from the dispatch data. Don't say you lack \
-access — this IS the dispatch log."""
+- DISPATCH LOG: iSpyFire calls it the "radio log" but it is the \
+dispatch log. We do not have audio recordings. When the user asks \
+for the "radio log", "dispatch log", or "CAD notes", show ALL \
+entries from the dispatch data in chronological order: CAD comments, \
+responder status changes (dispatched, enroute, on scene, clear), \
+and any notes — everything with a timestamp. Use get_dispatch_call \
+if the full details aren't in the context. Present it as a clean \
+timeline. Don't say you lack access — this IS the dispatch log."""
 
     workflow = """\
 WORKFLOW:
