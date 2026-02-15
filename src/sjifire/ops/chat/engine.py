@@ -136,7 +136,13 @@ from scratch if you truly cannot determine it from the data.
 last names only (e.g. "Stanger, See, Vos"), use the PERSONNEL \
 ROSTER below to resolve each last name to a full name and email. \
 Never ask the user for first names if you can match from the roster. \
-If a name is not in the roster, call get_personnel for a wider search."""
+If a name is not in the roster, call get_personnel for a wider search.
+- TERMINOLOGY: iSpyFire calls it the "radio log" but it is actually \
+the dispatch log — CAD comments, responder status changes, and unit \
+timeline. We do not have audio recordings. When the user asks for \
+the "radio log" or "dispatch log", show the CAD comments and \
+responder timeline from the dispatch data. Don't say you lack \
+access — this IS the dispatch log."""
 
     workflow = """\
 WORKFLOW:
