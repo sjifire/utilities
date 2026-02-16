@@ -6,6 +6,9 @@
 # Builds a container image via ACR and updates the running Container App.
 # Used by both local dev deploys and GitHub Actions (ops-deploy.yml).
 #
+# Optimized for fast rollout: image update fires first, housekeeping runs
+# in parallel while the new revision provisions.
+#
 # Usage:
 #   ./scripts/deploy-ops.sh              # Build & deploy
 #   ./scripts/deploy-ops.sh --build-only # Build image without deploying
@@ -132,7 +135,14 @@ if [ "$BUILD_ONLY" = true ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Fetch config from Key Vault
+# Temp dir for parallel output
+# ---------------------------------------------------------------------------
+
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+# ---------------------------------------------------------------------------
+# Fetch config from Key Vault (parallel — ~12s → ~2s)
 # ---------------------------------------------------------------------------
 
 VAULT_URL="https://${KEY_VAULT}.vault.azure.net"
@@ -142,67 +152,79 @@ _get_secret() {
 }
 
 info "Fetching config from Key Vault..."
-ENTRA_MCP_API_CLIENT_ID=$(_get_secret "ENTRA-MCP-API-CLIENT-ID")
-ENTRA_REPORT_EDITORS_GROUP_ID=$(_get_secret "ENTRA-REPORT-EDITORS-GROUP-ID")
-COSMOS_ENDPOINT=$(_get_secret "COSMOS-ENDPOINT")
-MS_GRAPH_TENANT_ID=$(_get_secret "MS-GRAPH-TENANT-ID")
-MS_GRAPH_CLIENT_ID=$(_get_secret "MS-GRAPH-CLIENT-ID")
-ALADTEC_URL=$(_get_secret "ALADTEC-URL")
+_get_secret "ENTRA-MCP-API-CLIENT-ID"      > "$TMPDIR/kv-1" &
+_get_secret "ENTRA-REPORT-EDITORS-GROUP-ID" > "$TMPDIR/kv-2" &
+_get_secret "COSMOS-ENDPOINT"               > "$TMPDIR/kv-3" &
+_get_secret "MS-GRAPH-TENANT-ID"            > "$TMPDIR/kv-4" &
+_get_secret "MS-GRAPH-CLIENT-ID"            > "$TMPDIR/kv-5" &
+_get_secret "ALADTEC-URL"                   > "$TMPDIR/kv-6" &
+wait
+ENTRA_MCP_API_CLIENT_ID=$(cat "$TMPDIR/kv-1")
+ENTRA_REPORT_EDITORS_GROUP_ID=$(cat "$TMPDIR/kv-2")
+COSMOS_ENDPOINT=$(cat "$TMPDIR/kv-3")
+MS_GRAPH_TENANT_ID=$(cat "$TMPDIR/kv-4")
+MS_GRAPH_CLIENT_ID=$(cat "$TMPDIR/kv-5")
+ALADTEC_URL=$(cat "$TMPDIR/kv-6")
 ok "Config fetched"
 
 # ---------------------------------------------------------------------------
-# Ensure managed identity can read Key Vault secrets (idempotent)
+# First-deploy check — run prerequisites if secrets not yet configured
 # ---------------------------------------------------------------------------
 
-info "Ensuring Key Vault access for managed identity..."
-MANAGED_ID=$(az containerapp identity show \
-    --name "$CONTAINER_APP" \
-    --resource-group "$RESOURCE_GROUP" \
-    --query principalId -o tsv 2>/dev/null || true)
+EXISTING_SECRETS=$(az containerapp secret list \
+    --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" \
+    --query "length(@)" -o tsv 2>/dev/null || echo "0")
 
-if [ -z "$MANAGED_ID" ]; then
-    info "Enabling system-assigned managed identity..."
-    MANAGED_ID=$(az containerapp identity assign \
+if [ "$EXISTING_SECRETS" -lt 5 ]; then
+    warn "First deploy detected (${EXISTING_SECRETS} secrets) — configuring prerequisites..."
+
+    # Ensure managed identity
+    info "Enabling managed identity..."
+    MANAGED_ID=$(az containerapp identity show \
         --name "$CONTAINER_APP" \
         --resource-group "$RESOURCE_GROUP" \
-        --system-assigned \
-        --query principalId -o tsv)
+        --query principalId -o tsv 2>/dev/null || true)
+
+    if [ -z "$MANAGED_ID" ]; then
+        MANAGED_ID=$(az containerapp identity assign \
+            --name "$CONTAINER_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --system-assigned \
+            --query principalId -o tsv)
+    fi
+
+    az keyvault set-policy \
+        --name "$KEY_VAULT" \
+        --object-id "$MANAGED_ID" \
+        --secret-permissions get \
+        --output none 2>/dev/null || true
+    ok "Managed identity has Key Vault access"
+
+    # Configure secrets before the update
+    info "Configuring Key Vault secret references..."
+    az containerapp secret set \
+        --name "$CONTAINER_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --secrets \
+            "aladtec-password=keyvaultref:${VAULT_URL}/secrets/ALADTEC-PASSWORD,identityref:system" \
+            "aladtec-username=keyvaultref:${VAULT_URL}/secrets/ALADTEC-USERNAME,identityref:system" \
+            "ms-graph-client-secret=keyvaultref:${VAULT_URL}/secrets/MS-GRAPH-CLIENT-SECRET,identityref:system" \
+            "entra-mcp-api-client-secret=keyvaultref:${VAULT_URL}/secrets/ENTRA-MCP-API-CLIENT-SECRET,identityref:system" \
+            "ispyfire-url=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-URL,identityref:system" \
+            "ispyfire-username=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-USERNAME,identityref:system" \
+            "ispyfire-password=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-PASSWORD,identityref:system" \
+            "neris-client-id=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-ID,identityref:system" \
+            "neris-client-secret=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-SECRET,identityref:system" \
+            "anthropic-api-key=keyvaultref:${VAULT_URL}/secrets/ANTHROPIC-API-KEY,identityref:system" \
+            "cosmos-key=keyvaultref:${VAULT_URL}/secrets/COSMOS-KEY,identityref:system" \
+            "azure-maps-key=keyvaultref:${VAULT_URL}/secrets/AZURE-MAPS-KEY,identityref:system" \
+            "kiosk-signing-key=keyvaultref:${VAULT_URL}/secrets/KIOSK-SIGNING-KEY,identityref:system" \
+        --output none
+    ok "Secrets configured"
 fi
 
-az keyvault set-policy \
-    --name "$KEY_VAULT" \
-    --object-id "$MANAGED_ID" \
-    --secret-permissions get \
-    --output none 2>/dev/null || true
-ok "Managed identity has Key Vault access"
-
 # ---------------------------------------------------------------------------
-# Wire secrets as Key Vault references (no secret values in CLI output)
-# ---------------------------------------------------------------------------
-
-info "Configuring Key Vault secret references..."
-az containerapp secret set \
-    --name "$CONTAINER_APP" \
-    --resource-group "$RESOURCE_GROUP" \
-    --secrets \
-        "aladtec-password=keyvaultref:${VAULT_URL}/secrets/ALADTEC-PASSWORD,identityref:system" \
-        "aladtec-username=keyvaultref:${VAULT_URL}/secrets/ALADTEC-USERNAME,identityref:system" \
-        "ms-graph-client-secret=keyvaultref:${VAULT_URL}/secrets/MS-GRAPH-CLIENT-SECRET,identityref:system" \
-        "entra-mcp-api-client-secret=keyvaultref:${VAULT_URL}/secrets/ENTRA-MCP-API-CLIENT-SECRET,identityref:system" \
-        "ispyfire-url=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-URL,identityref:system" \
-        "ispyfire-username=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-USERNAME,identityref:system" \
-        "ispyfire-password=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-PASSWORD,identityref:system" \
-        "neris-client-id=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-ID,identityref:system" \
-        "neris-client-secret=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-SECRET,identityref:system" \
-        "anthropic-api-key=keyvaultref:${VAULT_URL}/secrets/ANTHROPIC-API-KEY,identityref:system" \
-        "cosmos-key=keyvaultref:${VAULT_URL}/secrets/COSMOS-KEY,identityref:system" \
-        "azure-maps-key=keyvaultref:${VAULT_URL}/secrets/AZURE-MAPS-KEY,identityref:system" \
-        "kiosk-signing-key=keyvaultref:${VAULT_URL}/secrets/KIOSK-SIGNING-KEY,identityref:system" \
-    --output none
-ok "Secrets linked to Key Vault"
-
-# ---------------------------------------------------------------------------
-# Update image and env vars (full replacement — single source of truth)
+# Update image and env vars — starts the rollout
 # ---------------------------------------------------------------------------
 
 info "Updating Container App image and env vars..."
@@ -234,82 +256,126 @@ az containerapp update \
         "KIOSK_SIGNING_KEY=secretref:kiosk-signing-key" \
         "BUILD_VERSION=${TAG}" \
     --output none
-ok "Container App updated with ${IMAGE_NAME}:${TAG}"
+ok "Container App updated with ${IMAGE_NAME}:${TAG} — rollout started"
 
 # ---------------------------------------------------------------------------
-# Update Container Apps Job image (if job exists)
+# Housekeeping (parallel, while revision provisions)
 # ---------------------------------------------------------------------------
 
-CA_JOB="sjifire-ops-tasks"
-if az containerapp job show --name "$CA_JOB" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
-    info "Updating Container Apps Job image..."
-    az containerapp job update \
-        --name "$CA_JOB" \
-        --resource-group "$RESOURCE_GROUP" \
-        --image "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${TAG}" \
-        --output none
-    ok "Job updated with ${IMAGE_NAME}:${TAG}"
-else
-    warn "Container Apps Job $CA_JOB not found — skipping (run setup-azure-ops.sh --phase 9 to create)"
-fi
-
-# ---------------------------------------------------------------------------
-# Configure EasyAuth (Azure Container Apps built-in auth)
-# ---------------------------------------------------------------------------
-
-info "Configuring EasyAuth..."
-az containerapp auth update \
-    --name "$CONTAINER_APP" \
-    --resource-group "$RESOURCE_GROUP" \
-    --unauthenticated-client-action AllowAnonymous \
-    --enabled true \
-    --output none
-
-az containerapp auth microsoft update \
-    --name "$CONTAINER_APP" \
-    --resource-group "$RESOURCE_GROUP" \
-    --client-id "$ENTRA_MCP_API_CLIENT_ID" \
-    --client-secret-name entra-mcp-api-client-secret \
-    --tenant-id "$MS_GRAPH_TENANT_ID" \
-    --yes \
-    --output none
-ok "EasyAuth configured"
-
-# ---------------------------------------------------------------------------
-# Health check — verify the NEW version is serving
-# ---------------------------------------------------------------------------
-
-echo ""
-info "Waiting for new revision to provision..."
-for i in $(seq 1 20); do
-    REV_STATE=$(az containerapp revision list \
+_housekeeping_identity() {
+    MANAGED_ID=$(az containerapp identity show \
         --name "$CONTAINER_APP" \
         --resource-group "$RESOURCE_GROUP" \
-        --query "sort_by([], &properties.createdTime)[-1].properties.runningState" \
-        -o tsv 2>/dev/null || true)
-    if [ "$REV_STATE" = "Running" ]; then
-        ok "Revision running"
-        break
+        --query principalId -o tsv 2>/dev/null || true)
+
+    if [ -z "$MANAGED_ID" ]; then
+        MANAGED_ID=$(az containerapp identity assign \
+            --name "$CONTAINER_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --system-assigned \
+            --query principalId -o tsv 2>/dev/null || true)
     fi
-    printf "  %s (%s)...\r" "$REV_STATE" "${i}"
-    sleep 3
-done
 
-# ---------------------------------------------------------------------------
-# Purge old images (keep latest 5 + latest tag)
-# ---------------------------------------------------------------------------
+    if [ -n "$MANAGED_ID" ]; then
+        az keyvault set-policy \
+            --name "$KEY_VAULT" \
+            --object-id "$MANAGED_ID" \
+            --secret-permissions get \
+            --output none 2>/dev/null || true
+    fi
+    echo "ok" > "$TMPDIR/hk-identity"
+}
 
-info "Purging old ACR images (keeping 5 most recent)..."
-az acr run \
-    --registry "$ACR_NAME" \
-    --cmd "acr purge --filter '${IMAGE_NAME}:.*' --ago 0d --keep 5 --untagged" \
-    /dev/null --output none 2>/dev/null || warn "ACR purge failed (non-critical)"
-ok "ACR cleanup complete"
+_housekeeping_secrets() {
+    az containerapp secret set \
+        --name "$CONTAINER_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --secrets \
+            "aladtec-password=keyvaultref:${VAULT_URL}/secrets/ALADTEC-PASSWORD,identityref:system" \
+            "aladtec-username=keyvaultref:${VAULT_URL}/secrets/ALADTEC-USERNAME,identityref:system" \
+            "ms-graph-client-secret=keyvaultref:${VAULT_URL}/secrets/MS-GRAPH-CLIENT-SECRET,identityref:system" \
+            "entra-mcp-api-client-secret=keyvaultref:${VAULT_URL}/secrets/ENTRA-MCP-API-CLIENT-SECRET,identityref:system" \
+            "ispyfire-url=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-URL,identityref:system" \
+            "ispyfire-username=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-USERNAME,identityref:system" \
+            "ispyfire-password=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-PASSWORD,identityref:system" \
+            "neris-client-id=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-ID,identityref:system" \
+            "neris-client-secret=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-SECRET,identityref:system" \
+            "anthropic-api-key=keyvaultref:${VAULT_URL}/secrets/ANTHROPIC-API-KEY,identityref:system" \
+            "cosmos-key=keyvaultref:${VAULT_URL}/secrets/COSMOS-KEY,identityref:system" \
+            "azure-maps-key=keyvaultref:${VAULT_URL}/secrets/AZURE-MAPS-KEY,identityref:system" \
+            "kiosk-signing-key=keyvaultref:${VAULT_URL}/secrets/KIOSK-SIGNING-KEY,identityref:system" \
+        --output none 2>/dev/null || true
+    echo "ok" > "$TMPDIR/hk-secrets"
+}
+
+_housekeeping_easyauth() {
+    az containerapp auth update \
+        --name "$CONTAINER_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --unauthenticated-client-action AllowAnonymous \
+        --enabled true \
+        --output none 2>/dev/null || true
+
+    az containerapp auth microsoft update \
+        --name "$CONTAINER_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --client-id "$ENTRA_MCP_API_CLIENT_ID" \
+        --client-secret-name entra-mcp-api-client-secret \
+        --tenant-id "$MS_GRAPH_TENANT_ID" \
+        --yes \
+        --output none 2>/dev/null || true
+    echo "ok" > "$TMPDIR/hk-easyauth"
+}
+
+_housekeeping_job() {
+    CA_JOB="sjifire-ops-tasks"
+    if az containerapp job show --name "$CA_JOB" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+        az containerapp job update \
+            --name "$CA_JOB" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${TAG}" \
+            --output none 2>/dev/null || true
+        echo "ok" > "$TMPDIR/hk-job"
+    else
+        echo "skip" > "$TMPDIR/hk-job"
+    fi
+}
+
+_housekeeping_acr_purge() {
+    az acr run \
+        --registry "$ACR_NAME" \
+        --cmd "acr purge --filter '${IMAGE_NAME}:.*' --ago 0d --keep 5 --untagged" \
+        /dev/null --output none 2>/dev/null || true
+    echo "ok" > "$TMPDIR/hk-acr"
+}
+
+info "Running housekeeping in parallel..."
+_housekeeping_identity   > "$TMPDIR/hk-identity-log" 2>&1 &
+_housekeeping_secrets    > "$TMPDIR/hk-secrets-log"  2>&1 &
+_housekeeping_easyauth   > "$TMPDIR/hk-easyauth-log" 2>&1 &
+_housekeeping_job        > "$TMPDIR/hk-job-log"      2>&1 &
+_housekeeping_acr_purge  > "$TMPDIR/hk-acr-log"      2>&1 &
+wait
+
+# Report housekeeping results
+[ -f "$TMPDIR/hk-identity" ] && ok "Managed identity verified"  || warn "Managed identity check had issues"
+[ -f "$TMPDIR/hk-secrets" ]  && ok "Secret refs verified"       || warn "Secret refs had issues"
+[ -f "$TMPDIR/hk-easyauth" ] && ok "EasyAuth verified"          || warn "EasyAuth had issues"
+if [ -f "$TMPDIR/hk-job" ]; then
+    JOB_RESULT=$(cat "$TMPDIR/hk-job")
+    [ "$JOB_RESULT" = "ok" ] && ok "CA Job updated" || warn "CA Job not found — skipping"
+else
+    warn "CA Job update had issues"
+fi
+[ -f "$TMPDIR/hk-acr" ] && ok "ACR cleanup complete" || warn "ACR purge had issues"
+
+ok "Housekeeping complete"
 
 # ---------------------------------------------------------------------------
 # Verify version
 # ---------------------------------------------------------------------------
 
+echo ""
 info "Verifying version ${TAG} is serving..."
 for i in $(seq 1 10); do
     BODY=$(curl -s "https://${CUSTOM_DOMAIN}/health" 2>/dev/null || true)
