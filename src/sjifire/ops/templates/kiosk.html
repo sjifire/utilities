@@ -331,6 +331,9 @@
     padding: 2px 0;
     font-size: 13px;
     color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .crew-grid-cell.chief {
     color: var(--color-amber);
@@ -858,15 +861,41 @@ function kioskApp() {
       // Already have a map for this call
       if (maps[id]) {
         // Update position if changed
-        maps[id].setCamera({ center: [call.longitude, call.latitude], zoom: 13 });
+        const z = { 2: 12 }[parseInt(_params.get('map_style') || '2', 10)] || 13;
+        maps[id].setCamera({ center: [call.longitude, call.latitude], zoom: z });
         return;
       }
+
+      // Map style presets — switch via ?map_style=1 through 6
+      // 0 (default): night, no tweaks
+      // 1: grayscale_dark, no tweaks
+      // 2: night, zoom out to 12
+      // 3: satellite_road_labels
+      // 4: night, wider roads + bigger labels
+      // 5: grayscale_dark, wider roads + bigger labels
+      // 6: high_contrast_dark
+      const MAP_STYLE = parseInt(_params.get('map_style') || '2', 10);
+
+      const styleMap = {
+        0: 'night',
+        1: 'grayscale_dark',
+        2: 'night',
+        3: 'satellite_road_labels',
+        4: 'night',
+        5: 'grayscale_dark',
+        6: 'high_contrast_dark',
+      };
+      const zoomMap = { 2: 12 };
+      const tweakRoads = new Set([4, 5]);
+
+      const mapStyle = styleMap[MAP_STYLE] || 'night';
+      const mapZoom = zoomMap[MAP_STYLE] || 13;
 
       // Create new map
       const map = new atlas.Map(containerId, {
         center: [call.longitude, call.latitude],
-        zoom: 13,
-        style: 'night',
+        zoom: mapZoom,
+        style: mapStyle,
         interactive: false,
         authOptions: {
           authType: 'subscriptionKey',
@@ -875,6 +904,23 @@ function kioskApp() {
       });
 
       map.events.add('ready', () => {
+        if (tweakRoads.has(MAP_STYLE)) {
+          try {
+            const s = map.map.getStyle();
+            if (s && s.layers) {
+              for (const layer of s.layers) {
+                if (layer.type === 'line' && layer.id && /road/i.test(layer.id)) {
+                  map.map.setPaintProperty(layer.id, 'line-width', ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 5, 18, 12]);
+                  map.map.setPaintProperty(layer.id, 'line-opacity', 0.9);
+                }
+                if (layer.type === 'symbol' && layer.id && /road.*label/i.test(layer.id)) {
+                  map.map.setLayoutProperty(layer.id, 'text-size', ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 16, 18, 20]);
+                }
+              }
+            }
+          } catch (e) { /* style tweak failed, map still works */ }
+        }
+
         const marker = new atlas.HtmlMarker({
           position: [call.longitude, call.latitude],
           color: '#dc2626',

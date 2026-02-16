@@ -70,8 +70,15 @@ def get_test_kiosk_data() -> dict:
 # Scenario data
 # ---------------------------------------------------------------------------
 
-# Base timestamp — call was "reported" at the start of the cycle
-_CALL_BASE = datetime.now(UTC).replace(second=0, microsecond=0)
+
+def _cycle_base(t: float) -> datetime:
+    """Dynamic base timestamp for the current cycle.
+
+    Returns ``now - (t - 3)`` so that ``time_reported`` is always
+    "a few seconds ago" when the call first appears (T+3) and drifts
+    naturally as the cycle progresses.  Resets every cycle.
+    """
+    return datetime.now(UTC) - timedelta(seconds=max(t - 3, 0))
 
 
 def _ts(base: datetime, offset_seconds: int) -> str:
@@ -99,7 +106,7 @@ def _structure_fire_call(t: float) -> dict:
     Starts at T+5 with just a dispatch ID (incoming call, nothing else).
     Address+geo, nature, responders fill in over time.
     """
-    base = _CALL_BASE
+    base = _cycle_base(t)
     call: dict = {
         "dispatch_id": "26-001999",
         "long_term_call_id": "26-001999",
