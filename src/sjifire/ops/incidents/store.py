@@ -250,24 +250,22 @@ class IncidentStore:
         self,
         status: str | None = None,
         *,
-        station: str | None = None,
         exclude_status: str | None = None,
         max_items: int = 50,
     ) -> list[IncidentDocument]:
-        """List incidents, optionally filtered by status and/or station.
+        """List incidents, optionally filtered by status.
 
         Args:
             status: Filter by status (draft, in_progress, ready_review, submitted)
-            station: Filter by station code
             exclude_status: Exclude incidents with this status
             max_items: Maximum number of results
 
         Returns:
-            List of matching incident documents, sorted by incident_date ascending
+            List of matching incident documents, sorted by incident_datetime ascending
         """
         if self._in_memory:
             return self._filter_memory(
-                status=status, station=station, exclude_status=exclude_status, max_items=max_items
+                status=status, exclude_status=exclude_status, max_items=max_items
             )
 
         conditions = []
@@ -279,12 +277,9 @@ class IncidentStore:
         if exclude_status:
             conditions.append("c.status != @exclude_status")
             parameters.append({"name": "@exclude_status", "value": exclude_status})
-        if station:
-            conditions.append("c.station = @station")
-            parameters.append({"name": "@station", "value": station})
 
         where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        query = f"SELECT * FROM c{where_clause} ORDER BY c.incident_date ASC"
+        query = f"SELECT * FROM c{where_clause} ORDER BY c.incident_datetime ASC"
 
         items = []
         async for item in self._container.query_items(
@@ -327,7 +322,11 @@ class IncidentStore:
                 max_items=max_items,
             )
 
-        conditions = ['(c.created_by = @email OR ARRAY_CONTAINS(c.crew, {"email": @email}, true))']
+        conditions = [
+            "(c.created_by = @email OR EXISTS("
+            "SELECT VALUE u FROM u IN c.units WHERE EXISTS("
+            "SELECT VALUE p FROM p IN u.personnel WHERE p.email = @email)))"
+        ]
         parameters: list[dict] = [{"name": "@email", "value": user_email.lower()}]
 
         if status:
@@ -338,7 +337,7 @@ class IncidentStore:
             parameters.append({"name": "@exclude_status", "value": exclude_status})
 
         where_clause = f" WHERE {' AND '.join(conditions)}"
-        query = f"SELECT * FROM c{where_clause} ORDER BY c.incident_date ASC"
+        query = f"SELECT * FROM c{where_clause} ORDER BY c.incident_datetime ASC"
 
         items = []
         async for item in self._container.query_items(
@@ -365,10 +364,10 @@ class IncidentStore:
         """
         if self._in_memory:
             results = [IncidentDocument.from_cosmos(data) for data in self._memory.values()]
-            results.sort(key=lambda doc: doc.incident_date)
+            results.sort(key=lambda doc: doc.incident_datetime)
             return results[:max_items]
 
-        query = "SELECT * FROM c ORDER BY c.incident_date ASC"
+        query = "SELECT * FROM c ORDER BY c.incident_datetime ASC"
 
         items = []
         async for item in self._container.query_items(
@@ -385,7 +384,6 @@ class IncidentStore:
         self,
         *,
         status: str | None = None,
-        station: str | None = None,
         exclude_status: str | None = None,
         user_email: str | None = None,
         max_items: int = 50,
@@ -397,13 +395,15 @@ class IncidentStore:
                 continue
             if exclude_status and data.get("status") == exclude_status:
                 continue
-            if station and data.get("station") != station:
-                continue
             if user_email:
                 is_creator = data.get("created_by") == user_email
-                is_crew = any(c.get("email") == user_email for c in data.get("crew", []))
-                if not is_creator and not is_crew:
+                is_personnel = any(
+                    p.get("email") == user_email
+                    for u in data.get("units", [])
+                    for p in u.get("personnel", [])
+                )
+                if not is_creator and not is_personnel:
                     continue
             results.append(IncidentDocument.from_cosmos(data))
-        results.sort(key=lambda doc: doc.incident_date)
+        results.sort(key=lambda doc: doc.incident_datetime)
         return results[:max_items]

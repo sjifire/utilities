@@ -468,9 +468,9 @@ class TestSlimDispatchContext:
         incident = IncidentDocument(
             id="test-inc-1",
             incident_number="26-009999",
-            incident_date="2026-02-15",
-            station="S31",
+            incident_datetime="2026-02-15T00:00:00+00:00",
             created_by="test@sjifire.org",
+            extras={"station": "S31"},
         )
         async with IncidentStore() as store:
             await store.create(incident)

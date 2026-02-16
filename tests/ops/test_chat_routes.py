@@ -2,7 +2,7 @@
 
 import json
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -10,10 +10,10 @@ import pytest
 from sjifire.ops.auth import UserContext
 from sjifire.ops.chat.routes import chat_stream, print_report
 from sjifire.ops.incidents.models import (
-    CrewAssignment,
     EditEntry,
     IncidentDocument,
-    Narratives,
+    PersonnelAssignment,
+    UnitAssignment,
 )
 
 _TEST_USER = UserContext(
@@ -165,10 +165,10 @@ def _make_incident(**overrides) -> IncidentDocument:
     """Build a minimal IncidentDocument for testing."""
     defaults = {
         "id": "inc-print-test",
-        "station": "S31",
         "incident_number": "26-001678",
-        "incident_date": date(2026, 2, 2),
+        "incident_datetime": datetime(2026, 2, 2, tzinfo=UTC),
         "created_by": "firefighter@sjifire.org",
+        "extras": {"station": "S31"},
     }
     defaults.update(overrides)
     return IncidentDocument(**defaults)
@@ -192,10 +192,15 @@ class TestPrintReport:
         doc = _make_incident(
             incident_type="FIRE||STRUCTURE_FIRE||CHIMNEY_FIRE",
             address="241 WARBASS WAY",
-            crew=[
-                CrewAssignment(name="Kyle Dodd", rank="Batt Chief", unit="BN31", position="BC"),
+            units=[
+                UnitAssignment(
+                    unit_id="BN31",
+                    personnel=[
+                        PersonnelAssignment(name="Kyle Dodd", rank="Batt Chief", position="BC"),
+                    ],
+                ),
             ],
-            narratives=Narratives(outcome="False alarm.", actions_taken="Investigated."),
+            narrative="False alarm. Investigated.",
             timestamps={"psap_answer_time": "18:51:21"},
         )
         with patch(
@@ -288,16 +293,16 @@ class TestPrintReport:
         assert "Chief Smith" in body
         assert "incident_type" in body
 
-    async def test_unit_responses_table(self):
+    async def test_units_table(self):
         doc = _make_incident(
-            unit_responses=[
-                {
-                    "unit_designator": "E31",
-                    "dispatched": "18:53",
-                    "enroute": "18:55",
-                    "on_scene": "",
-                    "cleared": "18:58",
-                },
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    dispatch="18:53",
+                    enroute="18:55",
+                    on_scene="",
+                    cleared="18:58",
+                ),
             ],
         )
         with patch(

@@ -2,7 +2,7 @@
 
 Provides CRUD operations with role-based access control:
 - Any authenticated user can create incidents
-- Creator and crew members can view their incidents
+- Creator and personnel can view their incidents
 - Officers (Entra group) can view all incidents and submit to NERIS
 - Only creator and officers can edit incidents
 
@@ -16,23 +16,17 @@ from datetime import UTC, datetime
 from sjifire.core.config import get_org_config
 from sjifire.ops.auth import get_current_user
 from sjifire.ops.incidents.models import (
-    CrewAssignment,
     EditEntry,
     IncidentDocument,
-    Narratives,
+    PersonnelAssignment,
+    UnitAssignment,
 )
 from sjifire.ops.incidents.store import IncidentStore
-
-# TODO: Re-enable when cooldown is restored
-# from sjifire.ops.token_store import get_token_store
 
 logger = logging.getLogger(__name__)
 
 _EDITABLE_STATUSES = {"draft", "in_progress", "ready_review"}
 _RESETTABLE_STATUSES = {"draft", "in_progress"}
-
-# One reset per user per 24 hours (Cosmos DB backed, survives restarts)
-_RESET_COOLDOWN_TTL = 86400  # 24 hours
 
 
 def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
@@ -40,7 +34,7 @@ def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
 
     Maps iSpyFire responder status changes to NERIS timestamp fields:
     - time_reported → psap_answer (from call creation)
-    - First "Dispatch" → first_unit_dispatched
+    - First "Paged" for SJF3/SJF2 → alarm_time (agency page)
     - First "Enroute" → first_unit_enroute
     - First "On Scene" → first_unit_arrived
 
@@ -52,8 +46,6 @@ def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
     """
     timestamps: dict[str, str] = {}
     status_map = {
-        "Dispatch": "first_unit_dispatched",
-        "Dispatched": "first_unit_dispatched",
         "Enroute": "first_unit_enroute",
         "On Scene": "first_unit_arrived",
     }
@@ -61,7 +53,14 @@ def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
     for detail in responder_details:
         status = detail.get("status", "")
         time_str = detail.get("time_of_status_change", "")
+        unit = detail.get("unit", "")
         if not status or not time_str:
+            continue
+
+        # Agency page (SJF3 or SJF2 paged) → alarm_time
+        if status in ("Dispatch", "Dispatched", "Paged") and unit in ("SJF3", "SJF2"):
+            if "alarm_time" not in timestamps:
+                timestamps["alarm_time"] = str(time_str)
             continue
 
         neris_field = status_map.get(status)
@@ -71,11 +70,51 @@ def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
     return timestamps
 
 
+def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, str]]:
+    """Extract per-unit timestamps from dispatch responder details.
+
+    Returns a dict of unit_id → {dispatch, enroute, on_scene, cleared, ...}.
+    """
+    unit_times: dict[str, dict[str, str]] = {}
+    status_map = {
+        "Dispatch": "dispatch",
+        "Dispatched": "dispatch",
+        "Enroute": "enroute",
+        "On Scene": "on_scene",
+        "Complete": "cleared",
+        "Returning": "cleared",
+        "In Quarters": "in_quarters",
+        "Cancelled": "canceled",
+    }
+
+    for detail in responder_details:
+        unit = detail.get("unit", "")
+        status = detail.get("status", "")
+        time_str = detail.get("time_of_status_change", "")
+        if not unit or not status or not time_str:
+            continue
+        # Skip agency paging units
+        if unit in ("SJF3", "SJF2"):
+            continue
+
+        field = status_map.get(status)
+        if not field:
+            continue
+
+        if unit not in unit_times:
+            unit_times[unit] = {}
+        # Keep earliest time for each field
+        if field not in unit_times[unit]:
+            unit_times[unit][field] = str(time_str)
+
+    return unit_times
+
+
 async def _prefill_from_dispatch(incident_number: str) -> dict:
     """Look up dispatch data and return pre-fill fields for an incident.
 
     Both ``create_incident`` and ``reset_incident`` call this to populate
-    address, coordinates, and timestamps from dispatch records.
+    address, coordinates, timestamps, and unit shells from dispatch records.
 
     Args:
         incident_number: Dispatch ID (e.g. "26-000944")
@@ -113,12 +152,26 @@ async def _prefill_from_dispatch(incident_number: str) -> dict:
         except (ValueError, IndexError):
             pass
 
-    # Extract timestamps from responder details
+    # Extract incident-level timestamps from responder details
     ts = _extract_timestamps(dispatch.responder_details)
     if dispatch.time_reported:
         ts["psap_answer"] = dispatch.time_reported.isoformat()
     if ts:
         prefill["timestamps"] = ts
+
+    # Extract per-unit timestamps to build unit shells
+    unit_times = _extract_unit_times(dispatch.responder_details)
+    if unit_times:
+        units = []
+        for unit_id, times in unit_times.items():
+            units.append(UnitAssignment(unit_id=unit_id, **times))
+        prefill["units"] = units
+
+    # Snapshot dispatch comments
+    comments = dispatch.to_dict().get("cad_comments") or []
+    if comments:
+        lines = [f"{c.get('time', '')} {c.get('comment', '')}".strip() for c in comments]
+        prefill["dispatch_comments"] = "\n".join(lines)
 
     return prefill
 
@@ -167,7 +220,7 @@ async def _prefill_from_neris(neris_id: str) -> dict:
     # Outcome narrative
     base = record.get("base") or {}
     if base.get("outcome_narrative"):
-        prefill["outcome_narrative"] = base["outcome_narrative"]
+        prefill["narrative"] = base["outcome_narrative"]
 
     # Location — prefer base.location (corrected), fall back to dispatch
     loc = base.get("location") or {}
@@ -189,20 +242,18 @@ async def _prefill_from_neris(neris_id: str) -> dict:
     dispatch = record.get("dispatch") or {}
     neris_units = dispatch.get("unit_responses") or []
     if neris_units:
-        unit_responses = []
+        units = []
         for u in neris_units:
-            unit = {
-                "unit_neris_id": u.get("unit_neris_id", ""),
-                "staffing": u.get("staffing"),
-                "dispatch": u.get("dispatch"),
-                "enroute_to_scene": u.get("enroute_to_scene"),
-                "on_scene": u.get("on_scene"),
-                "unit_clear": u.get("unit_clear"),
-                "response_mode": u.get("response_mode"),
-            }
-            # Strip None values
-            unit_responses.append({k: v for k, v in unit.items() if v is not None})
-        prefill["unit_responses"] = unit_responses
+            unit = UnitAssignment(
+                unit_id=u.get("reported_unit_id") or u.get("unit_neris_id", ""),
+                response_mode=u.get("response_mode", ""),
+                dispatch=u.get("dispatch", ""),
+                enroute=u.get("enroute_to_scene", ""),
+                on_scene=u.get("on_scene", ""),
+                cleared=u.get("unit_clear", ""),
+            )
+            units.append(unit)
+        prefill["units"] = units
 
     # Timestamps — from dispatch-level fields and earliest unit times
     timestamps: dict[str, str] = {}
@@ -211,9 +262,8 @@ async def _prefill_from_neris(neris_id: str) -> dict:
     if dispatch.get("incident_clear"):
         timestamps["incident_clear"] = dispatch["incident_clear"]
 
-    # Earliest unit dispatch/enroute/on_scene across all units
+    # Earliest unit enroute/on_scene across all units
     for field, ts_key in [
-        ("dispatch", "first_unit_dispatched"),
         ("enroute_to_scene", "first_unit_enroute"),
         ("on_scene", "first_unit_arrived"),
     ]:
@@ -229,12 +279,41 @@ async def _prefill_from_neris(neris_id: str) -> dict:
 
 def _check_view_access(doc: IncidentDocument, user_email: str, is_officer: bool) -> bool:
     """Check if user can view this incident."""
-    return is_officer or doc.created_by == user_email or user_email in doc.crew_emails()
+    return is_officer or doc.created_by == user_email or user_email in doc.personnel_emails()
 
 
 def _check_edit_access(doc: IncidentDocument, user_email: str, is_officer: bool) -> bool:
     """Check if user can edit this incident."""
     return is_officer or doc.created_by == user_email
+
+
+def _parse_units(raw: list[dict]) -> list[UnitAssignment]:
+    """Parse raw unit dicts (from tool args) into UnitAssignment objects."""
+    units = []
+    for u in raw:
+        personnel = [
+            PersonnelAssignment(
+                name=p["name"],
+                email=p.get("email"),
+                rank=p.get("rank", ""),
+                position=p.get("position", ""),
+            )
+            for p in u.get("personnel", [])
+        ]
+        units.append(
+            UnitAssignment(
+                unit_id=u.get("unit_id", ""),
+                response_mode=u.get("response_mode", ""),
+                personnel=personnel,
+                dispatch=u.get("dispatch", ""),
+                enroute=u.get("enroute", ""),
+                on_scene=u.get("on_scene", ""),
+                cleared=u.get("cleared", ""),
+                canceled=u.get("canceled", ""),
+                in_quarters=u.get("in_quarters", ""),
+            )
+        )
+    return units
 
 
 async def create_incident(
@@ -279,7 +358,7 @@ async def create_incident(
             "existing_id": existing.id,
         }
 
-    # Pre-fill from dispatch data (address, coordinates, timestamps)
+    # Pre-fill from dispatch data (address, coordinates, timestamps, units)
     prefill = await _prefill_from_dispatch(incident_number)
 
     # If a NERIS ID was provided, fetch and merge NERIS data over dispatch
@@ -287,37 +366,56 @@ async def create_incident(
         neris_prefill = await _prefill_from_neris(neris_id)
         prefill = {**prefill, **neris_prefill}
 
-    crew_assignments = [
-        CrewAssignment(
-            name=c["name"],
-            email=c.get("email"),
-            rank=c.get("rank", ""),
-            position=c.get("position", ""),
-            unit=c.get("unit", ""),
-        )
-        for c in (crew or [])
-    ]
+    # Build units from prefill, then overlay crew assignments
+    units = prefill.get("units", [])
+    if crew:
+        # Group crew by unit
+        crew_by_unit: dict[str, list[PersonnelAssignment]] = {}
+        for c in crew:
+            p = PersonnelAssignment(
+                name=c["name"],
+                email=c.get("email"),
+                rank=c.get("rank", ""),
+                position=c.get("position", ""),
+            )
+            unit_id = c.get("unit", "")
+            crew_by_unit.setdefault(unit_id, []).append(p)
 
-    # Explicit args override prefill; prefill fills gaps
-    narratives = Narratives()
-    if prefill.get("outcome_narrative"):
-        narratives.outcome = prefill["outcome_narrative"]
+        # Assign personnel to existing units or create new ones
+        existing_unit_ids = {u.unit_id for u in units}
+        for unit_id, personnel in crew_by_unit.items():
+            if unit_id in existing_unit_ids:
+                for u in units:
+                    if u.unit_id == unit_id:
+                        u.personnel = personnel
+                        break
+            elif unit_id:
+                units.append(UnitAssignment(unit_id=unit_id, personnel=personnel))
+            # Personnel with no unit get added to a catch-all
+            else:
+                for u in units:
+                    if not u.personnel:
+                        u.personnel = personnel
+                        break
+
+    # Parse incident_date as datetime (start of day)
+    dt = datetime.strptime(incident_date, "%Y-%m-%d").replace(tzinfo=UTC)
 
     doc = IncidentDocument(
-        station=station,
         incident_number=incident_number,
-        incident_date=datetime.strptime(incident_date, "%Y-%m-%d").date(),
+        incident_datetime=dt,
         incident_type=incident_type or prefill.get("incident_type"),
         address=address if address is not None else prefill.get("address"),
         city=prefill.get("city", ""),
         state=prefill.get("state", ""),
         latitude=prefill.get("latitude"),
         longitude=prefill.get("longitude"),
-        crew=crew_assignments,
-        unit_responses=prefill.get("unit_responses", []),
+        units=units,
         timestamps=prefill.get("timestamps", {}),
-        narratives=narratives,
+        narrative=prefill.get("narrative", ""),
+        dispatch_comments=prefill.get("dispatch_comments", ""),
         neris_incident_id=prefill.get("neris_incident_id"),
+        extras={"station": station},
         created_by=user.email,
     )
 
@@ -383,24 +481,26 @@ async def list_incidents(
 
     async with IncidentStore() as store:
         if user.is_officer:
-            incidents = await store.list_by_status(
-                status, station=station, exclude_status=exclude_status
-            )
+            incidents = await store.list_by_status(status, exclude_status=exclude_status)
         else:
             incidents = await store.list_for_user(
                 user.email, status=status, exclude_status=exclude_status
             )
 
+    # Filter by station in extras if requested
+    if station:
+        incidents = [d for d in incidents if d.extras.get("station") == station]
+
     summaries = [
         {
             "id": doc.id,
             "incident_number": doc.incident_number,
-            "incident_date": doc.incident_date.isoformat(),
-            "station": doc.station,
+            "incident_datetime": doc.incident_datetime.isoformat(),
+            "station": doc.extras.get("station", ""),
             "status": doc.status,
             "incident_type": doc.incident_type,
             "created_by": doc.created_by,
-            "crew_count": len(doc.crew),
+            "personnel_count": doc.personnel_count(),
             "neris_incident_id": doc.neris_incident_id,
         }
         for doc in incidents
@@ -412,7 +512,6 @@ async def list_incidents(
 async def update_incident(
     incident_id: str,
     *,
-    station: str | None = None,
     status: str | None = None,
     incident_type: str | None = None,
     location_use: str | None = None,
@@ -423,9 +522,6 @@ async def update_incident(
     crew: list[dict] | None = None,
     outcome_narrative: str | None = None,
     actions_taken_narrative: str | None = None,
-    action_taken: str | None = None,
-    noaction_reason: str | None = None,
-    action_codes: list[str] | None = None,
     unit_responses: list[dict] | None = None,
     timestamps: dict[str, str] | None = None,
     internal_notes: str | None = None,
@@ -437,7 +533,6 @@ async def update_incident(
 
     Args:
         incident_id: The incident document ID
-        station: Update station code (e.g., "S31")
         status: New status (draft, in_progress, ready_review)
         incident_type: NERIS incident type code
         location_use: NERIS location use code (e.g., "RESIDENTIAL||MULTI_FAMILY_LOWRISE_DWELLING")
@@ -448,9 +543,6 @@ async def update_incident(
         crew: Replace crew list (each entry: name, email, rank, position, unit)
         outcome_narrative: What happened
         actions_taken_narrative: What actions were taken
-        action_taken: Was action taken? "ACTION" or "NOACTION"
-        noaction_reason: Why no action was taken (CANCELLED, STAGED_STANDBY, NO_INCIDENT_FOUND)
-        action_codes: NERIS action/tactic codes (when action_taken=ACTION)
         unit_responses: NERIS apparatus/unit response data
         timestamps: Event timestamps (dispatch, on_scene, etc.)
         internal_notes: Internal notes (not sent to NERIS)
@@ -484,9 +576,6 @@ async def update_incident(
             doc.status = status
             fields_changed.append("status")
 
-        if station is not None:
-            doc.station = station
-            fields_changed.append("station")
         if incident_type is not None:
             doc.incident_type = incident_type
             fields_changed.append("incident_type")
@@ -506,68 +595,49 @@ async def update_incident(
             doc.longitude = longitude
             fields_changed.append("longitude")
 
+        # crew param maps personnel into units
         if crew is not None:
-            doc.crew = [
-                CrewAssignment(
+            crew_by_unit: dict[str, list[PersonnelAssignment]] = {}
+            for c in crew:
+                p = PersonnelAssignment(
                     name=c["name"],
                     email=c.get("email"),
                     rank=c.get("rank", ""),
                     position=c.get("position", ""),
-                    unit=c.get("unit", ""),
                 )
-                for c in crew
-            ]
+                unit_id = c.get("unit", "")
+                crew_by_unit.setdefault(unit_id, []).append(p)
+
+            # Update existing units' personnel, create new units if needed
+            existing_ids = {u.unit_id for u in doc.units}
+            for unit_id, personnel in crew_by_unit.items():
+                if unit_id in existing_ids:
+                    for u in doc.units:
+                        if u.unit_id == unit_id:
+                            u.personnel = personnel
+                            break
+                elif unit_id:
+                    doc.units.append(UnitAssignment(unit_id=unit_id, personnel=personnel))
             fields_changed.append("crew")
 
+        # Narrative — accept both old and new param names for compatibility
         if outcome_narrative is not None or actions_taken_narrative is not None:
-            doc.narratives = Narratives(
-                outcome=(
-                    outcome_narrative if outcome_narrative is not None else doc.narratives.outcome
-                ),
-                actions_taken=(
-                    actions_taken_narrative
-                    if actions_taken_narrative is not None
-                    else doc.narratives.actions_taken
-                ),
-            )
+            parts = []
             if outcome_narrative is not None:
-                fields_changed.append("outcome_narrative")
+                parts.append(outcome_narrative)
+            elif doc.narrative:
+                parts.append(doc.narrative)
             if actions_taken_narrative is not None:
-                fields_changed.append("actions_taken_narrative")
-
-        if action_taken is not None:
-            if action_taken not in ("ACTION", "NOACTION"):
-                return {
-                    "error": f"Invalid action_taken '{action_taken}'. Must be ACTION or NOACTION"
-                }
-            doc.action_taken = action_taken
-            fields_changed.append("action_taken")
-            # Auto-clear the opposite field
-            if action_taken == "NOACTION":
-                doc.action_codes = []
-            elif action_taken == "ACTION":
-                doc.noaction_reason = None
-
-        if noaction_reason is not None:
-            valid_reasons = {"CANCELLED", "STAGED_STANDBY", "NO_INCIDENT_FOUND"}
-            if noaction_reason not in valid_reasons:
-                return {
-                    "error": f"Invalid noaction_reason '{noaction_reason}'. "
-                    f"Must be one of: {', '.join(sorted(valid_reasons))}"
-                }
-            doc.noaction_reason = noaction_reason
-            fields_changed.append("noaction_reason")
-
-        if action_codes is not None:
-            doc.action_codes = action_codes
-            fields_changed.append("action_codes")
+                parts.append(actions_taken_narrative)
+            doc.narrative = "\n\n".join(p for p in parts if p)
+            fields_changed.append("narrative")
 
         if unit_responses is not None:
-            doc.unit_responses = unit_responses
-            fields_changed.append("unit_responses")
+            doc.units = _parse_units(unit_responses)
+            fields_changed.append("units")
+
         if timestamps is not None:
             # Filter out None values — the LLM may send null for timestamps
-            # that don't apply (e.g. first_unit_arrived when units were cancelled)
             clean_ts = {k: v for k, v in timestamps.items() if v is not None}
             doc.timestamps = {**doc.timestamps, **clean_ts}
             fields_changed.append("timestamps")
@@ -629,48 +699,6 @@ async def submit_incident(incident_id: str) -> dict:
         "incident_id": incident_id,
     }
 
-    # --- NERIS submission (disabled until credentials are configured) ---
-
-    async with IncidentStore() as store:  # pragma: no cover
-        doc = await store.get_by_id(incident_id)
-
-        if doc is None:
-            return {"error": "Incident not found"}
-
-        if doc.status != "ready_review":
-            return {
-                "error": f"Incident must be in 'ready_review' status to submit "
-                f"(current: {doc.status})"
-            }
-
-        # Build the NERIS payload
-        payload = doc.to_neris_payload()
-
-        # Submit to NERIS (synchronous client, run in thread pool)
-        result = await asyncio.to_thread(_submit_to_neris, payload)
-
-        if result.get("error"):
-            return {"error": result["error"], "details": result.get("details")}
-
-        # Update local record with NERIS ID and status
-        doc.status = "submitted"
-        doc.neris_incident_id = result.get("neris_id")
-        doc.updated_at = datetime.now(UTC)
-        await store.update(doc)
-
-    logger.info(
-        "User %s submitted incident %s to NERIS (neris_id=%s)",
-        user.email,
-        incident_id,
-        doc.neris_incident_id,
-    )
-
-    return {
-        "status": "submitted",
-        "incident_id": incident_id,
-        "neris_incident_id": doc.neris_incident_id,
-    }
-
 
 async def reset_incident(incident_id: str) -> dict:
     """Reset a draft incident so the user can start over.
@@ -693,16 +721,6 @@ async def reset_incident(incident_id: str) -> dict:
     """
     user = get_current_user()
 
-    # TODO: Re-enable 24hr cooldown after testing phase.
-    # Check 24hr cooldown BEFORE loading the incident (Cosmos-backed)
-    # token_store = await get_token_store()
-    # cooldown = await token_store.get("incident_reset_cooldown", user.email)
-    # if cooldown is not None:
-    #     return {
-    #         "error": "You already reset an incident in the last 24 hours. "
-    #         "Please wait before resetting another."
-    #     }
-
     async with IncidentStore() as store:
         doc = await store.get_by_id(incident_id)
 
@@ -718,18 +736,28 @@ async def reset_incident(incident_id: str) -> dict:
                 f"Only draft or in_progress incidents can be reset."
             }
 
+        # Preserve identity fields
+        station = doc.extras.get("station", "")
+
         # Pre-fill from dispatch (same as creation)
         prefill = await _prefill_from_dispatch(doc.incident_number)
 
         # Clear content fields
         doc.incident_type = None
-        doc.crew = []
-        doc.unit_responses = []
-        doc.narratives = Narratives()
+        doc.additional_incident_types = []
+        doc.automatic_alarm = None
+        doc.arrival_conditions = None
+        doc.outside_fire_cause = None
+        doc.outside_fire_acres = None
+        doc.units = prefill.get("units", [])
+        doc.narrative = ""
         doc.action_taken = None
         doc.noaction_reason = None
         doc.action_codes = []
+        doc.people_present = None
+        doc.displaced_count = None
         doc.internal_notes = ""
+        doc.extras = {"station": station} if station else {}
 
         # Apply dispatch pre-fill
         doc.address = prefill.get("address")
@@ -738,6 +766,7 @@ async def reset_incident(incident_id: str) -> dict:
         doc.latitude = prefill.get("latitude")
         doc.longitude = prefill.get("longitude")
         doc.timestamps = prefill.get("timestamps", {})
+        doc.dispatch_comments = prefill.get("dispatch_comments", "")
 
         # Reset status to draft
         doc.status = "draft"
@@ -754,21 +783,6 @@ async def reset_incident(incident_id: str) -> dict:
 
         updated = await store.update(doc)
 
-    # TODO: Re-enable cooldown recording after testing phase.
-    # Record cooldown AFTER successful update (Cosmos TTL auto-expires)
-    # now = datetime.now(UTC)
-    # await token_store.set(
-    #     "incident_reset_cooldown",
-    #     user.email,
-    #     {
-    #         "incident_id": incident_id,
-    #         "user_email": user.email,
-    #         "user_name": user.name,
-    #         "reset_at": now.isoformat(),
-    #         "expires_at": now.timestamp() + _RESET_COOLDOWN_TTL,
-    #     },
-    #     _RESET_COOLDOWN_TTL,
-    # )
     # Clear chat conversation so the assistant starts fresh
     try:
         from sjifire.ops.chat.store import ConversationStore
@@ -845,12 +859,9 @@ async def import_from_neris(
             doc.incident_type = prefill["incident_type"]
             fields_changed.append("incident_type")
 
-        if "outcome_narrative" in prefill:
-            doc.narratives = Narratives(
-                outcome=prefill["outcome_narrative"],
-                actions_taken=doc.narratives.actions_taken,
-            )
-            fields_changed.append("outcome_narrative")
+        if "narrative" in prefill:
+            doc.narrative = prefill["narrative"]
+            fields_changed.append("narrative")
 
         if "address" in prefill:
             doc.address = prefill["address"]
@@ -862,9 +873,14 @@ async def import_from_neris(
             doc.state = prefill["state"]
             fields_changed.append("state")
 
-        if "unit_responses" in prefill:
-            doc.unit_responses = prefill["unit_responses"]
-            fields_changed.append("unit_responses")
+        if "units" in prefill:
+            # Preserve existing personnel assignments when replacing unit data
+            existing_personnel = {u.unit_id: u.personnel for u in doc.units}
+            for u in prefill["units"]:
+                if u.unit_id in existing_personnel:
+                    u.personnel = existing_personnel[u.unit_id]
+            doc.units = prefill["units"]
+            fields_changed.append("units")
 
         if "timestamps" in prefill:
             doc.timestamps = {**doc.timestamps, **prefill["timestamps"]}

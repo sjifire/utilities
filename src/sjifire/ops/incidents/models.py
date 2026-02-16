@@ -1,22 +1,22 @@
 """Pydantic models for incident documents stored in Cosmos DB."""
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from sjifire.core.config import get_org_config
 
-MAX_NARRATIVE_LENGTH = 10_000
-MAX_CREW_SIZE = 50
-MAX_UNIT_RESPONSES = 50
+MAX_NARRATIVE_LENGTH = 100_000
+MAX_PERSONNEL = 50
+MAX_UNITS = 50
 MAX_TIMESTAMPS = 30
 MAX_EDIT_HISTORY = 200
 
 
-class CrewAssignment(BaseModel):
-    """A person assigned to an incident with their role and unit.
+class PersonnelAssignment(BaseModel):
+    """A person assigned to a unit on an incident.
 
     Rank is snapshotted at incident time -- a Lt today may be a Captain
     next year, so we capture what they were when the call happened.
@@ -27,12 +27,32 @@ class CrewAssignment(BaseModel):
     email: str | None = Field(default=None, max_length=254)
     rank: str = Field(default="", max_length=100)
     position: str = Field(default="", max_length=100)
-    unit: str = Field(default="", max_length=20)
 
     @field_validator("email", mode="before")
     @classmethod
     def _normalize_email(cls, v: str | None) -> str | None:
         return v.lower() if v else v
+
+
+class UnitAssignment(BaseModel):
+    """A responding unit with its times and personnel.
+
+    Combines what was previously separate ``unit_responses`` and ``crew``
+    lists into a single structure. Each unit has its own timestamps and
+    a nested personnel list.
+    """
+
+    unit_id: str = Field(max_length=40)  # E31, BN31, M31, POV, etc.
+    response_mode: str = Field(default="", max_length=20)  # EMERGENT or NON_EMERGENT
+    personnel: list[PersonnelAssignment] = Field(default_factory=list, max_length=MAX_PERSONNEL)
+
+    # Per-unit timestamps (ISO 8601 strings)
+    dispatch: str = ""
+    enroute: str = ""
+    on_scene: str = ""
+    cleared: str = ""
+    canceled: str = ""
+    in_quarters: str = ""
 
 
 class EditEntry(BaseModel):
@@ -44,62 +64,82 @@ class EditEntry(BaseModel):
     fields_changed: list[str] = Field(default_factory=list)
 
 
-class Narratives(BaseModel):
-    """Incident narrative fields."""
-
-    outcome: str = Field(default="", max_length=MAX_NARRATIVE_LENGTH)
-    actions_taken: str = Field(default="", max_length=MAX_NARRATIVE_LENGTH)
-
-
 class IncidentDocument(BaseModel):
     """Full incident document stored in Cosmos DB.
 
-    Superset of NERIS fields -- includes crew, internal notes, and status tracking.
-    The partition key is ``year`` (four-digit string derived from incident_date).
+    Superset of NERIS fields -- includes personnel, internal notes, extras,
+    and status tracking. The partition key is ``year`` (derived from incident_datetime).
+
+    Architecture: strict core fields for every-call data, plus a flexible
+    ``extras`` dict for conditional NERIS sections and edge cases.
     """
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    year: str = ""  # Partition key — set by validator from incident_date
-    station: str  # Station code (e.g., "S31")
+    year: str = ""  # Partition key — set by validator from incident_datetime
     status: Literal["draft", "in_progress", "ready_review", "submitted"] = "draft"
 
     # Core incident info
     incident_number: str = Field(max_length=40)  # e.g., "26-000944"
-    incident_date: date
-    incident_type: str | None = Field(default=None, max_length=200)  # NERIS type code
-    location_use: str | None = Field(default=None, max_length=200)  # NERIS location use code
+    incident_datetime: datetime
+    incident_type: str | None = Field(default=None, max_length=200)
+    additional_incident_types: list[str] = Field(default_factory=list)
+    automatic_alarm: bool | None = None
+
+    # Location
     address: str | None = Field(default=None, max_length=500)
+    apt_suite: str | None = Field(default=None, max_length=100)
     city: str = Field(default="", max_length=100)
     state: str = Field(default="", max_length=2)
+    zip_code: str = Field(default="", max_length=20)
+    county: str = Field(default="", max_length=100)
     latitude: float | None = None
     longitude: float | None = None
+    location_use: str | None = Field(default=None, max_length=200)
 
-    # Crew and response
-    crew: list[CrewAssignment] = Field(default_factory=list, max_length=MAX_CREW_SIZE)
-    unit_responses: list[dict] = Field(default_factory=list, max_length=MAX_UNIT_RESPONSES)
-    timestamps: dict[str, str] = Field(default_factory=dict, max_length=MAX_TIMESTAMPS)
+    # Fire-specific first-class fields
+    arrival_conditions: str | None = Field(default=None, max_length=100)
+    outside_fire_cause: str | None = Field(default=None, max_length=200)
+    outside_fire_acres: float | None = None
 
-    # Narratives
-    narratives: Narratives = Field(default_factory=Narratives)
+    # Response — merged units with nested personnel
+    units: list[UnitAssignment] = Field(default_factory=list, max_length=MAX_UNITS)
+    timestamps: dict[str, str] = Field(default_factory=dict)
 
     # Actions & Tactics (NERIS discriminated union: ACTION or NOACTION)
     action_taken: Literal["ACTION", "NOACTION"] | None = None
     noaction_reason: str | None = Field(default=None, max_length=100)
     action_codes: list[str] = Field(default_factory=list)
 
-    # Internal tracking
+    # Single combined narrative
+    narrative: str = Field(default="", max_length=MAX_NARRATIVE_LENGTH)
+
+    # People
+    people_present: bool | None = None
+    displaced_count: int | None = None
+
+    # Dispatch
+    dispatch_comments: str = Field(default="", max_length=MAX_NARRATIVE_LENGTH)
+
+    # Tracking
+    contributed_by: list[str] = Field(default_factory=list)
     created_by: str  # Entra ID user email
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
     neris_incident_id: str | None = None  # Set after NERIS submission
+
     # Internal only — never sent to NERIS
     internal_notes: str | None = Field(default="", max_length=MAX_NARRATIVE_LENGTH)
     edit_history: list[EditEntry] = Field(default_factory=list, max_length=MAX_EDIT_HISTORY)
 
+    # Flexible extras for conditional NERIS sections (alarms, hazards,
+    # exposures, casualties, etc.). Claude saves edge-case data with
+    # descriptive snake_case keys.
+    extras: dict = Field(default_factory=dict)
+
     @model_validator(mode="after")
     def _set_defaults(self) -> IncidentDocument:
         """Derive year partition key and apply org defaults."""
-        self.year = str(self.incident_date.year)
+        self.year = str(self.incident_datetime.year)
         cfg = get_org_config()
         if not self.city:
             self.city = cfg.default_city
@@ -119,65 +159,17 @@ class IncidentDocument(BaseModel):
             data["timestamps"] = {k: v for k, v in data["timestamps"].items() if v is not None}
         return cls.model_validate(data)
 
-    def to_neris_payload(self) -> dict:
-        """Map to NERIS incident creation/update payload shape.
+    def all_personnel(self) -> list[PersonnelAssignment]:
+        """Flatten personnel from all units."""
+        return [p for u in self.units for p in u.personnel]
 
-        Returns a dict matching the NERIS API incident format.
-        Fields that are None or empty are omitted.
-        """
-        payload: dict = {
-            "incident_number": self.incident_number,
-            "incident_date": self.incident_date.isoformat(),
-        }
+    def personnel_emails(self) -> set[str]:
+        """Get set of personnel emails (lowered) for access checks."""
+        return {p.email.lower() for p in self.all_personnel() if p.email}
 
-        if self.incident_type:
-            payload["type"] = {"code": self.incident_type}
-
-        if self.location_use:
-            payload["location_use"] = {"code": self.location_use}
-
-        if self.address:
-            payload["address"] = {
-                "address_line1": self.address,
-                "city": self.city,
-                "state": self.state,
-            }
-
-        if self.latitude is not None and self.longitude is not None:
-            payload["location"] = {
-                "latitude": self.latitude,
-                "longitude": self.longitude,
-            }
-
-        if self.unit_responses:
-            payload["apparatus"] = self.unit_responses
-
-        if self.narratives.outcome or self.narratives.actions_taken:
-            payload["narrative"] = {}
-            if self.narratives.outcome:
-                payload["narrative"]["outcome"] = self.narratives.outcome
-            if self.narratives.actions_taken:
-                payload["narrative"]["actions_taken"] = self.narratives.actions_taken
-
-        if self.timestamps:
-            payload["timestamps"] = self.timestamps
-
-        if self.action_taken == "NOACTION" and self.noaction_reason:
-            payload["actions_tactics"] = {
-                "action_noaction": {
-                    "type": "NOACTION",
-                    "noaction_type": self.noaction_reason,
-                }
-            }
-        elif self.action_taken == "ACTION" and self.action_codes:
-            payload["actions_tactics"] = {
-                "action_noaction": {
-                    "type": "ACTION",
-                    "actions": self.action_codes,
-                }
-            }
-
-        return payload
+    def personnel_count(self) -> int:
+        """Total personnel across all units."""
+        return sum(len(u.personnel) for u in self.units)
 
     def completeness(self) -> dict:
         """Report completeness across key sections.
@@ -187,14 +179,13 @@ class IncidentDocument(BaseModel):
         """
         sections = {
             "incident_type": bool(self.incident_type),
-            "unit_responses": len(self.unit_responses) > 0,
-            "crew": len(self.crew) > 0,
+            "units": len(self.units) > 0,
+            "personnel": self.personnel_count() > 0,
             "timestamps": len(self.timestamps) > 0,
-            "narrative": bool(self.narratives.outcome),
+            "narrative": bool(self.narrative),
             "actions_taken": (
                 self.action_taken == "NOACTION"
                 or (self.action_taken == "ACTION" and len(self.action_codes) > 0)
-                or bool(self.narratives.actions_taken)  # legacy fallback
             ),
             "address": bool(self.address),
         }
@@ -204,7 +195,3 @@ class IncidentDocument(BaseModel):
             "total": len(sections),
             "sections": sections,
         }
-
-    def crew_emails(self) -> set[str]:
-        """Get set of crew member emails (lowered) for access checks."""
-        return {c.email.lower() for c in self.crew if c.email}

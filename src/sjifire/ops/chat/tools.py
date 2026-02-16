@@ -20,7 +20,7 @@ TOOL_SCHEMAS: list[dict] = [
         "name": "get_incident",
         "description": (
             "Get the current incident report by ID. Returns all fields "
-            "including crew, timestamps, narratives, and completeness."
+            "including units, personnel, timestamps, narrative, and completeness."
         ),
         "input_schema": {
             "type": "object",
@@ -59,28 +59,49 @@ TOOL_SCHEMAS: list[dict] = [
                 "city": {"type": "string", "description": "City name"},
                 "latitude": {"type": "number", "description": "GPS latitude"},
                 "longitude": {"type": "number", "description": "GPS longitude"},
-                "crew": {
+                "units": {
                     "type": "array",
-                    "description": "Full crew list (replaces existing)",
+                    "description": "Unit assignments with nested personnel (replaces existing)",
                     "items": {
                         "type": "object",
                         "properties": {
-                            "name": {"type": "string"},
-                            "email": {"type": "string"},
-                            "rank": {"type": "string"},
-                            "position": {"type": "string"},
-                            "unit": {"type": "string"},
+                            "unit_id": {
+                                "type": "string",
+                                "description": "Unit ID (E31, BN31, M31, POV)",
+                            },
+                            "response_mode": {
+                                "type": "string",
+                                "description": "EMERGENT or NON_EMERGENT",
+                            },
+                            "personnel": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "email": {"type": "string"},
+                                        "rank": {"type": "string"},
+                                        "position": {"type": "string"},
+                                    },
+                                    "required": ["name"],
+                                },
+                            },
+                            "dispatch": {"type": "string", "description": "Dispatch timestamp"},
+                            "enroute": {"type": "string", "description": "Enroute timestamp"},
+                            "on_scene": {"type": "string", "description": "On scene timestamp"},
+                            "cleared": {"type": "string", "description": "Cleared timestamp"},
+                            "canceled": {"type": "string", "description": "Canceled timestamp"},
+                            "in_quarters": {
+                                "type": "string",
+                                "description": "In quarters timestamp",
+                            },
                         },
-                        "required": ["name"],
+                        "required": ["unit_id"],
                     },
                 },
-                "outcome_narrative": {
+                "narrative": {
                     "type": "string",
-                    "description": "What happened (narrative)",
-                },
-                "actions_taken_narrative": {
-                    "type": "string",
-                    "description": "What actions were taken (narrative)",
+                    "description": "Combined incident narrative (what happened and actions taken)",
                 },
                 "action_taken": {
                     "type": "string",
@@ -96,11 +117,6 @@ TOOL_SCHEMAS: list[dict] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "NERIS action codes (required when action_taken=ACTION)",
-                },
-                "unit_responses": {
-                    "type": "array",
-                    "description": "NERIS apparatus/unit response data",
-                    "items": {"type": "object"},
                 },
                 "timestamps": {
                     "type": "object",
@@ -121,8 +137,8 @@ TOOL_SCHEMAS: list[dict] = [
         "name": "reset_incident",
         "description": (
             "Reset an incident report to a clean slate. Clears all content "
-            "fields (type, crew, narratives) and re-populates address and "
-            "timestamps from dispatch data. Use when the user wants to start over."
+            "fields (type, units, personnel, narrative) and re-populates address "
+            "and timestamps from dispatch data. Use when the user wants to start over."
         ),
         "input_schema": {
             "type": "object",
@@ -139,7 +155,8 @@ TOOL_SCHEMAS: list[dict] = [
         "name": "import_from_neris",
         "description": (
             "Import or re-import data from a NERIS record into this incident report. "
-            "Overwrites incident type, narrative, units, and timestamps with NERIS values."
+            "Overwrites incident type, narrative, location, units, and timestamps "
+            "with NERIS values."
         ),
         "input_schema": {
             "type": "object",
@@ -315,6 +332,11 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
     if name == "update_incident":
         incident_id = tool_input["incident_id"]
         kwargs = {k: v for k, v in tool_input.items() if k != "incident_id"}
+        # Map new schema names to update_incident parameter names
+        if "units" in kwargs:
+            kwargs["unit_responses"] = kwargs.pop("units")
+        if "narrative" in kwargs:
+            kwargs["outcome_narrative"] = kwargs.pop("narrative")
         return await incident_tools.update_incident(incident_id, **kwargs)
 
     if name == "reset_incident":
@@ -487,7 +509,7 @@ GENERAL_TOOL_SCHEMAS: list[dict] = [
         "name": "get_incident",
         "description": (
             "Get an incident report by ID. Returns all fields "
-            "including crew, timestamps, narratives, and completeness."
+            "including units, personnel, timestamps, narrative, and completeness."
         ),
         "input_schema": {
             "type": "object",

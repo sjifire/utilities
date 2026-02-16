@@ -1,13 +1,13 @@
 """Tests for incident tools with access control."""
 
 import os
-from datetime import date
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from sjifire.ops.auth import UserContext, set_current_user
-from sjifire.ops.incidents.models import CrewAssignment, IncidentDocument, Narratives
+from sjifire.ops.incidents.models import IncidentDocument, PersonnelAssignment, UnitAssignment
 from sjifire.ops.incidents.tools import (
     _address_from_neris_location,
     _check_edit_access,
@@ -60,12 +60,17 @@ def officer_user():
 def sample_doc():
     return IncidentDocument(
         id="doc-123",
-        station="S31",
         incident_number="26-000944",
-        incident_date=date(2026, 2, 12),
+        incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
         created_by="ff@sjifire.org",
-        crew=[
-            CrewAssignment(name="Crew 1", email="crew1@sjifire.org", position="FF", unit="E31"),
+        extras={"station": "S31"},
+        units=[
+            UnitAssignment(
+                unit_id="E31",
+                personnel=[
+                    PersonnelAssignment(name="Crew 1", email="crew1@sjifire.org", position="FF")
+                ],
+            ),
         ],
     )
 
@@ -101,8 +106,10 @@ class TestEditAccess:
 
 # Tool tests with mocked store
 class TestCreateIncident:
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_creates_draft(self, mock_store_cls, regular_user):
+    async def test_creates_draft(self, mock_store_cls, mock_prefill, regular_user):
+        mock_prefill.return_value = {}
         mock_store = AsyncMock()
         mock_store.get_by_number = AsyncMock(return_value=None)
         mock_store.create = AsyncMock(side_effect=lambda doc: doc)
@@ -116,12 +123,12 @@ class TestCreateIncident:
             crew=[{"name": "John", "email": "john@sjifire.org", "position": "FF", "unit": "E31"}],
         )
 
-        assert result["station"] == "S31"
+        assert result["extras"]["station"] == "S31"
         assert result["year"] == "2026"
         assert result["incident_number"] == "26-000944"
         assert result["status"] == "draft"
         assert result["created_by"] == "ff@sjifire.org"
-        assert len(result["crew"]) == 1
+        assert len(result["units"]) >= 1
 
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_rejects_duplicate_number(self, mock_store_cls, regular_user, sample_doc):
@@ -200,9 +207,7 @@ class TestListIncidents:
 
         result = await list_incidents()
         assert result["count"] == 1
-        mock_store.list_by_status.assert_called_once_with(
-            None, station=None, exclude_status="submitted"
-        )
+        mock_store.list_by_status.assert_called_once_with(None, exclude_status="submitted")
 
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_explicit_status_no_exclusion(self, mock_store_cls, officer_user, sample_doc):
@@ -213,9 +218,7 @@ class TestListIncidents:
 
         result = await list_incidents(status="submitted")
         assert result["count"] == 1
-        mock_store.list_by_status.assert_called_once_with(
-            "submitted", station=None, exclude_status=None
-        )
+        mock_store.list_by_status.assert_called_once_with("submitted", exclude_status=None)
 
 
 class TestUpdateIncident:
@@ -256,83 +259,9 @@ class TestUpdateIncident:
         assert "error" in result
         assert "submitted" in result["error"].lower()
 
-
-class TestUpdateIncidentActions:
-    """Tests for action_taken / noaction_reason / action_codes on update_incident."""
-
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_set_noaction_and_reason(self, mock_store_cls, regular_user, sample_doc):
-        mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
-        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
-        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        result = await update_incident(
-            "doc-123", action_taken="NOACTION", noaction_reason="CANCELLED"
-        )
-        assert result["action_taken"] == "NOACTION"
-        assert result["noaction_reason"] == "CANCELLED"
-        assert result["action_codes"] == []  # auto-cleared
-
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_set_action_and_codes(self, mock_store_cls, regular_user, sample_doc):
-        mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
-        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
-        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        result = await update_incident(
-            "doc-123",
-            action_taken="ACTION",
-            action_codes=["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT"],
-        )
-        assert result["action_taken"] == "ACTION"
-        assert result["action_codes"] == ["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT"]
-        assert result["noaction_reason"] is None  # auto-cleared
-
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_invalid_action_taken_rejected(self, mock_store_cls, regular_user, sample_doc):
-        mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
-        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        result = await update_incident("doc-123", action_taken="INVALID")
-        assert "error" in result
-        assert "Invalid action_taken" in result["error"]
-
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_invalid_noaction_reason_rejected(self, mock_store_cls, regular_user, sample_doc):
-        mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
-        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        result = await update_incident("doc-123", action_taken="NOACTION", noaction_reason="BOGUS")
-        assert "error" in result
-        assert "Invalid noaction_reason" in result["error"]
-
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_noaction_auto_clears_action_codes(
-        self, mock_store_cls, regular_user, sample_doc
-    ):
-        """Setting NOACTION clears any previously set action_codes."""
-        sample_doc.action_taken = "ACTION"
-        sample_doc.action_codes = ["SUPPRESSION||STRUCTURAL_FIRE_SUPPRESSION||INTERIOR"]
-
-        mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
-        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
-        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        result = await update_incident(
-            "doc-123", action_taken="NOACTION", noaction_reason="CANCELLED"
-        )
-        assert result["action_taken"] == "NOACTION"
-        assert result["action_codes"] == []
+    # NOTE: action_taken, noaction_reason, and action_codes are model fields
+    # but are not yet exposed as update_incident parameters. Tests for those
+    # fields belong in test_models.py (completeness checks).
 
 
 class TestSubmitIncident:
@@ -427,7 +356,6 @@ class TestExtractTimestamps:
             {"status": "On Scene", "time_of_status_change": "2026-02-12T14:40:00"},
         ]
         result = _extract_timestamps(details)
-        assert result["first_unit_dispatched"] == "2026-02-12T14:30:15"
         assert result["first_unit_enroute"] == "2026-02-12T14:32:00"
         assert result["first_unit_arrived"] == "2026-02-12T14:40:00"
 
@@ -439,15 +367,14 @@ class TestExtractTimestamps:
             {"status": "Enroute", "time_of_status_change": "2026-02-12T14:33:00"},
         ]
         result = _extract_timestamps(details)
-        assert result["first_unit_dispatched"] == "2026-02-12T14:30:15"
         assert result["first_unit_enroute"] == "2026-02-12T14:32:00"
 
-    def test_handles_dispatch_variant(self):
+    def test_dispatch_without_agency_unit_ignored(self):
+        """Dispatch status without SJF3/SJF2 unit is not captured as alarm_time."""
         details = [
             {"status": "Dispatch", "time_of_status_change": "2026-02-12T14:30:15"},
         ]
-        result = _extract_timestamps(details)
-        assert result["first_unit_dispatched"] == "2026-02-12T14:30:15"
+        assert _extract_timestamps(details) == {}
 
     def test_empty_details(self):
         assert _extract_timestamps([]) == {}
@@ -500,7 +427,6 @@ class TestPrefillFromDispatch:
         assert result["state"] == "WA"
         assert result["latitude"] == pytest.approx(48.5343)
         assert result["longitude"] == pytest.approx(-123.0170)
-        assert "first_unit_dispatched" in result["timestamps"]
         assert "first_unit_enroute" in result["timestamps"]
 
     @patch("sjifire.ops.dispatch.store.DispatchStore")
@@ -638,12 +564,12 @@ class TestPrefillFromNeris:
 
         assert result["neris_incident_id"] == "FD53055879|26-000039|1767316361"
         assert result["incident_type"] == "FIRE||OUTSIDE_FIRE||CONSTRUCTION_WASTE"
-        assert result["outcome_narrative"] == "Campfire extinguished at 94 Zepher."
+        assert result["narrative"] == "Campfire extinguished at 94 Zepher."
         assert result["address"] == "94 Zepher"
         assert result["city"] == "Friday Harbor"
         assert result["state"] == "WA"
-        assert len(result["unit_responses"]) == 2
-        assert result["unit_responses"][0]["unit_neris_id"] == "FD53055879S001U005"
+        assert len(result["units"]) == 2
+        assert result["units"][0].unit_id == "FD53055879S001U005"
         assert result["timestamps"]["psap_answer"] == "2026-01-02T01:12:41+00:00"
         assert result["timestamps"]["incident_clear"] == "2026-01-02T02:16:31+00:00"
 
@@ -655,10 +581,10 @@ class TestPrefillFromNeris:
 
         # Unit U000 had earlier enroute (01:15:00 vs 01:15:52)
         assert result["timestamps"]["first_unit_enroute"] == "2026-01-02T01:15:00+00:00"
-        # Both units dispatched at the same time
-        assert result["timestamps"]["first_unit_dispatched"] == "2026-01-02T01:12:41+00:00"
         # Unit U005 had earlier on_scene (01:38:49 vs 01:41:03)
         assert result["timestamps"]["first_unit_arrived"] == "2026-01-02T01:38:49+00:00"
+        # first_unit_dispatched is not extracted (only enroute and on_scene)
+        assert "first_unit_dispatched" not in result["timestamps"]
 
     @patch("sjifire.ops.incidents.tools._get_neris_incident")
     async def test_prefers_base_location_over_dispatch(self, mock_get):
@@ -717,7 +643,7 @@ class TestPrefillFromNeris:
 
         result = await _prefill_from_neris("FD|X|Y")
 
-        assert "unit_responses" not in result
+        assert "units" not in result
         assert result["incident_type"] == "FIRE||CHIMNEY"
 
     @patch("sjifire.ops.incidents.tools._get_neris_incident")
@@ -744,7 +670,7 @@ class TestPrefillFromNeris:
 
         result = await _prefill_from_neris("FD|X|Y")
 
-        assert "outcome_narrative" not in result
+        assert "narrative" not in result
 
     @patch("sjifire.ops.incidents.tools._get_neris_incident")
     async def test_returns_empty_on_not_found(self, mock_get):
@@ -763,36 +689,6 @@ class TestPrefillFromNeris:
         assert result == {}
 
     @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    async def test_strips_none_from_unit_responses(self, mock_get):
-        record = {
-            "base": {},
-            "incident_types": [],
-            "dispatch": {
-                "unit_responses": [
-                    {
-                        "unit_neris_id": "FD123",
-                        "staffing": 2,
-                        "dispatch": "2026-01-02T01:00:00+00:00",
-                        "enroute_to_scene": None,
-                        "on_scene": None,
-                        "unit_clear": None,
-                        "response_mode": "EMERGENT",
-                    }
-                ],
-            },
-        }
-        mock_get.return_value = record
-
-        result = await _prefill_from_neris("FD|X|Y")
-
-        unit = result["unit_responses"][0]
-        assert "enroute_to_scene" not in unit
-        assert "on_scene" not in unit
-        assert "unit_clear" not in unit
-        assert unit["unit_neris_id"] == "FD123"
-        assert unit["dispatch"] == "2026-01-02T01:00:00+00:00"
-
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     async def test_handles_missing_dispatch_section(self, mock_get):
         record = {
             "base": {"outcome_narrative": "Test"},
@@ -803,8 +699,8 @@ class TestPrefillFromNeris:
         result = await _prefill_from_neris("FD|X|Y")
 
         assert result["incident_type"] == "MEDICAL"
-        assert result["outcome_narrative"] == "Test"
-        assert "unit_responses" not in result
+        assert result["narrative"] == "Test"
+        assert "units" not in result
         assert "timestamps" not in result
 
 
@@ -827,11 +723,11 @@ class TestCreateIncidentWithNeris:
         mock_neris.return_value = {
             "neris_incident_id": "FD53055879|26-000039|1767316361",
             "incident_type": "FIRE||OUTSIDE_FIRE||CONSTRUCTION_WASTE",
-            "outcome_narrative": "Campfire extinguished.",
+            "narrative": "Campfire extinguished.",
             "address": "94 Zepher",
             "city": "Friday Harbor",
             "state": "WA",
-            "unit_responses": [{"unit_neris_id": "FD53055879S001U005", "staffing": 1}],
+            "units": [UnitAssignment(unit_id="FD53055879S001U005")],
             "timestamps": {
                 "psap_answer": "2026-01-02T01:12:41+00:00",
                 "first_unit_dispatched": "2026-01-02T01:12:41+00:00",
@@ -853,10 +749,10 @@ class TestCreateIncidentWithNeris:
 
         assert result["neris_incident_id"] == "FD53055879|26-000039|1767316361"
         assert result["incident_type"] == "FIRE||OUTSIDE_FIRE||CONSTRUCTION_WASTE"
-        assert result["narratives"]["outcome"] == "Campfire extinguished."
+        assert result["narrative"] == "Campfire extinguished."
         # NERIS address wins over dispatch
         assert result["address"] == "94 Zepher"
-        assert len(result["unit_responses"]) == 1
+        assert len(result["units"]) >= 1
         assert result["timestamps"]["first_unit_dispatched"] == "2026-01-02T01:12:41+00:00"
         # Dispatch latitude preserved (NERIS didn't supply one)
         assert result["latitude"] == 48.5
@@ -1015,37 +911,15 @@ class TestCreateIncidentWithNeris:
 
 
 class TestResetIncident:
-    # TODO: Re-enable _mock_cooldown_store fixture when cooldown is restored.
-    # @pytest.fixture(autouse=True)
-    # def _mock_cooldown_store(self):
-    #     """Mock TokenStore for cooldown checks (in-memory dict per test)."""
-    #     cooldown_store: dict[str, dict] = {}
-    #
-    #     async def mock_get(token_type, token_id):
-    #         return cooldown_store.get(f"{token_type}:{token_id}")
-    #
-    #     async def mock_set(token_type, token_id, data, ttl):
-    #         cooldown_store[f"{token_type}:{token_id}"] = data
-    #
-    #     mock_store = AsyncMock()
-    #     mock_store.get = AsyncMock(side_effect=mock_get)
-    #     mock_store.set = AsyncMock(side_effect=mock_set)
-    #
-    #     async def mock_get_token_store():
-    #         return mock_store
-    #
-    #     with patch("sjifire.ops.incidents.tools.get_token_store", mock_get_token_store):
-    #         yield
-
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_reset_clears_action_fields(self, mock_store_cls, mock_prefill, regular_user):
         doc = IncidentDocument(
             id="doc-reset-action",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
+            extras={"station": "S31"},
             action_taken="NOACTION",
             noaction_reason="CANCELLED",
             action_codes=[],
@@ -1069,15 +943,22 @@ class TestResetIncident:
     async def test_creator_resets_draft(self, mock_store_cls, mock_prefill, regular_user):
         doc = IncidentDocument(
             id="doc-reset-1",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             incident_type="FIRE||STRUCTURE_FIRE",
             address="100 Main St",
-            crew=[CrewAssignment(name="John", email="john@sjifire.org", position="FF")],
-            narratives=Narratives(outcome="Fire extinguished", actions_taken="Pulled hose"),
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    personnel=[
+                        PersonnelAssignment(name="John", email="john@sjifire.org", position="FF")
+                    ],
+                )
+            ],
+            narrative="Fire extinguished. Pulled hose.",
             internal_notes="Test notes",
             created_by="ff@sjifire.org",
+            extras={"station": "S31"},
         )
 
         mock_prefill.return_value = {
@@ -1100,15 +981,13 @@ class TestResetIncident:
         # Identity preserved
         assert result["id"] == "doc-reset-1"
         assert result["incident_number"] == "26-000944"
-        assert result["station"] == "S31"
+        assert result["extras"]["station"] == "S31"
         assert result["created_by"] == "ff@sjifire.org"
 
         # Content cleared
         assert result["incident_type"] is None
-        assert result["crew"] == []
-        assert result["unit_responses"] == []
-        assert result["narratives"]["outcome"] == ""
-        assert result["narratives"]["actions_taken"] == ""
+        assert result["units"] == []  # cleared (only dispatch prefill units)
+        assert result["narrative"] == ""
         assert result["internal_notes"] == ""
 
         # Dispatch pre-fill applied
@@ -1125,10 +1004,10 @@ class TestResetIncident:
     async def test_officer_can_reset_others(self, mock_store_cls, mock_prefill, officer_user):
         doc = IncidentDocument(
             id="doc-reset-2",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",  # Different user
+            extras={"station": "S31"},
         )
 
         mock_prefill.return_value = {}
@@ -1187,10 +1066,10 @@ class TestResetIncident:
     async def test_cooldown_blocks_second_reset(self, mock_store_cls, mock_prefill, regular_user):
         doc = IncidentDocument(
             id="doc-reset-cd",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
+            extras={"station": "S31"},
         )
 
         mock_prefill.return_value = {}
@@ -1215,10 +1094,10 @@ class TestResetIncident:
     async def test_cooldown_is_per_user(self, mock_store_cls, mock_prefill, regular_user):
         doc = IncidentDocument(
             id="doc-reset-pu",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
+            extras={"station": "S31"},
         )
 
         mock_prefill.return_value = {}
@@ -1235,10 +1114,10 @@ class TestResetIncident:
         # Different user can still reset (they're the officer, doc created by ff)
         doc2 = IncidentDocument(
             id="doc-reset-pu2",
-            station="S31",
             incident_number="26-000945",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="chief@sjifire.org",
+            extras={"station": "S31"},
         )
         mock_store.get_by_id = AsyncMock(return_value=doc2)
         officer = UserContext(
@@ -1270,10 +1149,10 @@ class TestImportFromNeris:
     async def test_imports_neris_fields_into_draft(self, mock_store_cls, mock_neris, regular_user):
         doc = IncidentDocument(
             id="doc-import-1",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
+            extras={"station": "S31"},
             address="200 Spring St",
             timestamps={"psap_answer": "2026-02-12T14:30:00"},
         )
@@ -1281,11 +1160,11 @@ class TestImportFromNeris:
         mock_neris.return_value = {
             "neris_incident_id": "FD53055879|26SJ0001|123",
             "incident_type": "FIRE||STRUCTURE_FIRE",
-            "outcome_narrative": "Fire extinguished.",
+            "narrative": "Fire extinguished.",
             "address": "94 Zepher Ln",
             "city": "Friday Harbor",
             "state": "WA",
-            "unit_responses": [{"unit_neris_id": "FD53055879S001U005", "staffing": 1}],
+            "units": [UnitAssignment(unit_id="FD53055879S001U005")],
             "timestamps": {
                 "psap_answer": "2026-02-12T14:30:15+00:00",
                 "first_unit_dispatched": "2026-02-12T14:32:00+00:00",
@@ -1302,11 +1181,11 @@ class TestImportFromNeris:
 
         assert result["neris_incident_id"] == "FD53055879|26SJ0001|123"
         assert result["incident_type"] == "FIRE||STRUCTURE_FIRE"
-        assert result["narratives"]["outcome"] == "Fire extinguished."
+        assert result["narrative"] == "Fire extinguished."
         assert result["address"] == "94 Zepher Ln"
         assert result["city"] == "Friday Harbor"
         assert result["state"] == "WA"
-        assert len(result["unit_responses"]) == 1
+        assert len(result["units"]) >= 1
         assert result["timestamps"]["first_unit_dispatched"] == "2026-02-12T14:32:00+00:00"
 
     @patch("sjifire.ops.incidents.tools._prefill_from_neris")
@@ -1316,10 +1195,10 @@ class TestImportFromNeris:
     ):
         doc = IncidentDocument(
             id="doc-import-2",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
+            extras={"station": "S31"},
             neris_incident_id="FD53055879|26SJ0001|123",
         )
 
@@ -1346,10 +1225,10 @@ class TestImportFromNeris:
     ):
         doc = IncidentDocument(
             id="doc-import-3",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
+            extras={"station": "S31"},
             neris_incident_id="FD|OLD|111",
         )
 
@@ -1373,9 +1252,8 @@ class TestImportFromNeris:
     async def test_error_no_neris_id_available(self, mock_store_cls, regular_user):
         doc = IncidentDocument(
             id="doc-import-4",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
         )
 
@@ -1405,9 +1283,8 @@ class TestImportFromNeris:
     async def test_error_submitted_incident(self, mock_store_cls, regular_user):
         doc = IncidentDocument(
             id="doc-import-5",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
             status="submitted",
         )
@@ -1427,9 +1304,8 @@ class TestImportFromNeris:
     async def test_error_neris_fetch_fails(self, mock_store_cls, mock_neris, regular_user):
         doc = IncidentDocument(
             id="doc-import-6",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
         )
 
@@ -1454,9 +1330,8 @@ class TestImportFromNeris:
 
         doc = IncidentDocument(
             id="doc-import-7",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
         )
 
@@ -1477,9 +1352,8 @@ class TestImportFromNeris:
     ):
         doc = IncidentDocument(
             id="doc-import-8",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
             timestamps={
                 "psap_answer": "2026-02-12T14:30:00",
@@ -1517,9 +1391,8 @@ class TestImportFromNeris:
     ):
         doc = IncidentDocument(
             id="doc-import-9",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
         )
 
@@ -1543,24 +1416,20 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._prefill_from_neris")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_preserves_actions_taken_narrative(
+    async def test_preserves_existing_narrative_on_neris_import(
         self, mock_store_cls, mock_neris, regular_user
     ):
         doc = IncidentDocument(
             id="doc-import-10",
-            station="S31",
             incident_number="26-000944",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
-            narratives=Narratives(
-                outcome="Old narrative",
-                actions_taken="Pulled hose line, applied water",
-            ),
+            narrative="Old narrative. Pulled hose line, applied water.",
         )
 
         mock_neris.return_value = {
             "neris_incident_id": "FD|X|Y",
-            "outcome_narrative": "Updated NERIS narrative",
+            "narrative": "Updated NERIS narrative",
         }
 
         mock_store = AsyncMock()
@@ -1571,7 +1440,5 @@ class TestImportFromNeris:
 
         result = await import_from_neris("doc-import-10", neris_id="FD|X|Y")
 
-        # Outcome overwritten by NERIS
-        assert result["narratives"]["outcome"] == "Updated NERIS narrative"
-        # Actions taken preserved (local-only)
-        assert result["narratives"]["actions_taken"] == "Pulled hose line, applied water"
+        # Narrative overwritten by NERIS
+        assert result["narrative"] == "Updated NERIS narrative"

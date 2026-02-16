@@ -246,8 +246,8 @@
       <div class="report-title">Incident Report</div>
       <div class="report-meta">
         <span><span class="meta-label">Incident #:</span> <span class="meta-value">{{ doc.incident_number }}</span></span>
-        <span><span class="meta-label">Date:</span> <span class="meta-value">{{ doc.incident_date }}</span></span>
-        <span><span class="meta-label">Station:</span> <span class="meta-value">{{ doc.station }}</span></span>
+        <span><span class="meta-label">Date:</span> <span class="meta-value">{{ doc.incident_datetime }}</span></span>
+        <span><span class="meta-label">Station:</span> <span class="meta-value">{{ doc.extras.station or "--" }}</span></span>
         <span><span class="meta-label">Status:</span> <span class="meta-value" style="text-transform:capitalize">{{ doc.status | replace("_", " ") }}</span></span>
         {% if doc.neris_incident_id %}
         <span><span class="meta-label">NERIS ID:</span> <span class="meta-value" style="font-size:11px">{{ doc.neris_incident_id }}</span></span>
@@ -316,7 +316,7 @@
     {% endif %}
 
     <!-- ── Apparatus Response ── -->
-    {% if doc.unit_responses %}
+    {% if doc.units %}
     <div class="section">
       <div class="section-header">Apparatus Response</div>
       <div class="section-body" style="padding:0">
@@ -331,13 +331,13 @@
             </tr>
           </thead>
           <tbody>
-            {% for unit in doc.unit_responses %}
+            {% for unit in doc.units %}
             <tr>
-              <td style="font-weight:600">{{ unit.get("unit_designator", unit.get("unit", "")) }}</td>
-              <td style="font-family:monospace">{{ unit.get("dispatched", unit.get("unit_dispatched_date_time", "--")) or "--" }}</td>
-              <td style="font-family:monospace">{{ unit.get("enroute", unit.get("unit_enroute_date_time", "--")) or "--" }}</td>
-              <td style="font-family:monospace">{{ unit.get("on_scene", unit.get("unit_arrived_date_time", "--")) or "--" }}</td>
-              <td style="font-family:monospace">{{ unit.get("cleared", unit.get("unit_cleared_date_time", "--")) or "--" }}</td>
+              <td style="font-weight:600">{{ unit.unit_id }}</td>
+              <td style="font-family:monospace">{{ unit.dispatch or "--" }}</td>
+              <td style="font-family:monospace">{{ unit.enroute or "--" }}</td>
+              <td style="font-family:monospace">{{ unit.on_scene or "--" }}</td>
+              <td style="font-family:monospace">{{ unit.cleared or "--" }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -347,7 +347,9 @@
     {% endif %}
 
     <!-- ── Personnel ── -->
-    {% if doc.crew %}
+    {% if doc.units %}
+    {% set has_personnel = doc.units | selectattr("personnel") | list | length > 0 %}
+    {% if has_personnel %}
     <div class="section">
       <div class="section-header">Personnel</div>
       <div class="section-body" style="padding:0">
@@ -361,37 +363,31 @@
             </tr>
           </thead>
           <tbody>
-            {% for member in doc.crew %}
+            {% for unit in doc.units %}
+            {% for member in unit.personnel %}
             <tr>
               <td style="font-weight:600">{{ member.name }}</td>
               <td>{{ member.rank or "--" }}</td>
-              <td>{{ member.unit or "--" }}</td>
+              <td>{{ unit.unit_id }}</td>
               <td>{{ member.position or "--" }}</td>
             </tr>
+            {% endfor %}
             {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
     {% endif %}
+    {% endif %}
 
     <!-- ── Narrative ── -->
-    {% if doc.narratives and (doc.narratives.outcome or doc.narratives.actions_taken) %}
+    {% if doc.narrative %}
     <div class="section">
       <div class="section-header">Narrative</div>
       <div class="section-body">
-        {% if doc.narratives.outcome %}
         <div class="narrative-text">
-          <div class="narrative-label">Outcome</div>
-          <div class="narrative-block">{{ doc.narratives.outcome }}</div>
+          <div class="narrative-block">{{ doc.narrative }}</div>
         </div>
-        {% endif %}
-        {% if doc.narratives.actions_taken %}
-        <div class="narrative-text">
-          <div class="narrative-label">Actions Taken</div>
-          <div class="narrative-block">{{ doc.narratives.actions_taken }}</div>
-        </div>
-        {% endif %}
       </div>
     </div>
     {% endif %}

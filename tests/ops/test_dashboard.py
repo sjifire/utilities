@@ -1,7 +1,7 @@
 """Tests for operations dashboard."""
 
 import os
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -16,9 +16,9 @@ from sjifire.ops.dashboard import (
 from sjifire.ops.dispatch.models import DispatchCallDocument
 from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.ops.incidents.models import (
-    CrewAssignment,
     IncidentDocument,
-    Narratives,
+    PersonnelAssignment,
+    UnitAssignment,
 )
 from sjifire.ops.incidents.store import IncidentStore
 
@@ -97,14 +97,19 @@ def sample_calls():
 def sample_incident():
     return IncidentDocument(
         id="inc-uuid-1",
-        station="S31",
         incident_number="26-001678",
-        incident_date=date(2026, 2, 12),
+        incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
         incident_type="MEDICAL",
         address="200 Spring St",
-        crew=[CrewAssignment(name="John", email="ff@sjifire.org")],
+        units=[
+            UnitAssignment(
+                unit_id="E31",
+                personnel=[PersonnelAssignment(name="John", email="ff@sjifire.org")],
+            )
+        ],
         created_by="ff@sjifire.org",
         status="in_progress",
+        extras={"station": "S31"},
     )
 
 
@@ -186,7 +191,7 @@ class TestGetDashboard:
         assert call_1["report"] is not None
         assert call_1["report"]["source"] == "local"
         assert call_1["report"]["status"] == "in_progress"
-        assert call_1["report"]["completeness"]["filled"] == 3
+        assert call_1["report"]["completeness"]["filled"] == 4
 
         # Second call has no report
         call_2 = result["recent_calls"][1]
@@ -655,7 +660,7 @@ class TestFetchIncidents:
         result = await _fetch_incidents("ff@sjifire.org", is_officer=False)
 
         comp = result["26-001678"]["completeness"]
-        assert comp["filled"] == 3  # incident_type + address + crew
+        assert comp["filled"] == 4  # incident_type + address + units + personnel
         assert comp["total"] == 7
 
     @patch("sjifire.ops.dashboard.IncidentStore")
@@ -736,7 +741,7 @@ class TestDashboardIntegration:
         assert call_1["report"]["source"] == "local"
         assert call_1["report"]["status"] == "in_progress"
         assert call_1["report"]["incident_id"] == "inc-uuid-1"
-        assert call_1["report"]["completeness"]["filled"] == 3
+        assert call_1["report"]["completeness"]["filled"] == 4
 
         call_2 = result["recent_calls"][1]
         assert call_2["dispatch_id"] == "26-001650"
@@ -781,11 +786,11 @@ class TestDashboardIntegration:
         )
         incident = IncidentDocument(
             id="inc-submitted",
-            station="S31",
             incident_number="26-001000",
-            incident_date=date(2026, 2, 10),
+            incident_datetime=datetime(2026, 2, 10, tzinfo=UTC),
             created_by="ff@sjifire.org",
             status="submitted",
+            extras={"station": "S31"},
         )
 
         async with DispatchStore() as store:
@@ -823,12 +828,12 @@ class TestDashboardIntegration:
         incidents = [
             IncidentDocument(
                 id=f"inc-{i}",
-                station="S31",
                 incident_number=f"26-00{i + 1:04d}",
-                incident_date=date(2026, 2, 12 - i),
+                incident_datetime=datetime(2026, 2, 12 - i, tzinfo=UTC),
                 incident_type="MEDICAL" if i == 0 else None,
                 created_by="chief@sjifire.org",
                 status=["in_progress", "draft"][i],
+                extras={"station": "S31"},
             )
             for i in range(2)
         ]
@@ -874,11 +879,11 @@ class TestDashboardIntegration:
         )
         other_incident = IncidentDocument(
             id="inc-other",
-            station="S31",
             incident_number="26-002000",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="chief@sjifire.org",
             status="in_progress",
+            extras={"station": "S31"},
         )
 
         async with DispatchStore() as store:
@@ -912,11 +917,11 @@ class TestDashboardIntegration:
         )
         incident = IncidentDocument(
             id="inc-other-officer",
-            station="S31",
             incident_number="26-003000",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
             status="draft",
+            extras={"station": "S31"},
         )
 
         async with DispatchStore() as store:
@@ -951,16 +956,21 @@ class TestDashboardIntegration:
         )
         incident = IncidentDocument(
             id="inc-full",
-            station="S31",
             incident_number="26-004000",
-            incident_date=date(2026, 2, 12),
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             incident_type="MEDICAL",
             address="200 Spring St",
-            crew=[CrewAssignment(name="John", email="ff@sjifire.org")],
-            narratives=Narratives(outcome="Patient transported"),
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    personnel=[PersonnelAssignment(name="John", email="ff@sjifire.org")],
+                )
+            ],
+            narrative="Patient transported",
             timestamps={"dispatch": "2026-02-12T10:00:00"},
             created_by="ff@sjifire.org",
             status="ready_review",
+            extras={"station": "S31"},
         )
 
         async with DispatchStore() as store:
@@ -973,8 +983,8 @@ class TestDashboardIntegration:
         report = result["recent_calls"][0]["report"]
         assert report["status"] == "ready_review"
         assert (
-            report["completeness"]["filled"] == 5
-        )  # type + address + crew + narrative + timestamps
+            report["completeness"]["filled"] == 6
+        )  # type + address + units + personnel + narrative + timestamps
         assert report["completeness"]["total"] == 7
 
     @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)

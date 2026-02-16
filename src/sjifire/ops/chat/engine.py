@@ -117,7 +117,7 @@ def _format_unit_times_table(
     1. **Incident timestamps** — derived from earliest unit times plus
        time_reported. Maps to ``update_incident(timestamps={...})``.
     2. **Per-unit times** — each apparatus with key timestamps for review.
-       Maps to ``update_incident(unit_responses=[...])``.
+       Maps to ``update_incident(units=[...])``.
 
     The ``alarm_time`` (SJF3 PAGED) is used as the default dispatch time
     for all units — the page goes out once and all units respond from it.
@@ -159,9 +159,9 @@ def _format_unit_times_table(
         f"  Last In Quarters (last_unit_in_quarters): {_time(_latest('in_quarters'))}",
     ]
 
-    # --- Per-unit times (→ update_incident unit_responses=[]) ---
+    # --- Per-unit times (→ update_incident units=[]) ---
     lines.append("")
-    lines.append("UNIT RESPONSE TIMES (save via unit_responses=[...]):")
+    lines.append("UNIT RESPONSE TIMES (save via units=[...]):")
     lines.append("(-- = missing, needs to be filled in or confirmed N/A)")
     header = "Unit     | Dispatched | Enroute  | On Scene | Cleared  | In Quarters"
     divider = "---------|------------|----------|----------|----------|------------"
@@ -285,12 +285,12 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
         crew_json = "[]"
         try:
             crew_data = await schedule_tools.get_on_duty_crew(
-                target_date=doc.incident_date.isoformat(),
+                target_date=doc.incident_datetime.date().isoformat(),
                 target_hour=incident_hour,
             )
             crew_json = json.dumps(crew_data, indent=2, default=str)
         except Exception:
-            logger.warning("Failed to fetch crew for %s", doc.incident_date, exc_info=True)
+            logger.warning("Failed to fetch crew for %s", doc.incident_datetime, exc_info=True)
     else:
         dispatch_json = "{}"
         crew_json = "[]"

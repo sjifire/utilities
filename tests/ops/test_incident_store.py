@@ -1,10 +1,10 @@
 """Tests for IncidentStore in-memory mode."""
 
-from datetime import date
+from datetime import UTC, datetime
 
 import pytest
 
-from sjifire.ops.incidents.models import CrewAssignment, IncidentDocument
+from sjifire.ops.incidents.models import IncidentDocument, PersonnelAssignment, UnitAssignment
 from sjifire.ops.incidents.store import IncidentStore
 
 
@@ -22,9 +22,8 @@ def _clear_memory_and_env(monkeypatch):
 def _make_doc(**overrides) -> IncidentDocument:
     """Helper to create an IncidentDocument with sensible defaults."""
     defaults = {
-        "station": "S31",
         "incident_number": "26-000944",
-        "incident_date": date(2026, 2, 12),
+        "incident_datetime": datetime(2026, 2, 12, tzinfo=UTC),
         "created_by": "chief@sjifire.org",
     }
     defaults.update(overrides)
@@ -33,12 +32,12 @@ def _make_doc(**overrides) -> IncidentDocument:
 
 class TestCreate:
     async def test_creates_draft(self):
-        doc = _make_doc()
+        doc = _make_doc(extras={"station": "S31"})
         async with IncidentStore() as store:
             result = await store.create(doc)
         assert result.id == doc.id
         assert result.year == "2026"
-        assert result.station == "S31"
+        assert result.extras.get("station") == "S31"
         assert result.status == "draft"
 
     async def test_create_and_get_back(self):
@@ -58,7 +57,7 @@ class TestGet:
         assert result is None
 
     async def test_wrong_year_returns_none(self):
-        doc = _make_doc(incident_date=date(2026, 2, 12))
+        doc = _make_doc(incident_datetime=datetime(2026, 2, 12, tzinfo=UTC))
         async with IncidentStore() as store:
             await store.create(doc)
             result = await store.get(doc.id, "2025")
@@ -179,10 +178,16 @@ class TestListAll:
         statuses = {r.status for r in results}
         assert "submitted" in statuses
 
-    async def test_sorted_by_incident_date_asc(self):
-        doc_feb = _make_doc(incident_number="26-002", incident_date=date(2026, 2, 15))
-        doc_jan = _make_doc(incident_number="26-001", incident_date=date(2026, 1, 10))
-        doc_mar = _make_doc(incident_number="26-003", incident_date=date(2026, 3, 20))
+    async def test_sorted_by_incident_datetime_asc(self):
+        doc_feb = _make_doc(
+            incident_number="26-002", incident_datetime=datetime(2026, 2, 15, tzinfo=UTC)
+        )
+        doc_jan = _make_doc(
+            incident_number="26-001", incident_datetime=datetime(2026, 1, 10, tzinfo=UTC)
+        )
+        doc_mar = _make_doc(
+            incident_number="26-003", incident_datetime=datetime(2026, 3, 20, tzinfo=UTC)
+        )
         async with IncidentStore() as store:
             await store.create(doc_feb)
             await store.create(doc_mar)
@@ -192,7 +197,10 @@ class TestListAll:
 
     async def test_respects_max_items(self):
         for i in range(5):
-            doc = _make_doc(incident_number=f"26-{i:03d}", incident_date=date(2026, 1, 1 + i))
+            doc = _make_doc(
+                incident_number=f"26-{i:03d}",
+                incident_datetime=datetime(2026, 1, 1 + i, tzinfo=UTC),
+            )
             async with IncidentStore() as store:
                 await store.create(doc)
         async with IncidentStore() as store:
@@ -225,28 +233,6 @@ class TestListByStatus:
         assert len(results) == 1
         assert results[0].incident_number == "26-001"
 
-    async def test_filtered_by_station(self):
-        doc1 = _make_doc(station="S31", incident_number="26-001")
-        doc2 = _make_doc(station="S32", incident_number="26-002")
-        async with IncidentStore() as store:
-            await store.create(doc1)
-            await store.create(doc2)
-            results = await store.list_by_status(station="S31")
-        assert len(results) == 1
-        assert results[0].station == "S31"
-
-    async def test_filtered_by_status_and_station(self):
-        doc1 = _make_doc(station="S31", incident_number="26-001")
-        doc2 = _make_doc(station="S31", incident_number="26-002", status="submitted")
-        doc3 = _make_doc(station="S32", incident_number="26-003")
-        async with IncidentStore() as store:
-            await store.create(doc1)
-            await store.create(doc2)
-            await store.create(doc3)
-            results = await store.list_by_status(status="draft", station="S31")
-        assert len(results) == 1
-        assert results[0].incident_number == "26-001"
-
     async def test_exclude_status(self):
         doc1 = _make_doc(incident_number="26-001")
         doc2 = _make_doc(incident_number="26-002", status="submitted")
@@ -259,10 +245,16 @@ class TestListByStatus:
         assert len(results) == 2
         assert all(r.status != "submitted" for r in results)
 
-    async def test_sorted_by_incident_date_asc(self):
-        doc_feb = _make_doc(incident_number="26-002", incident_date=date(2026, 2, 15))
-        doc_jan = _make_doc(incident_number="26-001", incident_date=date(2026, 1, 10))
-        doc_mar = _make_doc(incident_number="26-003", incident_date=date(2026, 3, 20))
+    async def test_sorted_by_incident_datetime_asc(self):
+        doc_feb = _make_doc(
+            incident_number="26-002", incident_datetime=datetime(2026, 2, 15, tzinfo=UTC)
+        )
+        doc_jan = _make_doc(
+            incident_number="26-001", incident_datetime=datetime(2026, 1, 10, tzinfo=UTC)
+        )
+        doc_mar = _make_doc(
+            incident_number="26-003", incident_datetime=datetime(2026, 3, 20, tzinfo=UTC)
+        )
         async with IncidentStore() as store:
             # Insert out of order
             await store.create(doc_feb)
@@ -281,10 +273,17 @@ class TestListForUser:
         assert len(results) == 1
         assert results[0].created_by == "ff@sjifire.org"
 
-    async def test_as_crew_member(self):
+    async def test_as_personnel_member(self):
         doc = _make_doc(
             created_by="chief@sjifire.org",
-            crew=[CrewAssignment(name="Jane", email="jane@sjifire.org", position="FF")],
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    personnel=[
+                        PersonnelAssignment(name="Jane", email="jane@sjifire.org", position="FF")
+                    ],
+                )
+            ],
         )
         async with IncidentStore() as store:
             await store.create(doc)
@@ -294,7 +293,12 @@ class TestListForUser:
     async def test_excludes_others_incidents(self):
         doc = _make_doc(
             created_by="chief@sjifire.org",
-            crew=[CrewAssignment(name="Jane", email="jane@sjifire.org")],
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    personnel=[PersonnelAssignment(name="Jane", email="jane@sjifire.org")],
+                )
+            ],
         )
         async with IncidentStore() as store:
             await store.create(doc)
@@ -325,12 +329,16 @@ class TestListForUser:
         assert len(results) == 2
         assert all(r.status != "submitted" for r in results)
 
-    async def test_sorted_by_incident_date_asc(self):
+    async def test_sorted_by_incident_datetime_asc(self):
         doc_feb = _make_doc(
-            created_by="ff@sjifire.org", incident_number="26-002", incident_date=date(2026, 2, 15)
+            created_by="ff@sjifire.org",
+            incident_number="26-002",
+            incident_datetime=datetime(2026, 2, 15, tzinfo=UTC),
         )
         doc_jan = _make_doc(
-            created_by="ff@sjifire.org", incident_number="26-001", incident_date=date(2026, 1, 10)
+            created_by="ff@sjifire.org",
+            incident_number="26-001",
+            incident_datetime=datetime(2026, 1, 10, tzinfo=UTC),
         )
         async with IncidentStore() as store:
             await store.create(doc_feb)

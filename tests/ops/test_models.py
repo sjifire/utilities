@@ -1,57 +1,64 @@
 """Tests for incident data models."""
 
-from datetime import date
+from datetime import UTC, datetime
 
-from sjifire.ops.incidents.models import CrewAssignment, IncidentDocument, Narratives
+from sjifire.ops.incidents.models import (
+    IncidentDocument,
+    PersonnelAssignment,
+    UnitAssignment,
+)
 
 
-class TestCrewAssignment:
+class TestPersonnelAssignment:
     def test_minimal(self):
-        crew = CrewAssignment(name="John Smith")
-        assert crew.name == "John Smith"
-        assert crew.email is None
-        assert crew.rank == ""
-        assert crew.position == ""
-        assert crew.unit == ""
+        person = PersonnelAssignment(name="John Smith")
+        assert person.name == "John Smith"
+        assert person.email is None
+        assert person.rank == ""
+        assert person.position == ""
 
     def test_full(self):
-        crew = CrewAssignment(
+        person = PersonnelAssignment(
             name="John Smith",
             email="john@sjifire.org",
             rank="Lieutenant",
             position="Engine Boss",
-            unit="E31",
         )
-        assert crew.email == "john@sjifire.org"
-        assert crew.rank == "Lieutenant"
-        assert crew.position == "Engine Boss"
-        assert crew.unit == "E31"
+        assert person.email == "john@sjifire.org"
+        assert person.rank == "Lieutenant"
+        assert person.position == "Engine Boss"
 
     def test_rank_is_snapshot(self):
         """Rank captures what the person was at incident time, not current."""
-        crew = CrewAssignment(name="Smith", email="smith@sjifire.org", rank="Lieutenant")
-        assert crew.rank == "Lieutenant"
+        person = PersonnelAssignment(name="Smith", email="smith@sjifire.org", rank="Lieutenant")
+        assert person.rank == "Lieutenant"
         # This value doesn't change even if the person is promoted later --
         # it's a snapshot of their rank when the incident occurred
 
 
-class TestNarratives:
-    def test_defaults_empty(self):
-        narr = Narratives()
-        assert narr.outcome == ""
-        assert narr.actions_taken == ""
+class TestUnitAssignment:
+    def test_minimal(self):
+        unit = UnitAssignment(unit_id="E31")
+        assert unit.unit_id == "E31"
+        assert unit.response_mode == ""
+        assert unit.personnel == []
+        assert unit.dispatch == ""
+        assert unit.on_scene == ""
 
-    def test_with_values(self):
-        narr = Narratives(outcome="Structure fire contained", actions_taken="Deployed 2 lines")
-        assert narr.outcome == "Structure fire contained"
+    def test_with_personnel(self):
+        unit = UnitAssignment(
+            unit_id="E31",
+            personnel=[PersonnelAssignment(name="John", email="john@sjifire.org", position="FF")],
+        )
+        assert len(unit.personnel) == 1
+        assert unit.personnel[0].name == "John"
 
 
 class TestIncidentDocument:
     def _make_doc(self, **overrides):
         defaults = {
-            "station": "S31",
             "incident_number": "26-000944",
-            "incident_date": date(2026, 2, 12),
+            "incident_datetime": datetime(2026, 2, 12, tzinfo=UTC),
             "created_by": "chief@sjifire.org",
         }
         defaults.update(overrides)
@@ -62,7 +69,7 @@ class TestIncidentDocument:
         assert doc.status == "draft"
         assert doc.city == "Friday Harbor"
         assert doc.state == "WA"
-        assert doc.crew == []
+        assert doc.units == []
         assert doc.internal_notes == ""
         assert doc.neris_incident_id is None
         assert doc.id  # Should have auto-generated UUID
@@ -74,70 +81,52 @@ class TestIncidentDocument:
 
     def test_to_cosmos_roundtrip(self):
         doc = self._make_doc(
-            crew=[
-                CrewAssignment(name="Jane Doe", email="jane@sjifire.org", position="FF", unit="E31")
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    personnel=[
+                        PersonnelAssignment(
+                            name="Jane Doe", email="jane@sjifire.org", position="FF"
+                        )
+                    ],
+                )
             ],
-            narratives=Narratives(outcome="Fire contained"),
+            narrative="Fire contained",
             incident_type="111",
             address="100 Spring St",
+            extras={"station": "S31"},
         )
         cosmos_dict = doc.to_cosmos()
         assert isinstance(cosmos_dict, dict)
-        assert cosmos_dict["station"] == "S31"
-        assert cosmos_dict["crew"][0]["name"] == "Jane Doe"
+        assert cosmos_dict["extras"]["station"] == "S31"
+        assert cosmos_dict["units"][0]["personnel"][0]["name"] == "Jane Doe"
 
         restored = IncidentDocument.from_cosmos(cosmos_dict)
-        assert restored.station == doc.station
+        assert restored.extras.get("station") == doc.extras.get("station")
         assert restored.incident_number == doc.incident_number
-        assert restored.crew[0].email == "jane@sjifire.org"
+        assert restored.units[0].personnel[0].email == "jane@sjifire.org"
 
-    def test_to_neris_payload_minimal(self):
-        doc = self._make_doc()
-        payload = doc.to_neris_payload()
-        assert payload["incident_number"] == "26-000944"
-        assert payload["incident_date"] == "2026-02-12"
-        assert "address" not in payload
-        assert "narrative" not in payload
-
-    def test_to_neris_payload_full(self):
+    def test_personnel_emails(self):
         doc = self._make_doc(
-            incident_type="111",
-            address="100 Spring St",
-            latitude=48.5343,
-            longitude=-123.0178,
-            narratives=Narratives(outcome="Contained", actions_taken="Deployed lines"),
-            timestamps={"dispatch": "2026-02-12T10:00:00"},
-            unit_responses=[{"unit_id": "E31", "response_type": "first_due"}],
-        )
-        payload = doc.to_neris_payload()
-        assert payload["type"]["code"] == "111"
-        assert payload["address"]["city"] == "Friday Harbor"
-        assert payload["location"]["latitude"] == 48.5343
-        assert payload["narrative"]["outcome"] == "Contained"
-        assert payload["timestamps"]["dispatch"] == "2026-02-12T10:00:00"
-        assert len(payload["apparatus"]) == 1
-
-    def test_to_neris_excludes_internal_notes(self):
-        doc = self._make_doc(internal_notes="Private note for dept only")
-        payload = doc.to_neris_payload()
-        assert "internal_notes" not in str(payload)
-
-    def test_crew_emails(self):
-        doc = self._make_doc(
-            crew=[
-                CrewAssignment(name="John", email="JOHN@sjifire.org"),
-                CrewAssignment(name="Jane", email="jane@sjifire.org"),
-                CrewAssignment(name="Unknown"),  # No email
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    personnel=[
+                        PersonnelAssignment(name="John", email="JOHN@sjifire.org"),
+                        PersonnelAssignment(name="Jane", email="jane@sjifire.org"),
+                        PersonnelAssignment(name="Unknown"),  # No email
+                    ],
+                )
             ]
         )
-        emails = doc.crew_emails()
+        emails = doc.personnel_emails()
         assert "john@sjifire.org" in emails
         assert "jane@sjifire.org" in emails
         assert len(emails) == 2
 
-    def test_crew_emails_empty(self):
+    def test_personnel_emails_empty(self):
         doc = self._make_doc()
-        assert doc.crew_emails() == set()
+        assert doc.personnel_emails() == set()
 
     def test_completeness_empty(self):
         doc = self._make_doc()
@@ -150,14 +139,20 @@ class TestIncidentDocument:
         doc = self._make_doc(
             incident_type="111",
             address="100 Spring St",
-            crew=[CrewAssignment(name="John", email="john@sjifire.org")],
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    personnel=[PersonnelAssignment(name="John", email="john@sjifire.org")],
+                )
+            ],
         )
         result = doc.completeness()
-        assert result["filled"] == 3
+        assert result["filled"] == 4
         assert result["total"] == 7
         assert result["sections"]["incident_type"] is True
+        assert result["sections"]["units"] is True
         assert result["sections"]["address"] is True
-        assert result["sections"]["crew"] is True
+        assert result["sections"]["personnel"] is True
         assert result["sections"]["narrative"] is False
         assert result["sections"]["actions_taken"] is False
         assert result["sections"]["timestamps"] is False
@@ -166,9 +161,15 @@ class TestIncidentDocument:
         doc = self._make_doc(
             incident_type="111",
             address="100 Spring St",
-            crew=[CrewAssignment(name="John")],
-            unit_responses=[{"unit": "E31"}],
-            narratives=Narratives(outcome="Contained", actions_taken="Deployed lines"),
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    personnel=[PersonnelAssignment(name="John")],
+                )
+            ],
+            narrative="Contained",
+            action_taken="ACTION",
+            action_codes=["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT"],
             timestamps={"dispatch": "2026-02-12T10:00:00"},
         )
         result = doc.completeness()
@@ -176,23 +177,15 @@ class TestIncidentDocument:
         assert result["total"] == 7
         assert all(result["sections"].values())
 
-    def test_completeness_outcome_only(self):
-        doc = self._make_doc(narratives=Narratives(outcome="Contained"))
+    def test_completeness_narrative_only(self):
+        doc = self._make_doc(narrative="Contained")
         result = doc.completeness()
         assert result["sections"]["narrative"] is True
-        assert result["sections"]["actions_taken"] is False
 
-    def test_completeness_actions_taken_only(self):
-        doc = self._make_doc(narratives=Narratives(actions_taken="Deployed lines"))
+    def test_completeness_empty_narrative(self):
+        doc = self._make_doc(narrative="")
         result = doc.completeness()
         assert result["sections"]["narrative"] is False
-        assert result["sections"]["actions_taken"] is True
-
-    def test_completeness_empty_narratives(self):
-        doc = self._make_doc(narratives=Narratives(outcome="", actions_taken=""))
-        result = doc.completeness()
-        assert result["sections"]["narrative"] is False
-        assert result["sections"]["actions_taken"] is False
 
     # ── NOACTION / ACTION fields ──
 
@@ -219,39 +212,6 @@ class TestIncidentDocument:
         doc = self._make_doc(action_taken="ACTION")
         result = doc.completeness()
         assert result["sections"]["actions_taken"] is False
-
-    def test_completeness_legacy_narrative_still_works(self):
-        doc = self._make_doc(narratives=Narratives(actions_taken="Deployed lines"))
-        result = doc.completeness()
-        assert result["sections"]["actions_taken"] is True
-
-    def test_to_neris_payload_noaction(self):
-        doc = self._make_doc(action_taken="NOACTION", noaction_reason="CANCELLED")
-        payload = doc.to_neris_payload()
-        at = payload["actions_tactics"]["action_noaction"]
-        assert at["type"] == "NOACTION"
-        assert at["noaction_type"] == "CANCELLED"
-
-    def test_to_neris_payload_action(self):
-        doc = self._make_doc(
-            action_taken="ACTION",
-            action_codes=[
-                "SUPPRESSION||STRUCTURAL_FIRE_SUPPRESSION||INTERIOR",
-                "SALVAGE_AND_OVERHAUL",
-            ],
-        )
-        payload = doc.to_neris_payload()
-        at = payload["actions_tactics"]["action_noaction"]
-        assert at["type"] == "ACTION"
-        assert at["actions"] == [
-            "SUPPRESSION||STRUCTURAL_FIRE_SUPPRESSION||INTERIOR",
-            "SALVAGE_AND_OVERHAUL",
-        ]
-
-    def test_to_neris_payload_no_action_data_omits_field(self):
-        doc = self._make_doc()
-        payload = doc.to_neris_payload()
-        assert "actions_tactics" not in payload
 
     def test_cosmos_roundtrip_with_action_fields(self):
         doc = self._make_doc(
@@ -281,7 +241,12 @@ class TestIncidentDocument:
         doc = self._make_doc(
             incident_type="111",
             address="100 Spring St",
-            crew=[CrewAssignment(name="John")],
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    personnel=[PersonnelAssignment(name="John")],
+                )
+            ],
         )
         original = doc.completeness()
         restored = IncidentDocument.from_cosmos(doc.to_cosmos())

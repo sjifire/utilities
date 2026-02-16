@@ -585,9 +585,10 @@ if should_run 3; then
         --output none
     ok "MCP_SERVER_URL set to https://$CUSTOM_DOMAIN"
 
-    # Extend EasyAuth session cookie to 72 hours (default is 8h).
+    # Configure EasyAuth session: 72h cookie + token store for /.auth/me
+    # and /.auth/refresh (proactive token refresh in base.html).
     # authConfigs only supports PUT (not PATCH), so read-modify-write.
-    info "Extending EasyAuth session cookie to 72 hours..."
+    info "Configuring EasyAuth session (72h cookie + token store)..."
     AUTH_URL="https://management.azure.com/subscriptions/${SUB_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.App/containerApps/${CA_APP}/authConfigs/current?api-version=2024-03-01"
     AUTH_CONFIG=$(az rest --method get --url "$AUTH_URL" 2>/dev/null || echo '{}')
     UPDATED_CONFIG=$(echo "$AUTH_CONFIG" | python3 -c "
@@ -599,10 +600,17 @@ login['cookieExpiration'] = {
     'convention': 'FixedTime',
     'timeToExpiration': '3.00:00:00',
 }
+# Token store enables /.auth/me and /.auth/refresh endpoints.
+# Without this, the proactive session keep-alive in base.html fails
+# silently and group claim changes don't take effect until cookie expiry.
+login['tokenStore'] = {
+    'enabled': True,
+    'tokenRefreshExtensionHours': 72,
+}
 json.dump(cfg, sys.stdout)
 ")
     az rest --method put --url "$AUTH_URL" --body "$UPDATED_CONFIG" --output none
-    ok "EasyAuth session cookie set to 72h"
+    ok "EasyAuth session: 72h cookie + token store enabled"
 
     ok "Phase 3 complete"
     echo ""
