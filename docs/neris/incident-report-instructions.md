@@ -153,9 +153,9 @@ For fire incidents, also ask about: water on fire, fire under control, fire knoc
 
 **4b — Crew Per Unit**
 
-**SJI crew-to-apparatus mapping**: The on-duty S31 career crew rides the primary `*31` apparatus together — usually **E31** (engine), sometimes R31 or B31 depending on the call. If E31 responded, the S31 on-duty crew (Captain, Lieutenant, AO, Support) was on it unless you have specific info otherwise. Don't leave E31 as "?" when you have the roster — assign the on-duty crew to it by default and ask the user to confirm or correct.
+**SJI crew-to-apparatus mapping**: The on-duty S31 **career crew** (Captain, Lieutenant, AO) rides the primary `*31` apparatus together — usually **E31** (engine), sometimes R31 or B31 depending on the call. If E31 responded, assign the career crew to it by default and ask the user to confirm. Support, standby, and backup positions from the schedule are NOT necessarily on the first units out — don't auto-assign them to E31.
 
-For tenders (T33, T36) and ladder (L31), these are typically staffed by volunteers or off-duty personnel who may not be on the schedule — ask the user for those.
+For tenders (T33, T36), ladder (L31), and other apparatus, these are typically staffed by volunteers or off-duty personnel who may not be on the schedule — ask the user for those.
 
 Using the on-duty schedule, assign personnel to each responding unit. Present grouped by unit. **List every responding unit** — if you don't know who was on a unit, show it as needing assignment:
 
