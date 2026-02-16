@@ -113,6 +113,13 @@ Present the unit response timeline from dispatch data (`analysis.unit_times`). S
 
 Save unit times via `update_incident(unit_responses=[...])` and the incident-level timestamps (earliest dispatched, first enroute, first on scene, last cleared) via `update_incident(timestamps={...})`.
 
+**Response Mode** — Set each unit's response mode based on the incident type:
+- **Emergent** (default for): `FIRE||`, `MEDICAL||ILLNESS||CARDIAC_ARREST`, `MEDICAL||ILLNESS||BREATHING_PROBLEMS`, `MEDICAL||ILLNESS||CHEST_PAIN_NON_TRAUMA`, `MEDICAL||ILLNESS||STROKE_CVA`, `RESCUE||`
+- **Non-emergent** (default for): `PUBSERV||`, `NOEMERG||`
+- **Ask** for everything else
+
+Present: "I've set all units to **Emergent** response based on the incident type. Any units respond non-emergent?" (or vice versa). Save via `update_incident(unit_responses=[{unit_id: "E31", response_mode: "EMERGENT", ...}])`.
+
 For fire incidents, also ask about: water on fire, fire under control, fire knocked down, primary search times.
 
 **4b — Crew Per Unit**
@@ -219,7 +226,11 @@ Help draft the outcome narrative based on everything collected:
 >
 > Want me to adjust anything?
 
-Also ask about impediments if relevant (access issues, weather, etc.).
+**Impediment Detection** — After drafting the narrative, scan the CAD notes for access-related keywords: "narrow", "gated", "locked", "steep", "dirt road", "no access", "limited access", "long driveway", "remote". If found, suggest:
+
+> The CAD notes mention "[keyword]". Was access to the scene an issue? If so, I'll note it as an impediment.
+
+If confirmed, save via `update_incident(extras={"impediment_narrative": "Long gravel driveway limited apparatus access", "rescue_impediment": "ACCESS_LIMITATIONS"})`. Valid impediment codes: HOARDING_CONDITIONS, ACCESS_LIMITATIONS, PHYSICAL_MEDICAL_CONDITIONS_PERSON, IMPAIRED_PERSON, OTHER, NONE.
 
 ### Step 8 — Fire Module (when `incident_type` starts with `FIRE||`)
 
@@ -304,21 +315,199 @@ If yes:
 - How many exposures? Save `extras.exposure_count`
 - Damage level for each? Save `extras.exposure_damage`
 
+**8h — Powergen & Emerging Hazards** (structure fires, gas leaks, electrical fires, CO calls):
+
+Only ask when relevant — skip for medical-only or public service calls. Present as a quick checklist:
+
+> A few quick questions about the building:
+> - Solar panels present? (yes/no/unknown)
+> - Battery or energy storage system (ESS)? (yes/no/unknown)
+> - Backup generator present? (yes/no/unknown)
+> - CSST (corrugated stainless steel) gas piping? (yes/no/unknown)
+> - Electric vehicle involved? (yes/no/unknown)
+
+Save via `update_incident(extras={"solar_present": "YES", "battery_ess_present": "NO", "generator_present": "UNKNOWN", "csst_present": "NO", "ev_involved": "NO"})`. Use YES/NO/UNKNOWN values. Batch the questions — don't ask one at a time.
+
 ### Step 8-alt — Medical Module (when `incident_type` starts with `MEDICAL||`)
 
-Ask about:
-1. **Patient count** — How many patients? Save via `extras.patient_count`
-2. **Care disposition** — What care was provided? (e.g., care provided and transferred, refused care, DOA) Save via `extras.care_disposition`
-3. **Transport disposition** — How was the patient transported? (EMS transport, private vehicle, refused transport, no transport needed) Save via `extras.transport_disposition`
+Skip this step for non-medical incidents.
 
-### Step 8-other — Hazmat and Rescue
+**Patient count** — "How many patients?" Save via `extras.patient_count` (integer).
 
-**Hazmat incidents** (`HAZSIT||`):
-- Hazard type, DOT class, physical state → save to extras
-- Release disposition → save to extras
+**For each patient**, ask about these three fields (batch them together):
 
-**Rescue incidents** (`RESCUE||`):
-- Rescue type, elevation, path, impediments → save to extras
+1. **Care disposition** — What care was provided?
+   - Patient evaluated, care provided (`PATIENT_EVALUATED_CARE_PROVIDED`)
+   - Patient evaluated, refused care (`PATIENT_EVALUATED_REFUSED_CARE`)
+   - Patient evaluated, no care required (`PATIENT_EVALUATED_NO_CARE_REQUIRED`)
+   - Patient refused evaluation/care (`PATIENT_REFUSED_EVALUATION_CARE`)
+   - Support services provided (`PATIENT_SUPPORT_SERVICES_PROVIDED`)
+   - Dead on arrival (`PATIENT_DEAD_ON_ARRIVAL`)
+
+2. **Transport disposition** — How was the patient transported?
+   - Transport by EMS unit (`TRANSPORT_BY_EMS_UNIT`)
+   - Other agency transport (`OTHER_AGENCY_TRANSPORT`)
+   - Patient refused transport (`PATIENT_REFUSED_TRANSPORT`)
+   - Non-patient transport (`NONPATIENT_TRANSPORT`)
+   - No transport (`NO_TRANSPORT`)
+
+3. **Patient status at handoff** — Condition when handed off to receiving facility or when care ended:
+   - Improved (`IMPROVED`)
+   - Unchanged (`UNCHANGED`)
+   - Worse (`WORSE`)
+
+4. **Receiving facility** — If transported, ask: "Which facility?" (free text, e.g., "PeaceHealth Friday Harbor"). Save via `extras.receiving_facility`.
+
+**Prompt flow**: Present likely defaults based on context. For a routine BLS call:
+> For your patient:
+> - **Care**: Evaluated, care provided — sound right?
+> - **Transport**: Transport by EMS unit (M31)?
+> - **Status at handoff**: Improved?
+> - **Receiving facility**: PeaceHealth Friday Harbor?
+
+For a **single patient**, save:
+```
+update_incident(extras={
+    "patient_count": 1,
+    "care_disposition": "PATIENT_EVALUATED_CARE_PROVIDED",
+    "transport_disposition": "TRANSPORT_BY_EMS_UNIT",
+    "patient_status": "IMPROVED",
+    "receiving_facility": "PeaceHealth Friday Harbor"
+})
+```
+
+For **multiple patients**, use numbered keys:
+```
+update_incident(extras={
+    "patient_count": 2,
+    "patient_1_care_disposition": "PATIENT_EVALUATED_CARE_PROVIDED",
+    "patient_1_transport_disposition": "TRANSPORT_BY_EMS_UNIT",
+    "patient_1_patient_status": "IMPROVED",
+    "patient_1_receiving_facility": "PeaceHealth Friday Harbor",
+    "patient_2_care_disposition": "PATIENT_EVALUATED_REFUSED_CARE",
+    "patient_2_transport_disposition": "NO_TRANSPORT",
+    "patient_2_patient_status": "UNCHANGED"
+})
+```
+
+### Step 8-other — Rescue Module (when `incident_type` starts with `RESCUE||` or is a lift assist)
+
+Skip this step for non-rescue incidents.
+
+**8-other-a — Rescue Mode** — "What type of rescue was this?"
+- Removal from structure (`REMOVAL_FROM_STRUCTURE`)
+- Extrication (`EXTRICATION`)
+- Disentanglement (`DISENTANGLEMENT`)
+- Recovery (`RECOVERY`)
+- Other (`OTHER`)
+
+Save via `update_incident(extras={"rescue_mode": "REMOVAL_FROM_STRUCTURE"})`.
+
+**8-other-b — Rescue Actions** — "What rescue tools or techniques were used?" (multi-select)
+- Ventilation (`VENTILATION`)
+- Hydraulic tool use (`HYDRAULIC_TOOL_USE`)
+- Underwater dive (`UNDERWATER_DIVE`)
+- Rope rigging (`ROPE_RIGGING`)
+- Break/breach wall (`BREAK_BREACH_WALL`)
+- Brace wall/infrastructure (`BRACE_WALL_INFRASTRUCTURE`)
+- Trench shoring (`TRENCH_SHORING`)
+- Supply air (`SUPPLY_AIR`)
+- None (`NONE`)
+
+Save via `update_incident(extras={"rescue_actions": ["HYDRAULIC_TOOL_USE", "VENTILATION"]})`.
+
+**8-other-c — Rescue Impediment** — "Were there any impediments to the rescue?"
+- Hoarding conditions (`HOARDING_CONDITIONS`)
+- Access limitations (`ACCESS_LIMITATIONS`)
+- Physical/medical conditions of person (`PHYSICAL_MEDICAL_CONDITIONS_PERSON`)
+- Impaired person (`IMPAIRED_PERSON`)
+- Other (`OTHER`)
+- None (`NONE`)
+
+Save via `update_incident(extras={"rescue_impediment": "NONE"})`.
+
+**8-other-d — Rescue Elevation** — "Where was the patient found?" (for building rescues, lift assists)
+- On floor (`ON_FLOOR`)
+- On bed (`ON_BED`)
+- On furniture (`ON_FURNITURE`)
+- Other (`OTHER`)
+
+Save via `update_incident(extras={"rescue_elevation": "ON_FLOOR"})`.
+
+**Lift assists** (`PUBSERV||CITIZEN_ASSIST||LIFT_ASSIST`): These are simple — skip rescue mode and actions. Just ask about elevation and impediment:
+> For the lift assist: Was the patient on the floor, bed, or furniture? Any access issues getting to them?
+
+### Step 8-other — Hazmat Module (when `incident_type` starts with `HAZSIT||HAZARDOUS_MATERIALS||`)
+
+Skip this step for non-hazmat incidents.
+
+Hazmat value sets are too large and specialized for the cheat sheet. Use `get_neris_values` for these lookups:
+- `hazmat_cause` — Cause of release
+- `hazmat_dot` — DOT hazard class
+- `hazmat_physical_state` — Physical state of material
+- `hazmat_released_into` — Where the material was released
+- `hazmat_disposition` — Disposition of the material
+
+Save all as `extras.hazmat_*` keys:
+```
+update_incident(extras={
+    "hazmat_material": "Natural gas",
+    "hazmat_cause": "EQUIPMENT_FAILURE",
+    "hazmat_dot": "FLAMMABLE_GAS",
+    "hazmat_physical_state": "GAS",
+    "hazmat_released_into": "AIR",
+    "hazmat_disposition": "REMOVED_NEUTRALIZED"
+})
+```
+
+**Gas leaks** (`HAZSIT||HAZARDOUS_MATERIALS||GAS_LEAK_ODOR`) — common on SJI. Ask about:
+- Gas company (OPALCO/Propane vendor) notified?
+- Gas shut off at meter/tank?
+- Ventilation performed?
+- Meter readings (LEL levels)?
+
+Save details in extras and include in the narrative.
+
+**CO calls** (`HAZSIT||HAZARDOUS_MATERIALS||CARBON_MONOXIDE_RELEASE` or `PUBSERV||ALARMS_NONMED||CO_ALARM`) — also common. Ask about:
+- CO levels measured (ppm)?
+- Source identified?
+- Ventilation performed?
+- Building cleared and re-entry readings?
+
+Save details in extras and include in the narrative.
+
+### Step 8-casualty — Firefighter Injury & Civilian Casualty (REACTIVE — do not ask on every call)
+
+**Only trigger this section when:**
+- The user mentions a firefighter was injured
+- The user mentions a civilian casualty or fatality
+- CAD notes indicate injury or fatality keywords
+
+Do NOT proactively ask about casualties on routine calls. These are rare events.
+
+**Firefighter Injury** — If a firefighter was injured on scene:
+
+1. **Activity when injured** (`extras.ff_injury_activity`):
+   - Search/rescue, Carrying/setting up equipment, Advancing/operating hoseline, Vehicle extrication, Ventilation, Forcible entry, Pump operations, EMS patient care, During incident response, Scene safety/directing traffic, Standby, Incident command, Other
+
+2. **Cause of injury** (`extras.ff_injury_cause`):
+   - Caught/trapped by fire or explosion, Fall/jump, Stress/overexertion, Collapse, Caught/trapped by object, Struck by/contact with object, Exposure, Vehicle collision, Other
+
+3. **PPE worn at time of injury** (`extras.ff_injury_ppe`, multi-select):
+   - Turnout coat, Bunker pants, Protective hood, Gloves, Face shield/goggles, Helmet, SCBA, PASS device, Rubber knee boots, 3/4 boots, Brush gear, Reflective vest, Other special equipment, None
+
+4. **Timeline phase** (`extras.ff_injury_timeline`):
+   - Responding, Initial response, Continuing operations, Extended operations, After conclusion of incident, Unknown
+
+Save all via `update_incident(extras={...})`.
+
+**Civilian Casualty** — If a civilian was injured or killed:
+
+1. **Casualty type** (`extras.civ_casualty_type`): INJURED_NONFATAL, FATAL, OTHER
+2. **Cause** (`extras.civ_casualty_cause`): Same 9 cause values as firefighter injury
+3. **Timeline phase** (`extras.civ_casualty_timeline`): Same 6 timeline values
+
+For fatal casualties, flag that additional documentation and investigation may be required.
 
 ### Step 9 — Review and Save
 

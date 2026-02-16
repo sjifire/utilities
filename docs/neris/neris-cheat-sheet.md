@@ -251,6 +251,160 @@ FIRE BUILDING DAMAGE (value_set: "fire_bldg_damage")
 - MAJOR_DAMAGE
 
 ========================================
+RESPONSE MODE (value_set: "response_mode")
+========================================
+
+2 total codes (COMPLETE list):
+- EMERGENT
+- NON_EMERGENT
+
+========================================
+MEDICAL — CARE DISPOSITION (value_set: "medical_patient_care")
+========================================
+
+6 total codes (COMPLETE list):
+- PATIENT_EVALUATED_CARE_PROVIDED
+- PATIENT_EVALUATED_REFUSED_CARE
+- PATIENT_EVALUATED_NO_CARE_REQUIRED
+- PATIENT_REFUSED_EVALUATION_CARE
+- PATIENT_SUPPORT_SERVICES_PROVIDED
+- PATIENT_DEAD_ON_ARRIVAL
+
+========================================
+MEDICAL — TRANSPORT DISPOSITION (value_set: "medical_transport")
+========================================
+
+5 total codes (COMPLETE list):
+- TRANSPORT_BY_EMS_UNIT
+- OTHER_AGENCY_TRANSPORT
+- PATIENT_REFUSED_TRANSPORT
+- NONPATIENT_TRANSPORT
+- NO_TRANSPORT
+
+========================================
+MEDICAL — PATIENT STATUS (value_set: "medical_patient_status")
+========================================
+
+3 total codes (COMPLETE list):
+- IMPROVED
+- UNCHANGED
+- WORSE
+
+========================================
+RESCUE MODE (value_set: "rescue_mode")
+========================================
+
+5 total codes (COMPLETE list):
+- REMOVAL_FROM_STRUCTURE
+- EXTRICATION
+- DISENTANGLEMENT
+- RECOVERY
+- OTHER
+
+========================================
+RESCUE ACTIONS (value_set: "rescue_action")
+========================================
+
+9 total codes (COMPLETE list):
+- VENTILATION
+- HYDRAULIC_TOOL_USE
+- UNDERWATER_DIVE
+- ROPE_RIGGING
+- BREAK_BREACH_WALL
+- BRACE_WALL_INFRASTRUCTURE
+- TRENCH_SHORING
+- SUPPLY_AIR
+- NONE
+
+========================================
+RESCUE IMPEDIMENT (value_set: "rescue_impediment")
+========================================
+
+6 total codes (COMPLETE list):
+- HOARDING_CONDITIONS
+- ACCESS_LIMITATIONS
+- PHYSICAL_MEDICAL_CONDITIONS_PERSON
+- IMPAIRED_PERSON
+- OTHER
+- NONE
+
+========================================
+RESCUE ELEVATION (value_set: "rescue_elevation")
+========================================
+
+4 total codes (COMPLETE list):
+- ON_FLOOR
+- ON_BED
+- ON_FURNITURE
+- OTHER
+
+========================================
+CASUALTY — ACTIVITY (value_set: "casualty_action")
+========================================
+
+13 total codes (COMPLETE list):
+- SEARCH_RESCUE
+- CARRYING_SETTINGUP_EQUIPMENT
+- ADVANCING_OPERATING_HOSELINE
+- VEHICLE_EXTRICATION
+- VENTILATION
+- FORCIBLE_ENTRY
+- PUMP_OPERATIONS
+- EMS_PATIENT_CARE
+- DURING_INCIDENT_RESPONSE
+- SCENE_SAFETY_DIRECTING_TRAFFIC
+- STANDBY
+- INCIDENT_COMMAND
+- OTHER
+
+========================================
+CASUALTY — CAUSE (value_set: "casualty_cause")
+========================================
+
+9 total codes (COMPLETE list):
+- CAUGHT_TRAPPED_BY_FIRE_EXPLOSION
+- FALL_JUMP
+- STRESS_OVEREXERTION
+- COLLAPSE
+- CAUGHT_TRAPPED_BY_OBJECT
+- STRUCK_CONTACT_WITH_OBJECT
+- EXPOSURE
+- VEHICLE_COLLISION
+- OTHER
+
+========================================
+CASUALTY — PPE (value_set: "casualty_ppe")
+========================================
+
+14 total codes (COMPLETE list):
+- TURNOUT_COAT
+- BUNKER_PANTS
+- PROTECTIVE_HOOD
+- GLOVES
+- FACE_SHIELD_GOGGLES
+- HELMET
+- SCBA
+- PASS_DEVICE
+- RUBBER_KNEE_BOOTS
+- 3_4_BOOTS
+- BRUSH_GEAR
+- REFLECTIVE_VEST
+- OTHER_SPECIAL_EQUIPMENT
+- NONE
+
+========================================
+CASUALTY — TIMELINE (value_set: "casualty_timeline")
+========================================
+
+6 total codes (COMPLETE list):
+- RESPONDING
+- INITIAL_RESPONSE
+- CONTINUING_OPERATIONS
+- EXTENDED_OPERATIONS
+- AFTER_CONCLUSION_OF_INCIDENT
+- UNKNOWN
+
+========================================
 ROOM OF ORIGIN (value_set: "room")
 ========================================
 
