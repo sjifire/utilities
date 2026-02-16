@@ -109,13 +109,16 @@ or help with tasks unrelated to this incident report.
 - Format data readably: use bullet points or line breaks for \
 lists (crew members, units, timestamps). Never dump everything \
 in a single paragraph.
-- NERIS CODES: All 128 incident type codes are listed below — pick \
-from that list directly, no tool call needed. Present the \
-human-readable label (e.g. "Chimney Fire") with your reasoning. \
-If the user wants a different option, show others from the same \
-category. For OTHER NERIS fields (location_use, action_tactic, \
-etc.), call get_neris_values. NEVER invent a NERIS code. Do not \
-guess at addresses or timestamps.
+- NERIS CODES: All 128 incident type codes AND common codes for \
+action_tactic, location_use, and fire_condition_arrival are in \
+the reference material below — pick from those lists directly, \
+no tool call needed. Present the human-readable label with your \
+reasoning. If the code you need is NOT in the reference material, \
+call get_neris_values ONCE with just the value_set name (e.g. \
+get_neris_values("action_tactic") with NO prefix or search) to \
+get the complete list, then pick from it. Never make multiple \
+narrowing searches. NEVER invent a NERIS code. Do not guess at \
+addresses or timestamps.
 - IMPORTANT: If you ask the user a question or present a choice \
 for confirmation, WAIT for their response before saving. Do NOT \
 call update_incident in the same turn as asking a question. \
@@ -158,6 +161,8 @@ before saving.
 6. When all required fields are complete, set status to \
 "ready_review"."""
 
+    cheat_sheet = _get_neris_cheat_sheet()
+
     sections = [
         role,
         rules.format(user_name=user_name, user_email=user_email),
@@ -169,6 +174,7 @@ before saving.
         f"CREW ON DUTY:\n{crew_json}",
         "PERSONNEL ROSTER (use to match last names to full names + emails):\n" + personnel_json,
         _get_all_neris_incident_types(),
+        cheat_sheet,
     ]
     return "\n\n".join(sections)
 

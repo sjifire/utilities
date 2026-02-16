@@ -694,7 +694,7 @@ function reportsApp() {
 
     async refreshData() {
       try {
-        const r = await fetch('/dashboard/data');
+        const r = await authFetch('/dashboard/data');
         if (r.ok) {
           const d = await r.json();
           this.calls = d.recent_calls || [];
@@ -790,7 +790,7 @@ function reportsApp() {
 
     async loadChatHistory() {
       try {
-        const res = await fetch('/chat/history');
+        const res = await authFetch('/chat/history');
         if (res.ok) {
           const data = await res.json();
           for (const msg of data.messages || []) {
@@ -839,7 +839,7 @@ function reportsApp() {
       if (this.$refs.chatInput) this.$refs.chatInput.style.height = 'auto';
 
       try {
-        const res = await fetch('/chat/stream', {
+        const res = await authFetch('/chat/stream', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
@@ -855,12 +855,6 @@ function reportsApp() {
         });
 
         if (!res.ok) {
-          if (res.status === 401) {
-            this.chatMessages.push({type: 'error', content: 'Session expired. Redirecting to sign in...'});
-            this.chatStreaming = false;
-            setTimeout(() => { window.location.href = '/.auth/login/aad?post_login_redirect_uri=' + window.location.pathname; }, 1500);
-            return;
-          }
           const err = await res.json().catch(() => ({error: 'Request failed'}));
           this.chatMessages.push({type: 'error', content: err.error || 'Request failed'});
           this.chatStreaming = false;
