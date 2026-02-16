@@ -35,6 +35,15 @@
     .back-link:hover   { opacity: 1; }
     .print-link        { color: var(--text-muted); text-decoration: none; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border-medium); border-radius: 4px; }
     .print-link:hover  { color: var(--text-secondary); border-color: var(--color-blue); }
+    .header-actions    { display: flex; align-items: center; gap: 8px; }
+    .export-wrap       { position: relative; }
+    .export-btn        { background: none; border: 1px solid var(--border-medium); border-radius: 4px; color: var(--text-muted); font-size: 12px; padding: 4px 10px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+    .export-btn:hover  { color: var(--text-secondary); border-color: var(--color-blue); }
+    .export-btn svg    { width: 14px; height: 14px; }
+    .export-menu       { position: absolute; right: 0; top: calc(100% + 4px); background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.3); min-width: 160px; z-index: 50; overflow: hidden; }
+    .export-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 14px; font-size: 13px; color: var(--text-secondary); background: none; border: none; cursor: pointer; text-align: left; }
+    .export-menu button:hover { background: var(--border-subtle); color: var(--text-primary); }
+    .export-menu .fmt  { color: var(--text-dim); font-size: 11px; font-family: monospace; min-width: 28px; }
 
     .status-badge {
       font-size: 11px;
@@ -404,7 +413,20 @@
       <h1>{{ incident_number }}</h1>
       <span class="status-badge {{ incident_status }}" x-text="status">{{ incident_status }}</span>
     </div>
-    <a href="/reports/{{ incident_id }}/print" target="_blank" class="print-link">Print Report</a>
+    <div class="header-actions">
+      <div class="export-wrap" x-data="{open: false}" @click.away="open = false">
+        <button class="export-btn" @click="open = !open">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export
+        </button>
+        <div class="export-menu" x-show="open" x-cloak x-transition.opacity>
+          <button @click="exportChat('json'); open = false"><span class="fmt">.json</span> Raw data</button>
+          <button @click="exportChat('md'); open = false"><span class="fmt">.md</span> Markdown</button>
+          <button @click="exportChat('print'); open = false"><span class="fmt">&#9113;</span> Print</button>
+        </div>
+      </div>
+      <a href="/reports/{{ incident_id }}/print" target="_blank" class="print-link">Print Report</a>
+    </div>
   </div>
 
   {% if dispatch %}
@@ -623,6 +645,106 @@ function chatApp() {
       L.marker([lat, lng]).addTo(map);
       // Fix tile rendering after container resize
       setTimeout(() => map.invalidateSize(), 200);
+    },
+
+    async exportChat(format) {
+      try {
+        const res = await authFetch(`/reports/${this.incidentId}/conversation`);
+        if (!res.ok) { alert('Failed to load conversation'); return; }
+        const data = await res.json();
+        const msgs = data.messages || [];
+        const num = '{{ incident_number }}';
+        const date = '{{ incident_date }}';
+
+        if (format === 'json') {
+          const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+          this._download(blob, `${num}-chat.json`);
+
+        } else if (format === 'md') {
+          let md = `# Chat History — ${num} (${date})\n\n`;
+          md += `**Turns**: ${data.turn_count || '?'}  |  **Input tokens**: ${(data.total_input_tokens || 0).toLocaleString()}  |  **Output tokens**: ${(data.total_output_tokens || 0).toLocaleString()}\n\n---\n\n`;
+          for (const m of msgs) {
+            const label = m.role === 'user' ? 'User' : 'Assistant';
+            md += `### ${label}\n\n${m.content || ''}\n\n`;
+            if (m.tool_use?.length) {
+              for (const t of m.tool_use) {
+                md += `> **Tool**: \`${t.name || 'unknown'}\`\n\n`;
+              }
+            }
+            if (m.tool_results?.length) {
+              for (const tr of m.tool_results) {
+                md += `> **Result** (${tr.name || 'tool'}): ${tr.summary || ''}\n\n`;
+              }
+            }
+            md += '---\n\n';
+          }
+          const blob = new Blob([md], {type: 'text/markdown'});
+          this._download(blob, `${num}-chat.md`);
+
+        } else if (format === 'print') {
+          const w = window.open('', '_blank');
+          let html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+            <title>Chat — ${num}</title>
+            <style>
+              body { font-family: -apple-system, system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #1a1a1a; font-size: 14px; }
+              h1 { font-size: 18px; border-bottom: 2px solid #c00; padding-bottom: 8px; }
+              .meta { color: #666; font-size: 12px; margin-bottom: 20px; }
+              .msg { margin-bottom: 16px; padding: 10px 14px; border-radius: 8px; page-break-inside: avoid; }
+              .msg-user { background: #f0f4ff; border: 1px solid #d0d8e8; }
+              .msg-assistant { background: #f8f8f8; border: 1px solid #e0e0e0; }
+              .msg-role { font-weight: 600; font-size: 11px; text-transform: uppercase; color: #666; margin-bottom: 4px; }
+              .msg-tool { font-size: 12px; color: #888; padding: 2px 14px; font-style: italic; }
+              p { margin: 6px 0; }
+              table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+              th, td { padding: 4px 8px; border: 1px solid #ddd; text-align: left; font-size: 13px; }
+              th { background: #f5f5f5; }
+              @media print { body { padding: 0; } .msg { break-inside: avoid; } }
+            </style></head><body>`;
+          html += `<h1>Chat History &mdash; ${this._esc(num)}</h1>`;
+          html += `<div class="meta">Date: ${this._esc(date)} &nbsp;|&nbsp; Turns: ${data.turn_count || '?'} &nbsp;|&nbsp; Input: ${(data.total_input_tokens || 0).toLocaleString()} tokens &nbsp;|&nbsp; Output: ${(data.total_output_tokens || 0).toLocaleString()} tokens</div>`;
+          for (const m of msgs) {
+            const cls = m.role === 'user' ? 'msg-user' : 'msg-assistant';
+            const label = m.role === 'user' ? 'User' : 'Assistant';
+            const rendered = m.role === 'assistant'
+              ? DOMPurify.sanitize(marked.parse(m.content || '', {breaks: true}))
+              : this._esc(m.content || '');
+            html += `<div class="msg ${cls}"><div class="msg-role">${label}</div>${rendered}`;
+            if (m.tool_use?.length) {
+              for (const t of m.tool_use) {
+                html += `<div class="msg-tool">Tool: ${this._esc(t.name || '')}</div>`;
+              }
+            }
+            if (m.tool_results?.length) {
+              for (const tr of m.tool_results) {
+                html += `<div class="msg-tool">Result (${this._esc(tr.name || 'tool')}): ${this._esc(tr.summary || '')}</div>`;
+              }
+            }
+            html += '</div>';
+          }
+          html += '</body></html>';
+          w.document.write(html);
+          w.document.close();
+          w.onload = () => w.print();
+        }
+      } catch (e) {
+        console.error('Export error:', e);
+        alert('Export failed — see console for details');
+      }
+    },
+
+    _download(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+
+    _esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
     },
 
     autoResize(e) {
