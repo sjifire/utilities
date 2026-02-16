@@ -497,6 +497,7 @@ function chatApp() {
     lightboxSrc: '',
     _userScrolledAway: false,
     _scrollRAF: null,
+    _reconnectAttempts: 0,
 
     async init() {
       // Load conversation history
@@ -542,9 +543,17 @@ function chatApp() {
         console.error('Failed to load history:', e);
       }
 
-      // Auto-start if no conversation exists
       if (this.messages.length === 0) {
+        // No conversation — auto-start
         this.$nextTick(() => this.sendMessage('Begin report'));
+      } else {
+        // Existing conversation — check if the agent's response was lost
+        const lastMsg = this.messages[this.messages.length - 1];
+        if (lastMsg && lastMsg.type === 'message' && lastMsg.role === 'user') {
+          // Last saved message was from the user — agent never responded.
+          // Auto-continue so the user doesn't have to re-type.
+          this.$nextTick(() => this.sendMessage('Continue where we left off.'));
+        }
       }
     },
 
@@ -653,6 +662,8 @@ function chatApp() {
         reqBody.images = images.map(img => ({data: img.base64, media_type: img.mediaType}));
       }
 
+      let streamCompleted = false;  // True only when server sends 'done' event
+
       try {
         const res = await authFetch(`/reports/${this.incidentId}/chat`, {
           method: 'POST',
@@ -667,16 +678,21 @@ function chatApp() {
           return;
         }
 
-        // Read SSE stream
+        // Read SSE stream — reader.read() resolves immediately on connection close
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
 
         while (true) {
-          const {done, value} = await reader.read();
-          if (done) break;
+          let result;
+          try {
+            result = await reader.read();
+          } catch {
+            break;  // Network error / connection dropped
+          }
+          if (result.done) break;
 
-          buffer += decoder.decode(value, {stream: true});
+          buffer += decoder.decode(result.value, {stream: true});
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
 
@@ -687,6 +703,7 @@ function chatApp() {
             } else if (line.startsWith('data: ') && eventType) {
               try {
                 const data = JSON.parse(line.slice(6));
+                if (eventType === 'done') streamCompleted = true;
                 this.handleEvent(eventType, data);
               } catch {}
               eventType = '';
@@ -695,16 +712,31 @@ function chatApp() {
         }
       } catch (e) {
         console.error('Chat error:', e);
-        this.messages.push({type: 'error', content: 'Connection error. Please try again.'});
       }
 
-      // Finalize streaming message
+      // Finalize any partial streaming message
       if (this.currentText) {
         this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
         this.currentText = '';
       }
       this.streaming = false;
       this.scrollToBottom(true);
+
+      // If stream ended without 'done', connection was lost — auto-retry
+      if (!streamCompleted) {
+        this._reconnectAttempts++;
+        if (this._reconnectAttempts <= 3) {
+          const delay = this._reconnectAttempts * 2000;  // 2s, 4s, 6s
+          console.warn(`Stream lost (attempt ${this._reconnectAttempts}/3) — retrying in ${delay}ms`);
+          setTimeout(() => this.sendMessage('Continue where we left off.'), delay);
+        } else {
+          this._reconnectAttempts = 0;
+          this.messages.push({type: 'error', content: 'Connection lost. Please try again.'});
+        }
+        return;
+      }
+
+      this._reconnectAttempts = 0;  // Reset on successful completion
       this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
     },
 
