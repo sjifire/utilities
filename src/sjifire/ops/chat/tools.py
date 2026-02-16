@@ -129,6 +129,49 @@ TOOL_SCHEMAS: list[dict] = [
                     "type": "string",
                     "description": "Internal notes (not sent to NERIS)",
                 },
+                "arrival_conditions": {
+                    "type": "string",
+                    "enum": [
+                        "NO_SMOKE_FIRE_SHOWING",
+                        "SMOKE_SHOWING",
+                        "SMOKE_FIRE_SHOWING",
+                        "STRUCTURE_INVOLVED",
+                        "FIRE_SPREAD_BEYOND_STRUCTURE",
+                        "FIRE_OUT_UPON_ARRIVAL",
+                    ],
+                    "description": "Fire condition on arrival (fire incidents only)",
+                },
+                "outside_fire_cause": {
+                    "type": "string",
+                    "description": "Cause of outside fire (NERIS fire_cause_out code)",
+                },
+                "outside_fire_acres": {
+                    "type": "number",
+                    "description": "Estimated acres burned (outside fire only)",
+                },
+                "additional_incident_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Up to 2 additional NERIS incident type codes",
+                },
+                "automatic_alarm": {
+                    "type": "boolean",
+                    "description": "Was this call initiated by an automatic alarm?",
+                },
+                "people_present": {
+                    "type": "boolean",
+                    "description": "Were people present at the incident location?",
+                },
+                "displaced_count": {
+                    "type": "integer",
+                    "description": "Number of people displaced",
+                },
+                "extras": {
+                    "type": "object",
+                    "description": (
+                        "Additional NERIS fields merged into existing extras. Use snake_case keys."
+                    ),
+                },
             },
             "required": ["incident_id"],
         },
@@ -332,11 +375,9 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
     if name == "update_incident":
         incident_id = tool_input["incident_id"]
         kwargs = {k: v for k, v in tool_input.items() if k != "incident_id"}
-        # Map new schema names to update_incident parameter names
+        # Map chat schema "units" to the function's "unit_responses" param
         if "units" in kwargs:
             kwargs["unit_responses"] = kwargs.pop("units")
-        if "narrative" in kwargs:
-            kwargs["outcome_narrative"] = kwargs.pop("narrative")
         return await incident_tools.update_incident(incident_id, **kwargs)
 
     if name == "reset_incident":

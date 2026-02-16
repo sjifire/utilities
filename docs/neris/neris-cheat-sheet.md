@@ -173,3 +173,99 @@ Common codes:
 - COMMAND_AND_CONTROL||SAFETY_OFFICER_ASSIGNED
 - SEARCH_STRUCTURE||DOOR_INITIATED_SEARCH
 - VENTILATION||POSITIVE_PRESSURE
+
+========================================
+WATER SUPPLY (value_set: "water_supply")
+========================================
+
+9 total codes (COMPLETE list):
+- HYDRANT_LESS_500
+- HYDRANT_GREATER_500
+- TANK_WATER
+- WATER_TENDER_SHUTTLE
+- NURSE_OTHER_APPARATUS
+- DRAFT_FROM_STATIC_SOURCE
+- SUPPLY_FROM_FIRE_BOAT
+- FOAM_ADDITIVE
+- NONE
+
+========================================
+FIRE CAUSE — INSIDE (value_set: "fire_cause_in")
+========================================
+
+13 total codes (COMPLETE list):
+- OPERATING_EQUIPMENT
+- ELECTRICAL
+- BATTERY_POWER_STORAGE
+- HEAT_FROM_ANOTHER_OBJECT
+- EXPLOSIVES_FIREWORKS
+- SMOKING_MATERIALS_ILLICIT_DRUGS
+- OPEN_FLAME
+- COOKING
+- CHEMICAL
+- ACT_OF_NATURE
+- INCENDIARY
+- OTHER_HEAT_SOURCE
+- UNABLE_TO_BE_DETERMINED
+
+========================================
+FIRE CAUSE — OUTSIDE (value_set: "fire_cause_out")
+========================================
+
+14 total codes (COMPLETE list):
+- NATURAL
+- EQUIPMENT_VEHICLE_USE
+- SMOKING_MATERIALS_ILLICIT_DRUGS
+- RECREATION_CEREMONY
+- DEBRIS_OPEN_BURNING
+- RAILROAD_OPS_MAINTENANCE
+- FIREARMS_EXPLOSIVES
+- FIREWORKS
+- POWER_GEN_TRANS_DIST
+- STRUCTURE
+- INCENDIARY
+- BATTERY_POWER_STORAGE
+- SPREAD_FROM_CONTROLLED_BURN
+- UNABLE_TO_BE_DETERMINED
+
+========================================
+FIRE INVESTIGATION (value_set: "fire_invest_need")
+========================================
+
+6 total codes (COMPLETE list):
+- YES
+- NO
+- NOT_EVALUATED
+- NOT_APPLICABLE
+- NO_CAUSE_OBVIOUS
+- OTHER
+
+========================================
+FIRE BUILDING DAMAGE (value_set: "fire_bldg_damage")
+========================================
+
+4 total codes (COMPLETE list):
+- NO_DAMAGE
+- MINOR_DAMAGE
+- MODERATE_DAMAGE
+- MAJOR_DAMAGE
+
+========================================
+ROOM OF ORIGIN (value_set: "room")
+========================================
+
+14 total codes (COMPLETE list):
+- ASSEMBLY
+- BATHROOM
+- BEDROOM
+- KITCHEN
+- LIVING_SPACE
+- HALLWAY_FOYER
+- GARAGE
+- BALCONY_PORCH_DECK
+- BASEMENT
+- ATTIC
+- OFFICE
+- UTILITY_ROOM
+- OTHER
+- UNKNOWN

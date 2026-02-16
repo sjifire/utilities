@@ -525,6 +525,27 @@ async def update_incident(
     unit_responses: list[dict] | None = None,
     timestamps: dict[str, str] | None = None,
     internal_notes: str | None = None,
+    # Actions
+    action_taken: str | None = None,
+    noaction_reason: str | None = None,
+    action_codes: list[str] | None = None,
+    # Fire-specific
+    arrival_conditions: str | None = None,
+    outside_fire_cause: str | None = None,
+    outside_fire_acres: float | None = None,
+    # Incident details
+    additional_incident_types: list[str] | None = None,
+    automatic_alarm: bool | None = None,
+    narrative: str | None = None,
+    # Location
+    apt_suite: str | None = None,
+    zip_code: str | None = None,
+    county: str | None = None,
+    # People
+    people_present: bool | None = None,
+    displaced_count: int | None = None,
+    # Flexible extras
+    extras: dict | None = None,
 ) -> dict:
     """Update fields on an existing incident.
 
@@ -546,6 +567,21 @@ async def update_incident(
         unit_responses: NERIS apparatus/unit response data
         timestamps: Event timestamps (dispatch, on_scene, etc.)
         internal_notes: Internal notes (not sent to NERIS)
+        action_taken: "ACTION" or "NOACTION"
+        noaction_reason: "CANCELLED", "STAGED_STANDBY", or "NO_INCIDENT_FOUND"
+        action_codes: NERIS action_tactic codes
+        arrival_conditions: Fire condition on arrival (fire_condition_arrival value)
+        outside_fire_cause: Cause of outside fire (fire_cause_out value)
+        outside_fire_acres: Estimated acres burned (outside fire only)
+        additional_incident_types: Up to 2 additional NERIS incident type codes
+        automatic_alarm: Was this call initiated by an automatic alarm?
+        narrative: Combined incident narrative (direct, takes precedence over compat params)
+        apt_suite: Apartment or suite number
+        zip_code: ZIP code
+        county: County name
+        people_present: Were people present at the incident location?
+        displaced_count: Number of people displaced
+        extras: Additional fields merged into existing extras dict
 
     Returns:
         The updated incident document, or an error
@@ -620,8 +656,11 @@ async def update_incident(
                     doc.units.append(UnitAssignment(unit_id=unit_id, personnel=personnel))
             fields_changed.append("crew")
 
-        # Narrative — accept both old and new param names for compatibility
-        if outcome_narrative is not None or actions_taken_narrative is not None:
+        # Narrative — direct param takes precedence, then compat params
+        if narrative is not None:
+            doc.narrative = narrative
+            fields_changed.append("narrative")
+        elif outcome_narrative is not None or actions_taken_narrative is not None:
             parts = []
             if outcome_narrative is not None:
                 parts.append(outcome_narrative)
@@ -644,6 +683,60 @@ async def update_incident(
         if internal_notes is not None:
             doc.internal_notes = internal_notes
             fields_changed.append("internal_notes")
+
+        # Actions
+        if action_taken is not None:
+            doc.action_taken = action_taken
+            fields_changed.append("action_taken")
+        if noaction_reason is not None:
+            doc.noaction_reason = noaction_reason
+            fields_changed.append("noaction_reason")
+        if action_codes is not None:
+            doc.action_codes = action_codes
+            fields_changed.append("action_codes")
+
+        # Fire-specific
+        if arrival_conditions is not None:
+            doc.arrival_conditions = arrival_conditions
+            fields_changed.append("arrival_conditions")
+        if outside_fire_cause is not None:
+            doc.outside_fire_cause = outside_fire_cause
+            fields_changed.append("outside_fire_cause")
+        if outside_fire_acres is not None:
+            doc.outside_fire_acres = outside_fire_acres
+            fields_changed.append("outside_fire_acres")
+
+        # Incident details
+        if additional_incident_types is not None:
+            doc.additional_incident_types = additional_incident_types
+            fields_changed.append("additional_incident_types")
+        if automatic_alarm is not None:
+            doc.automatic_alarm = automatic_alarm
+            fields_changed.append("automatic_alarm")
+
+        # Location
+        if apt_suite is not None:
+            doc.apt_suite = apt_suite
+            fields_changed.append("apt_suite")
+        if zip_code is not None:
+            doc.zip_code = zip_code
+            fields_changed.append("zip_code")
+        if county is not None:
+            doc.county = county
+            fields_changed.append("county")
+
+        # People
+        if people_present is not None:
+            doc.people_present = people_present
+            fields_changed.append("people_present")
+        if displaced_count is not None:
+            doc.displaced_count = displaced_count
+            fields_changed.append("displaced_count")
+
+        # Extras — merge into existing
+        if extras is not None:
+            doc.extras = {**doc.extras, **extras}
+            fields_changed.append("extras")
 
         # Record edit history
         if fields_changed:

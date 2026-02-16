@@ -263,9 +263,156 @@ class TestUpdateIncident:
         assert "error" in result
         assert "submitted" in result["error"].lower()
 
-    # NOTE: action_taken, noaction_reason, and action_codes are model fields
-    # but are not yet exposed as update_incident parameters. Tests for those
-    # fields belong in test_models.py (completeness checks).
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_action_fields(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123",
+            action_taken="ACTION",
+            action_codes=["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT"],
+        )
+        assert result["action_taken"] == "ACTION"
+        assert result["action_codes"] == ["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT"]
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_noaction_fields(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123",
+            action_taken="NOACTION",
+            noaction_reason="CANCELLED",
+        )
+        assert result["action_taken"] == "NOACTION"
+        assert result["noaction_reason"] == "CANCELLED"
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_fire_specific_fields(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123",
+            arrival_conditions="SMOKE_SHOWING",
+            outside_fire_cause="NATURAL",
+            outside_fire_acres=2.5,
+        )
+        assert result["arrival_conditions"] == "SMOKE_SHOWING"
+        assert result["outside_fire_cause"] == "NATURAL"
+        assert result["outside_fire_acres"] == 2.5
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_incident_detail_fields(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123",
+            additional_incident_types=["PUBSERV||ALARMS_NONMED||FIRE_ALARM"],
+            automatic_alarm=True,
+        )
+        assert result["additional_incident_types"] == ["PUBSERV||ALARMS_NONMED||FIRE_ALARM"]
+        assert result["automatic_alarm"] is True
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_location_fields(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123",
+            apt_suite="Unit 4B",
+            zip_code="98250",
+            county="San Juan",
+        )
+        assert result["apt_suite"] == "Unit 4B"
+        assert result["zip_code"] == "98250"
+        assert result["county"] == "San Juan"
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_people_fields(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123",
+            people_present=True,
+            displaced_count=3,
+        )
+        assert result["people_present"] is True
+        assert result["displaced_count"] == 3
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_extras_merge(self, mock_store_cls, regular_user, sample_doc):
+        """Extras should merge into existing, not replace."""
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # sample_doc already has extras={"station": "S31"}
+        result = await update_incident(
+            "doc-123",
+            extras={"water_supply": "HYDRANT_LESS_500", "smoke_alarm_presence": "NOT_APPLICABLE"},
+        )
+        assert result["extras"]["station"] == "S31"  # preserved
+        assert result["extras"]["water_supply"] == "HYDRANT_LESS_500"  # added
+        assert result["extras"]["smoke_alarm_presence"] == "NOT_APPLICABLE"  # added
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_narrative_direct_param(self, mock_store_cls, regular_user, sample_doc):
+        """Direct narrative param takes precedence over compat params."""
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123",
+            narrative="Full narrative text here.",
+        )
+        assert result["narrative"] == "Full narrative text here."
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_narrative_direct_overrides_compat(
+        self, mock_store_cls, regular_user, sample_doc
+    ):
+        """When both narrative and outcome_narrative provided, narrative wins."""
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123",
+            narrative="Direct narrative wins.",
+            outcome_narrative="This should be ignored.",
+        )
+        assert result["narrative"] == "Direct narrative wins."
 
 
 class TestSubmitIncident:

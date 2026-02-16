@@ -221,26 +221,104 @@ Help draft the outcome narrative based on everything collected:
 
 Also ask about impediments if relevant (access issues, weather, etc.).
 
-### Step 8 — Conditional Sections
+### Step 8 — Fire Module (when `incident_type` starts with `FIRE||`)
 
-Based on incident type, ask about applicable sections:
+Skip this step for non-fire incidents — jump to Step 8-alt if medical, or Step 9 otherwise.
 
-**Fire incidents:**
-- Fire condition on arrival (no smoke, smoke showing, fully involved, etc.)
-- Risk reduction: smoke alarms, fire alarms, sprinklers present?
-- Exposures: did fire spread to adjacent structures?
-- Fire cause investigation needed?
+**8a — Arrival Conditions** (all fire types):
 
-**Medical incidents:**
-- Patient care disposition (care provided, refused care, DOA, etc.)
-- Transport disposition (EMS transport, refused transport, etc.)
+Auto-extract from CAD notes when possible:
+- "nothing showing" → `NO_SMOKE_FIRE_SHOWING`
+- "smoke showing" / "smoke from eaves" → `SMOKE_SHOWING`
+- "smoke and flames" / "fire visible" → `SMOKE_FIRE_SHOWING`
+- "fully involved" / "structure involved" → `STRUCTURE_INVOLVED`
+- "fire spread to adjacent" → `FIRE_SPREAD_BEYOND_STRUCTURE`
+- "fire out" / "extinguished prior" → `FIRE_OUT_UPON_ARRIVAL`
 
-**Hazmat incidents:**
-- Hazard type, DOT class, physical state
-- Release disposition
+Present your suggestion with reasoning:
+> Based on the CAD notes mentioning "smoke showing from eaves", I'd classify arrival conditions as **Smoke Showing**. Sound right?
 
-**Rescue incidents:**
-- Rescue type, elevation, path, impediments
+After confirmation, save:
+```
+update_incident(arrival_conditions="SMOKE_SHOWING")
+```
+
+**8b — Water Supply** (all fire types where ACTION was taken):
+
+Ask: "What was the water supply source?"
+
+Present the 9 options:
+- Hydrant <500ft (`HYDRANT_LESS_500`)
+- Hydrant >500ft (`HYDRANT_GREATER_500`)
+- Tank water (`TANK_WATER`)
+- Water tender shuttle (`WATER_TENDER_SHUTTLE`)
+- Nurse/other apparatus (`NURSE_OTHER_APPARATUS`)
+- Draft from static source (`DRAFT_FROM_STATIC_SOURCE`)
+- Supply from fire boat (`SUPPLY_FROM_FIRE_BOAT`)
+- Foam additive (`FOAM_ADDITIVE`)
+- None (`NONE`)
+
+Save via `update_incident(extras={"water_supply": "HYDRANT_LESS_500"})`.
+
+**8c — Fire Investigation** (all fire types):
+
+Ask: "Was a fire investigation conducted?"
+
+If investigated on scene: save `extras.fire_investigation = "INVESTIGATED_ON_SCENE_RESOURCE"`
+Other investigation values: `INVESTIGATED_EXTERNAL_RESOURCE`, `INVESTIGATED_JOINT`
+If no investigation: ask why, then save `extras.fire_investigation` with one of: `NO_CAUSE_OBVIOUS`, `NOT_EVALUATED`, `NOT_APPLICABLE`, `YES`, `NO`, `OTHER`
+
+**8d — Structure Fire specifics** (when type contains `STRUCTURE_FIRE`):
+
+Ask about each of these (one at a time, skip if already known from CAD):
+
+1. **Floor of origin** — number (save via `extras.floor_of_origin`)
+2. **Room of origin** — 14 values: ASSEMBLY, BATHROOM, BEDROOM, KITCHEN, LIVING_SPACE, HALLWAY_FOYER, GARAGE, BALCONY_PORCH_DECK, BASEMENT, ATTIC, OFFICE, UTILITY_ROOM, OTHER, UNKNOWN (save via `extras.room_of_origin`)
+3. **Fire cause (inside)** — 13 `fire_cause_in` values: OPERATING_EQUIPMENT, ELECTRICAL, BATTERY_POWER_STORAGE, HEAT_FROM_ANOTHER_OBJECT, EXPLOSIVES_FIREWORKS, SMOKING_MATERIALS_ILLICIT_DRUGS, OPEN_FLAME, COOKING, CHEMICAL, ACT_OF_NATURE, INCENDIARY, OTHER_HEAT_SOURCE, UNABLE_TO_BE_DETERMINED (save via `extras.fire_cause_in`)
+4. **Building damage** — NO_DAMAGE, MINOR_DAMAGE, MODERATE_DAMAGE, MAJOR_DAMAGE (save via `extras.fire_bldg_damage`)
+5. **Fire-specific timestamps** — Ask about these if not already captured:
+   - Water on fire, fire under control, fire knocked down, suppression complete
+   - Primary search began, primary search complete
+   - Save via `update_incident(timestamps={...})`
+
+**8e — Outside Fire specifics** (when type contains `OUTSIDE_FIRE`):
+
+1. **Fire cause (outside)** — 14 `fire_cause_out` values: NATURAL, EQUIPMENT_VEHICLE_USE, SMOKING_MATERIALS_ILLICIT_DRUGS, RECREATION_CEREMONY, DEBRIS_OPEN_BURNING, RAILROAD_OPS_MAINTENANCE, FIREARMS_EXPLOSIVES, FIREWORKS, POWER_GEN_TRANS_DIST, STRUCTURE, INCENDIARY, BATTERY_POWER_STORAGE, SPREAD_FROM_CONTROLLED_BURN, UNABLE_TO_BE_DETERMINED
+   Save via `update_incident(outside_fire_cause="...")`
+
+2. **Acres burned** — Estimated area in acres
+   Save via `update_incident(outside_fire_acres=0.5)`
+
+**8f — Alarms & Risk Reduction** (structure fires):
+
+For each of these, ask if present and save to extras:
+- **Smoke alarm**: `extras.smoke_alarm_presence` — PRESENT_AND_WORKING, PRESENT_NOT_WORKING, NOT_PRESENT, UNKNOWN, NOT_APPLICABLE
+- **Fire alarm**: `extras.fire_alarm_presence` — same values
+- **Sprinkler system**: `extras.sprinkler_presence` — same values
+
+**8g — Exposures** (fire incidents where fire spread):
+
+Ask: "Did the fire spread to any adjacent structures or vehicles?"
+
+If yes:
+- How many exposures? Save `extras.exposure_count`
+- Damage level for each? Save `extras.exposure_damage`
+
+### Step 8-alt — Medical Module (when `incident_type` starts with `MEDICAL||`)
+
+Ask about:
+1. **Patient count** — How many patients? Save via `extras.patient_count`
+2. **Care disposition** — What care was provided? (e.g., care provided and transferred, refused care, DOA) Save via `extras.care_disposition`
+3. **Transport disposition** — How was the patient transported? (EMS transport, private vehicle, refused transport, no transport needed) Save via `extras.transport_disposition`
+
+### Step 8-other — Hazmat and Rescue
+
+**Hazmat incidents** (`HAZSIT||`):
+- Hazard type, DOT class, physical state → save to extras
+- Release disposition → save to extras
+
+**Rescue incidents** (`RESCUE||`):
+- Rescue type, elevation, path, impediments → save to extras
 
 ### Step 9 — Review and Save
 
