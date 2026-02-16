@@ -100,14 +100,31 @@ info "Image: ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${TAG}"
 # Build
 # ---------------------------------------------------------------------------
 
-info "Building image via ACR..."
-az acr build \
-    --registry "$ACR_NAME" \
-    --image "${IMAGE_NAME}:${TAG}" \
-    --image "${IMAGE_NAME}:latest" \
-    . \
-    --output none
-ok "Image built: ${IMAGE_NAME}:${TAG}"
+FULL_IMAGE="${ACR_LOGIN_SERVER}/${IMAGE_NAME}"
+
+if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+    info "Building image locally (Docker)..."
+    az acr login --name "$ACR_NAME" --output none
+
+    docker build --platform linux/amd64 \
+        -t "${FULL_IMAGE}:${TAG}" \
+        -t "${FULL_IMAGE}:latest" \
+        .
+
+    info "Pushing image to ACR..."
+    docker push "${FULL_IMAGE}:${TAG}" --quiet
+    docker push "${FULL_IMAGE}:latest" --quiet
+    ok "Image built & pushed: ${IMAGE_NAME}:${TAG}"
+else
+    info "Building image via ACR (no local Docker)..."
+    az acr build \
+        --registry "$ACR_NAME" \
+        --image "${IMAGE_NAME}:${TAG}" \
+        --image "${IMAGE_NAME}:latest" \
+        . \
+        --output none
+    ok "Image built: ${IMAGE_NAME}:${TAG}"
+fi
 
 if [ "$BUILD_ONLY" = true ]; then
     ok "Build-only mode — skipping deploy"
