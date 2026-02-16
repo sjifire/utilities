@@ -439,27 +439,30 @@ class TestLogCacheStats:
     def test_logs_when_cache_fields_present(self, caplog):
         class Usage:
             input_tokens = 50000
+            output_tokens = 500
             cache_read_input_tokens = 35000
             cache_creation_input_tokens = 10000
 
         with caplog.at_level(logging.INFO, logger="sjifire.ops.chat.engine"):
             _log_cache_stats(Usage())
 
-        assert "Cache:" in caplog.text
-        assert "35000 read" in caplog.text
+        assert "Tokens:" in caplog.text
+        assert "35000 cached" in caplog.text
         assert "10000 created" in caplog.text
         assert "5000 uncached" in caplog.text
+        assert "500 out" in caplog.text
 
-    def test_no_log_when_no_cache_fields(self, caplog):
+    def test_logs_when_no_cache_fields(self, caplog):
         class Usage:
             input_tokens = 50000
 
         with caplog.at_level(logging.INFO, logger="sjifire.ops.chat.engine"):
             _log_cache_stats(Usage())
 
-        assert "Cache:" not in caplog.text
+        assert "Tokens: 50000 in" in caplog.text
+        assert "0 cached" in caplog.text
 
-    def test_no_log_when_cache_fields_are_zero(self, caplog):
+    def test_logs_when_cache_fields_are_zero(self, caplog):
         class Usage:
             input_tokens = 50000
             cache_read_input_tokens = 0
@@ -468,7 +471,7 @@ class TestLogCacheStats:
         with caplog.at_level(logging.INFO, logger="sjifire.ops.chat.engine"):
             _log_cache_stats(Usage())
 
-        assert "Cache:" not in caplog.text
+        assert "Tokens: 50000 in" in caplog.text
 
 
 class TestSlimDispatchContext:

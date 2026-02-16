@@ -6,6 +6,8 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.js"></script>
 {% endblock %}
 
 {% block extra_styles %}
@@ -94,6 +96,31 @@
     .msg.assistant td            { padding: 6px 12px; text-align: left; border-bottom: 1px solid var(--border-default); white-space: nowrap; }
     .msg.assistant th            { font-weight: 600; color: var(--text-primary); background: var(--bg-page); }
     .msg.assistant tr:last-child td { border-bottom: none; }
+
+    /* ── Inline map ── */
+    .chat-map-wrap {
+      float: right;
+      width: 220px;
+      height: 180px;
+      margin: 0 0 10px 14px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border-default);
+    }
+    .chat-map-wrap .leaflet-container {
+      width: 100%;
+      height: 100%;
+      border-radius: 8px;
+    }
+    /* On narrow screens, map goes full-width above text */
+    @media (max-width: 600px) {
+      .chat-map-wrap {
+        float: none;
+        width: 100%;
+        height: 160px;
+        margin: 0 0 10px 0;
+      }
+    }
 
     /* ── Tool indicators ── */
     .tool-indicator {
@@ -412,7 +439,7 @@
                 </template>
               </div>
             </template>
-            <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content"></div>
+            <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content, false, i) : msg.content"></div>
           </div>
         </template>
         <!-- Tool indicator (morphs from spinner → result) -->
@@ -436,7 +463,7 @@
 
     <!-- Streaming assistant message -->
     <template x-if="streaming && currentText">
-      <div class="msg assistant" x-html="renderMarkdown(currentText)"></div>
+      <div class="msg assistant" x-html="renderMarkdown(currentText, true)"></div>
     </template>
   </div>
 
@@ -466,13 +493,12 @@
     <textarea
       x-ref="input"
       x-model="inputText"
-      :disabled="streaming"
-      placeholder="Describe what happened, or attach a photo..."
+      :placeholder="streaming ? 'Type your next message — it will send when the current response finishes...' : 'Describe what happened, or attach a photo...'"
       @keydown.enter.prevent="if (!$event.shiftKey) sendMessage()"
       @input="autoResize($event)"
       rows="1"
     ></textarea>
-    <button class="send-btn" :disabled="streaming || (!inputText.trim() && !pendingImages.length)" @click="sendMessage()">Send</button>
+    <button class="send-btn" :disabled="!inputText.trim() && !pendingImages.length" @click="sendMessage()">Send</button>
   </div>
 
   <!-- Lightbox -->
@@ -498,6 +524,7 @@ function chatApp() {
     _userScrolledAway: false,
     _scrollRAF: null,
     _reconnectAttempts: 0,
+    _queuedMessage: null,
 
     async init() {
       // Load conversation history
@@ -557,13 +584,45 @@ function chatApp() {
       }
     },
 
-    renderMarkdown(text) {
+    renderMarkdown(text, isStreaming, msgIndex) {
       if (!text) return '';
       try {
-        return DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+        let html = DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+        // Detect GPS coordinates and inject a map (skip during streaming)
+        if (!isStreaming && msgIndex !== undefined) {
+          const gpsMatch = text.match(/\*?\*?GPS\*?\*?:?\s*(-?\d+\.\d+),\s*(-?\d+\.\d+)/i)
+            || text.match(/\*?\*?(?:Lat|Latitude)\*?\*?:?\s*(-?\d+\.\d+).*?(?:Lon|Lng|Longitude):?\s*(-?\d+\.\d+)/i);
+          if (gpsMatch) {
+            const lat = parseFloat(gpsMatch[1]);
+            const lng = parseFloat(gpsMatch[2]);
+            if (lat > 40 && lat < 60 && lng > -130 && lng < -120) {
+              const mapId = `chat-map-${msgIndex}`;
+              html = `<div class="chat-map-wrap"><div id="${mapId}" class="chat-map"></div></div>` + html;
+              requestAnimationFrame(() => this._initMap(mapId, lat, lng));
+            }
+          }
+        }
+        return html;
       } catch {
         return text;
       }
+    },
+
+    _initMap(mapId, lat, lng) {
+      const el = document.getElementById(mapId);
+      if (!el || el._leaflet_id) return;
+      // Retry if element not in DOM yet
+      if (!el.offsetParent) {
+        setTimeout(() => this._initMap(mapId, lat, lng), 100);
+        return;
+      }
+      const map = L.map(mapId, {zoomControl: false, attributionControl: false}).setView([lat, lng], 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+      }).addTo(map);
+      L.marker([lat, lng]).addTo(map);
+      // Fix tile rendering after container resize
+      setTimeout(() => map.invalidateSize(), 200);
     },
 
     autoResize(e) {
@@ -639,9 +698,23 @@ function chatApp() {
     async sendMessage(overrideText) {
       const text = overrideText || this.inputText.trim();
       const images = this.pendingImages.slice();
-      if ((!text && !images.length) || this.streaming) return;
+      if (!text && !images.length) return;
 
       const displayText = text || '(Attached photo)';
+
+      // If already streaming, queue the message for after completion
+      if (this.streaming) {
+        this._queuedMessage = {displayText, images};
+        this.inputText = '';
+        this.pendingImages = [];
+        if (this.$refs.input) this.$refs.input.style.height = 'auto';
+        // Show queued message in chat immediately
+        const msgObj = {type: 'message', role: 'user', content: displayText};
+        if (images.length) msgObj.images = images.map(img => img.dataUrl);
+        this.messages.push(msgObj);
+        this.scrollToBottom(true);
+        return;
+      }
 
       // Add user message with image thumbnails
       const msgObj = {type: 'message', role: 'user', content: displayText};
@@ -649,20 +722,22 @@ function chatApp() {
       this.messages.push(msgObj);
       this.inputText = '';
       this.pendingImages = [];
-      this.streaming = true;
-      this.currentText = '';
+      if (this.$refs.input) this.$refs.input.style.height = 'auto';
       this.scrollToBottom(true);
 
-      // Reset textarea height
-      this.$refs.input.style.height = 'auto';
+      await this._streamRequest(displayText, images);
+    },
 
-      // Build request body
+    async _streamRequest(displayText, images) {
+      this.streaming = true;
+      this.currentText = '';
+
       const reqBody = {message: displayText};
       if (images.length) {
         reqBody.images = images.map(img => ({data: img.base64, media_type: img.mediaType}));
       }
 
-      let streamCompleted = false;  // True only when server sends 'done' event
+      let streamCompleted = false;
 
       try {
         const res = await authFetch(`/reports/${this.incidentId}/chat`, {
@@ -678,7 +753,6 @@ function chatApp() {
           return;
         }
 
-        // Read SSE stream — reader.read() resolves immediately on connection close
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -688,7 +762,7 @@ function chatApp() {
           try {
             result = await reader.read();
           } catch {
-            break;  // Network error / connection dropped
+            break;
           }
           if (result.done) break;
 
@@ -726,10 +800,9 @@ function chatApp() {
       if (!streamCompleted) {
         const recovered = await this._recoverFromServer();
         if (!recovered) {
-          // Server doesn't have new messages — retry the request
           this._reconnectAttempts++;
           if (this._reconnectAttempts <= 3) {
-            const delay = this._reconnectAttempts * 2000;  // 2s, 4s, 6s
+            const delay = this._reconnectAttempts * 2000;
             console.warn(`Stream lost (attempt ${this._reconnectAttempts}/3) — retrying in ${delay}ms`);
             setTimeout(() => this.sendMessage('Continue where we left off.'), delay);
           } else {
@@ -741,6 +814,15 @@ function chatApp() {
       }
 
       this._reconnectAttempts = 0;
+
+      // Send queued message if user typed while we were streaming
+      if (this._queuedMessage) {
+        const queued = this._queuedMessage;
+        this._queuedMessage = null;
+        await this._streamRequest(queued.displayText, queued.images);
+        return;
+      }
+
       this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
     },
 
