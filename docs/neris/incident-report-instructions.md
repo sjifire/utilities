@@ -274,97 +274,82 @@ If confirmed, save via `update_incident(extras={"impediment_narrative": "Long gr
 
 Skip this step for non-fire incidents — jump to Step 8-alt if medical, or Step 9 otherwise.
 
-**8a — Arrival Conditions** (all fire types):
+**IMPORTANT: Batch all fire questions into ONE turn.** Do NOT ask 8a, wait for response, ask 8b, wait, etc. Present all applicable questions together, pre-filling from CAD data where possible. Let the user confirm or correct everything at once, then save in a single `update_incident` call.
 
-Auto-extract from CAD notes when possible:
+**Present this as a single checklist:**
+
+> **Fire Module — please confirm or correct:**
+>
+> **Arrival conditions**: [auto-extract from CAD — see mapping below] — sound right?
+> **Water supply**: [suggest based on context, or ask]
+> **Investigation**: [suggest based on context]
+> **Floor/room of origin**: [if structure fire — suggest from CAD or ask]
+> **Fire cause**: [suggest from CAD or ask]
+> **Building damage**: [suggest or ask]
+> **Smoke alarm**: present and working / not working / not present / unknown?
+> **Sprinkler**: present and working / not present / N/A?
+> **Exposures**: Did fire spread to adjacent structures?
+> **Hazards**: Solar panels? Battery/ESS? Generator? CSST gas piping? EV?
+>
+> And any fire timestamps I'm missing: water on fire, fire under control, knocked down?
+
+After the user responds (confirming or correcting), save everything in ONE call:
+```
+update_incident(
+    arrival_conditions="FIRE_OUT_UPON_ARRIVAL",
+    extras={
+        "water_supply": "NONE",
+        "fire_investigation": "NO_CAUSE_OBVIOUS",
+        "floor_of_origin": 1,
+        "room_of_origin": "LIVING_SPACE",
+        "fire_cause_in": "OPERATING_EQUIPMENT",
+        "fire_bldg_damage": "MINOR_DAMAGE",
+        "smoke_alarm_presence": "PRESENT_AND_WORKING",
+        "fire_alarm_presence": "NOT_APPLICABLE",
+        "sprinkler_presence": "NOT_PRESENT",
+        "solar_present": "NO",
+        "battery_ess_present": "NO",
+        "generator_present": "NO",
+        "csst_present": "UNKNOWN",
+        "ev_involved": "NO"
+    }
+)
+```
+
+**Reference — Arrival Condition auto-extraction from CAD:**
 - "nothing showing" → `NO_SMOKE_FIRE_SHOWING`
 - "smoke showing" / "smoke from eaves" → `SMOKE_SHOWING`
 - "smoke and flames" / "fire visible" → `SMOKE_FIRE_SHOWING`
-- "fully involved" / "structure involved" → `STRUCTURE_INVOLVED`
+- "fully involved" → `STRUCTURE_INVOLVED`
 - "fire spread to adjacent" → `FIRE_SPREAD_BEYOND_STRUCTURE`
 - "fire out" / "extinguished prior" → `FIRE_OUT_UPON_ARRIVAL`
 
-Present your suggestion with reasoning:
-> Based on the CAD notes mentioning "smoke showing from eaves", I'd classify arrival conditions as **Smoke Showing**. Sound right?
+**Reference — Water Supply** (9 values):
+`HYDRANT_LESS_500`, `HYDRANT_GREATER_500`, `TANK_WATER`, `WATER_TENDER_SHUTTLE`, `NURSE_OTHER_APPARATUS`, `DRAFT_FROM_STATIC_SOURCE`, `SUPPLY_FROM_FIRE_BOAT`, `FOAM_ADDITIVE`, `NONE`
 
-After confirmation, save:
-```
-update_incident(arrival_conditions="SMOKE_SHOWING")
-```
+**Reference — Fire Investigation:**
+`INVESTIGATED_ON_SCENE_RESOURCE`, `INVESTIGATED_EXTERNAL_RESOURCE`, `INVESTIGATED_JOINT`, `NO_CAUSE_OBVIOUS`, `NOT_EVALUATED`, `NOT_APPLICABLE`, `YES`, `NO`, `OTHER`
 
-**8b — Water Supply** (all fire types where ACTION was taken):
+**Reference — Room of Origin** (14 values):
+`ASSEMBLY`, `BATHROOM`, `BEDROOM`, `KITCHEN`, `LIVING_SPACE`, `HALLWAY_FOYER`, `GARAGE`, `BALCONY_PORCH_DECK`, `BASEMENT`, `ATTIC`, `OFFICE`, `UTILITY_ROOM`, `OTHER`, `UNKNOWN`
 
-Ask: "What was the water supply source?"
+**Reference — Fire Cause Inside** (13 values):
+`OPERATING_EQUIPMENT`, `ELECTRICAL`, `BATTERY_POWER_STORAGE`, `HEAT_FROM_ANOTHER_OBJECT`, `EXPLOSIVES_FIREWORKS`, `SMOKING_MATERIALS_ILLICIT_DRUGS`, `OPEN_FLAME`, `COOKING`, `CHEMICAL`, `ACT_OF_NATURE`, `INCENDIARY`, `OTHER_HEAT_SOURCE`, `UNABLE_TO_BE_DETERMINED`
 
-Present the 9 options:
-- Hydrant <500ft (`HYDRANT_LESS_500`)
-- Hydrant >500ft (`HYDRANT_GREATER_500`)
-- Tank water (`TANK_WATER`)
-- Water tender shuttle (`WATER_TENDER_SHUTTLE`)
-- Nurse/other apparatus (`NURSE_OTHER_APPARATUS`)
-- Draft from static source (`DRAFT_FROM_STATIC_SOURCE`)
-- Supply from fire boat (`SUPPLY_FROM_FIRE_BOAT`)
-- Foam additive (`FOAM_ADDITIVE`)
-- None (`NONE`)
+**Reference — Fire Cause Outside** (14 values):
+`NATURAL`, `EQUIPMENT_VEHICLE_USE`, `SMOKING_MATERIALS_ILLICIT_DRUGS`, `RECREATION_CEREMONY`, `DEBRIS_OPEN_BURNING`, `RAILROAD_OPS_MAINTENANCE`, `FIREARMS_EXPLOSIVES`, `FIREWORKS`, `POWER_GEN_TRANS_DIST`, `STRUCTURE`, `INCENDIARY`, `BATTERY_POWER_STORAGE`, `SPREAD_FROM_CONTROLLED_BURN`, `UNABLE_TO_BE_DETERMINED`
 
-Save via `update_incident(extras={"water_supply": "HYDRANT_LESS_500"})`.
+**Reference — Building Damage:** `NO_DAMAGE`, `MINOR_DAMAGE`, `MODERATE_DAMAGE`, `MAJOR_DAMAGE`
 
-**8c — Fire Investigation** (all fire types):
+**Reference — Alarms/Sprinklers:** `PRESENT_AND_WORKING`, `PRESENT_NOT_WORKING`, `NOT_PRESENT`, `UNKNOWN`, `NOT_APPLICABLE`
 
-Ask: "Was a fire investigation conducted?"
+**Reference — Hazards:** Use `YES`/`NO`/`UNKNOWN` for `solar_present`, `battery_ess_present`, `generator_present`, `csst_present`, `ev_involved`
 
-If investigated on scene: save `extras.fire_investigation = "INVESTIGATED_ON_SCENE_RESOURCE"`
-Other investigation values: `INVESTIGATED_EXTERNAL_RESOURCE`, `INVESTIGATED_JOINT`
-If no investigation: ask why, then save `extras.fire_investigation` with one of: `NO_CAUSE_OBVIOUS`, `NOT_EVALUATED`, `NOT_APPLICABLE`, `YES`, `NO`, `OTHER`
+**Reference — Exposures:** If fire spread, save `extras.exposure_count` and `extras.exposure_damage`
 
-**8d — Structure Fire specifics** (when type contains `STRUCTURE_FIRE`):
+**Reference — Fire Timestamps:** `water_on_fire`, `fire_under_control`, `fire_knocked_down`, `suppression_complete`, `primary_search_began`, `primary_search_complete` — save via `update_incident(timestamps={...})`
 
-Ask about each of these (one at a time, skip if already known from CAD):
-
-1. **Floor of origin** — number (save via `extras.floor_of_origin`)
-2. **Room of origin** — 14 values: ASSEMBLY, BATHROOM, BEDROOM, KITCHEN, LIVING_SPACE, HALLWAY_FOYER, GARAGE, BALCONY_PORCH_DECK, BASEMENT, ATTIC, OFFICE, UTILITY_ROOM, OTHER, UNKNOWN (save via `extras.room_of_origin`)
-3. **Fire cause (inside)** — 13 `fire_cause_in` values: OPERATING_EQUIPMENT, ELECTRICAL, BATTERY_POWER_STORAGE, HEAT_FROM_ANOTHER_OBJECT, EXPLOSIVES_FIREWORKS, SMOKING_MATERIALS_ILLICIT_DRUGS, OPEN_FLAME, COOKING, CHEMICAL, ACT_OF_NATURE, INCENDIARY, OTHER_HEAT_SOURCE, UNABLE_TO_BE_DETERMINED (save via `extras.fire_cause_in`)
-4. **Building damage** — NO_DAMAGE, MINOR_DAMAGE, MODERATE_DAMAGE, MAJOR_DAMAGE (save via `extras.fire_bldg_damage`)
-5. **Fire-specific timestamps** — Ask about these if not already captured:
-   - Water on fire, fire under control, fire knocked down, suppression complete
-   - Primary search began, primary search complete
-   - Save via `update_incident(timestamps={...})`
-
-**8e — Outside Fire specifics** (when type contains `OUTSIDE_FIRE`):
-
-1. **Fire cause (outside)** — 14 `fire_cause_out` values: NATURAL, EQUIPMENT_VEHICLE_USE, SMOKING_MATERIALS_ILLICIT_DRUGS, RECREATION_CEREMONY, DEBRIS_OPEN_BURNING, RAILROAD_OPS_MAINTENANCE, FIREARMS_EXPLOSIVES, FIREWORKS, POWER_GEN_TRANS_DIST, STRUCTURE, INCENDIARY, BATTERY_POWER_STORAGE, SPREAD_FROM_CONTROLLED_BURN, UNABLE_TO_BE_DETERMINED
-   Save via `update_incident(outside_fire_cause="...")`
-
-2. **Acres burned** — Estimated area in acres
-   Save via `update_incident(outside_fire_acres=0.5)`
-
-**8f — Alarms & Risk Reduction** (structure fires):
-
-For each of these, ask if present and save to extras:
-- **Smoke alarm**: `extras.smoke_alarm_presence` — PRESENT_AND_WORKING, PRESENT_NOT_WORKING, NOT_PRESENT, UNKNOWN, NOT_APPLICABLE
-- **Fire alarm**: `extras.fire_alarm_presence` — same values
-- **Sprinkler system**: `extras.sprinkler_presence` — same values
-
-**8g — Exposures** (fire incidents where fire spread):
-
-Ask: "Did the fire spread to any adjacent structures or vehicles?"
-
-If yes:
-- How many exposures? Save `extras.exposure_count`
-- Damage level for each? Save `extras.exposure_damage`
-
-**8h — Powergen & Emerging Hazards** (structure fires, gas leaks, electrical fires, CO calls):
-
-Only ask when relevant — skip for medical-only or public service calls. Present as a quick checklist:
-
-> A few quick questions about the building:
-> - Solar panels present? (yes/no/unknown)
-> - Battery or energy storage system (ESS)? (yes/no/unknown)
-> - Backup generator present? (yes/no/unknown)
-> - CSST (corrugated stainless steel) gas piping? (yes/no/unknown)
-> - Electric vehicle involved? (yes/no/unknown)
-
-Save via `update_incident(extras={"solar_present": "YES", "battery_ess_present": "NO", "generator_present": "UNKNOWN", "csst_present": "NO", "ev_involved": "NO"})`. Use YES/NO/UNKNOWN values. Batch the questions — don't ask one at a time.
+**For outside fires**, replace structure-specific fields (floor/room/cause inside/damage/alarms) with: fire cause outside + acres burned (`outside_fire_acres`).
 
 ### Step 8-alt — Medical Module (when `incident_type` starts with `MEDICAL||`)
 
@@ -432,47 +417,31 @@ update_incident(extras={
 
 Skip this step for non-rescue incidents.
 
-**8-other-a — Rescue Mode** — "What type of rescue was this?"
-- Removal from structure (`REMOVAL_FROM_STRUCTURE`)
-- Extrication (`EXTRICATION`)
-- Disentanglement (`DISENTANGLEMENT`)
-- Recovery (`RECOVERY`)
-- Other (`OTHER`)
+**IMPORTANT: Batch all rescue questions into ONE turn.** Present all applicable fields together, let the user confirm or correct, then save in a single call.
 
-Save via `update_incident(extras={"rescue_mode": "REMOVAL_FROM_STRUCTURE"})`.
+> **Rescue Module — please confirm or correct:**
+>
+> **Rescue mode**: [suggest based on context] (Removal from structure / Extrication / Disentanglement / Recovery / Other)
+> **Actions used**: [suggest or ask] (multi-select)
+> **Impediments**: Any access issues? (Hoarding / Access limitations / Patient condition / Impaired person / None)
+> **Elevation**: Where was the patient? (Floor / Bed / Furniture / Other)
 
-**8-other-b — Rescue Actions** — "What rescue tools or techniques were used?" (multi-select)
-- Ventilation (`VENTILATION`)
-- Hydraulic tool use (`HYDRAULIC_TOOL_USE`)
-- Underwater dive (`UNDERWATER_DIVE`)
-- Rope rigging (`ROPE_RIGGING`)
-- Break/breach wall (`BREAK_BREACH_WALL`)
-- Brace wall/infrastructure (`BRACE_WALL_INFRASTRUCTURE`)
-- Trench shoring (`TRENCH_SHORING`)
-- Supply air (`SUPPLY_AIR`)
-- None (`NONE`)
+Save everything in ONE call:
+```
+update_incident(extras={
+    "rescue_mode": "REMOVAL_FROM_STRUCTURE",
+    "rescue_actions": ["HYDRAULIC_TOOL_USE"],
+    "rescue_impediment": "NONE",
+    "rescue_elevation": "ON_FLOOR"
+})
+```
 
-Save via `update_incident(extras={"rescue_actions": ["HYDRAULIC_TOOL_USE", "VENTILATION"]})`.
+**Reference — Rescue Mode:** `REMOVAL_FROM_STRUCTURE`, `EXTRICATION`, `DISENTANGLEMENT`, `RECOVERY`, `OTHER`
+**Reference — Rescue Actions** (multi-select): `VENTILATION`, `HYDRAULIC_TOOL_USE`, `UNDERWATER_DIVE`, `ROPE_RIGGING`, `BREAK_BREACH_WALL`, `BRACE_WALL_INFRASTRUCTURE`, `TRENCH_SHORING`, `SUPPLY_AIR`, `NONE`
+**Reference — Rescue Impediment:** `HOARDING_CONDITIONS`, `ACCESS_LIMITATIONS`, `PHYSICAL_MEDICAL_CONDITIONS_PERSON`, `IMPAIRED_PERSON`, `OTHER`, `NONE`
+**Reference — Rescue Elevation:** `ON_FLOOR`, `ON_BED`, `ON_FURNITURE`, `OTHER`
 
-**8-other-c — Rescue Impediment** — "Were there any impediments to the rescue?"
-- Hoarding conditions (`HOARDING_CONDITIONS`)
-- Access limitations (`ACCESS_LIMITATIONS`)
-- Physical/medical conditions of person (`PHYSICAL_MEDICAL_CONDITIONS_PERSON`)
-- Impaired person (`IMPAIRED_PERSON`)
-- Other (`OTHER`)
-- None (`NONE`)
-
-Save via `update_incident(extras={"rescue_impediment": "NONE"})`.
-
-**8-other-d — Rescue Elevation** — "Where was the patient found?" (for building rescues, lift assists)
-- On floor (`ON_FLOOR`)
-- On bed (`ON_BED`)
-- On furniture (`ON_FURNITURE`)
-- Other (`OTHER`)
-
-Save via `update_incident(extras={"rescue_elevation": "ON_FLOOR"})`.
-
-**Lift assists** (`PUBSERV||CITIZEN_ASSIST||LIFT_ASSIST`): These are simple — skip rescue mode and actions. Just ask about elevation and impediment:
+**Lift assists** (`PUBSERV||CITIZEN_ASSIST||LIFT_ASSIST`): Skip rescue mode and actions. Just ask elevation + impediment together:
 > For the lift assist: Was the patient on the floor, bed, or furniture? Any access issues getting to them?
 
 ### Step 8-other — Hazmat Module (when `incident_type` starts with `HAZSIT||HAZARDOUS_MATERIALS||`)
