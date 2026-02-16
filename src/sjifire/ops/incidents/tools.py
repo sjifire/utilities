@@ -167,11 +167,9 @@ async def _prefill_from_dispatch(incident_number: str) -> dict:
             units.append(UnitAssignment(unit_id=unit_id, **times))
         prefill["units"] = units
 
-    # Snapshot dispatch comments
-    comments = dispatch.to_dict().get("cad_comments") or []
-    if comments:
-        lines = [f"{c.get('time', '')} {c.get('comment', '')}".strip() for c in comments]
-        prefill["dispatch_comments"] = "\n".join(lines)
+    # Snapshot dispatch comments (plain string from iSpyFire JoinedComments)
+    if dispatch.cad_comments:
+        prefill["dispatch_comments"] = dispatch.cad_comments
 
     return prefill
 

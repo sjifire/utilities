@@ -3,7 +3,7 @@
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -36,11 +36,19 @@ class _FakeRequest:
         return self._body
 
 
+def _fake_get_user(_request):
+    """Fake _get_user that also sets the context var (like the real one)."""
+    from sjifire.ops.auth import set_current_user
+
+    set_current_user(_TEST_USER)
+    return _TEST_USER
+
+
 @pytest.fixture(autouse=True)
 def _patch_auth(monkeypatch):
     """Bypass auth checks for route tests."""
     monkeypatch.delenv("ENTRA_MCP_API_CLIENT_ID", raising=False)
-    monkeypatch.setattr("sjifire.ops.chat.routes._get_user", lambda r: _TEST_USER)
+    monkeypatch.setattr("sjifire.ops.chat.routes._get_user", _fake_get_user)
 
 
 class TestImageValidation:
@@ -340,6 +348,17 @@ class TestPrintReport:
 # ---------------------------------------------------------------------------
 
 
+class _FakeFormRequest(_FakeRequest):
+    """Fake request that supports form() for POST /reports/new."""
+
+    def __init__(self, form_data: dict, **kwargs):
+        super().__init__({}, method="POST", **kwargs)
+        self._form = form_data
+
+    async def form(self):
+        return self._form
+
+
 class TestCreateReport:
     """Tests for the POST /reports/new route."""
 
@@ -350,3 +369,55 @@ class TestCreateReport:
 
         assert resp.status_code == 303
         assert resp.headers["location"] == "/reports"
+
+    async def test_post_with_dispatch_cad_comments(self):
+        """POST /reports/new succeeds when dispatch has cad_comments string.
+
+        Regression test: cad_comments is a plain string from iSpyFire, not
+        a list of dicts. The old code iterated over it as list[dict] and
+        called .get() on each character, causing AttributeError.
+        """
+        from sjifire.ops.dispatch.models import DispatchCallDocument
+
+        dispatch = DispatchCallDocument(
+            id="uuid-test",
+            year="2026",
+            long_term_call_id="26-002210",
+            nature="Medical Aid",
+            address="100 Spring St",
+            agency_code="SJF",
+            cad_comments="18:51 Dispatched\n18:55 Enroute",
+        )
+
+        mock_dispatch_store = AsyncMock()
+        mock_dispatch_store.get_by_dispatch_id = AsyncMock(return_value=dispatch)
+
+        mock_incident_store = AsyncMock()
+        mock_incident_store.get_by_number = AsyncMock(return_value=None)
+        mock_incident_store.create = AsyncMock(side_effect=lambda doc: doc)
+
+        with (
+            patch(
+                "sjifire.ops.incidents.tools.IncidentStore",
+            ) as mock_inc_cls,
+            patch(
+                "sjifire.ops.dispatch.store.DispatchStore",
+            ) as mock_disp_cls,
+        ):
+            mock_inc_cls.return_value.__aenter__ = AsyncMock(return_value=mock_incident_store)
+            mock_inc_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+            mock_disp_cls.return_value.__aenter__ = AsyncMock(return_value=mock_dispatch_store)
+            mock_disp_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            req = _FakeFormRequest(
+                {
+                    "incident_number": "26-002210",
+                    "incident_date": "2026-02-16",
+                    "station": "S31",
+                }
+            )
+            resp = await create_report(req)
+
+        # Should redirect to the new report, not 500
+        assert resp.status_code == 303
+        assert "/reports/" in resp.headers["location"]

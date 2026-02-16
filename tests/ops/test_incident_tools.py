@@ -591,6 +591,53 @@ class TestPrefillFromDispatch:
         assert result == {}
 
     @patch("sjifire.ops.dispatch.store.DispatchStore")
+    async def test_snapshots_cad_comments_string(self, mock_store_cls):
+        """cad_comments is a plain string (JoinedComments from iSpyFire)."""
+        from sjifire.ops.dispatch.models import DispatchCallDocument
+
+        dispatch = DispatchCallDocument(
+            id="uuid-comments",
+            year="2026",
+            long_term_call_id="26-002210",
+            nature="Medical Aid",
+            address="100 Spring St",
+            agency_code="SJF",
+            cad_comments="18:51:21 Dispatched\n18:55:00 Enroute to scene",
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_dispatch_id = AsyncMock(return_value=dispatch)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await _prefill_from_dispatch("26-002210")
+
+        assert result["dispatch_comments"] == "18:51:21 Dispatched\n18:55:00 Enroute to scene"
+
+    @patch("sjifire.ops.dispatch.store.DispatchStore")
+    async def test_skips_empty_cad_comments(self, mock_store_cls):
+        from sjifire.ops.dispatch.models import DispatchCallDocument
+
+        dispatch = DispatchCallDocument(
+            id="uuid-no-comments",
+            year="2026",
+            long_term_call_id="26-002211",
+            nature="Fire Alarm",
+            address="200 Spring St",
+            agency_code="SJF",
+            cad_comments="",
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_dispatch_id = AsyncMock(return_value=dispatch)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await _prefill_from_dispatch("26-002211")
+
+        assert "dispatch_comments" not in result
+
+    @patch("sjifire.ops.dispatch.store.DispatchStore")
     async def test_handles_store_error(self, mock_store_cls):
         mock_store_cls.return_value.__aenter__ = AsyncMock(side_effect=RuntimeError("DB down"))
 
