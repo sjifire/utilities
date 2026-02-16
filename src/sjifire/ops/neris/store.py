@@ -169,7 +169,7 @@ class NerisReportStore:
             normalized = _normalize_incident_number(doc.incident_number)
             if normalized:
                 lookup[normalized] = summary
-            # ESO-originated reports store the dispatch ID in determinant_code
+            # Legacy reports store the dispatch ID in determinant_code
             if doc.determinant_code:
                 det_normalized = _normalize_incident_number(doc.determinant_code)
                 if det_normalized and det_normalized != normalized:

@@ -20,7 +20,6 @@ docs/neris/*
 !docs/neris/incident-report-instructions.md
 !docs/neris/neris-value-sets-reference.md
 scripts/
-ESO/
 .github/
 .claude/
 .env

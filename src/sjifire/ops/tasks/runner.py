@@ -3,7 +3,7 @@
 Usage::
 
     uv run ops-tasks              # run all tasks
-    uv run ops-tasks neris-cache  # run specific task
+    uv run ops-tasks neris-sync   # run specific task
     uv run ops-tasks --list       # list available tasks
 
 Exit code 0 on success, 1 on any failure.
@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 
 def _import_tasks() -> None:
     """Import all task modules to trigger @register decorators."""
-    import sjifire.ops.tasks.neris_cache  # noqa: F401
+    import sjifire.ops.tasks.dispatch_sync
+    import sjifire.ops.tasks.ispyfire_sync
+    import sjifire.ops.tasks.neris_sync  # noqa: F401
 
 
 async def _run(args: list[str]) -> int:

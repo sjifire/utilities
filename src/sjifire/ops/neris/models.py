@@ -15,7 +15,7 @@ class NerisReportDocument(BaseModel):
     year: str  # Partition key (e.g. "2026")
     neris_id: str = ""
     incident_number: str = ""  # Original format (e.g. "26-001980")
-    determinant_code: str = ""  # Dispatch ID from ESO (e.g. "26002059")
+    determinant_code: str = ""  # Dispatch ID from legacy system (e.g. "26002059")
     status: str = ""
     incident_type: str = ""
     call_create: str = ""

@@ -1,4 +1,4 @@
-"""NERIS report cache refresh task.
+"""NERIS report sync task.
 
 Fetches incident summaries from the NERIS API and writes them to
 the ``neris-reports`` Cosmos DB container.  All server instances
@@ -70,12 +70,12 @@ async def refresh_neris_report_cache(summaries: list[dict]) -> int:
     return count
 
 
-@register("neris-cache")
-async def neris_cache_refresh() -> int:
-    """Fetch from NERIS API and write to Cosmos DB cache.
+@register("neris-sync")
+async def neris_sync() -> int:
+    """Fetch from NERIS API and write to Cosmos DB.
 
     Returns:
-        Number of reports cached
+        Number of reports synced
     """
     summaries = await asyncio.to_thread(fetch_neris_summaries)
     logger.info("Fetched %d NERIS summaries from API", len(summaries))

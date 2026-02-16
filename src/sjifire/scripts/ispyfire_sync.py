@@ -172,12 +172,17 @@ def print_comparison_report(comparison) -> None:
     print(f"\n{'=' * 70}")
 
 
-async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int:
+async def run_sync(
+    dry_run: bool = True,
+    single_email: str | None = None,
+    backup: bool = False,
+) -> int:
     """Run the iSpyFire sync.
 
     Args:
         dry_run: If True, only show what would change without making changes
         single_email: If provided, only sync this user
+        backup: If True, save iSpyFire state to backups/ before syncing
 
     Returns:
         Exit code (0 for success)
@@ -205,8 +210,8 @@ async def run_sync(dry_run: bool = True, single_email: str | None = None) -> int
     with ISpyFireClient() as ispy_client:
         ispyfire_people = ispy_client.get_people(include_inactive=True, include_deleted=True)
 
-        # Backup current state (only for full sync)
-        if ispyfire_people and not single_email:
+        # Backup current state when explicitly requested
+        if backup and ispyfire_people and not single_email:
             backup_ispyfire_people(ispyfire_people, backup_dir)
 
         # Compare
@@ -316,6 +321,11 @@ def main() -> int:
         help="Sync a single user by email address",
     )
     parser.add_argument(
+        "--backup",
+        action="store_true",
+        help="Save iSpyFire state to backups/ before syncing",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -339,7 +349,9 @@ def main() -> int:
 
     import asyncio
 
-    return asyncio.run(run_sync(dry_run=args.dry_run, single_email=single_email))
+    return asyncio.run(
+        run_sync(dry_run=args.dry_run, single_email=single_email, backup=args.backup)
+    )
 
 
 if __name__ == "__main__":

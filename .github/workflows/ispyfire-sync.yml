@@ -1,9 +1,9 @@
-name: iSpyFire Sync
+name: iSpyFire Backup
 
 on:
   schedule:
-    # Run hourly
-    - cron: '0 * * * *'
+    # Daily at 6am Pacific (14:00 UTC)
+    - cron: '0 14 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -11,11 +11,6 @@ on:
         required: false
         default: false
         type: boolean
-      archive_days:
-        description: 'Days to look back for archive'
-        required: false
-        default: '2'
-        type: string
 
 permissions:
   id-token: write
@@ -31,8 +26,8 @@ permissions:
   statuses: none
 
 jobs:
-  sync:
-    name: Sync Entra to iSpyFire
+  backup:
+    name: Backup iSpyFire state
     runs-on: ubuntu-latest
     environment: production
 
@@ -75,14 +70,6 @@ jobs:
             echo "::add-mask::$ISPYFIRE_PASSWORD"
             echo "ISPYFIRE_PASSWORD=$ISPYFIRE_PASSWORD" >> $GITHUB_ENV
 
-            COSMOS_ENDPOINT=$(az keyvault secret show --vault-name gh-website-utilities --name COSMOS-ENDPOINT --query value -o tsv)
-            echo "::add-mask::$COSMOS_ENDPOINT"
-            echo "COSMOS_ENDPOINT=$COSMOS_ENDPOINT" >> $GITHUB_ENV
-
-            COSMOS_KEY=$(az keyvault secret show --vault-name gh-website-utilities --name COSMOS-KEY --query value -o tsv)
-            echo "::add-mask::$COSMOS_KEY"
-            echo "COSMOS_KEY=$COSMOS_KEY" >> $GITHUB_ENV
-
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -94,25 +81,10 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run iSpyFire sync
-        run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run ispyfire-sync --dry-run
-          else
-            uv run ispyfire-sync
-          fi
-
-      - name: Archive completed dispatch calls
-        run: |
-          DAYS="${{ inputs.archive_days || '2' }}"
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run ispyfire-dispatch archive --days "$DAYS" --dry-run
-          else
-            uv run ispyfire-dispatch archive --days "$DAYS"
-          fi
+      - name: Backup iSpyFire state
+        run: uv run ispyfire-sync --backup --dry-run
 
       - name: Upload backup artifacts
-        if: ${{ inputs.dry_run != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ispyfire-backup-${{ github.run_id }}

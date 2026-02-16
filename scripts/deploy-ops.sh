@@ -223,7 +223,7 @@ ok "Container App updated with ${IMAGE_NAME}:${TAG}"
 # Update Container Apps Job image (if job exists)
 # ---------------------------------------------------------------------------
 
-CA_JOB="sjifire-mcp-tasks"
+CA_JOB="sjifire-ops-tasks"
 if az containerapp job show --name "$CA_JOB" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
     info "Updating Container Apps Job image..."
     az containerapp job update \

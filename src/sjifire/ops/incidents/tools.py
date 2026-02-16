@@ -922,7 +922,7 @@ async def list_neris_incidents() -> dict:
 
 def _list_neris_incidents() -> dict:
     """Fetch incidents from NERIS (blocking, for thread pool)."""
-    from sjifire.ops.tasks.neris_cache import fetch_neris_summaries
+    from sjifire.ops.tasks.neris_sync import fetch_neris_summaries
 
     summaries = fetch_neris_summaries()
     return {"incidents": summaries, "count": len(summaries)}

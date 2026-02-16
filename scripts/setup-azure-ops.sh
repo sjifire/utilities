@@ -8,7 +8,7 @@
 #
 # Usage:
 #   ./scripts/setup-azure-ops.sh              # Provision everything
-#   ./scripts/setup-azure-ops.sh --phase N    # Run only phase N (1-7)
+#   ./scripts/setup-azure-ops.sh --phase N    # Run only phase N (1-9)
 #
 # Existing Azure Resources (reference — NOT created by this script):
 # ┌────────────────────┬──────────────────────────────┬──────────────────────────────┐
@@ -630,6 +630,9 @@ if should_run 4; then
         "ALADTEC-URL"
         "ALADTEC-USERNAME"
         "ALADTEC-PASSWORD"
+        "ISPYFIRE-URL"
+        "ISPYFIRE-USERNAME"
+        "ISPYFIRE-PASSWORD"
         "ANTHROPIC-API-KEY"
         "AZURE-MAPS-KEY"
         "KIOSK-SIGNING-KEY"
@@ -1008,7 +1011,7 @@ fi
 if should_run 9; then
     echo -e "${CYAN}━━━ Phase 9: Container Apps Job (background tasks) ━━━${NC}"
 
-    CA_JOB="sjifire-mcp-tasks"
+    CA_JOB="sjifire-ops-tasks"
 
     # Get ACR login server
     ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query loginServer -o tsv 2>/dev/null) || \
@@ -1022,14 +1025,24 @@ if should_run 9; then
     JOB_IMAGE="${CURRENT_IMAGE:-${ACR_LOGIN_SERVER}/sjifire-mcp:latest}"
     info "Job image: $JOB_IMAGE"
 
-    # Fetch secrets for job env vars
+    # Fetch secrets for job env vars (direct values at creation time,
+    # since managed identity doesn't exist yet for keyvaultref)
     _get_secret() {
         az keyvault secret show --vault-name "$KEY_VAULT" --name "$1" --query value -o tsv 2>/dev/null || echo ""
     }
 
+    info "Fetching secrets from Key Vault..."
     COSMOS_ENDPOINT_VAL=$(_get_secret "COSMOS-ENDPOINT")
-
-    VAULT_URL="https://${KEY_VAULT}.vault.azure.net"
+    COSMOS_KEY_VAL=$(_get_secret "COSMOS-KEY")
+    NERIS_CLIENT_ID_VAL=$(_get_secret "NERIS-CLIENT-ID")
+    NERIS_CLIENT_SECRET_VAL=$(_get_secret "NERIS-CLIENT-SECRET")
+    ISPYFIRE_URL_VAL=$(_get_secret "ISPYFIRE-URL")
+    ISPYFIRE_USERNAME_VAL=$(_get_secret "ISPYFIRE-USERNAME")
+    ISPYFIRE_PASSWORD_VAL=$(_get_secret "ISPYFIRE-PASSWORD")
+    ANTHROPIC_API_KEY_VAL=$(_get_secret "ANTHROPIC-API-KEY")
+    MS_GRAPH_TENANT_ID_VAL=$(_get_secret "MS-GRAPH-TENANT-ID")
+    MS_GRAPH_CLIENT_ID_VAL=$(_get_secret "MS-GRAPH-CLIENT-ID")
+    MS_GRAPH_CLIENT_SECRET_VAL=$(_get_secret "MS-GRAPH-CLIENT-SECRET")
 
     if az containerapp job show --name "$CA_JOB" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
         warn "Container Apps Job $CA_JOB already exists — updating image"
@@ -1061,6 +1074,7 @@ if should_run 9; then
             --cpu 0.25 \
             --memory 0.5Gi \
             --parallelism 1 \
+            --replica-completion-count 1 \
             --replica-timeout 300 \
             --replica-retry-limit 1 \
             --env-vars \
@@ -1068,10 +1082,22 @@ if should_run 9; then
                 "COSMOS_KEY=secretref:cosmos-key" \
                 "NERIS_CLIENT_ID=secretref:neris-client-id" \
                 "NERIS_CLIENT_SECRET=secretref:neris-client-secret" \
+                "ISPYFIRE_URL=secretref:ispyfire-url" \
+                "ISPYFIRE_USERNAME=secretref:ispyfire-username" \
+                "ISPYFIRE_PASSWORD=secretref:ispyfire-password" \
+                "ANTHROPIC_API_KEY=secretref:anthropic-api-key" \
+                "MS_GRAPH_TENANT_ID=${MS_GRAPH_TENANT_ID_VAL}" \
+                "MS_GRAPH_CLIENT_ID=${MS_GRAPH_CLIENT_ID_VAL}" \
+                "MS_GRAPH_CLIENT_SECRET=secretref:ms-graph-client-secret" \
             --secrets \
-                "cosmos-key=keyvaultref:${VAULT_URL}/secrets/COSMOS-KEY,identityref:system" \
-                "neris-client-id=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-ID,identityref:system" \
-                "neris-client-secret=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-SECRET,identityref:system" \
+                "cosmos-key=${COSMOS_KEY_VAL}" \
+                "neris-client-id=${NERIS_CLIENT_ID_VAL}" \
+                "neris-client-secret=${NERIS_CLIENT_SECRET_VAL}" \
+                "ispyfire-url=${ISPYFIRE_URL_VAL}" \
+                "ispyfire-username=${ISPYFIRE_USERNAME_VAL}" \
+                "ispyfire-password=${ISPYFIRE_PASSWORD_VAL}" \
+                "anthropic-api-key=${ANTHROPIC_API_KEY_VAL}" \
+                "ms-graph-client-secret=${MS_GRAPH_CLIENT_SECRET_VAL}" \
             --output none
         ok "Container Apps Job created"
     fi

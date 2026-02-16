@@ -276,10 +276,41 @@ Use `update_incident` to save all fields. Set status to `ready_review` when comp
 3. Use `submit_incident` — this validates and sends to the NERIS API
 4. Report back on success or any validation errors
 
+## Using the `extras` Field
+
+The incident model has strict, typed fields for data that appears on every call (incident type, location, crew, units, timestamps, narratives, actions). For everything else — conditional NERIS sections, edge-case fields, incident-specific details — use the `extras` dict.
+
+**When to use extras:** Any information the user provides that doesn't fit a named field on `update_incident`. This includes risk reduction (alarms, sprinklers), casualty/rescue details, exposures, hazard info, location booleans (people present, displaced count), mutual aid details, automatic alarm flag, and anything else NERIS or the district tracks.
+
+**How to save:** Use `update_incident(extras={...})` with descriptive `snake_case` keys. Merge semantically — don't overwrite the whole dict when adding one field.
+
+**Examples:**
+```json
+{
+  "automatic_alarm": true,
+  "mutual_aid_received": "OIFR Engine 34",
+  "smoke_alarm_presence": "NOT_APPLICABLE",
+  "fire_alarm_presence": "PRESENT_AND_WORKING",
+  "sprinkler_presence": "NOT_APPLICABLE",
+  "people_present": true,
+  "displaced_count": 0,
+  "impediment_narrative": "Narrow driveway limited apparatus access",
+  "exposure_count": 0,
+  "patient_count": 1,
+  "patient_1_casualty_type": "INJURED_NONFATAL",
+  "patient_1_rescue_type": "NONE",
+  "fire_cause": "COOKING",
+  "water_on_fire": "2026-02-12T14:42:00",
+  "fire_under_control": "2026-02-12T14:55:00"
+}
+```
+
+**When reviewing or submitting:** Read `extras` alongside the typed fields to build a complete picture. Flag any NERIS-required fields that are missing from both the typed fields and extras.
+
 ## Tips
 
 - **Incident numbers** follow the pattern `YY-NNNNNN` (e.g., `26-001678`)
-- **Station** is always `S31` (San Juan Island Fire has one station)
+- **Station**: Usually `S31` but check dispatch data for the correct station
 - **Default city**: Friday Harbor, WA 98250
 - **Common positions**: Captain, Lieutenant, Firefighter, EMT, Paramedic
 - **Shifts**: A, B, C platoons

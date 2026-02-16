@@ -304,7 +304,7 @@ def _build_template_context(
             break
 
     # Recent calls — dispatch calls with cross-referenced reports.
-    # NERIS-only entries (old ESO reports with 26SJ/numeric IDs that
+    # NERIS-only entries (legacy reports with 26SJ/numeric IDs that
     # don't match any dispatch call) are excluded from the dashboard.
     raw_calls = dashboard_data.get("recent_calls", [])
     if isinstance(raw_calls, dict):
@@ -315,7 +315,7 @@ def _build_template_context(
     local_draft_count = 0
 
     for call in raw_calls:
-        # Skip NERIS-only entries (old ESO reports with no dispatch match)
+        # Skip NERIS-only entries (legacy reports with no dispatch match)
         if call.get("address") is None:
             continue
 
@@ -1214,7 +1214,7 @@ async def _fetch_incidents(user_email: str, is_officer: bool) -> dict[str, dict]
 async def _read_neris_cache() -> dict:
     """Read NERIS reports from Cosmos DB cache (read-only).
 
-    The cache is populated by the Container Apps Job (``ops-tasks neris-cache``).
+    The cache is populated by the Container Apps Job (``ops-tasks neris-sync``).
     The dashboard never touches the NERIS API directly.
     """
     from sjifire.ops.neris.store import NerisReportStore

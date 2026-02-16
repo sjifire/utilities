@@ -31,8 +31,8 @@ def register(name: str):
 
     Usage::
 
-        @register("neris-cache")
-        async def neris_cache_refresh() -> int:
+        @register("neris-sync")
+        async def neris_sync() -> int:
             ...  # returns count of items processed
     """
 

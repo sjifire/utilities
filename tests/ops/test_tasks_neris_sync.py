@@ -1,4 +1,4 @@
-"""Tests for the NERIS cache refresh task."""
+"""Tests for the NERIS report sync task."""
 
 import os
 from unittest.mock import MagicMock, patch
@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from sjifire.ops.neris.store import NerisReportStore
-from sjifire.ops.tasks.neris_cache import (
+from sjifire.ops.tasks.neris_sync import (
     fetch_neris_summaries,
-    neris_cache_refresh,
+    neris_sync,
     refresh_neris_report_cache,
 )
 
@@ -137,9 +137,9 @@ class TestRefreshNerisReportCache:
         assert count == 0
 
 
-class TestNerisCacheRefresh:
-    @patch("sjifire.ops.tasks.neris_cache.fetch_neris_summaries")
-    async def test_orchestrates_fetch_and_cache(self, mock_fetch):
+class TestNerisSync:
+    @patch("sjifire.ops.tasks.neris_sync.fetch_neris_summaries")
+    async def test_orchestrates_fetch_and_sync(self, mock_fetch):
         mock_fetch.return_value = [
             {
                 "source": "neris",
@@ -152,12 +152,12 @@ class TestNerisCacheRefresh:
             },
         ]
 
-        count = await neris_cache_refresh()
+        count = await neris_sync()
 
         assert count == 1
         mock_fetch.assert_called_once()
 
-        # Verify cache was populated
+        # Verify store was populated
         async with NerisReportStore() as store:
             result = await store.list_as_lookup()
         assert len(result["reports"]) == 1
