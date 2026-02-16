@@ -48,5 +48,5 @@ class TestCachedSystem:
 
 
 class TestModelConstant:
-    def test_model_is_sonnet(self):
-        assert "sonnet" in anthropic_mod.MODEL
+    def test_model_is_opus(self):
+        assert "opus" in anthropic_mod.MODEL

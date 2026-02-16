@@ -4,7 +4,7 @@ import os
 
 from anthropic import AsyncAnthropic
 
-MODEL = "claude-sonnet-4-5-20250929"
+MODEL = "claude-opus-4-6"
 
 _client: AsyncAnthropic | None = None
 

@@ -44,6 +44,7 @@ ops-server = "sjifire.ops.server:main"
 backup-cosmos = "sjifire.scripts.backup_cosmos:main"
 generate-neris-reference = "sjifire.scripts.generate_neris_reference:main"
 ops-admin = "sjifire.scripts.ops_admin:main"
+ops-logs = "sjifire.scripts.ops_logs:main"
 kiosk-url = "sjifire.scripts.kiosk_url:main"
 ops-tasks = "sjifire.ops.tasks.runner:main"
 
