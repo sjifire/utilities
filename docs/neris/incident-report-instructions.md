@@ -111,6 +111,17 @@ Present the unit response timeline from dispatch data (`analysis.unit_times`). S
 >
 > Do these look right? Any corrections?
 
+**Interpret missing timestamps from dispatch data** — Before asking the user about gaps, cross-reference the unit timeline with CAD comments to figure out what happened:
+
+- **No enroute + no on-scene + has cleared** → Unit likely staged in quarters or was cancelled before responding. Check CAD comments for "staging", "in quarters", "available" from that unit.
+- **Has enroute + no on-scene + has cleared** → Unit likely staged enroute or was cancelled enroute. Check CAD comments for staging location (e.g., "T33 staging on Cattle Point").
+- **Has enroute + no on-scene + has canceled** → Unit was explicitly cancelled.
+
+Present what you found rather than asking:
+> T36 has no enroute or on-scene times — the dispatch log shows them staging in quarters. T33 went enroute but never arrived on scene — the dispatch log shows them staging on Cattle Point Rd. I'll mark both as staged.
+
+Only ask the user if the CAD comments don't explain the gap.
+
 Save unit times via `update_incident(unit_responses=[...])` and the incident-level timestamps (earliest dispatched, first enroute, first on scene, last cleared) via `update_incident(timestamps={...})`.
 
 **Response Mode** — Set each unit's response mode based on the incident type:
