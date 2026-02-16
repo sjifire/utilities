@@ -147,7 +147,32 @@ After all units have crew, ask about anyone else:
 
 Add any additional responders to the crew list with their unit. For mutual aid, include the agency in the unit name (e.g., "E34-OIFR").
 
-### Step 5 — Actions Taken
+### Step 5 — Actions Taken (ACTION / NOACTION)
+
+First determine whether any on-scene action occurred. Check for NOACTION clues:
+- No on-scene timestamp in dispatch data (units never arrived)
+- CAD comments say "cancelled", "disregard", "cancel enroute"
+- Incident type is NOEMERG||CANCELLED or similar non-emergency
+
+**NOACTION path** — If no on-scene activity occurred:
+
+> It looks like units were cancelled enroute — no on-scene activity.
+> I'll mark this as **No Action Taken** with reason: **Cancelled**.
+>
+> Does that sound right?
+
+After confirmation, save:
+```
+update_incident(action_taken="NOACTION", noaction_reason="CANCELLED")
+```
+Then write a brief actions_taken narrative (e.g., "Units cancelled enroute by keyholder. No on-scene activity.") and move on. Do NOT suggest action codes.
+
+Valid NOACTION reasons:
+- **CANCELLED** — Call cancelled before arrival
+- **STAGED_STANDBY** — Units staged/stood by, not needed
+- **NO_INCIDENT_FOUND** — Arrived on scene, no incident found
+
+**ACTION path** — If crew performed any on-scene activity:
 
 Ask what the crew did. Based on the incident type, suggest likely actions:
 
@@ -160,6 +185,15 @@ Ask what the crew did. Based on the incident type, suggest likely actions:
 > Which of these apply? Anything else?
 
 Use `get_neris_values("action_tactic", prefix="EMERGENCY_MEDICAL_CARE||")` to show medical-specific options, etc.
+
+After confirmation, save structured codes and narrative:
+```
+update_incident(
+    action_taken="ACTION",
+    action_codes=["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT", ...],
+    actions_taken_narrative="..."
+)
+```
 
 ### Step 6 — Location Details
 

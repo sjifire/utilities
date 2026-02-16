@@ -137,6 +137,18 @@ FIRE CONDITION ON ARRIVAL (value_set: "fire_condition_arrival")
 - FIRE_OUT_UPON_ARRIVAL
 
 ========================================
+NO-ACTION REASONS (when action_taken=NOACTION)
+========================================
+
+3 values (COMPLETE list):
+- CANCELLED — Call cancelled before arrival
+- STAGED_STANDBY — Units staged/stood by, not needed
+- NO_INCIDENT_FOUND — Arrived on scene, no incident found
+
+Use NOACTION when no on-scene activity occurred.
+Use ACTION when crew performed ANY on-scene activity, even brief.
+
+========================================
 COMMON ACTIONS (value_set: "action_tactic")
 ========================================
 
