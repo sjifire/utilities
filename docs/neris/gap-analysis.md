@@ -140,36 +140,160 @@ Note: Our `timestamps` dict is flexible enough to hold all of these. The gap is 
 
 ---
 
-## Completeness by call type (estimated)
+## Architecture Decision: Strict Core + Flexible Extras
 
-| Call Type | Current Coverage | Biggest Gaps |
-|-----------|-----------------|--------------|
-| Simple cancel/NOACTION | ~85% | Risk reduction defaults, staffing count |
-| Medical | ~70% | Casualties/rescues, patient disposition |
-| Structure fire | ~55% | Risk reduction, exposures, fire timestamps, staffing |
-| Hazmat | ~50% | Hazard details, emerging hazards |
+Rather than typing every NERIS field, the model uses:
 
-## Key architectural notes
+- **First-class fields** — data that appears on every call, drives business logic, or needs querying
+- **`extras: dict`** — everything else. Claude saves edge-case data with descriptive `snake_case` keys. Can be promoted to first-class later if needed.
 
-- Our `timestamps` dict and `unit_responses` list-of-dicts are **flexible enough** to hold staffing, response mode, and fire-specific times without model changes.
-- The **real structural gaps** are: risk reduction, casualties/rescues, exposures, location booleans, impediment narrative.
-- Instructions Step 8 ("Conditional Sections") **mentions** asking about fire/medical/hazmat specifics but there are no model fields or `update_incident` parameters to store most of them.
+Instruction to Claude: *"If you need to save information that doesn't fit a named field, add it to `extras` with a descriptive snake_case key and the value."*
 
-## Resolution tracking
+For NERIS submission, `to_neris_payload()` reads from typed fields first, then pulls from extras to fill in conditional sections.
 
-| Gap | Priority | Resolution | Status |
-|-----|----------|------------|--------|
-| Risk reduction (alarms/sprinklers) | High | TBD | Open |
-| Staffing count per unit | High | TBD | Open |
-| Impediment narrative | Medium | TBD | Open |
-| Location booleans (people_present, displaced, in_use) | Medium | TBD | Open |
-| Casualties/rescues | Medium | TBD | Open |
-| Exposures | Medium | TBD | Open |
-| Fire-specific timestamps prompting | Medium | TBD | Open |
-| Response mode per unit | Low | TBD | Open |
-| Additional incident types (max 2) | Low | TBD | Open |
-| Automatic alarm boolean | Low | TBD | Open |
-| Aid given/received | Low | TBD | Open |
-| Powergen/CSST hazards | Low | TBD | Open |
-| County, zip, apt/suite | Low | TBD | Open |
-| Dispatch metadata | Low | TBD | Open |
+---
+
+## Decisions by Section
+
+### Core Incident
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1 | Incident number | **Keep** | `incident_number` |
+| 2 | Incident date/time | **Promote** | `incident_date: date` → `incident_datetime: datetime` |
+| 3 | Primary incident type | **Keep** | `incident_type` |
+| 4 | Additional incident types | **First-class** | `additional_incident_types: list[str]` (max 2) |
+| 5 | Special incident modifiers | **Extras** | |
+| 6 | Actions taken codes | **Keep** | `action_codes` |
+| 7 | No action taken reason | **Keep** | `noaction_reason` |
+| 8 | Dispatch run number | **Keep** | Same as incident_number |
+| 9 | Initial dispatch code | **Skip** | |
+| 10 | Automatic alarm? | **First-class** | `automatic_alarm: bool \| None` |
+| 11 | Aid given/received | **Extras** | |
+| 12 | Station + agency assignment | **Extras** | Remove `station` as required first-class field |
+| 13 | Report writers | **First-class** | `contributed_by: list[str]` |
+
+### Narrative
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1 | Narrative | **First-class** | Single `narrative: str` — replaces `Narratives` class (outcome + actions_taken combined) |
+| 2 | Impediment narrative | **Extras** | Claude extracts from narrative/CAD notes if needed |
+
+### Location
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1 | Address | **Keep** | `address` |
+| 2 | City | **Keep** | `city` |
+| 3 | State | **Keep** | `state` |
+| 4 | Zip code | **First-class** | `zip_code: str` |
+| 5 | County | **First-class** | `county: str` |
+| 6 | Apt/unit/suite | **First-class** | `apt_suite: str \| None` |
+| 7 | Latitude | **Keep** | `latitude` |
+| 8 | Longitude | **Keep** | `longitude` |
+| 9 | Cross streets | **Extras** | |
+| 10 | Location use | **Keep** | `location_use` |
+| 11 | In Use | **Extras** | |
+| 12 | Used as Intended | **Extras** | |
+| 13 | Secondary use impacted | **Extras** | |
+| 14 | Vacancy cause | **Extras** | |
+| 15 | People present | **First-class** | `people_present: bool \| None` |
+| 16 | Number displaced | **First-class** | `displaced_count: int \| None` |
+
+### Incident Times
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1 | PSAP answer | **Keep in dict** | `timestamps["psap_answer"]` |
+| 2 | Agency paged (SJF3/SJF2) | **Add to dict** | `timestamps["alarm_time"]` — look for "Paged" on SJF3/SJF2 |
+| 3 | First unit dispatched | **Remove** | Redundant with alarm_time |
+| 4 | First unit enroute | **Keep in dict** | `timestamps["first_unit_enroute"]` |
+| 5 | First unit arrived | **Keep in dict** | `timestamps["first_unit_arrived"]` |
+| 6 | IC established | **Add to dict** | `timestamps["ic_established"]` |
+| 7 | Incident clear | **Keep in dict** | `timestamps["incident_clear"]` |
+| 8-15 | Fire/rescue-specific times | **Same dict** | Standardized keys, prompted by Claude for fire incidents |
+
+### Resources / Units
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1 | Units + personnel | **Merge** | Single `units` list — each entry has unit_id, times, response_mode, personnel[] |
+| 2 | Staffing count | **Auto-calculate** | `len(personnel)` at NERIS submission |
+| 3 | Response mode | **Key in each unit** | `response_mode: EMERGENT \| NON_EMERGENT` |
+| 4 | Transport mode | **Skip** | |
+| 5 | POV responders | **Unit designator** | `unit_id: "POV"` with personnel nested |
+| 6 | Unable to dispatch | **Extras** | |
+
+### Risk Reduction / Alarms
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1-10 | All alarm/sprinkler fields | **Extras** | Prompted for fire, gas, electrical, CO incidents |
+
+### Powergen / Emerging Hazards
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1-6 | All powergen/CSST fields | **Extras** | Hazards checklist for fire/gas/electrical/CO incidents |
+
+### Exposures
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1-4 | All exposure fields | **Extras** | Prompted for fire incidents: item (4 types), damage (4 levels), location |
+
+### Casualty & Rescues
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1-5 | All casualty/rescue/medical fields | **Extras** | Context-driven prompting hints based on incident type and CAD notes |
+
+### Dispatch Metadata
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1-4 | Center ID, Determinant Code, Incident Code, Disposition | **Skip** | |
+| 5 | Dispatch comments / CAD notes | **First-class** | `dispatch_comments: str` — snapshot from completed dispatch record at creation time. If call is still open, warn user that data may be incomplete but don't block. |
+
+---
+
+## Prompting Improvements Needed
+
+| Trigger | Claude Should Ask About |
+|---------|----------------------|
+| Fire, gas, electrical, CO incidents | Hazards checklist: alarms, sprinklers, solar/battery/generators, CSST |
+| Fire incidents with spread | Exposures: what was affected, damage level |
+| Medical incidents / any patient | Patient count, care disposition, transport, status at handoff |
+| Rescue incidents | Rescue actions, impediments, elevation |
+| Firefighter injury | Activity when injured, cause, PPE |
+| Civilian casualty at fire | Casualty type, demographics |
+| All structure fire incidents | Fire-specific timestamps (water on fire, fire under control, etc.) |
+| CAD notes mention access issues | Impediment narrative |
+
+---
+
+## New Model Summary (first-class fields only)
+
+**Changed:**
+- `incident_date: date` → `incident_datetime: datetime`
+- `Narratives` class (outcome + actions_taken) → single `narrative: str`
+- `unit_responses` + `crew` → merged `units: list` with nested personnel
+- Remove `station` as required field → extras
+
+**Added:**
+- `additional_incident_types: list[str]`
+- `automatic_alarm: bool | None`
+- `contributed_by: list[str]`
+- `zip_code: str`
+- `county: str`
+- `apt_suite: str | None`
+- `people_present: bool | None`
+- `displaced_count: int | None`
+- `dispatch_comments: str`
+- `extras: dict`
+
+**Removed:**
+- `station` (→ extras)
+- `Narratives` class
+- Separate `crew` list (→ nested under units)
