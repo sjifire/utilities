@@ -59,12 +59,17 @@ def _is_person(email: str, domain: str) -> bool:
     return not local.startswith(("svc-", "api", "noreply"))
 
 
-async def get_personnel() -> list[dict[str, str]]:
+async def get_personnel(search: str | None = None) -> list[dict[str, str]]:
     """Get a list of active SJI Fire personnel (cached 10 min).
 
     Returns names and email addresses only. Use this to look up
     people for crew assignment on incidents. Only returns real people
     with @domain emails (no groups, shared mailboxes, or guests).
+
+    Args:
+        search: Optional case-insensitive search term. Filters results
+            to entries where name or email contains the term.
+            Use this for last-name lookups (e.g., search="Vos").
 
     Returns:
         List of {"name": "...", "email": "..."} for each active user
@@ -72,26 +77,28 @@ async def get_personnel() -> list[dict[str, str]]:
     global _personnel_cache, _personnel_cache_expires
 
     user = get_current_user()
-    logger.info("Personnel lookup requested by %s", user.email)
+    logger.info("Personnel lookup requested by %s (search=%s)", user.email, search)
 
-    if _personnel_cache and _personnel_cache_expires > time.monotonic():
-        logger.info("Personnel cache hit (%d entries)", len(_personnel_cache))
-        return _personnel_cache
+    if not (_personnel_cache and _personnel_cache_expires > time.monotonic()):
+        domain = get_domain()
+        users = await _fetch_all_users(["displayName", "mail", "userPrincipalName"])
 
-    domain = get_domain()
-    users = await _fetch_all_users(["displayName", "mail", "userPrincipalName"])
+        personnel = []
+        for u in users:
+            email = (u.mail or u.user_principal_name or "").lower()
+            if _is_person(email, domain):
+                personnel.append({"name": u.display_name or "", "email": email})
 
-    personnel = []
-    for u in users:
-        email = (u.mail or u.user_principal_name or "").lower()
-        if _is_person(email, domain):
-            personnel.append({"name": u.display_name or "", "email": email})
+        personnel.sort(key=lambda p: p["name"])
+        _personnel_cache = personnel
+        _personnel_cache_expires = time.monotonic() + _CACHE_TTL
+        logger.info("Retrieved %d personnel (cached)", len(personnel))
 
-    personnel.sort(key=lambda p: p["name"])
-    _personnel_cache = personnel
-    _personnel_cache_expires = time.monotonic() + _CACHE_TTL
-    logger.info("Retrieved %d personnel (cached)", len(personnel))
-    return personnel
+    if search:
+        term = search.lower()
+        return [p for p in _personnel_cache if term in p["name"].lower() or term in p["email"]]
+
+    return _personnel_cache
 
 
 async def get_operational_personnel() -> list[dict[str, str]]:

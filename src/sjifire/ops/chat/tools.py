@@ -305,14 +305,25 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "name": "get_personnel",
         "description": (
-            "Get all active personnel (names + emails). Use this when you "
+            "Search active personnel by name or email. Use this when you "
             "cannot match a name from the pre-loaded operational roster — "
             "e.g. for admin staff, volunteers, or when the user gives a "
-            "nickname, shorthand, or last name only."
+            "nickname, shorthand, or last name only. Always pass a search "
+            "term for targeted lookups (e.g. search='Vos'). If zero results, "
+            "the user may have used a nickname — try the formal name "
+            "(Mike→Michael, Dick→Richard, Bill→William, etc.) before "
+            "asking the user."
         ),
         "input_schema": {
             "type": "object",
-            "properties": {},
+            "properties": {
+                "search": {
+                    "type": "string",
+                    "description": "Case-insensitive substring search on name or email. "
+                    "Use for last-name lookups (e.g. 'Vos', 'Smith'). "
+                    "Omit to get the full list.",
+                },
+            },
         },
     },
     {
@@ -415,8 +426,27 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
     if name == "get_personnel":
         from sjifire.ops.personnel import tools as personnel_tools
 
-        result = await personnel_tools.get_personnel()
-        return {"personnel": result, "count": len(result)}
+        search = tool_input.get("search")
+        result = await personnel_tools.get_personnel(search=search)
+        if result:
+            return {"personnel": result, "count": len(result)}
+
+        # No exact match — return names-only list for Claude to reason about
+        # (nicknames, shorthand, spelling variants). Compact format so
+        # Claude can scan ~56 names without JSON noise.
+        if search:
+            all_personnel = await personnel_tools.get_personnel()
+            return {
+                "personnel": [],
+                "count": 0,
+                "search": search,
+                "hint": f"No exact match for '{search}'. Full roster names below — "
+                "check for nicknames (Mike→Michael, Dick→Richard, etc.), "
+                "spelling variants, or ask the user.",
+                "all_names": [p["name"] for p in all_personnel],
+            }
+
+        return {"personnel": [], "count": 0}
 
     if name == "lookup_location":
         return await _lookup_location(tool_input["latitude"], tool_input["longitude"])
