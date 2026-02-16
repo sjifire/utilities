@@ -513,11 +513,26 @@ function chatApp() {
               this.messages.push({type: 'message', role: msg.role, content: msg.content});
             }
             if (msg.tool_use) {
+              // Collapse consecutive same-tool entries into one pill
+              const grouped = [];
               for (const tu of msg.tool_use) {
+                const prev = grouped[grouped.length - 1];
+                if (prev && prev.name === tu.name) {
+                  prev.count++;
+                } else {
+                  grouped.push({name: tu.name, count: 1});
+                }
+              }
+              for (const g of grouped) {
+                const summary = g.count > 1
+                  ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups`
+                  : g.name + ' completed';
                 this.messages.push({
                   type: 'tool_result',
-                  summary: tu.name + ' completed',
-                  expanded: false
+                  summary,
+                  toolName: g.name,
+                  expanded: false,
+                  resultCount: g.count
                 });
               }
             }
@@ -711,28 +726,50 @@ function chatApp() {
           get_dispatch_call: 'Looking up dispatch data...',
           search_dispatch_calls: 'Searching dispatch calls...',
           get_on_duty_crew: 'Checking crew schedule...',
-          get_neris_values: 'Looking up NERIS values...'
+          get_neris_values: 'Looking up NERIS values...',
+          get_personnel: 'Looking up personnel...'
         };
-        this.messages.push({
-          type: 'tool_call',
-          label: labels[data.name] || `Running ${data.name}...`,
-          pending: true
-        });
+        const label = labels[data.name] || `Running ${data.name}...`;
+        // Collapse consecutive calls for the same tool into one indicator
+        const last = this.messages[this.messages.length - 1];
+        if (last && last.type === 'tool_call' && last.toolName === data.name && last.pending) {
+          last.pendingCount = (last.pendingCount || 1) + 1;
+        } else {
+          this.messages.push({
+            type: 'tool_call',
+            label,
+            toolName: data.name,
+            pending: true,
+            pendingCount: 1
+          });
+        }
         this.scrollToBottom();
       } else if (type === 'tool_result') {
-        // Mark last tool_call as complete
+        // Mark last pending tool_call as complete (decrement count)
         for (let i = this.messages.length - 1; i >= 0; i--) {
           if (this.messages[i].type === 'tool_call' && this.messages[i].pending) {
-            this.messages[i].pending = false;
+            this.messages[i].pendingCount = (this.messages[i].pendingCount || 1) - 1;
+            if (this.messages[i].pendingCount <= 0) {
+              this.messages[i].pending = false;
+            }
             break;
           }
         }
-        this.messages.push({
-          type: 'tool_result',
-          summary: data.summary || data.name,
-          is_error: data.is_error || false,
-          expanded: false
-        });
+        // Collapse consecutive results for the same tool into one line
+        const lastMsg = this.messages[this.messages.length - 1];
+        if (lastMsg && lastMsg.type === 'tool_result' && lastMsg.toolName === data.name && !lastMsg.is_error && !(data.is_error)) {
+          lastMsg.resultCount = (lastMsg.resultCount || 1) + 1;
+          lastMsg.summary = `${lastMsg.resultCount} ${data.name.replace(/_/g, ' ')} lookups`;
+        } else {
+          this.messages.push({
+            type: 'tool_result',
+            summary: data.summary || data.name,
+            toolName: data.name,
+            is_error: data.is_error || false,
+            expanded: false,
+            resultCount: 1
+          });
+        }
         this.scrollToBottom();
         // After a successful reset, reload to get fresh state
         if (data.name === 'reset_incident' && !(data.summary || '').startsWith('Error')) {
