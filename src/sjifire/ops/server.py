@@ -324,7 +324,7 @@ app.routes.insert(0, Route("/reports/{incident_id}/chat", chat_stream, methods=[
 app.routes.insert(0, Route("/reports/{incident_id}/conversation", conversation_history))
 app.routes.insert(0, Route("/reports/{incident_id}/print", print_report))
 app.routes.insert(0, Route("/reports/{incident_id}", chat_page))
-app.routes.insert(0, Route("/reports/new", create_report, methods=["POST"]))
+app.routes.insert(0, Route("/reports/new", create_report, methods=["GET", "POST"]))
 app.routes.insert(0, Route("/reports", reports_list))
 
 # General chat routes (not tied to an incident)

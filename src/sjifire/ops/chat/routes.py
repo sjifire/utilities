@@ -92,6 +92,9 @@ async def reports_list(request: Request) -> Response:
 
 async def create_report(request: Request) -> Response:
     """Create a new incident and redirect to the chat UI."""
+    if request.method == "GET":
+        return RedirectResponse("/reports", status_code=303)
+
     user = _get_user(request)
 
     import os
