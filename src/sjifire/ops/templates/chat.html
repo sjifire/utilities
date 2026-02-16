@@ -690,7 +690,7 @@ function chatApp() {
         this.currentText = '';
       }
       this.streaming = false;
-      this.scrollToBottom();
+      this.scrollToBottom(true);
       this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
     },
 
