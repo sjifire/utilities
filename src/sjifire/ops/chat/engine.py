@@ -1079,14 +1079,17 @@ async def _stream_general_loop(
 
 def _log_cache_stats(usage: object) -> None:
     """Log prompt cache performance metrics if available."""
+    input_tokens = getattr(usage, "input_tokens", 0) or 0
+    output_tokens = getattr(usage, "output_tokens", 0) or 0
     cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
     cache_create = getattr(usage, "cache_creation_input_tokens", 0) or 0
-    if cache_read or cache_create:
-        input_tokens = getattr(usage, "input_tokens", 0) or 0
-        logger.info(
-            "Cache: %d read, %d created, %d uncached (of %d total input)",
-            cache_read,
-            cache_create,
-            input_tokens - cache_read - cache_create,
-            input_tokens,
-        )
+    uncached = input_tokens - cache_read - cache_create
+    # Always log token counts so we can see context growth
+    logger.info(
+        "Tokens: %d in (%d cached, %d created, %d uncached), %d out",
+        input_tokens,
+        cache_read,
+        cache_create,
+        uncached,
+        output_tokens,
+    )
