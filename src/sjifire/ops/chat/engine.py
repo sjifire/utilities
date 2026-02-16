@@ -409,22 +409,36 @@ async def stream_chat(
     # Record user message (text only — images are one-shot, not stored)
     conversation.messages.append(ConversationMessage(role="user", content=user_message))
 
+    # Persist user message immediately so interrupted streams don't lose it.
+    # If the SSE connection drops mid-stream, the generator is cancelled and
+    # the final save never runs. This early save ensures the user's input
+    # (and all prior history) survives a disconnect.
+    try:
+        async with ConversationStore() as store:
+            if is_new:
+                await store.create(conversation)
+                is_new = False  # Now exists in Cosmos — subsequent saves are updates
+            else:
+                await store.update(conversation)
+    except Exception as exc:
+        logger.warning("Failed to persist user message: %s", exc)
+
     # Streaming loop (handles tool calls)
     total_input = 0
     total_output = 0
 
     client = get_client()
 
+    stream_error = False
     try:
         async for event_str in _stream_loop(
             client, system_prompt, api_messages, conversation, user
         ):
-            # Parse the event to track tokens
             yield event_str
 
     except Exception as exc:
         yield _sse("error", {"message": _user_error("stream", exc)})
-        return
+        stream_error = True
 
     # Calculate total tokens from this turn's messages
     turn_messages = [
@@ -436,7 +450,8 @@ async def stream_chat(
         total_input += m.input_tokens
         total_output += m.output_tokens
 
-    # Persist conversation
+    # Persist full turn (assistant response + token counts).
+    # Runs even after stream errors so partial responses aren't lost.
     conversation.turn_count += 1
     conversation.total_input_tokens += total_input
     conversation.total_output_tokens += total_output
@@ -450,6 +465,9 @@ async def stream_chat(
                 await store.update(conversation)
     except Exception as exc:
         yield _sse("error", {"message": _user_error("save", exc)})
+        return
+
+    if stream_error:
         return
 
     # Record budget usage
@@ -805,11 +823,23 @@ async def stream_general_chat(
 
     conversation.messages.append(ConversationMessage(role="user", content=user_message))
 
+    # Persist user message immediately (same rationale as stream_chat)
+    try:
+        async with ConversationStore() as store:
+            if is_new:
+                await store.create(conversation)
+                is_new = False
+            else:
+                await store.update(conversation)
+    except Exception as exc:
+        logger.warning("Failed to persist user message: %s", exc)
+
     total_input = 0
     total_output = 0
 
     client = get_client()
 
+    stream_error = False
     try:
         async for event_str in _stream_general_loop(
             client, system_prompt, api_messages, conversation, user
@@ -818,7 +848,7 @@ async def stream_general_chat(
 
     except Exception as exc:
         yield _sse("error", {"message": _user_error("stream", exc)})
-        return
+        stream_error = True
 
     turn_messages = [
         m
@@ -834,11 +864,18 @@ async def stream_general_chat(
     conversation.total_output_tokens += total_output
     conversation.updated_at = datetime.now(UTC)
 
-    async with ConversationStore() as store:
-        if is_new:
-            await store.create(conversation)
-        else:
-            await store.update(conversation)
+    try:
+        async with ConversationStore() as store:
+            if is_new:
+                await store.create(conversation)
+            else:
+                await store.update(conversation)
+    except Exception as exc:
+        yield _sse("error", {"message": _user_error("save", exc)})
+        return
+
+    if stream_error:
+        return
 
     if total_input > 0 or total_output > 0:
         await record_usage(user.email, total_input, total_output)

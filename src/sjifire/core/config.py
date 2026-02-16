@@ -1,6 +1,8 @@
 """Configuration loading utilities."""
 
+import asyncio
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -8,6 +10,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 
 def get_graph_credentials() -> tuple[str, str, str]:
@@ -299,6 +303,68 @@ def get_cosmos_database() -> str:
     falls back to ``organization.json``.
     """
     return os.getenv("COSMOS_DATABASE") or get_org_config().cosmos_database
+
+
+# ---------------------------------------------------------------------------
+# Shared Cosmos DB client (connection pool)
+# ---------------------------------------------------------------------------
+
+_cosmos_client = None
+_cosmos_db = None
+_cosmos_lock: asyncio.Lock | None = None
+_cosmos_in_memory: bool | None = None
+
+
+def _get_cosmos_lock() -> asyncio.Lock:
+    """Get or create the Cosmos init lock (must be called in an event loop)."""
+    global _cosmos_lock
+    if _cosmos_lock is None:
+        _cosmos_lock = asyncio.Lock()
+    return _cosmos_lock
+
+
+async def get_cosmos_container(container_name: str):
+    """Get a Cosmos DB container client from the shared connection pool.
+
+    All stores should use this instead of creating their own CosmosClient.
+    Returns None when Cosmos DB is not configured (in-memory fallback).
+    """
+    global _cosmos_client, _cosmos_db, _cosmos_in_memory
+
+    if _cosmos_in_memory is True:
+        return None
+    if _cosmos_db is not None:
+        return _cosmos_db.get_container_client(container_name)
+
+    async with _get_cosmos_lock():
+        # Re-check after acquiring lock
+        if _cosmos_in_memory is True:
+            return None
+        if _cosmos_db is not None:
+            return _cosmos_db.get_container_client(container_name)
+
+        load_dotenv()
+        endpoint = os.getenv("COSMOS_ENDPOINT")
+        key = os.getenv("COSMOS_KEY")
+
+        if key:
+            from azure.cosmos.aio import CosmosClient
+
+            _cosmos_client = CosmosClient(endpoint, credential=key)
+        elif endpoint:
+            from azure.cosmos.aio import CosmosClient
+            from azure.identity.aio import DefaultAzureCredential
+
+            _cosmos_client = CosmosClient(endpoint, credential=DefaultAzureCredential())
+        else:
+            logger.info("No COSMOS_ENDPOINT — stores will use in-memory mode")
+            _cosmos_in_memory = True
+            return None
+
+        db_name = get_cosmos_database()
+        _cosmos_db = _cosmos_client.get_database_client(db_name)
+        logger.info("Cosmos DB connection pool ready: %s", db_name)
+        return _cosmos_db.get_container_client(container_name)
 
 
 def get_timezone() -> ZoneInfo:

@@ -5,12 +5,9 @@ for local development and testing with ``mcp dev``.
 """
 
 import logging
-import os
 from typing import ClassVar, Self
 
-from dotenv import load_dotenv
-
-from sjifire.core.config import get_cosmos_database
+from sjifire.core.config import get_cosmos_container
 from sjifire.ops.chat.models import ConversationDocument, UserBudget
 
 logger = logging.getLogger(__name__)
@@ -34,45 +31,18 @@ class ConversationStore:
 
     def __init__(self) -> None:
         """Initialize store. Call ``__aenter__`` to connect."""
-        self._client = None
         self._container = None
-        self._credential = None
         self._in_memory = False
 
     async def __aenter__(self) -> Self:
-        """Connect to Cosmos DB, or fall back to in-memory mode."""
-        load_dotenv()
-        endpoint = os.getenv("COSMOS_ENDPOINT")
-        key = os.getenv("COSMOS_KEY")
-
-        if key:
-            from azure.cosmos.aio import CosmosClient
-
-            self._client = CosmosClient(endpoint, credential=key)
-        elif endpoint:
-            from azure.cosmos.aio import CosmosClient
-            from azure.identity.aio import DefaultAzureCredential
-
-            self._credential = DefaultAzureCredential()
-            self._client = CosmosClient(endpoint, credential=self._credential)
-        else:
-            logger.warning("No COSMOS_ENDPOINT set — using in-memory conversation store (dev only)")
+        """Get a container client from the shared Cosmos connection pool."""
+        self._container = await get_cosmos_container(CONVERSATIONS_CONTAINER)
+        if self._container is None:
             self._in_memory = True
-            return self
-
-        database = self._client.get_database_client(get_cosmos_database())
-        self._container = database.get_container_client(CONVERSATIONS_CONTAINER)
-        logger.info("Connected to Cosmos DB: %s/%s", get_cosmos_database(), CONVERSATIONS_CONTAINER)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Close connections."""
-        if self._client:
-            await self._client.close()
-            self._client = None
-        if self._credential:
-            await self._credential.close()
-            self._credential = None
+        """No-op — shared Cosmos client stays alive."""
         self._container = None
 
     async def create(self, doc: ConversationDocument) -> ConversationDocument:
@@ -170,45 +140,18 @@ class BudgetStore:
 
     def __init__(self) -> None:
         """Initialize store. Call ``__aenter__`` to connect."""
-        self._client = None
         self._container = None
-        self._credential = None
         self._in_memory = False
 
     async def __aenter__(self) -> Self:
-        """Connect to Cosmos DB, or fall back to in-memory mode."""
-        load_dotenv()
-        endpoint = os.getenv("COSMOS_ENDPOINT")
-        key = os.getenv("COSMOS_KEY")
-
-        if key:
-            from azure.cosmos.aio import CosmosClient
-
-            self._client = CosmosClient(endpoint, credential=key)
-        elif endpoint:
-            from azure.cosmos.aio import CosmosClient
-            from azure.identity.aio import DefaultAzureCredential
-
-            self._credential = DefaultAzureCredential()
-            self._client = CosmosClient(endpoint, credential=self._credential)
-        else:
-            logger.warning("No COSMOS_ENDPOINT set — using in-memory budget store (dev only)")
+        """Get a container client from the shared Cosmos connection pool."""
+        self._container = await get_cosmos_container(BUDGETS_CONTAINER)
+        if self._container is None:
             self._in_memory = True
-            return self
-
-        database = self._client.get_database_client(get_cosmos_database())
-        self._container = database.get_container_client(BUDGETS_CONTAINER)
-        logger.info("Connected to Cosmos DB: %s/%s", get_cosmos_database(), BUDGETS_CONTAINER)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Close connections."""
-        if self._client:
-            await self._client.close()
-            self._client = None
-        if self._credential:
-            await self._credential.close()
-            self._credential = None
+        """No-op — shared Cosmos client stays alive."""
         self._container = None
 
     async def get_or_create(self, user_email: str, month: str) -> UserBudget:
