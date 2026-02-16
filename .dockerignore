@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+.venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Dev/CI files
+tests/
+docs/*
+!docs/dashboard-template.html
+!docs/mcp-start-session.md
+!docs/neris
+docs/neris/*
+!docs/neris/incident-report-instructions.md
+!docs/neris/neris-value-sets-reference.md
+scripts/
+ESO/
+.github/
+.claude/
+.env
+*.md
+!README.md
+
+# Images and misc
+*.jpg
+*.png
+*.html
+!docs/dashboard-template.html
+.DS_Store

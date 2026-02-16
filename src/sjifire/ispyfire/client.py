@@ -1,5 +1,6 @@
 """iSpyFire API client."""
 
+import json
 import logging
 import os
 import re
@@ -16,7 +17,7 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from sjifire.ispyfire.models import ISpyFirePerson
+from sjifire.ispyfire.models import DispatchCall, ISpyFirePerson
 
 
 def get_ispyfire_credentials() -> tuple[str, str, str]:
@@ -66,10 +67,17 @@ def _log_retry(retry_state) -> None:
 class ISpyFireClient:
     """Client for iSpyFire API."""
 
+    CENTRAL_API_BASE = "https://api.ispyfire.com"
+
     def __init__(self) -> None:
         """Initialize the client with credentials from environment."""
         self.base_url, self.username, self.password = get_ispyfire_credentials()
         self.client: httpx.Client | None = None
+        self.central_client: httpx.Client | None = None
+        self.bearer: str | None = None
+        self.ispyid: str | None = None
+        self.leadispyid: str | None = None
+        self.person_id: str | None = None
 
     def __enter__(self) -> Self:
         """Enter context manager - create HTTP client and login."""
@@ -78,10 +86,14 @@ class ISpyFireClient:
             timeout=30.0,
         )
         self._login()
+        self._login_central_api()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context manager - close HTTP client."""
+        """Exit context manager - close HTTP clients."""
+        if self.central_client:
+            self.central_client.close()
+            self.central_client = None
         if self.client:
             self.client.close()
             self.client = None
@@ -152,6 +164,140 @@ class ISpyFireClient:
 
         logger.info("Login successful")
         return True
+
+    def _login_central_api(self) -> bool:
+        """Authenticate with the central API (api.ispyfire.com).
+
+        Performs a separate non-redirect login to get the session IDs
+        from the HTML response, then authenticates with the central API.
+
+        Returns:
+            True if login successful, False otherwise
+        """
+        # Do a separate non-redirect login to get the HTML with session IDs.
+        # The main client follows redirects, so the login HTML is lost.
+        try:
+            no_redirect = httpx.Client(follow_redirects=False, timeout=30.0)
+            response = no_redirect.post(
+                f"{self.base_url}/login",
+                data={"username": self.username, "password": self.password},
+            )
+            html = response.text
+            no_redirect.close()
+        except httpx.HTTPError:
+            logger.warning("Failed to perform non-redirect login for central API")
+            return False
+
+        # Parse session identifiers from login page JavaScript
+        # HTML looks like: window.localStorage.setItem('currentLIPID', 'token...');
+        pid_match = re.search(r"setItem\('currentLIPID',\s*'([^']+)'\)", html)
+        aid_match = re.search(r"setItem\('currentLIAID',\s*'([^']+)'\)", html)
+        uid_match = re.search(r"setItem\('currentLIUserID',\s*'([^']+)'\)", html)
+
+        if not pid_match or not aid_match or not uid_match:
+            logger.warning("Could not parse session IDs from login HTML")
+            return False
+
+        pid = pid_match.group(1)  # Password/token for central API
+        agency = aid_match.group(1)  # e.g. "sjf3"
+        user_id = uid_match.group(1)  # e.g. "svc-automations@sjifire.org"
+
+        logger.debug(f"Central API auth: agency={agency}, user={user_id}")
+
+        # Authenticate with central API using PID as password
+        self.central_client = httpx.Client(
+            follow_redirects=True,
+            timeout=30.0,
+        )
+
+        login_url = f"{self.CENTRAL_API_BASE}/{agency}/session/login/{user_id}"
+        try:
+            response = self.central_client.put(
+                login_url,
+                content=json.dumps({"agency": agency, "pass": pid}),
+                headers={"Content-Type": "application/json"},
+            )
+        except httpx.HTTPError:
+            logger.warning("Failed to connect to central API")
+            return False
+
+        if response.status_code != 200:
+            logger.warning(f"Central API login failed: {response.status_code}")
+            return False
+
+        data = response.json()
+        self.bearer = data.get("bearer")
+        if not self.bearer:
+            logger.warning("No bearer token in central API response")
+            return False
+
+        self.person_id = data.get("personid")
+
+        # Get CAD settings to find ispyid and leadispyid
+        self._get_cad_settings(agency)
+
+        logger.info("Central API login successful")
+        return True
+
+    def _get_cad_settings(self, agency: str) -> None:
+        """Fetch CAD settings to get ispyid and leadispyid.
+
+        Args:
+            agency: Agency identifier (e.g. "sjf3")
+        """
+        if not self.client:
+            return
+
+        url = f"{self.base_url}/api/cad/settings/{agency}"
+        try:
+            response = self.client.get(url)
+        except httpx.HTTPError:
+            logger.warning("Failed to fetch CAD settings")
+            return
+
+        if response.status_code != 200:
+            logger.warning(f"CAD settings request failed: {response.status_code}")
+            return
+
+        data = response.json()
+        results = data.get("results", [])
+        if results:
+            settings = results[0]
+            self.ispyid = settings.get("ispyid")
+            self.leadispyid = settings.get("leadispyid")
+            logger.debug(f"CAD settings: ispyid={self.ispyid}, leadispyid={self.leadispyid}")
+
+    def _central_request(
+        self,
+        method: str,
+        url: str,
+        **kwargs,
+    ) -> httpx.Response | None:
+        """Make an HTTP request to the central API with bearer auth.
+
+        Args:
+            method: HTTP method
+            url: URL to request
+            **kwargs: Additional arguments passed to httpx
+
+        Returns:
+            Response object, or None if central API is not available
+        """
+        if not self.central_client or not self.bearer:
+            logger.warning("Central API not authenticated")
+            return None
+
+        headers = kwargs.pop("headers", {})
+        headers["X-ISPY-Bearer"] = self.bearer
+        kwargs["headers"] = headers
+
+        time.sleep(BULK_OPERATION_DELAY)
+
+        try:
+            return self.central_client.request(method, url, **kwargs)
+        except httpx.HTTPError as e:
+            logger.error(f"Central API request failed: {e}")
+            return None
 
     def get_people(
         self, include_inactive: bool = False, include_deleted: bool = False
@@ -548,3 +694,174 @@ class ISpyFireClient:
                 logger.warning(f"Failed to send invite email to {person.email}")
 
         return result
+
+    # ── Dispatch / Call methods (central API) ──────────────────────────
+
+    def get_calls(self, days: int = 30) -> list[DispatchCall]:
+        """Search recent calls and return full details for each.
+
+        Uses the search endpoint for discovery, then fetches full details.
+
+        Args:
+            days: Number of days to look back
+
+        Returns:
+            List of DispatchCall objects with full details
+        """
+        now = int(time.time())
+        after = now - (days * 24 * 60 * 60)
+        raw = self.search_calls_raw(after=after, before=now)
+        logger.info(f"Search returned {len(raw)} calls for last {days} days")
+
+        calls: list[DispatchCall] = []
+        for entry in raw:
+            call_id = entry.get("_id")
+            if call_id:
+                detail = self.get_call_details(call_id)
+                if detail:
+                    calls.append(detail)
+        return calls
+
+    def get_call_details(self, call_id: str) -> DispatchCall | None:
+        """Get full details for a specific call.
+
+        Args:
+            call_id: The call's _id (UUID) or long_term_call_id (dispatch ID)
+
+        Returns:
+            DispatchCall if found, None otherwise
+        """
+        if not self.ispyid:
+            logger.error("ispyid not available - central API not initialized")
+            return None
+
+        # If it looks like a dispatch ID (e.g. "26-001678"), search for it
+        if re.match(r"\d{2}-\d+", call_id):
+            return self._get_call_by_dispatch_id(call_id)
+
+        url = f"{self.CENTRAL_API_BASE}/calls/details/{self.ispyid}/id/{call_id}"
+        response = self._central_request("GET", url)
+        if not response or response.status_code != 200:
+            logger.error(f"Failed to fetch call details: {call_id}")
+            return None
+
+        data = response.json()
+        results = data.get("results", [])
+        if not results:
+            return None
+
+        return DispatchCall.from_api(results[0])
+
+    def _get_call_by_dispatch_id(self, dispatch_id: str) -> DispatchCall | None:
+        """Find a call by its dispatch ID (e.g. '26-001678').
+
+        Uses search to find the call, then fetches full details.
+
+        Args:
+            dispatch_id: The LongTermCallID to search for
+
+        Returns:
+            DispatchCall if found, None otherwise
+        """
+        # Search a wide window (90 days) to find the call
+        now = int(time.time())
+        after = now - (90 * 24 * 60 * 60)
+        raw = self.search_calls_raw(after=after, before=now)
+        for entry in raw:
+            entry_id = entry.get("_id")
+            if entry_id:
+                detail = self.get_call_details(entry_id)
+                if detail and detail.long_term_call_id == dispatch_id:
+                    return detail
+        return None
+
+    def get_open_calls(self) -> list[DispatchCall]:
+        """Get currently active/open calls.
+
+        Returns:
+            List of open DispatchCall objects
+        """
+        if not self.leadispyid:
+            logger.error("leadispyid not available - central API not initialized")
+            return []
+
+        url = f"{self.CENTRAL_API_BASE}/calls/headers/{self.leadispyid}/open?skipunit=true"
+        response = self._central_request("GET", url)
+        if not response or response.status_code != 200:
+            logger.error("Failed to fetch open calls")
+            return []
+
+        data = response.json()
+        results = data.get("results", [])
+
+        # Open call headers have a different shape than full details.
+        # Fetch full details for each open call.
+        calls = []
+        for header in results:
+            call_id = header.get("_id")
+            if call_id:
+                detail = self.get_call_details(call_id)
+                if detail:
+                    calls.append(detail)
+        return calls
+
+    def get_call_log(self, call_id: str) -> list[dict]:
+        """Get audit log entries for a call (who viewed it, when).
+
+        Args:
+            call_id: The call's _id (UUID)
+
+        Returns:
+            List of log entry dicts with email, commenttype, timestamp
+        """
+        url = f"{self.CENTRAL_API_BASE}/logging/calldetails/callid/{call_id}"
+        response = self._central_request("GET", url)
+        if not response or response.status_code != 200:
+            logger.error(f"Failed to fetch call log: {call_id}")
+            return []
+
+        data = response.json()
+        return data.get("results", [])
+
+    def search_calls_raw(
+        self,
+        after: int,
+        before: int,
+        page_size: int = 50,
+    ) -> list[dict]:
+        """Search calls via the PUT search endpoint (raw API response).
+
+        This endpoint supports arbitrary date ranges (back to ~Dec 2025)
+        unlike get_calls() which is limited by the {days} path parameter.
+
+        Args:
+            after: Unix timestamp (seconds) for start of range
+            before: Unix timestamp (seconds) for end of range
+            page_size: Number of results per page
+
+        Returns:
+            Raw list of call dicts from the API
+        """
+        if not self.ispyid:
+            logger.error("ispyid not available - central API not initialized")
+            return []
+
+        url = f"{self.CENTRAL_API_BASE}/calls/search/{self.ispyid}"
+        payload = {
+            "after": after,
+            "before": before,
+            "pagesize": page_size,
+        }
+        response = self._central_request(
+            "PUT",
+            url,
+            content=json.dumps(payload),
+            headers={"Content-Type": "application/json"},
+        )
+        if not response or response.status_code != 200:
+            status = response.status_code if response else "no response"
+            logger.error(f"Search calls failed: {status}")
+            return []
+
+        data = response.json()
+        return data.get("results", [])

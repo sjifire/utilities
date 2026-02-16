@@ -30,6 +30,9 @@ def get_aladtec_credentials() -> tuple[str, str, str]:
             "Aladtec credentials not set. Required: ALADTEC_URL, ALADTEC_USERNAME, ALADTEC_PASSWORD"
         )
 
+    if not url.startswith("https://"):
+        raise ValueError(f"ALADTEC_URL must use HTTPS (got: {url[:30]}...)")
+
     return url, username, password
 
 

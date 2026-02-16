@@ -1,0 +1,178 @@
+name: MCP Server Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/sjifire/mcp/**'
+      - 'Dockerfile'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/mcp-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  packages: none
+
+env:
+  RESOURCE_GROUP: rg-sjifire-mcp
+  ACR_NAME: sjifiremcp
+  CONTAINER_APP: sjifire-mcp
+  IMAGE_NAME: sjifire-mcp
+  CUSTOM_DOMAIN: mcp.sjifire.org
+  KEY_VAULT: gh-website-utilities
+
+jobs:
+  build-deploy:
+    name: Build & Deploy MCP Server
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: bb2cb591-58ff-4687-bf14-502049dee01b
+          tenant-id: 4122848f-c317-4267-9c07-7c504150d1bd
+          allow-no-subscriptions: true
+
+      - name: Get non-secret config from Key Vault
+        uses: azure/cli@v2
+        with:
+          azcliversion: agentazcliversion
+          inlineScript: |
+            # Only fetch non-sensitive values needed for env vars (not secretref'd)
+            ENTRA_MCP_API_CLIENT_ID=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT }} --name ENTRA-MCP-API-CLIENT-ID --query value -o tsv)
+            echo "::add-mask::$ENTRA_MCP_API_CLIENT_ID"
+            echo "ENTRA_MCP_API_CLIENT_ID=$ENTRA_MCP_API_CLIENT_ID" >> $GITHUB_ENV
+
+            ENTRA_MCP_OFFICER_GROUP_ID=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT }} --name ENTRA-MCP-OFFICER-GROUP-ID --query value -o tsv)
+            echo "::add-mask::$ENTRA_MCP_OFFICER_GROUP_ID"
+            echo "ENTRA_MCP_OFFICER_GROUP_ID=$ENTRA_MCP_OFFICER_GROUP_ID" >> $GITHUB_ENV
+
+            COSMOS_ENDPOINT=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT }} --name COSMOS-ENDPOINT --query value -o tsv)
+            echo "::add-mask::$COSMOS_ENDPOINT"
+            echo "COSMOS_ENDPOINT=$COSMOS_ENDPOINT" >> $GITHUB_ENV
+
+            MS_GRAPH_TENANT_ID=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT }} --name MS-GRAPH-TENANT-ID --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_TENANT_ID"
+            echo "MS_GRAPH_TENANT_ID=$MS_GRAPH_TENANT_ID" >> $GITHUB_ENV
+
+            MS_GRAPH_CLIENT_ID=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT }} --name MS-GRAPH-CLIENT-ID --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_CLIENT_ID"
+            echo "MS_GRAPH_CLIENT_ID=$MS_GRAPH_CLIENT_ID" >> $GITHUB_ENV
+
+            ALADTEC_URL=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT }} --name ALADTEC-URL --query value -o tsv)
+            echo "::add-mask::$ALADTEC_URL"
+            echo "ALADTEC_URL=$ALADTEC_URL" >> $GITHUB_ENV
+
+            ACR_LOGIN_SERVER=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT }} --name ACR-LOGIN-SERVER --query value -o tsv)
+            echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> $GITHUB_ENV
+
+      - name: Build image with ACR
+        uses: azure/cli@v2
+        with:
+          azcliversion: agentazcliversion
+          inlineScript: |
+            az acr build \
+              --registry ${{ env.ACR_NAME }} \
+              --image ${{ env.IMAGE_NAME }}:${{ github.sha }} \
+              --image ${{ env.IMAGE_NAME }}:latest \
+              .
+
+      - name: Configure Key Vault secret references
+        uses: azure/cli@v2
+        with:
+          azcliversion: agentazcliversion
+          inlineScript: |
+            VAULT_URL="https://${{ env.KEY_VAULT }}.vault.azure.net"
+
+            az containerapp secret set \
+              --name ${{ env.CONTAINER_APP }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --secrets \
+                "aladtec-password=keyvaultref:${VAULT_URL}/secrets/ALADTEC-PASSWORD,identityref:system" \
+                "aladtec-username=keyvaultref:${VAULT_URL}/secrets/ALADTEC-USERNAME,identityref:system" \
+                "ms-graph-client-secret=keyvaultref:${VAULT_URL}/secrets/MS-GRAPH-CLIENT-SECRET,identityref:system" \
+                "entra-mcp-api-client-secret=keyvaultref:${VAULT_URL}/secrets/ENTRA-MCP-API-CLIENT-SECRET,identityref:system" \
+                "ispyfire-url=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-URL,identityref:system" \
+                "ispyfire-username=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-USERNAME,identityref:system" \
+                "ispyfire-password=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-PASSWORD,identityref:system" \
+                "neris-client-id=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-ID,identityref:system" \
+                "neris-client-secret=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-SECRET,identityref:system" \
+              --output none
+
+      - name: Deploy to Container Apps
+        uses: azure/cli@v2
+        with:
+          azcliversion: agentazcliversion
+          inlineScript: |
+            az containerapp update \
+              --name ${{ env.CONTAINER_APP }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+              --set-env-vars \
+                "ENTRA_MCP_API_TENANT_ID=${{ env.MS_GRAPH_TENANT_ID }}" \
+                "ENTRA_MCP_API_CLIENT_ID=${{ env.ENTRA_MCP_API_CLIENT_ID }}" \
+                "ENTRA_MCP_OFFICER_GROUP_ID=${{ env.ENTRA_MCP_OFFICER_GROUP_ID }}" \
+                "ENTRA_MCP_API_CLIENT_SECRET=secretref:entra-mcp-api-client-secret" \
+                "COSMOS_ENDPOINT=${{ env.COSMOS_ENDPOINT }}" \
+                "MS_GRAPH_TENANT_ID=${{ env.MS_GRAPH_TENANT_ID }}" \
+                "MS_GRAPH_CLIENT_ID=${{ env.MS_GRAPH_CLIENT_ID }}" \
+                "MS_GRAPH_CLIENT_SECRET=secretref:ms-graph-client-secret" \
+                "ALADTEC_URL=${{ env.ALADTEC_URL }}" \
+                "ALADTEC_USERNAME=secretref:aladtec-username" \
+                "ALADTEC_PASSWORD=secretref:aladtec-password" \
+                "ISPYFIRE_URL=secretref:ispyfire-url" \
+                "ISPYFIRE_USERNAME=secretref:ispyfire-username" \
+                "ISPYFIRE_PASSWORD=secretref:ispyfire-password" \
+                "NERIS_CLIENT_ID=secretref:neris-client-id" \
+                "NERIS_CLIENT_SECRET=secretref:neris-client-secret" \
+                "MCP_SERVER_URL=https://${{ env.CUSTOM_DOMAIN }}" \
+                "BUILD_VERSION=${{ github.sha }}" \
+              --replace-env-vars
+
+      - name: Configure EasyAuth
+        uses: azure/cli@v2
+        with:
+          azcliversion: agentazcliversion
+          inlineScript: |
+            az containerapp auth update \
+              --name ${{ env.CONTAINER_APP }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --unauthenticated-client-action AllowAnonymous \
+              --enabled true \
+              --output none
+
+            az containerapp auth microsoft update \
+              --name ${{ env.CONTAINER_APP }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --client-id "${{ env.ENTRA_MCP_API_CLIENT_ID }}" \
+              --client-secret-name entra-mcp-api-client-secret \
+              --tenant-id "${{ env.MS_GRAPH_TENANT_ID }}" \
+              --yes \
+              --output none
+
+      - name: Health check
+        run: |
+          echo "Waiting for deployment to stabilize..."
+          sleep 30
+
+          echo "Health check: https://${{ env.CUSTOM_DOMAIN }}/health"
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://${{ env.CUSTOM_DOMAIN }}/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "✓ Health check passed (attempt $i)"
+              curl -s "https://${{ env.CUSTOM_DOMAIN }}/health" | python3 -m json.tool
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS — retrying in 15s..."
+            sleep 15
+          done
+
+          echo "⚠ Health check did not pass after 5 attempts"
+          exit 1

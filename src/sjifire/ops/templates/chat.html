@@ -1,0 +1,759 @@
+{% extends "base.html" %}
+
+{% block title %}Incident Report &mdash; {{ incident_number }}{% endblock %}
+
+{% block head_scripts %}
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+    body { overflow: hidden; }
+
+    /* ── Layout ── */
+    .chat-app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .chat-header {
+      background: linear-gradient(135deg, #0f2240, #1a3a5c);
+      border-bottom: 3px solid var(--color-red);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .chat-header-left { display: flex; align-items: center; gap: 12px; }
+    .chat-header h1   { font-size: 16px; color: var(--text-primary); font-weight: 600; }
+    .back-link         { color: var(--color-blue); text-decoration: none; font-size: 13px; opacity: .8; }
+    .back-link:hover   { opacity: 1; }
+    .print-link        { color: var(--text-muted); text-decoration: none; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border-medium); border-radius: 4px; }
+    .print-link:hover  { color: var(--text-secondary); border-color: var(--color-blue); }
+
+    .status-badge {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .status-badge.draft        { background: var(--blue-alpha);  color: var(--color-blue); }
+    .status-badge.in_progress  { background: var(--amber-alpha); color: var(--color-amber); }
+    .status-badge.ready_review { background: var(--green-alpha); color: var(--color-green); }
+
+    /* ── Messages area ── */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .messages::-webkit-scrollbar       { width: 6px; }
+    .messages::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+
+    .msg {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--color-blue);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--bg-panel-alt);
+      border: 1px solid var(--border-default);
+      border-bottom-left-radius: 4px;
+    }
+    .msg.assistant p             { margin-bottom: 8px; }
+    .msg.assistant p:last-child  { margin-bottom: 0; }
+    .msg.assistant strong        { color: var(--text-primary); }
+    .msg.assistant code          { background: var(--border-medium); padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+    .msg.assistant pre           { background: var(--bg-page); border: 1px solid var(--border-default); border-radius: 6px; padding: 10px; margin: 8px 0; overflow-x: auto; }
+    .msg.assistant pre code      { background: none; padding: 0; }
+    .msg.assistant ul,
+    .msg.assistant ol            { margin: 4px 0 8px 20px; }
+    .msg.assistant li            { margin-bottom: 4px; }
+    .msg.assistant a             { color: #93c5fd; text-decoration: underline; text-underline-offset: 2px; }
+    .msg.assistant a:hover       { color: #bfdbfe; }
+    .msg.assistant blockquote    { border-left: 3px solid var(--color-blue); padding-left: 12px; margin: 8px 0; color: var(--text-muted); }
+    .msg.assistant table         { border-collapse: collapse; margin: 8px 0; font-size: 13px; width: 100%; }
+    .msg.assistant th,
+    .msg.assistant td            { padding: 6px 12px; text-align: left; border-bottom: 1px solid var(--border-default); white-space: nowrap; }
+    .msg.assistant th            { font-weight: 600; color: var(--text-primary); background: var(--bg-page); }
+    .msg.assistant tr:last-child td { border-bottom: none; }
+
+    /* ── Tool indicators ── */
+    .tool-indicator {
+      align-self: flex-start;
+      max-width: 85%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      background: var(--border-subtle);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .tool-indicator .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border-medium);
+      border-top-color: var(--color-blue);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .tool-result {
+      align-self: flex-start;
+      max-width: 85%;
+      padding: 8px 14px;
+      background: var(--green-alpha);
+      border: 1px solid rgba(34, 197, 94, .2);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--color-green);
+      cursor: pointer;
+    }
+    .tool-result:hover { background: rgba(34, 197, 94, .2); }
+    .tool-error { background: rgba(239, 68, 68, .1); border-color: rgba(239, 68, 68, .2); color: #f87171; }
+    .tool-error:hover { background: rgba(239, 68, 68, .2); }
+
+    /* ── Incident summary panel ── */
+    .incident-summary {
+      flex-shrink: 0;
+      margin: 12px 20px 0;
+      padding: 12px 16px;
+      background: var(--bg-panel-alt);
+      border: 1px solid var(--border-default);
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+    }
+    .incident-summary .summary-nature    { font-weight: 600; color: var(--text-primary); font-size: 14px; }
+    .incident-summary .summary-short-dsc { color: var(--text-muted); font-weight: 400; }
+    .incident-summary .summary-address   { color: var(--text-secondary); }
+    .incident-summary .summary-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 16px;
+      color: var(--text-dim);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .incident-summary .summary-meta span { white-space: nowrap; }
+
+    .completeness-bar          { display: inline-flex; align-items: center; gap: 6px; }
+    .completeness-bar .bar     { display: inline-block; width: 48px; height: 6px; background: var(--border-medium); border-radius: 3px; overflow: hidden; vertical-align: middle; }
+    .completeness-bar .bar-fill { display: block; height: 100%; background: var(--color-blue); border-radius: 3px; transition: width .3s; }
+
+    /* ── Typing indicator ── */
+    .typing {
+      align-self: flex-start;
+      display: flex;
+      gap: 4px;
+      padding: 12px 16px;
+      background: var(--bg-panel-alt);
+      border: 1px solid var(--border-default);
+      border-radius: 12px;
+      border-bottom-left-radius: 4px;
+    }
+    .typing span              { width: 7px; height: 7px; background: var(--text-dim); border-radius: 50%; animation: bounce 1.4s infinite; }
+    .typing span:nth-child(2) { animation-delay: .2s; }
+    .typing span:nth-child(3) { animation-delay: .4s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30%           { transform: translateY(-6px); }
+    }
+
+    /* ── Input bar ── */
+    .input-bar {
+      border-top: 1px solid var(--border-default);
+      padding: 12px 20px;
+      background: var(--bg-panel);
+      flex-shrink: 0;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .input-bar textarea {
+      flex: 1;
+      background: var(--bg-page);
+      border: 1px solid var(--border-medium);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      padding: 10px 14px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      min-height: 42px;
+      max-height: 120px;
+      line-height: 1.5;
+    }
+    .input-bar textarea:focus       { outline: none; border-color: var(--color-blue); }
+    .input-bar textarea::placeholder { color: var(--text-dim); }
+    .input-bar textarea:disabled    { opacity: .5; }
+
+    .attach-btn {
+      background: var(--bg-page);
+      border: 1px solid var(--border-medium);
+      border-radius: 8px;
+      color: var(--text-muted);
+      font-size: 20px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 42px;
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    .attach-btn:hover:not(:disabled) { border-color: var(--color-blue); color: var(--text-secondary); }
+    .attach-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    .send-btn {
+      background: var(--color-blue);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      height: 42px;
+    }
+    .send-btn:hover:not(:disabled) { background: #4a94f0; }
+    .send-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Image preview strip ── */
+    .image-preview {
+      display: flex;
+      gap: 8px;
+      padding: 8px 20px 0;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .preview-thumb {
+      position: relative;
+      width: 64px;
+      height: 64px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border-medium);
+    }
+    .preview-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .remove-img {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      background: rgba(0,0,0,.6);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+    .remove-img:hover { background: rgba(220,38,38,.8); }
+
+    /* ── Image thumbnails in user messages ── */
+    .msg-images {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .msg-images img {
+      width: 80px;
+      height: 80px;
+      object-fit: cover;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid rgba(255,255,255,.2);
+    }
+    .msg-images img:hover { opacity: .85; }
+
+    /* ── Lightbox ── */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      cursor: pointer;
+    }
+    .lightbox img {
+      max-width: 90vw;
+      max-height: 90vh;
+      border-radius: 8px;
+    }
+
+    /* ── Suggestion chips ── */
+    .chat-hints {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 20px;
+      border-top: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+    .chat-hint {
+      background: var(--border-subtle);
+      border: 1px solid var(--border-default);
+      color: var(--text-muted);
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 14px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .chat-hint:hover {
+      background: rgba(96, 165, 250, .1);
+      border-color: var(--color-blue);
+      color: var(--text-secondary);
+    }
+
+    /* ── Error banner ── */
+    .error-banner {
+      background: var(--red-alpha);
+      border: 1px solid rgba(220, 38, 38, .3);
+      color: var(--color-error);
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      align-self: stretch;
+      text-align: center;
+    }
+
+    /* ── Chat responsive ── */
+    @media (max-width: 640px) {
+      .msg            { max-width: 95%; }
+      .chat-header h1 { font-size: 14px; }
+      .input-bar      { padding: 8px 12px; }
+    }
+</style>
+{% endblock %}
+
+{% block header %}{% endblock %}
+
+{% block body %}
+<div class="chat-app" x-data="chatApp()" x-init="init()" x-cloak>
+  <!-- Compact header -->
+  <div class="chat-header">
+    <div class="chat-header-left">
+      <a href="/reports" class="back-link">&larr; Reports</a>
+      <h1>{{ incident_number }}</h1>
+      <span class="status-badge {{ incident_status }}" x-text="status">{{ incident_status }}</span>
+    </div>
+    <a href="/reports/{{ incident_id }}/print" target="_blank" class="print-link">Print Report</a>
+  </div>
+
+  {% if dispatch %}
+  <!-- Incident summary panel -->
+  <div class="incident-summary">
+    <div>
+      <span class="summary-nature">{{ dispatch.nature }}</span>
+      {% if dispatch.short_dsc %}<span class="summary-short-dsc"> &mdash; {{ dispatch.short_dsc }}</span>{% endif %}
+    </div>
+    {% if dispatch.address %}<div class="summary-address">{{ dispatch.address }}</div>{% endif %}
+    <div class="summary-meta">
+      {% if dispatch.time_reported %}<span>{{ dispatch.time_reported }}</span>{% endif %}
+      {% if dispatch.ic %}<span>IC: {{ dispatch.ic }}</span>{% endif %}
+      {% if dispatch.responding_units %}<span>Units: {{ dispatch.responding_units }}</span>{% endif %}
+      <span class="completeness-bar" x-show="completeness">Report: <span x-text="completeness.filled + '/' + completeness.total"></span> <span class="bar"><span class="bar-fill" :style="'width:' + (completeness.total ? (completeness.filled / completeness.total * 100) : 0) + '%'"></span></span></span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Messages -->
+  <div class="messages" x-ref="messages">
+    <!-- Message list -->
+    <template x-for="(msg, i) in messages" :key="i">
+      <div>
+        <!-- User or assistant message -->
+        <template x-if="msg.type === 'message'">
+          <div class="msg" :class="msg.role">
+            <template x-if="msg.images && msg.images.length">
+              <div class="msg-images">
+                <template x-for="(img, j) in msg.images" :key="j">
+                  <img :src="img" @click="lightboxSrc = img">
+                </template>
+              </div>
+            </template>
+            <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content"></div>
+          </div>
+        </template>
+        <!-- Tool call indicator -->
+        <template x-if="msg.type === 'tool_call'">
+          <div class="tool-indicator">
+            <template x-if="msg.pending"><div class="spinner"></div></template>
+            <span x-text="msg.label"></span>
+          </div>
+        </template>
+        <!-- Tool result -->
+        <template x-if="msg.type === 'tool_result'">
+          <div class="tool-result" :class="msg.is_error && 'tool-error'" x-text="(msg.is_error ? '\u2717 ' : '\u2713 ') + msg.summary" @click="msg.expanded = !msg.expanded"></div>
+        </template>
+        <!-- Error -->
+        <template x-if="msg.type === 'error'">
+          <div class="error-banner" x-text="msg.content"></div>
+        </template>
+      </div>
+    </template>
+
+    <!-- Typing indicator (shown while waiting for first token) -->
+    <template x-if="streaming && !currentText">
+      <div class="typing"><span></span><span></span><span></span></div>
+    </template>
+
+    <!-- Streaming assistant message -->
+    <template x-if="streaming && currentText">
+      <div class="msg assistant" x-html="renderMarkdown(currentText)"></div>
+    </template>
+  </div>
+
+  <!-- Quick action chips -->
+  <div class="chat-hints" x-show="!streaming">
+    <button class="chat-hint" @click="sendMessage('Show the dispatch log')">Show dispatch log</button>
+    <button class="chat-hint" @click="sendMessage('Add today\'s on-duty crew')">Add today's crew</button>
+    <button class="chat-hint" @click="sendMessage('Fill in timestamps from dispatch')">Fill in timestamps</button>
+    <button class="chat-hint" @click="sendMessage('Write the narrative')">Write narrative</button>
+    <button class="chat-hint" @click="sendMessage('What fields are still missing?')">What's missing?</button>
+  </div>
+
+  <!-- Image preview strip -->
+  <div class="image-preview" x-show="pendingImages.length > 0">
+    <template x-for="(img, i) in pendingImages" :key="i">
+      <div class="preview-thumb">
+        <img :src="img.dataUrl">
+        <button class="remove-img" @click="pendingImages.splice(i, 1)">&times;</button>
+      </div>
+    </template>
+  </div>
+
+  <!-- Input bar -->
+  <div class="input-bar">
+    <button class="attach-btn" @click="$refs.fileInput.click()" :disabled="streaming" title="Attach a scene photo, whiteboard, or run sheet">&#128206;</button>
+    <input type="file" x-ref="fileInput" accept="image/jpeg,image/png,image/webp,image/gif" multiple @change="handleFiles($event)" style="display:none" capture="environment">
+    <textarea
+      x-ref="input"
+      x-model="inputText"
+      :disabled="streaming"
+      placeholder="Describe what happened, or attach a photo..."
+      @keydown.enter.prevent="if (!$event.shiftKey) sendMessage()"
+      @input="autoResize($event)"
+      rows="1"
+    ></textarea>
+    <button class="send-btn" :disabled="streaming || (!inputText.trim() && !pendingImages.length)" @click="sendMessage()">Send</button>
+  </div>
+
+  <!-- Lightbox -->
+  <div class="lightbox" x-show="lightboxSrc" @click="lightboxSrc = ''" x-cloak>
+    <img :src="lightboxSrc" @click.stop>
+  </div>
+</div>
+{% endblock %}
+
+{% block body_scripts %}
+<script>
+function chatApp() {
+  return {
+    messages: [],
+    inputText: '',
+    streaming: false,
+    currentText: '',
+    status: '{{ incident_status }}',
+    completeness: {{ completeness | tojson }},
+    incidentId: '{{ incident_id }}',
+    pendingImages: [],
+    lightboxSrc: '',
+
+    async init() {
+      this.initScroll();
+
+      // Load conversation history
+      try {
+        const res = await authFetch(`/reports/${this.incidentId}/conversation`);
+        if (res.ok) {
+          const data = await res.json();
+          for (const msg of data.messages || []) {
+            if (msg.content) {
+              this.messages.push({type: 'message', role: msg.role, content: msg.content});
+            }
+            if (msg.tool_use) {
+              for (const tu of msg.tool_use) {
+                this.messages.push({
+                  type: 'tool_result',
+                  summary: tu.name + ' completed',
+                  expanded: false
+                });
+              }
+            }
+          }
+          this.scrollToBottom(true);
+        }
+      } catch (e) {
+        console.error('Failed to load history:', e);
+      }
+
+      // Auto-start if no conversation exists
+      if (this.messages.length === 0) {
+        this.$nextTick(() => this.sendMessage('Begin report'));
+      }
+    },
+
+    renderMarkdown(text) {
+      if (!text) return '';
+      try {
+        return DOMPurify.sanitize(marked.parse(text));
+      } catch {
+        return text;
+      }
+    },
+
+    autoResize(e) {
+      const ta = e.target;
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+    },
+
+    async handleFiles(event) {
+      const files = Array.from(event.target.files || []);
+      const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+      for (const file of files) {
+        if (this.pendingImages.length >= 3) break;
+        if (!allowed.includes(file.type)) continue;
+        const img = await this.compressImage(file);
+        if (img) this.pendingImages.push(img);
+      }
+      event.target.value = '';
+    },
+
+    compressImage(file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const MAX = 1536;
+            let w = img.width, h = img.height;
+            if (w > MAX || h > MAX) {
+              const scale = MAX / Math.max(w, h);
+              w = Math.round(w * scale);
+              h = Math.round(h * scale);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            const base64 = dataUrl.split(',')[1];
+            resolve({dataUrl, base64, mediaType: 'image/jpeg'});
+          };
+          img.onerror = () => resolve(null);
+          img.src = e.target.result;
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      });
+    },
+
+    _userScrolledUp: false,
+
+    initScroll() {
+      const el = this.$refs.messages;
+      if (!el) return;
+      el.addEventListener('scroll', () => {
+        // "Near bottom" = within 80px of the end
+        this._userScrolledUp = (el.scrollHeight - el.scrollTop - el.clientHeight) > 80;
+      });
+    },
+
+    scrollToBottom(force) {
+      if (!force && this._userScrolledUp) return;
+      this.$nextTick(() => {
+        const el = this.$refs.messages;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    async sendMessage(overrideText) {
+      const text = overrideText || this.inputText.trim();
+      const images = this.pendingImages.slice();
+      if ((!text && !images.length) || this.streaming) return;
+
+      const displayText = text || '(Attached photo)';
+
+      // Add user message with image thumbnails
+      const msgObj = {type: 'message', role: 'user', content: displayText};
+      if (images.length) msgObj.images = images.map(img => img.dataUrl);
+      this.messages.push(msgObj);
+      this.inputText = '';
+      this.pendingImages = [];
+      this.streaming = true;
+      this.currentText = '';
+      this._userScrolledUp = false;
+      this.scrollToBottom(true);
+
+      // Reset textarea height
+      this.$refs.input.style.height = 'auto';
+
+      // Build request body
+      const reqBody = {message: displayText};
+      if (images.length) {
+        reqBody.images = images.map(img => ({data: img.base64, media_type: img.mediaType}));
+      }
+
+      try {
+        const res = await authFetch(`/reports/${this.incidentId}/chat`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(reqBody)
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({error: 'Request failed'}));
+          this.messages.push({type: 'error', content: err.error || 'Request failed'});
+          this.streaming = false;
+          return;
+        }
+
+        // Read SSE stream
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const {done, value} = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, {stream: true});
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          let eventType = '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith('data: ') && eventType) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                this.handleEvent(eventType, data);
+              } catch {}
+              eventType = '';
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Chat error:', e);
+        this.messages.push({type: 'error', content: 'Connection error. Please try again.'});
+      }
+
+      // Finalize streaming message
+      if (this.currentText) {
+        this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+        this.currentText = '';
+      }
+      this.streaming = false;
+      this.scrollToBottom();
+      this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+    },
+
+    handleEvent(type, data) {
+      if (type === 'text') {
+        this.currentText += data.content || '';
+        this.scrollToBottom();
+      } else if (type === 'tool_call') {
+        // Finalize current text if any
+        if (this.currentText) {
+          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+          this.currentText = '';
+        }
+        const labels = {
+          get_incident: 'Loading incident data...',
+          update_incident: 'Saving changes...',
+          reset_incident: 'Resetting report...',
+          get_dispatch_call: 'Looking up dispatch data...',
+          search_dispatch_calls: 'Searching dispatch calls...',
+          get_on_duty_crew: 'Checking crew schedule...',
+          get_neris_values: 'Looking up NERIS values...'
+        };
+        this.messages.push({
+          type: 'tool_call',
+          label: labels[data.name] || `Running ${data.name}...`,
+          pending: true
+        });
+        this.scrollToBottom();
+      } else if (type === 'tool_result') {
+        // Mark last tool_call as complete
+        for (let i = this.messages.length - 1; i >= 0; i--) {
+          if (this.messages[i].type === 'tool_call' && this.messages[i].pending) {
+            this.messages[i].pending = false;
+            break;
+          }
+        }
+        this.messages.push({
+          type: 'tool_result',
+          summary: data.summary || data.name,
+          is_error: data.is_error || false,
+          expanded: false
+        });
+        this.scrollToBottom();
+        // After a successful reset, reload to get fresh state
+        if (data.name === 'reset_incident' && !(data.summary || '').startsWith('Error')) {
+          setTimeout(() => location.reload(), 800);
+          return;
+        }
+      } else if (type === 'status_update') {
+        if (data.completeness) this.completeness = data.completeness;
+        if (data.status) {
+          this.status = data.status;
+        }
+      } else if (type === 'done') {
+        // Token usage could be shown but keeping it minimal
+      } else if (type === 'error') {
+        console.error('Chat SSE error:', data);
+        if (this.currentText) {
+          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+          this.currentText = '';
+        }
+        this.messages.push({type: 'error', content: data.message});
+        this.scrollToBottom();
+      }
+    }
+  };
+}
+</script>
+{% endblock %}

@@ -2,6 +2,56 @@
   "company_name": "San Juan Island Fire & Rescue",
   "domain": "sjifire.org",
   "service_email": "svc-automations@sjifire.org",
+  "timezone": "America/Los_Angeles",
+  "cosmos_database": "sjifire-incidents",
+  "rank_hierarchy": [
+    "Chief",
+    "Division Chief",
+    "Battalion Chief",
+    "Captain",
+    "Lieutenant"
+  ],
+  "officer_positions": ["Chief", "Captain", "Lieutenant"],
+  "operational_positions": [
+    "Firefighter",
+    "Apparatus Operator",
+    "Support",
+    "Wildland Firefighter",
+    "Marine: Deckhand",
+    "Marine: Mate",
+    "Marine: Pilot"
+  ],
+  "marine_positions": [
+    "Marine: Deckhand",
+    "Marine: Mate",
+    "Marine: Pilot"
+  ],
+  "chief_unit_prefixes": ["BN", "CH", "OPS"],
+  "neris_entity_id": "FD53055879",
+  "default_city": "Friday Harbor",
+  "default_state": "WA",
+  "officer_group_name": "MCP Incident Officers",
+  "position_order": [
+    "Chief",
+    "Captain",
+    "Lieutenant",
+    "Apparatus Operator",
+    "Firefighter",
+    "EMT",
+    "Support",
+    "Marine Pilot",
+    "Marine Mate",
+    "Backup Duty Officer"
+  ],
+  "schedule_excluded_sections": ["administration", "time off", "trades"],
+  "schedule_section_order": ["chief", "e31", "s31", "station 31", "backup", "fb", "fireboat", "support"],
+  "schedule_section_labels": {
+    "S31": "Station 31",
+    "FB31": "Fireboat 31 Standby",
+    "Support": "Support Standby"
+  },
+  "duty_event_subject": "On Duty",
+  "calendar_category": "Aladtec",
   "skip_emails": [
     "aladtec.admin@sjifire.org",
     "api@sjifire.org"

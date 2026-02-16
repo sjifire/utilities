@@ -163,7 +163,15 @@ class TestDaySchedule:
                 date=date(2026, 2, 1),
                 section="Administration",
                 position="Chief",
-                name="",  # Unfilled
+                name="",  # Unfilled (empty)
+                start_time="18:00",
+                end_time="18:00",
+            ),
+            ScheduleEntry(
+                date=date(2026, 2, 1),
+                section="S31",
+                position="Apparatus Operator",
+                name="S31 / Apparatus Operator",  # Unfilled (placeholder)
                 start_time="18:00",
                 end_time="18:00",
             ),
@@ -178,33 +186,63 @@ class TestDaySchedule:
         assert "S32" in by_section
         assert "Administration" in by_section
 
-        assert len(by_section["S31"]) == 2
+        assert len(by_section["S31"]) == 3  # 2 filled + 1 placeholder
         assert len(by_section["S32"]) == 1
         assert len(by_section["Administration"]) == 1
 
     def test_get_filled_positions_all(self, sample_entries):
-        """Get all filled positions."""
+        """Get all filled positions (excludes empty and placeholder names)."""
         day = DaySchedule(date=date(2026, 2, 1), platoon="A", entries=sample_entries)
         filled = day.get_filled_positions()
 
-        # Should include 3 (excluding empty name in Administration)
+        # 3 real people; excludes empty name AND "S31 / Apparatus Operator" placeholder
         assert len(filled) == 3
         names = [e.name for e in filled]
         assert "John Doe" in names
         assert "Jane Smith" in names
         assert "Bob Johnson" in names
+        assert "S31 / Apparatus Operator" not in names
 
-    def test_get_filled_positions_exclude_sections(self, sample_entries):
-        """Get filled positions excluding certain sections."""
+    def test_get_filled_positions_dedup(self, sample_entries):
+        """Duplicate entries (same name/position/section) are removed."""
+        # Add a duplicate of Jane Smith
+        sample_entries.append(
+            ScheduleEntry(
+                date=date(2026, 2, 1),
+                section="S31",
+                position="Firefighter",
+                name="Jane Smith",
+                start_time="18:00",
+                end_time="18:00",
+            )
+        )
         day = DaySchedule(date=date(2026, 2, 1), platoon="A", entries=sample_entries)
-        filled = day.get_filled_positions(exclude_sections=["S32"])
+        filled = day.get_filled_positions()
 
-        # Should only include S31 entries (2)
-        assert len(filled) == 2
+        # Still 3 unique people despite the duplicate
+        assert len(filled) == 3
         names = [e.name for e in filled]
-        assert "John Doe" in names
-        assert "Jane Smith" in names
-        assert "Bob Johnson" not in names
+        assert names.count("Jane Smith") == 1
+
+    def test_get_filled_positions_different_positions_kept(self, sample_entries):
+        """Same person in different positions is NOT deduplicated."""
+        sample_entries.append(
+            ScheduleEntry(
+                date=date(2026, 2, 1),
+                section="Backup",
+                position="Backup Duty Officer",
+                name="John Doe",
+                start_time="18:00",
+                end_time="18:00",
+            )
+        )
+        day = DaySchedule(date=date(2026, 2, 1), platoon="A", entries=sample_entries)
+        filled = day.get_filled_positions()
+
+        # John Doe appears twice: Captain on S31 and Backup Duty Officer
+        assert len(filled) == 4
+        john_entries = [e for e in filled if e.name == "John Doe"]
+        assert len(john_entries) == 2
 
     def test_entries_default_empty(self):
         """Entries defaults to empty list."""

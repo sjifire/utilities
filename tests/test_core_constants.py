@@ -1,132 +1,137 @@
-"""Tests for core/constants.py - organizational constants."""
+"""Tests for organization config values (loaded from organization.json)."""
 
-from sjifire.core.constants import (
-    MARINE_POSITIONS,
-    OPERATIONAL_POSITIONS,
-    RANK_HIERARCHY,
-)
+from sjifire.core.config import get_org_config
 
 
 class TestRankHierarchy:
-    """Tests for RANK_HIERARCHY constant."""
+    """Tests for rank_hierarchy config."""
 
-    def test_is_list(self):
-        """RANK_HIERARCHY should be a list."""
-        assert isinstance(RANK_HIERARCHY, list)
+    def test_is_tuple(self):
+        assert isinstance(get_org_config().rank_hierarchy, tuple)
 
     def test_not_empty(self):
-        """RANK_HIERARCHY should not be empty."""
-        assert len(RANK_HIERARCHY) > 0
+        assert len(get_org_config().rank_hierarchy) > 0
 
     def test_contains_chief(self):
-        """RANK_HIERARCHY should contain Chief."""
-        assert "Chief" in RANK_HIERARCHY
+        assert "Chief" in get_org_config().rank_hierarchy
 
     def test_contains_captain(self):
-        """RANK_HIERARCHY should contain Captain."""
-        assert "Captain" in RANK_HIERARCHY
+        assert "Captain" in get_org_config().rank_hierarchy
 
     def test_contains_lieutenant(self):
-        """RANK_HIERARCHY should contain Lieutenant."""
-        assert "Lieutenant" in RANK_HIERARCHY
+        assert "Lieutenant" in get_org_config().rank_hierarchy
 
     def test_chief_ranks_first(self):
-        """Chief ranks should come before Captain/Lieutenant."""
-        chief_idx = RANK_HIERARCHY.index("Chief")
-        captain_idx = RANK_HIERARCHY.index("Captain")
-        lieutenant_idx = RANK_HIERARCHY.index("Lieutenant")
+        rh = get_org_config().rank_hierarchy
+        chief_idx = rh.index("Chief")
+        captain_idx = rh.index("Captain")
+        lieutenant_idx = rh.index("Lieutenant")
         assert chief_idx < captain_idx < lieutenant_idx
 
     def test_all_strings(self):
-        """All entries should be strings."""
-        for rank in RANK_HIERARCHY:
+        for rank in get_org_config().rank_hierarchy:
             assert isinstance(rank, str)
             assert len(rank) > 0
 
 
 class TestMarinePositions:
-    """Tests for MARINE_POSITIONS constant."""
+    """Tests for marine_positions config."""
 
-    def test_is_set(self):
-        """MARINE_POSITIONS should be a set."""
-        assert isinstance(MARINE_POSITIONS, set)
+    def test_is_frozenset(self):
+        assert isinstance(get_org_config().marine_positions, frozenset)
 
     def test_not_empty(self):
-        """MARINE_POSITIONS should not be empty."""
-        assert len(MARINE_POSITIONS) > 0
+        assert len(get_org_config().marine_positions) > 0
 
     def test_contains_deckhand(self):
-        """MARINE_POSITIONS should contain Marine: Deckhand."""
-        assert "Marine: Deckhand" in MARINE_POSITIONS
+        assert "Marine: Deckhand" in get_org_config().marine_positions
 
     def test_contains_mate(self):
-        """MARINE_POSITIONS should contain Marine: Mate."""
-        assert "Marine: Mate" in MARINE_POSITIONS
+        assert "Marine: Mate" in get_org_config().marine_positions
 
     def test_contains_pilot(self):
-        """MARINE_POSITIONS should contain Marine: Pilot."""
-        assert "Marine: Pilot" in MARINE_POSITIONS
+        assert "Marine: Pilot" in get_org_config().marine_positions
 
     def test_all_marine_prefixed(self):
-        """All marine positions should start with 'Marine:'."""
-        for position in MARINE_POSITIONS:
+        for position in get_org_config().marine_positions:
             assert position.startswith("Marine:"), f"'{position}' should start with 'Marine:'"
 
     def test_all_strings(self):
-        """All entries should be non-empty strings."""
-        for position in MARINE_POSITIONS:
+        for position in get_org_config().marine_positions:
             assert isinstance(position, str)
             assert len(position) > 0
 
 
 class TestOperationalPositions:
-    """Tests for OPERATIONAL_POSITIONS constant."""
+    """Tests for operational_positions config."""
 
-    def test_is_set(self):
-        """OPERATIONAL_POSITIONS should be a set."""
-        assert isinstance(OPERATIONAL_POSITIONS, set)
+    def test_is_frozenset(self):
+        assert isinstance(get_org_config().operational_positions, frozenset)
 
     def test_not_empty(self):
-        """OPERATIONAL_POSITIONS should not be empty."""
-        assert len(OPERATIONAL_POSITIONS) > 0
+        assert len(get_org_config().operational_positions) > 0
 
     def test_contains_firefighter(self):
-        """OPERATIONAL_POSITIONS should contain Firefighter."""
-        assert "Firefighter" in OPERATIONAL_POSITIONS
+        assert "Firefighter" in get_org_config().operational_positions
 
     def test_contains_apparatus_operator(self):
-        """OPERATIONAL_POSITIONS should contain Apparatus Operator."""
-        assert "Apparatus Operator" in OPERATIONAL_POSITIONS
+        assert "Apparatus Operator" in get_org_config().operational_positions
 
     def test_contains_support(self):
-        """OPERATIONAL_POSITIONS should contain Support."""
-        assert "Support" in OPERATIONAL_POSITIONS
+        assert "Support" in get_org_config().operational_positions
 
     def test_contains_wildland(self):
-        """OPERATIONAL_POSITIONS should contain Wildland Firefighter."""
-        assert "Wildland Firefighter" in OPERATIONAL_POSITIONS
+        assert "Wildland Firefighter" in get_org_config().operational_positions
 
     def test_includes_marine_positions(self):
-        """OPERATIONAL_POSITIONS should be a superset of MARINE_POSITIONS."""
-        assert MARINE_POSITIONS.issubset(OPERATIONAL_POSITIONS)
+        cfg = get_org_config()
+        assert cfg.marine_positions.issubset(cfg.operational_positions)
 
     def test_all_strings(self):
-        """All entries should be non-empty strings."""
-        for position in OPERATIONAL_POSITIONS:
+        for position in get_org_config().operational_positions:
             assert isinstance(position, str)
             assert len(position) > 0
 
 
-class TestConstantConsistency:
-    """Tests for consistency between constants."""
+class TestConfigConsistency:
+    """Tests for consistency between config values."""
 
     def test_marine_subset_of_operational(self):
-        """All marine positions should be operational positions."""
-        for position in MARINE_POSITIONS:
-            assert position in OPERATIONAL_POSITIONS, f"'{position}' not in OPERATIONAL_POSITIONS"
+        cfg = get_org_config()
+        for position in cfg.marine_positions:
+            assert position in cfg.operational_positions, (
+                f"'{position}' not in operational_positions"
+            )
 
     def test_no_rank_in_positions(self):
-        """Ranks should not appear in position lists."""
-        for rank in RANK_HIERARCHY:
-            assert rank not in OPERATIONAL_POSITIONS, f"Rank '{rank}' in OPERATIONAL_POSITIONS"
-            assert rank not in MARINE_POSITIONS, f"Rank '{rank}' in MARINE_POSITIONS"
+        cfg = get_org_config()
+        for rank in cfg.rank_hierarchy:
+            assert rank not in cfg.operational_positions, f"Rank '{rank}' in operational_positions"
+            assert rank not in cfg.marine_positions, f"Rank '{rank}' in marine_positions"
+
+    def test_officer_positions_not_empty(self):
+        assert len(get_org_config().officer_positions) > 0
+
+    def test_chief_unit_prefixes_not_empty(self):
+        assert len(get_org_config().chief_unit_prefixes) > 0
+
+    def test_cosmos_database_set(self):
+        assert get_org_config().cosmos_database != ""
+
+    def test_neris_entity_id_set(self):
+        assert get_org_config().neris_entity_id != ""
+
+    def test_default_city_set(self):
+        assert get_org_config().default_city != ""
+
+    def test_default_state_set(self):
+        assert len(get_org_config().default_state) == 2
+
+    def test_officer_group_name_set(self):
+        assert get_org_config().officer_group_name != ""
+
+    def test_duty_event_subject_set(self):
+        assert get_org_config().duty_event_subject != ""
+
+    def test_calendar_category_set(self):
+        assert get_org_config().calendar_category != ""

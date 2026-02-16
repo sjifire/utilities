@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Incident Report &mdash; {{ doc.incident_number }}</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
+  <style>
+    /* Alpine cloak */
+    [x-cloak] { display: none !important; }
+
+    /* ── Reset ── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Screen preview ── */
+    body {
+      background: #e5e7eb;
+      font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      color: #1a1a1a;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .page {
+      max-width: 8.5in;
+      margin: 24px auto;
+      background: #fff;
+      padding: 0.6in 0.7in;
+      box-shadow: 0 2px 12px rgba(0,0,0,.15);
+      border-radius: 2px;
+    }
+
+    /* ── Screen-only controls ── */
+    .screen-controls {
+      max-width: 8.5in;
+      margin: 16px auto 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 8px;
+    }
+    .screen-controls label {
+      font-size: 13px;
+      color: #374151;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .print-btn {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 20px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .print-btn:hover { background: #1d4ed8; }
+    .back-link {
+      color: #2563eb;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .back-link:hover { text-decoration: underline; }
+
+    /* ── Header ── */
+    .report-header {
+      border-bottom: 3px solid #1a1a1a;
+      padding-bottom: 10px;
+      margin-bottom: 16px;
+    }
+    .dept-name {
+      font-size: 18px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #1a1a1a;
+    }
+    .report-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: #4b5563;
+      margin-top: 2px;
+    }
+    .report-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 24px;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+    .report-meta .meta-label {
+      font-weight: 600;
+      color: #374151;
+    }
+    .report-meta .meta-value {
+      color: #1a1a1a;
+    }
+
+    /* ── Sections ── */
+    .section {
+      margin-bottom: 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .section-header {
+      background: #f3f4f6;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: #374151;
+      border-bottom: 1px solid #d1d5db;
+    }
+    .section-body {
+      padding: 10px 12px;
+    }
+
+    /* ── Key-value rows ── */
+    .kv-row {
+      display: flex;
+      gap: 8px;
+      padding: 3px 0;
+    }
+    .kv-label {
+      width: 180px;
+      flex-shrink: 0;
+      font-weight: 600;
+      color: #4b5563;
+      font-size: 12px;
+    }
+    .kv-value {
+      color: #1a1a1a;
+      font-size: 13px;
+    }
+
+    /* ── Tables ── */
+    .report-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .report-table th {
+      text-align: left;
+      padding: 5px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: #4b5563;
+      background: #f9fafb;
+      border-bottom: 1px solid #d1d5db;
+    }
+    .report-table td {
+      padding: 5px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      color: #1a1a1a;
+    }
+    .report-table tr:last-child td { border-bottom: none; }
+
+    /* ── Narrative ── */
+    .narrative-block {
+      white-space: pre-wrap;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #1a1a1a;
+    }
+    .narrative-label {
+      font-weight: 700;
+      font-size: 12px;
+      color: #374151;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .narrative-text { margin-bottom: 12px; }
+    .narrative-text:last-child { margin-bottom: 0; }
+
+    /* ── Footer ── */
+    .report-footer {
+      margin-top: 16px;
+      padding-top: 10px;
+      border-top: 1px solid #d1d5db;
+      font-size: 11px;
+      color: #6b7280;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 20px;
+    }
+
+    /* ── Empty state ── */
+    .empty { color: #9ca3af; font-style: italic; }
+
+    /* ── Internal sections (togglable) ── */
+    .internal-section { border-color: #fbbf24; }
+    .internal-section .section-header { background: #fffbeb; color: #92400e; border-color: #fbbf24; }
+
+    /* ══════════════════════════════════════════
+       Print styles
+       ══════════════════════════════════════════ */
+    @media print {
+      body { background: #fff; }
+      .page {
+        max-width: none;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+        border-radius: 0;
+      }
+      .screen-controls { display: none !important; }
+      .no-print { display: none !important; }
+
+      .section { break-inside: avoid; }
+      .report-header { break-after: avoid; }
+
+      @page {
+        size: letter;
+        margin: 0.5in;
+      }
+    }
+  </style>
+</head>
+<body x-data="{ showInternal: false }">
+  <!-- Screen-only controls -->
+  <div class="screen-controls no-print">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <a href="/reports/{{ doc.id }}" class="back-link">&larr; Back to chat</a>
+      <label>
+        <input type="checkbox" x-model="showInternal">
+        Show internal notes &amp; edit history
+      </label>
+    </div>
+    <button class="print-btn" onclick="window.print()">Print Report</button>
+  </div>
+
+  <div class="page">
+    <!-- ── Report Header ── -->
+    <div class="report-header">
+      <div class="dept-name">San Juan Island Fire &amp; Rescue</div>
+      <div class="report-title">Incident Report</div>
+      <div class="report-meta">
+        <span><span class="meta-label">Incident #:</span> <span class="meta-value">{{ doc.incident_number }}</span></span>
+        <span><span class="meta-label">Date:</span> <span class="meta-value">{{ doc.incident_date }}</span></span>
+        <span><span class="meta-label">Station:</span> <span class="meta-value">{{ doc.station }}</span></span>
+        <span><span class="meta-label">Status:</span> <span class="meta-value" style="text-transform:capitalize">{{ doc.status | replace("_", " ") }}</span></span>
+        {% if doc.neris_incident_id %}
+        <span><span class="meta-label">NERIS ID:</span> <span class="meta-value" style="font-size:11px">{{ doc.neris_incident_id }}</span></span>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ── Incident Information ── -->
+    <div class="section">
+      <div class="section-header">Incident Information</div>
+      <div class="section-body">
+        <div class="kv-row">
+          <span class="kv-label">Type</span>
+          <span class="kv-value">{% if doc.incident_type %}{{ doc.incident_type | replace("||", " > ") | replace("_", " ") | title }}{% else %}<span class="empty">Not set</span>{% endif %}</span>
+        </div>
+        {% if doc.location_use %}
+        <div class="kv-row">
+          <span class="kv-label">Location Use</span>
+          <span class="kv-value">{{ doc.location_use | replace("||", " > ") | replace("_", " ") | title }}</span>
+        </div>
+        {% endif %}
+        <div class="kv-row">
+          <span class="kv-label">Address</span>
+          <span class="kv-value">{% if doc.address %}{{ doc.address }}{% if doc.city %}, {{ doc.city }}{% endif %}{% if doc.state %}, {{ doc.state }}{% endif %}{% else %}<span class="empty">Not set</span>{% endif %}</span>
+        </div>
+        {% if doc.latitude and doc.longitude %}
+        <div class="kv-row">
+          <span class="kv-label">GPS</span>
+          <span class="kv-value">{{ "%.4f" | format(doc.latitude) }}, {{ "%.4f" | format(doc.longitude) }}</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ── Response Timeline ── -->
+    {% if doc.timestamps %}
+    <div class="section">
+      <div class="section-header">Response Timeline</div>
+      <div class="section-body">
+        {% set ts_labels = {
+          "psap_answer_time": "PSAP Answer",
+          "event_first_unit_dispatched": "First Unit Dispatched",
+          "event_first_unit_enroute": "First Unit Enroute",
+          "event_first_unit_arrived": "First Unit Arrived",
+          "event_controlled": "Controlled",
+          "event_last_unit_cleared": "Last Unit Cleared"
+        } %}
+        {% for key, label in ts_labels.items() %}
+        {% if key in doc.timestamps %}
+        <div class="kv-row">
+          <span class="kv-label">{{ label }}</span>
+          <span class="kv-value" style="font-family:monospace">{{ doc.timestamps[key] }}</span>
+        </div>
+        {% endif %}
+        {% endfor %}
+        {% for key, val in doc.timestamps.items() %}
+        {% if key not in ts_labels %}
+        <div class="kv-row">
+          <span class="kv-label">{{ key | replace("_", " ") | title }}</span>
+          <span class="kv-value" style="font-family:monospace">{{ val }}</span>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Apparatus Response ── -->
+    {% if doc.unit_responses %}
+    <div class="section">
+      <div class="section-header">Apparatus Response</div>
+      <div class="section-body" style="padding:0">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Unit</th>
+              <th>Dispatched</th>
+              <th>Enroute</th>
+              <th>On Scene</th>
+              <th>Cleared</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for unit in doc.unit_responses %}
+            <tr>
+              <td style="font-weight:600">{{ unit.get("unit_designator", unit.get("unit", "")) }}</td>
+              <td style="font-family:monospace">{{ unit.get("dispatched", unit.get("unit_dispatched_date_time", "--")) or "--" }}</td>
+              <td style="font-family:monospace">{{ unit.get("enroute", unit.get("unit_enroute_date_time", "--")) or "--" }}</td>
+              <td style="font-family:monospace">{{ unit.get("on_scene", unit.get("unit_arrived_date_time", "--")) or "--" }}</td>
+              <td style="font-family:monospace">{{ unit.get("cleared", unit.get("unit_cleared_date_time", "--")) or "--" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Personnel ── -->
+    {% if doc.crew %}
+    <div class="section">
+      <div class="section-header">Personnel</div>
+      <div class="section-body" style="padding:0">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Rank</th>
+              <th>Unit</th>
+              <th>Position</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for member in doc.crew %}
+            <tr>
+              <td style="font-weight:600">{{ member.name }}</td>
+              <td>{{ member.rank or "--" }}</td>
+              <td>{{ member.unit or "--" }}</td>
+              <td>{{ member.position or "--" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Narrative ── -->
+    {% if doc.narratives and (doc.narratives.outcome or doc.narratives.actions_taken) %}
+    <div class="section">
+      <div class="section-header">Narrative</div>
+      <div class="section-body">
+        {% if doc.narratives.outcome %}
+        <div class="narrative-text">
+          <div class="narrative-label">Outcome</div>
+          <div class="narrative-block">{{ doc.narratives.outcome }}</div>
+        </div>
+        {% endif %}
+        {% if doc.narratives.actions_taken %}
+        <div class="narrative-text">
+          <div class="narrative-label">Actions Taken</div>
+          <div class="narrative-block">{{ doc.narratives.actions_taken }}</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Internal Notes (toggle) ── -->
+    {% if doc.internal_notes %}
+    <div class="section internal-section" x-show="showInternal" x-cloak>
+      <div class="section-header">Internal Notes</div>
+      <div class="section-body">
+        <div class="narrative-block">{{ doc.internal_notes }}</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Edit History (toggle) ── -->
+    {% if doc.edit_history %}
+    <div class="section internal-section" x-show="showInternal" x-cloak>
+      <div class="section-header">Edit History</div>
+      <div class="section-body" style="padding:0">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Editor</th>
+              <th>Fields Changed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in doc.edit_history %}
+            <tr>
+              <td style="font-family:monospace; font-size:11px">{{ entry.timestamp }}</td>
+              <td>{{ entry.editor_name }}</td>
+              <td style="font-size:11px">{{ entry.fields_changed | join(", ") }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Footer ── -->
+    <div class="report-footer">
+      <span>Report by: {{ doc.created_by }}</span>
+      <span>Created: {{ doc.created_at }}</span>
+      {% if doc.updated_at %}<span>Updated: {{ doc.updated_at }}</span>{% endif %}
+      <span>Printed: {{ now }}</span>
+    </div>
+  </div>
+</body>
+</html>

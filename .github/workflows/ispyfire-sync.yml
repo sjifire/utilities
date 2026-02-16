@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      archive_days:
+        description: 'Days to look back for archive'
+        required: false
+        default: '2'
+        type: string
 
 permissions:
   id-token: write
@@ -70,6 +75,14 @@ jobs:
             echo "::add-mask::$ISPYFIRE_PASSWORD"
             echo "ISPYFIRE_PASSWORD=$ISPYFIRE_PASSWORD" >> $GITHUB_ENV
 
+            COSMOS_ENDPOINT=$(az keyvault secret show --vault-name gh-website-utilities --name COSMOS-ENDPOINT --query value -o tsv)
+            echo "::add-mask::$COSMOS_ENDPOINT"
+            echo "COSMOS_ENDPOINT=$COSMOS_ENDPOINT" >> $GITHUB_ENV
+
+            COSMOS_KEY=$(az keyvault secret show --vault-name gh-website-utilities --name COSMOS-KEY --query value -o tsv)
+            echo "::add-mask::$COSMOS_KEY"
+            echo "COSMOS_KEY=$COSMOS_KEY" >> $GITHUB_ENV
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -87,6 +100,15 @@ jobs:
             uv run ispyfire-sync --dry-run
           else
             uv run ispyfire-sync
+          fi
+
+      - name: Archive completed dispatch calls
+        run: |
+          DAYS="${{ inputs.archive_days || '2' }}"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            uv run ispyfire-dispatch archive --days "$DAYS" --dry-run
+          else
+            uv run ispyfire-dispatch archive --days "$DAYS"
           fi
 
       - name: Upload backup artifacts

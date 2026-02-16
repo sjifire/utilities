@@ -109,8 +109,71 @@ src/sjifire/
 │   ├── models.py          # OnDutyEvent, SyncResult dataclasses
 │   ├── duty_sync.py       # DutyCalendarSync for shared mailbox (On Duty events)
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
+├── ops/                   # Operations server (dashboard, reports, MCP tools)
+│   ├── server.py          # FastMCP app, auth config, tool registration
+│   ├── auth.py            # Entra JWT validation, EasyAuth header parsing, UserContext, RBAC
+│   ├── oauth_provider.py  # OAuth AS proxy: Claude.ai ↔ Entra ID
+│   ├── token_store.py     # Two-layer OAuth token store (TTLCache + Cosmos DB)
+│   ├── dashboard.py       # Operations dashboard (client-side rendered) + session bootstrap
+│   ├── prompts.py         # MCP prompts and resources (project instructions, NERIS values)
+│   ├── dispatch/          # iSpyFire dispatch call lookup + archival
+│   │   ├── models.py      # DispatchCallDocument (Pydantic)
+│   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
+│   │   └── tools.py       # MCP tools for dispatch calls
+│   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
+│   │   ├── models.py      # IncidentDocument, CrewAssignment (Pydantic)
+│   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
+│   │   └── tools.py       # MCP tools with role-based access control
+│   ├── neris/tools.py     # NERIS value set lookup tools
+│   ├── personnel/tools.py # Graph API personnel lookup
+│   └── schedule/          # On-duty crew lookup with Cosmos cache
+│       ├── models.py      # DayScheduleCache (Pydantic)
+│       ├── store.py       # Cosmos DB cache with in-memory fallback
+│       └── tools.py       # MCP tool with auto-refresh from Aladtec
 └── scripts/               # CLI entry points
 ```
+
+### Ops Server (Remote, for Claude.ai)
+
+Operations platform at `https://ops.sjifire.org` providing fire district tools, dashboard, and incident reporting. Also serves MCP tools at `/mcp` for Claude.ai. Deployed on Azure Container Apps.
+
+**Auth flow**: Claude.ai → Ops Server (OAuth AS) → Entra ID. The server implements `OAuthAuthorizationServerProvider` from the MCP SDK to bridge Claude.ai's Dynamic Client Registration with Entra ID. See `oauth_provider.py`.
+
+**Access control**:
+- Any `@sjifire.org` Entra user can connect (sign-in audience: `AzureADMyOrg`)
+- Officer group (`MCP Incident Officers`) gates: submit incidents, view all incidents
+- All other tools (dispatch, schedule, personnel) are open to any authenticated user
+
+**MCP tools registered** (19 tools):
+- `start_session` (text summary + browser dashboard URL + session bootstrap)
+- `refresh_dashboard` (refreshes data, returns updated summary + new URL)
+- `get_dashboard` (raw data: on-duty crew, recent calls, report status)
+- `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`, `reset_incident`
+- `list_neris_incidents`, `get_neris_incident` (NERIS federal reporting records)
+- `get_personnel`
+- `get_on_duty_crew` (hides admin by default; `include_admin=True` to show all)
+- `list_dispatch_calls`, `get_dispatch_call`, `get_open_dispatch_calls`, `search_dispatch_calls`
+- `list_neris_value_sets`, `get_neris_values`
+
+**Dashboard**: `start_session` returns a markdown summary (fast text display) plus a link to `/dashboard` for the full visual dashboard. `refresh_dashboard` returns fresh data without the instructions payload. The browser dashboard at `/dashboard` is authenticated via Azure Container Apps EasyAuth (Entra ID SSO) and auto-refreshes every hour. The visual dashboard is rendered client-side from `docs/dashboard-template.html` with injected JSON data.
+
+**MCP prompts**: `operations_dashboard`, `incident_reporting`, `shift_briefing` — selectable workflows in Claude.ai.
+
+**MCP resources**: `sjifire://project-instructions` (from `docs/neris/incident-report-instructions.md`), `sjifire://neris-values` (from `docs/neris/neris-value-sets-reference.md`, auto-generated via `uv run generate-neris-reference`).
+
+**Session instructions**: `docs/mcp-start-session.md` — loaded by `start_session` tool, tells Claude how to present the dashboard and what actions to offer.
+
+**Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
+
+**Cosmos DB backup**: Continuous 30-day PITR (any-second point-in-time restore). For ad-hoc JSON exports beyond 30 days, use `uv run backup-cosmos`. Infrastructure provisioned via `./scripts/setup-azure-ops.sh --phase 2`.
+
+**Deployment**:
+- Dev: `./scripts/deploy-ops.sh` (builds via ACR, deploys, configures EasyAuth, health check, ACR purge)
+- Prod: `.github/workflows/ops-deploy.yml` (on push to main — calls `deploy-ops.sh` with `TAG=${{ github.sha }}`)
+
+**Key env vars** (set on Container App, secrets via Key Vault references):
+- `ENTRA_MCP_API_CLIENT_ID`, `ENTRA_MCP_API_CLIENT_SECRET`, `ENTRA_MCP_OFFICER_GROUP_ID`
+- `COSMOS_ENDPOINT`, `MS_GRAPH_*`, `ALADTEC_*`, `ISPYFIRE_*`, `MCP_SERVER_URL`
 
 ### Group Sync Strategy Pattern
 Group sync uses a strategy pattern with a `GroupMember` protocol that works with both Aladtec `Member` and `EntraUser` objects. The sync pulls membership data directly from Entra ID (which is synced from Aladtec via user sync).
@@ -228,6 +291,14 @@ The `ms-group-sync` command uses Entra ID as the source of truth for membership 
 
 Note: Run `entra-user-sync` before `ms-group-sync` to ensure Entra ID has current data.
 
+### Cosmos DB backup (ad-hoc JSON export)
+```bash
+uv run backup-cosmos                    # Both collections
+uv run backup-cosmos --incidents-only
+uv run backup-cosmos --dispatch-only
+uv run backup-cosmos --output /path/
+```
+
 ### Check linting
 ```bash
 uv run ruff check .
@@ -236,7 +307,7 @@ uv run ruff format --check .
 
 ## Configuration Files
 
-- `config/entra_sync.json`: Company name, domain, skip list
+- `config/organization.json`: Company name, domain, service email, timezone, skip list
 - `config/group_mappings.json`: Position-to-group assignments
 - `.env`: Credentials (not committed) - use `./scripts/pull-secrets.sh` to populate
 
@@ -254,6 +325,8 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ALADTEC-URL`, `ALADTEC-USERNAME`, `ALADTEC-PASSWORD`
 - `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
 - `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
+- `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-MCP-OFFICER-GROUP-ID`
+- `COSMOS-ENDPOINT`, `COSMOS-KEY`, `ACR-LOGIN-SERVER`, `ACR-USERNAME`, `ACR-PASSWORD`
 
 ### OIDC app registration
 - App: `utilities-sync` (client ID in workflow files)
@@ -265,5 +338,6 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Sync every 30 minutes (Entra to iSpyFire), uploads backup artifacts
 - `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
+- `ops-deploy.yml`: Deploy ops server on push to main (paths: `src/sjifire/ops/**`, `Dockerfile`, `pyproject.toml`)
 
 All workflows authenticate via OIDC and fetch secrets from Key Vault (no GitHub secrets required).
