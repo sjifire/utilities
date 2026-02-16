@@ -257,6 +257,84 @@ class TestUpdateIncident:
         assert "submitted" in result["error"].lower()
 
 
+class TestUpdateIncidentActions:
+    """Tests for action_taken / noaction_reason / action_codes on update_incident."""
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_set_noaction_and_reason(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123", action_taken="NOACTION", noaction_reason="CANCELLED"
+        )
+        assert result["action_taken"] == "NOACTION"
+        assert result["noaction_reason"] == "CANCELLED"
+        assert result["action_codes"] == []  # auto-cleared
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_set_action_and_codes(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123",
+            action_taken="ACTION",
+            action_codes=["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT"],
+        )
+        assert result["action_taken"] == "ACTION"
+        assert result["action_codes"] == ["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT"]
+        assert result["noaction_reason"] is None  # auto-cleared
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_invalid_action_taken_rejected(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident("doc-123", action_taken="INVALID")
+        assert "error" in result
+        assert "Invalid action_taken" in result["error"]
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_invalid_noaction_reason_rejected(self, mock_store_cls, regular_user, sample_doc):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident("doc-123", action_taken="NOACTION", noaction_reason="BOGUS")
+        assert "error" in result
+        assert "Invalid noaction_reason" in result["error"]
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_noaction_auto_clears_action_codes(
+        self, mock_store_cls, regular_user, sample_doc
+    ):
+        """Setting NOACTION clears any previously set action_codes."""
+        sample_doc.action_taken = "ACTION"
+        sample_doc.action_codes = ["SUPPRESSION||STRUCTURAL_FIRE_SUPPRESSION||INTERIOR"]
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident(
+            "doc-123", action_taken="NOACTION", noaction_reason="CANCELLED"
+        )
+        assert result["action_taken"] == "NOACTION"
+        assert result["action_codes"] == []
+
+
 class TestSubmitIncident:
     async def test_regular_user_cannot_submit(self, regular_user):
         result = await submit_incident("doc-123")
@@ -958,6 +1036,33 @@ class TestResetIncident:
     #
     #     with patch("sjifire.ops.incidents.tools.get_token_store", mock_get_token_store):
     #         yield
+
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_reset_clears_action_fields(self, mock_store_cls, mock_prefill, regular_user):
+        doc = IncidentDocument(
+            id="doc-reset-action",
+            station="S31",
+            incident_number="26-000944",
+            incident_date=date(2026, 2, 12),
+            created_by="ff@sjifire.org",
+            action_taken="NOACTION",
+            noaction_reason="CANCELLED",
+            action_codes=[],
+        )
+
+        mock_prefill.return_value = {}
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await reset_incident("doc-reset-action")
+
+        assert result["action_taken"] is None
+        assert result["noaction_reason"] is None
+        assert result["action_codes"] == []
 
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")

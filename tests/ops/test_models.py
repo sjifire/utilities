@@ -194,6 +194,89 @@ class TestIncidentDocument:
         assert result["sections"]["narrative"] is False
         assert result["sections"]["actions_taken"] is False
 
+    # ── NOACTION / ACTION fields ──
+
+    def test_new_fields_default_none_and_empty(self):
+        doc = self._make_doc()
+        assert doc.action_taken is None
+        assert doc.noaction_reason is None
+        assert doc.action_codes == []
+
+    def test_completeness_noaction_counts_as_complete(self):
+        doc = self._make_doc(action_taken="NOACTION", noaction_reason="CANCELLED")
+        result = doc.completeness()
+        assert result["sections"]["actions_taken"] is True
+
+    def test_completeness_action_with_codes_counts_as_complete(self):
+        doc = self._make_doc(
+            action_taken="ACTION",
+            action_codes=["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT"],
+        )
+        result = doc.completeness()
+        assert result["sections"]["actions_taken"] is True
+
+    def test_completeness_action_without_codes_is_incomplete(self):
+        doc = self._make_doc(action_taken="ACTION")
+        result = doc.completeness()
+        assert result["sections"]["actions_taken"] is False
+
+    def test_completeness_legacy_narrative_still_works(self):
+        doc = self._make_doc(narratives=Narratives(actions_taken="Deployed lines"))
+        result = doc.completeness()
+        assert result["sections"]["actions_taken"] is True
+
+    def test_to_neris_payload_noaction(self):
+        doc = self._make_doc(action_taken="NOACTION", noaction_reason="CANCELLED")
+        payload = doc.to_neris_payload()
+        at = payload["actions_tactics"]["action_noaction"]
+        assert at["type"] == "NOACTION"
+        assert at["noaction_type"] == "CANCELLED"
+
+    def test_to_neris_payload_action(self):
+        doc = self._make_doc(
+            action_taken="ACTION",
+            action_codes=[
+                "SUPPRESSION||STRUCTURAL_FIRE_SUPPRESSION||INTERIOR",
+                "SALVAGE_AND_OVERHAUL",
+            ],
+        )
+        payload = doc.to_neris_payload()
+        at = payload["actions_tactics"]["action_noaction"]
+        assert at["type"] == "ACTION"
+        assert at["actions"] == [
+            "SUPPRESSION||STRUCTURAL_FIRE_SUPPRESSION||INTERIOR",
+            "SALVAGE_AND_OVERHAUL",
+        ]
+
+    def test_to_neris_payload_no_action_data_omits_field(self):
+        doc = self._make_doc()
+        payload = doc.to_neris_payload()
+        assert "actions_tactics" not in payload
+
+    def test_cosmos_roundtrip_with_action_fields(self):
+        doc = self._make_doc(
+            action_taken="NOACTION",
+            noaction_reason="STAGED_STANDBY",
+        )
+        cosmos_dict = doc.to_cosmos()
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.action_taken == "NOACTION"
+        assert restored.noaction_reason == "STAGED_STANDBY"
+        assert restored.action_codes == []
+
+    def test_cosmos_roundtrip_without_action_fields(self):
+        """Old documents without action fields load with defaults."""
+        doc = self._make_doc()
+        cosmos_dict = doc.to_cosmos()
+        # Simulate old doc missing action fields
+        del cosmos_dict["action_taken"]
+        del cosmos_dict["noaction_reason"]
+        del cosmos_dict["action_codes"]
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.action_taken is None
+        assert restored.noaction_reason is None
+        assert restored.action_codes == []
+
     def test_completeness_survives_cosmos_roundtrip(self):
         doc = self._make_doc(
             incident_type="111",
