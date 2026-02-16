@@ -722,22 +722,86 @@ function chatApp() {
       this.streaming = false;
       this.scrollToBottom(true);
 
-      // If stream ended without 'done', connection was lost — auto-retry
+      // If stream ended without 'done', connection was lost — try to recover
       if (!streamCompleted) {
-        this._reconnectAttempts++;
-        if (this._reconnectAttempts <= 3) {
-          const delay = this._reconnectAttempts * 2000;  // 2s, 4s, 6s
-          console.warn(`Stream lost (attempt ${this._reconnectAttempts}/3) — retrying in ${delay}ms`);
-          setTimeout(() => this.sendMessage('Continue where we left off.'), delay);
-        } else {
-          this._reconnectAttempts = 0;
-          this.messages.push({type: 'error', content: 'Connection lost. Please try again.'});
+        const recovered = await this._recoverFromServer();
+        if (!recovered) {
+          // Server doesn't have new messages — retry the request
+          this._reconnectAttempts++;
+          if (this._reconnectAttempts <= 3) {
+            const delay = this._reconnectAttempts * 2000;  // 2s, 4s, 6s
+            console.warn(`Stream lost (attempt ${this._reconnectAttempts}/3) — retrying in ${delay}ms`);
+            setTimeout(() => this.sendMessage('Continue where we left off.'), delay);
+          } else {
+            this._reconnectAttempts = 0;
+            this.messages.push({type: 'error', content: 'Connection lost. Please try again.'});
+          }
         }
         return;
       }
 
-      this._reconnectAttempts = 0;  // Reset on successful completion
+      this._reconnectAttempts = 0;
       this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+    },
+
+    async _recoverFromServer() {
+      // Fetch server conversation and diff with local state.
+      // If the server has messages we missed, add them to the UI.
+      // Returns true if we recovered (no retry needed).
+      try {
+        // Brief delay — give the server time to finish saving before we check
+        await new Promise(r => setTimeout(r, 1500));
+
+        const res = await authFetch(`/reports/${this.incidentId}/conversation`);
+        if (!res.ok) return false;
+        const data = await res.json();
+        const serverMsgs = (data.messages || []).filter(m => m.content);
+
+        // Count local content messages (user + assistant text, not tool/error)
+        const localCount = this.messages.filter(m => m.type === 'message').length;
+        if (serverMsgs.length <= localCount) return false;
+
+        // Server has messages we don't — add the delta
+        console.log(`Recovering ${serverMsgs.length - localCount} messages from server`);
+        for (let i = localCount; i < serverMsgs.length; i++) {
+          const msg = serverMsgs[i];
+          if (msg.content) {
+            this.messages.push({type: 'message', role: msg.role, content: msg.content});
+          }
+          if (msg.tool_use) {
+            // Collapse consecutive same-tool entries
+            const grouped = [];
+            for (const tu of msg.tool_use) {
+              const prev = grouped[grouped.length - 1];
+              if (prev && prev.name === tu.name) { prev.count++; }
+              else { grouped.push({name: tu.name, count: 1}); }
+            }
+            for (const g of grouped) {
+              this.messages.push({
+                type: 'tool',
+                label: '',
+                toolName: g.name,
+                pending: false,
+                pendingCount: 0,
+                totalCount: g.count,
+                summary: g.count > 1 ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups` : g.name + ' completed',
+                is_error: false
+              });
+            }
+          }
+        }
+
+        // Update status from server if available
+        if (data.status) this.status = data.status;
+
+        this._reconnectAttempts = 0;
+        this.scrollToBottom(true);
+        this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+        return true;
+      } catch (e) {
+        console.warn('Recovery fetch failed:', e);
+        return false;
+      }
     },
 
     handleEvent(type, data) {
