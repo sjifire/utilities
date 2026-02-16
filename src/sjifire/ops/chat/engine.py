@@ -60,23 +60,17 @@ def _user_error(category: str, exc: Exception) -> str:
     return f"{friendly} (ref: {error_id})"
 
 
-def _get_instructions() -> str:
-    """Load incident report instructions for the system prompt."""
-    path = _DOCS_DIR / "neris" / "incident-report-instructions.md"
+def _load_doc(name: str) -> str:
+    """Load a doc file relative to _DOCS_DIR.
+
+    Examples: ``_load_doc("incident-chat-prompt.md")``,
+    ``_load_doc("neris/neris-cheat-sheet.md")``.
+    """
+    path = _DOCS_DIR / name
     try:
         return path.read_text().strip()
     except FileNotFoundError:
-        logger.warning("Incident report instructions not found: %s", path)
-        return ""
-
-
-def _get_neris_cheat_sheet() -> str:
-    """Load the NERIS cheat sheet from docs."""
-    path = _DOCS_DIR / "neris" / "neris-cheat-sheet.md"
-    try:
-        return path.read_text().strip()
-    except FileNotFoundError:
-        logger.warning("NERIS cheat sheet not found: %s", path)
+        logger.warning("Doc file not found: %s", path)
         return ""
 
 
@@ -90,83 +84,16 @@ def _build_system_prompt(
 ) -> str:
     """Build the scoped system prompt for Claude."""
     org = get_org_config()
-    instructions = _get_instructions()
-
-    role = (
-        f"You are an incident report assistant for {org.company_name}. "
-        "Your ONLY purpose is to help firefighters complete NERIS "
-        "incident reports accurately and efficiently."
+    prompt = _load_doc("incident-chat-prompt.md").format(
+        company_name=org.company_name,
+        user_name=user_name,
+        user_email=user_email,
     )
-
-    rules = """\
-RULES:
-- You MUST stay focused on incident reporting. Do not engage in \
-general conversation, answer trivia, write code, tell stories, \
-or help with tasks unrelated to this incident report.
-- If the user asks about something unrelated, briefly redirect: \
-"I'm here to help with your incident report. Let's continue."
-- Be concise. Ask one question at a time.
-- Format data readably: use bullet points or line breaks for \
-lists (crew members, units, timestamps). Never dump everything \
-in a single paragraph.
-- NERIS CODES: All 128 incident type codes AND common codes for \
-action_tactic, location_use, and fire_condition_arrival are in \
-the reference material below — pick from those lists directly, \
-no tool call needed. Present the human-readable label with your \
-reasoning. If the code you need is NOT in the reference material, \
-call get_neris_values ONCE with just the value_set name (e.g. \
-get_neris_values("action_tactic") with NO prefix or search) to \
-get the complete list, then pick from it. Never make multiple \
-narrowing searches. NEVER invent a NERIS code. Do not guess at \
-addresses or timestamps.
-- IMPORTANT: If you ask the user a question or present a choice \
-for confirmation, WAIT for their response before saving. Do NOT \
-call update_incident in the same turn as asking a question. \
-Only save after the user confirms or provides their answer.
-- For fields that are unambiguous from dispatch data (address, \
-timestamps, responding units), save immediately without asking.
-- After each save, confirm what was saved and move to the \
-next section.
-- The person writing this report is {user_name} ({user_email}). \
-Cross-reference their name against the dispatch data \
-(incident_commander_name, responding_units) and crew roster \
-(position, section) to infer their likely role. If the dispatch \
-data shows them as IC, say "It looks like you were IC on this \
-call — is that right?" If the crew roster shows their position \
-(e.g. Captain on E31), use that context. Only ask their role \
-from scratch if you truly cannot determine it from the data.
-- CREW NAME MATCHING: When dispatch data or user input contains \
-last names only (e.g. "Stanger, See, Vos"), use the PERSONNEL \
-ROSTER below to resolve each last name to a full name and email. \
-Never ask the user for first names if you can match from the roster. \
-If a name is not in the roster, call get_personnel for a wider search.
-- DISPATCH LOG: iSpyFire calls it the "radio log" but it is the \
-dispatch log. We do not have audio recordings. When the user asks \
-for the "radio log", "dispatch log", or "CAD notes", show ALL \
-entries from the dispatch data in chronological order: CAD comments, \
-responder status changes (dispatched, enroute, on scene, clear), \
-and any notes — everything with a timestamp. Use get_dispatch_call \
-if the full details aren't in the context. Present it as a clean \
-timeline. Don't say you lack access — this IS the dispatch log."""
-
-    workflow = """\
-WORKFLOW:
-1. Review the dispatch data and crew roster provided below.
-2. Walk through each section, pre-filling from dispatch data.
-3. For unambiguous fields (address, timestamps), save immediately.
-4. For fields requiring judgment (incident type, narratives), \
-present your best guess and WAIT for the user to confirm \
-before saving.
-5. Save each confirmed section as you go.
-6. When all required fields are complete, set status to \
-"ready_review"."""
-
-    cheat_sheet = _get_neris_cheat_sheet()
+    instructions = _load_doc("neris/incident-report-instructions.md")
+    cheat_sheet = _load_doc("neris/neris-cheat-sheet.md")
 
     sections = [
-        role,
-        rules.format(user_name=user_name, user_email=user_email),
-        workflow,
+        prompt,
         instructions,
         f"REPORT AUTHOR: {user_name} ({user_email})",
         f"CURRENT INCIDENT STATE:\n{incident_json}",
@@ -795,23 +722,13 @@ def _build_general_system_prompt(context: dict | None = None) -> str:
     org = get_org_config()
     now = local_now()
 
-    parts = [
-        f"You are an operations assistant for {org.company_name}. "
-        "You help firefighters look up dispatch calls, crew schedules, "
-        "NERIS reporting codes, and incident report status.\n\n"
-        f"TODAY: {now.strftime('%A, %B %d, %Y')}  "
-        f"TIME: {now.strftime('%H:%M')} ({org.timezone})\n\n"
-        "RULES:\n"
-        "- Be concise and helpful.\n"
-        "- Use tools to look up data — don't guess.\n"
-        "- If someone wants to edit an incident report, tell them to "
-        'click "Edit Report" on the reports table for that call.\n'
-        "- You can answer questions about schedules, call history, "
-        "NERIS codes, and report status.\n"
-        "- Format responses using markdown for readability.\n"
-        "- When the user asks about calls visible on the page, use the "
-        "PAGE CONTEXT below before calling tools.",
-    ]
+    prompt = _load_doc("general-chat-prompt.md").format(
+        company_name=org.company_name,
+        today=now.strftime("%A, %B %d, %Y"),
+        time=now.strftime("%H:%M"),
+        timezone=org.timezone,
+    )
+    parts = [prompt]
 
     if context and context.get("calls"):
         calls = context["calls"]
