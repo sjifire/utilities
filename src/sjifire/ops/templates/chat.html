@@ -537,7 +537,7 @@ function chatApp() {
     renderMarkdown(text) {
       if (!text) return '';
       try {
-        return DOMPurify.sanitize(marked.parse(text));
+        return DOMPurify.sanitize(marked.parse(text, { breaks: true }));
       } catch {
         return text;
       }
