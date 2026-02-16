@@ -233,7 +233,8 @@ def _most_senior_officer(entries: list[ScheduleEntryCache]) -> str:
 _STATUS_TO_FIELD: dict[str, str] = {
     "PAGED": "paged",
     "ENRT": "enroute",
-    "ARSTN": "staged",
+    "ARSTN": "staged",  # Arrived at Station (staging in quarters)
+    "ARRNL": "staged",  # Arrived Non-Location (staging in the field)
     "ARRVD": "arrived",
     "CMPLT": "completed",
     "RTQ": "in_quarters",
