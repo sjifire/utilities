@@ -75,14 +75,16 @@ def _load_doc(name: str) -> str:
 
 
 def _build_system_prompt(
-    incident_json: str,
-    dispatch_json: str,
-    crew_json: str,
-    personnel_json: str,
     user_name: str,
     user_email: str,
 ) -> str:
-    """Build the scoped system prompt for Claude."""
+    """Build the stable system prompt for Claude.
+
+    Contains only static content (persona, instructions, NERIS codes) and
+    session-stable context (personnel, author). Dynamic data (incident,
+    dispatch, crew) goes in the messages array so this prompt stays
+    identical across turns and Anthropic's prompt cache hits every time.
+    """
     org = get_org_config()
     prompt = _load_doc("incident-chat-prompt.md").format(
         company_name=org.company_name,
@@ -96,14 +98,32 @@ def _build_system_prompt(
         prompt,
         instructions,
         f"REPORT AUTHOR: {user_name} ({user_email})",
-        f"CURRENT INCIDENT STATE:\n{incident_json}",
-        f"DISPATCH DATA:\n{dispatch_json}",
-        f"CREW ON DUTY:\n{crew_json}",
-        "PERSONNEL ROSTER (use to match last names to full names + emails):\n" + personnel_json,
         _get_all_neris_incident_types(),
         cheat_sheet,
     ]
     return "\n\n".join(sections)
+
+
+def _build_context_message(
+    incident_json: str,
+    dispatch_json: str,
+    crew_json: str,
+    personnel_json: str,
+) -> str:
+    """Build the context preamble injected into the first user message.
+
+    This data changes between turns (incident state updates after tool
+    calls), so it lives in the messages array rather than the system
+    prompt. Anthropic's prompt cache covers the stable system prompt;
+    this message is cheap (a few KB) and always fresh.
+    """
+    parts = [
+        f"CURRENT INCIDENT STATE:\n{incident_json}",
+        f"DISPATCH DATA:\n{dispatch_json}",
+        f"CREW ON DUTY:\n{crew_json}",
+        "PERSONNEL ROSTER (use to match last names to full names + emails):\n" + personnel_json,
+    ]
+    return "\n\n".join(parts)
 
 
 def _format_unit_times_table(
@@ -360,7 +380,10 @@ async def stream_chat(
         )
         return
 
-    # Build system prompt with context
+    # Build stable system prompt (static content only — cached by Anthropic)
+    system_prompt = _build_system_prompt(user.name, user.email)
+
+    # Fetch dynamic context (incident, dispatch, crew, personnel)
     try:
         incident_json, dispatch_json, crew_json, personnel_json = await _fetch_context(
             incident_id, user
@@ -368,8 +391,8 @@ async def stream_chat(
     except Exception as exc:
         yield _sse("error", {"message": _user_error("context", exc)})
         return
-    system_prompt = _build_system_prompt(
-        incident_json, dispatch_json, crew_json, personnel_json, user.name, user.email
+    context_preamble = _build_context_message(
+        incident_json, dispatch_json, crew_json, personnel_json
     )
 
     # Build messages for Claude API
@@ -387,6 +410,10 @@ async def stream_chat(
             entry["content"] = msg.content or ""
         api_messages.append(entry)
 
+    # Prepend fresh context to the user message so Claude always sees
+    # the latest incident state without polluting the stable system prompt.
+    prefixed_message = f"{context_preamble}\n\n---\n\n{user_message}"
+
     # Add the new user message (with optional image content blocks)
     if images:
         content_blocks: list[dict] = [
@@ -400,10 +427,10 @@ async def stream_chat(
             }
             for img in images
         ]
-        content_blocks.append({"type": "text", "text": user_message})
+        content_blocks.append({"type": "text", "text": prefixed_message})
         api_messages.append({"role": "user", "content": content_blocks})
     else:
-        api_messages.append({"role": "user", "content": user_message})
+        api_messages.append({"role": "user", "content": prefixed_message})
     api_messages = _trim_messages(api_messages)
 
     # Record user message (text only — images are one-shot, not stored)

@@ -5,6 +5,7 @@ Group membership is never exposed -- used internally for access control only.
 """
 
 import logging
+import time
 
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.users.users_request_builder import UsersRequestBuilder
@@ -14,6 +15,13 @@ from sjifire.core.msgraph_client import get_graph_client
 from sjifire.ops.auth import get_current_user
 
 logger = logging.getLogger(__name__)
+
+# Cached personnel lists (refreshed every 10 minutes)
+_CACHE_TTL = 600
+_personnel_cache: list[dict[str, str]] | None = None
+_personnel_cache_expires: float = 0
+_operational_cache: list[dict[str, str]] | None = None
+_operational_cache_expires: float = 0
 
 
 async def _fetch_all_users(
@@ -52,7 +60,7 @@ def _is_person(email: str, domain: str) -> bool:
 
 
 async def get_personnel() -> list[dict[str, str]]:
-    """Get a list of active SJI Fire personnel.
+    """Get a list of active SJI Fire personnel (cached 10 min).
 
     Returns names and email addresses only. Use this to look up
     people for crew assignment on incidents. Only returns real people
@@ -61,8 +69,14 @@ async def get_personnel() -> list[dict[str, str]]:
     Returns:
         List of {"name": "...", "email": "..."} for each active user
     """
+    global _personnel_cache, _personnel_cache_expires
+
     user = get_current_user()
     logger.info("Personnel lookup requested by %s", user.email)
+
+    if _personnel_cache and _personnel_cache_expires > time.monotonic():
+        logger.info("Personnel cache hit (%d entries)", len(_personnel_cache))
+        return _personnel_cache
 
     domain = get_domain()
     users = await _fetch_all_users(["displayName", "mail", "userPrincipalName"])
@@ -74,12 +88,14 @@ async def get_personnel() -> list[dict[str, str]]:
             personnel.append({"name": u.display_name or "", "email": email})
 
     personnel.sort(key=lambda p: p["name"])
-    logger.info("Retrieved %d personnel", len(personnel))
+    _personnel_cache = personnel
+    _personnel_cache_expires = time.monotonic() + _CACHE_TTL
+    logger.info("Retrieved %d personnel (cached)", len(personnel))
     return personnel
 
 
 async def get_operational_personnel() -> list[dict[str, str]]:
-    """Get personnel in operational roles (officers + field positions).
+    """Get personnel in operational roles (cached 10 min).
 
     Filters to users who have scheduling positions in extensionAttribute3,
     meaning they're in the Aladtec scheduling system and respond to calls.
@@ -88,6 +104,12 @@ async def get_operational_personnel() -> list[dict[str, str]]:
     Returns:
         List of {"name": "...", "email": "..."} for each operational user
     """
+    global _operational_cache, _operational_cache_expires
+
+    if _operational_cache and _operational_cache_expires > time.monotonic():
+        logger.info("Operational personnel cache hit (%d entries)", len(_operational_cache))
+        return _operational_cache
+
     domain = get_domain()
     users = await _fetch_all_users(
         ["displayName", "mail", "userPrincipalName", "onPremisesExtensionAttributes"],
@@ -104,5 +126,7 @@ async def get_operational_personnel() -> list[dict[str, str]]:
             personnel.append({"name": u.display_name or "", "email": email})
 
     personnel.sort(key=lambda p: p["name"])
-    logger.info("Retrieved %d operational personnel", len(personnel))
+    _operational_cache = personnel
+    _operational_cache_expires = time.monotonic() + _CACHE_TTL
+    logger.info("Retrieved %d operational personnel (cached)", len(personnel))
     return personnel

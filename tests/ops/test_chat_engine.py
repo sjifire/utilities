@@ -9,6 +9,7 @@ import pytest
 
 from sjifire.ops.auth import UserContext
 from sjifire.ops.chat.engine import (
+    _build_context_message,
     _build_general_system_prompt,
     _build_system_prompt,
     _format_unit_times_table,
@@ -56,37 +57,49 @@ _TEST_USER = UserContext(
 
 class TestBuildSystemPrompt:
     def test_includes_org_name(self):
-        prompt = _build_system_prompt("{}", "{}", "[]", "[]", "Test User", "test@sjifire.org")
+        prompt = _build_system_prompt("Test User", "test@sjifire.org")
         assert (
             "San Juan" in prompt
             or "sjifire" in prompt.lower()
             or "incident report" in prompt.lower()
         )
 
-    def test_includes_incident_data(self):
-        incident_json = '{"incident_number": "26-001234"}'
-        prompt = _build_system_prompt(
-            incident_json, "{}", "[]", "[]", "Test User", "test@sjifire.org"
-        )
-        assert "26-001234" in prompt
-
     def test_includes_rules(self):
-        prompt = _build_system_prompt("{}", "{}", "[]", "[]", "Test User", "test@sjifire.org")
+        prompt = _build_system_prompt("Test User", "test@sjifire.org")
         assert "RULES" in prompt
         assert "WORKFLOW" in prompt
 
     def test_includes_user_identity(self):
-        prompt = _build_system_prompt(
-            "{}", "{}", "[]", "[]", "Jordan Pollack", "jpollack@sjifire.org"
-        )
+        prompt = _build_system_prompt("Jordan Pollack", "jpollack@sjifire.org")
         assert "Jordan Pollack" in prompt
         assert "jpollack@sjifire.org" in prompt
 
+    def test_does_not_include_dynamic_data(self):
+        """System prompt should not contain incident/dispatch/crew section headers."""
+        prompt = _build_system_prompt("Test User", "test@sjifire.org")
+        assert "CURRENT INCIDENT STATE:\n" not in prompt
+        assert "DISPATCH DATA:\n" not in prompt
+        assert "CREW ON DUTY:\n" not in prompt
+
+
+class TestBuildContextMessage:
+    def test_includes_incident_data(self):
+        msg = _build_context_message('{"incident_number": "26-001234"}', "{}", "[]", "[]")
+        assert "26-001234" in msg
+        assert "CURRENT INCIDENT STATE" in msg
+
+    def test_includes_all_sections(self):
+        msg = _build_context_message("{}", "{}", "[]", "[]")
+        assert "CURRENT INCIDENT STATE" in msg
+        assert "DISPATCH DATA" in msg
+        assert "CREW ON DUTY" in msg
+        assert "PERSONNEL ROSTER" in msg
+
     def test_includes_personnel_roster(self):
         roster = '[{"name": "Jane Doe", "email": "jdoe@sjifire.org"}]'
-        prompt = _build_system_prompt("{}", "{}", "[]", roster, "Test User", "test@sjifire.org")
-        assert "Jane Doe" in prompt
-        assert "PERSONNEL ROSTER" in prompt
+        msg = _build_context_message("{}", "{}", "[]", roster)
+        assert "Jane Doe" in msg
+        assert "PERSONNEL ROSTER" in msg
 
 
 class TestTrimMessages:
@@ -730,7 +743,9 @@ class TestImageContentBlocks:
         assert last_msg["content"][0]["source"]["media_type"] == "image/jpeg"
         assert last_msg["content"][0]["source"]["data"] == "abc123base64=="
         assert last_msg["content"][1]["type"] == "text"
-        assert last_msg["content"][1]["text"] == "What is this?"
+        # Text should contain context preamble + user message
+        assert "What is this?" in last_msg["content"][1]["text"]
+        assert "CURRENT INCIDENT STATE" in last_msg["content"][1]["text"]
 
     async def test_multiple_images_build_multiple_blocks(self):
         """Multiple images should produce multiple image content blocks."""
@@ -764,8 +779,8 @@ class TestImageContentBlocks:
         assert all(c["type"] == "image" for c in content[:3])
         assert content[3]["type"] == "text"
 
-    async def test_no_images_sends_plain_string(self):
-        """Without images, the API message should be a plain string."""
+    async def test_no_images_sends_prefixed_string(self):
+        """Without images, the API message should be context + user text."""
         from sjifire.ops.chat.budget import BudgetStatus
         from sjifire.ops.chat.engine import stream_chat
 
@@ -785,7 +800,9 @@ class TestImageContentBlocks:
 
         last_msg = captured_messages[-1]
         assert last_msg["role"] == "user"
-        assert last_msg["content"] == "just text"
+        # Message should contain context preamble + user text
+        assert "just text" in last_msg["content"]
+        assert "CURRENT INCIDENT STATE" in last_msg["content"]
 
     async def test_images_not_stored_in_conversation(self):
         """Images should be one-shot — not persisted in conversation messages."""
@@ -810,10 +827,36 @@ class TestImageContentBlocks:
                 e async for e in stream_chat("inc-store", "Look at this", _TEST_USER, images=images)
             ]
 
-        # The stored user message should be text only
+        # The stored user message should be text only (no context preamble, no images)
         assert saved_conv is not None
         user_msgs = [m for m in saved_conv.messages if m.role == "user"]
         assert len(user_msgs) == 1
         assert user_msgs[0].content == "Look at this"
         # Content is a plain string, no image data
         assert "photo123" not in str(user_msgs[0].model_dump())
+
+    async def test_system_prompt_is_stable(self):
+        """System prompt should not contain dynamic incident/dispatch data."""
+        from sjifire.ops.chat.budget import BudgetStatus
+        from sjifire.ops.chat.engine import stream_chat
+
+        captured_system: list = []
+
+        async def fake_stream_loop(client, system, api_messages, conv, user):
+            captured_system.append(system)
+            yield _sse("text", {"content": "ok"})
+
+        with (
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=('{"incident_number": "26-UNIQUE"}', "{}", "[]", "[]"),
+            ),
+            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine.get_client"),
+        ):
+            _ = [e async for e in stream_chat("inc-stable", "hi", _TEST_USER)]
+
+        # System prompt should NOT contain the dynamic incident data
+        assert "26-UNIQUE" not in captured_system[0]
+        assert "CURRENT INCIDENT STATE" not in captured_system[0]
