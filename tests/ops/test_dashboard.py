@@ -28,19 +28,23 @@ _EMPTY_NERIS = {"lookup": {}, "reports": []}
 
 @pytest.fixture(autouse=True)
 def _env():
-    """Ensure dev mode and set officer group for all tests."""
+    """Ensure dev mode and set editor group for all tests."""
+    import sjifire.ops.auth
+
+    sjifire.ops.auth._EDITOR_GROUP_ID = None
     with patch.dict(
         os.environ,
         {
             "ENTRA_MCP_API_CLIENT_ID": "",
             "COSMOS_ENDPOINT": "",
             "COSMOS_KEY": "",
-            "ENTRA_MCP_OFFICER_GROUP_ID": "officer-group",
+            "ENTRA_REPORT_EDITORS_GROUP_ID": "officer-group",
         },
         clear=False,
     ):
         set_current_user(None)
         yield
+    sjifire.ops.auth._EDITOR_GROUP_ID = None
     # Clean up in-memory stores between tests
     DispatchStore._memory.clear()
     IncidentStore._memory.clear()
@@ -181,7 +185,7 @@ class TestGetDashboard:
         result = await get_dashboard()
 
         assert result["user"]["email"] == "ff@sjifire.org"
-        assert result["user"]["is_officer"] is False
+        assert result["user"]["is_editor"] is False
         assert result["on_duty"]["platoon"] == "A"
         assert result["call_count"] == 2
 
@@ -305,7 +309,7 @@ class TestGetDashboard:
 
         result = await get_dashboard()
 
-        assert result["user"]["is_officer"] is True
+        assert result["user"]["is_editor"] is True
         mock_incidents.assert_called_once_with("chief@sjifire.org", True)
 
     @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
@@ -329,7 +333,7 @@ class TestGetDashboard:
 
         result = await get_dashboard()
 
-        assert result["user"]["is_officer"] is False
+        assert result["user"]["is_editor"] is False
         mock_incidents.assert_called_once_with("ff@sjifire.org", False)
 
     @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
@@ -626,7 +630,7 @@ class TestFetchIncidents:
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await _fetch_incidents("chief@sjifire.org", is_officer=True)
+        result = await _fetch_incidents("chief@sjifire.org", is_editor=True)
 
         assert "26-001678" in result
         assert result["26-001678"]["status"] == "in_progress"
@@ -641,7 +645,7 @@ class TestFetchIncidents:
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await _fetch_incidents("ff@sjifire.org", is_officer=False)
+        result = await _fetch_incidents("ff@sjifire.org", is_editor=False)
 
         assert "26-001678" in result
         mock_store.list_for_user.assert_called_once_with(
@@ -657,7 +661,7 @@ class TestFetchIncidents:
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await _fetch_incidents("ff@sjifire.org", is_officer=False)
+        result = await _fetch_incidents("ff@sjifire.org", is_editor=False)
 
         comp = result["26-001678"]["completeness"]
         assert comp["filled"] == 4  # incident_type + address + units + personnel
@@ -670,7 +674,7 @@ class TestFetchIncidents:
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await _fetch_incidents("ff@sjifire.org", is_officer=False)
+        result = await _fetch_incidents("ff@sjifire.org", is_editor=False)
         assert result == {}
 
 

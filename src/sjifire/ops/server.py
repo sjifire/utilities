@@ -29,7 +29,7 @@ from starlette.routing import Route
 
 from sjifire.core.config import get_org_config
 from sjifire.ops import dashboard
-from sjifire.ops.auth import get_easyauth_user, set_current_user
+from sjifire.ops.auth import check_is_editor, get_easyauth_user, set_current_user
 from sjifire.ops.chat.routes import (
     chat_page,
     chat_stream,
@@ -195,8 +195,10 @@ async def dashboard_page(request: Request) -> Response:
     elif provider is not None:
         return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=/dashboard")
     # In dev mode, _DevAuthMiddleware already set the user
-    # Show reports nav: always in dev mode, only for officers in prod
-    show_reports = provider is None or (user is not None and user.is_officer)
+    # Show reports nav: always in dev mode, only for editors in prod
+    show_reports = provider is None or (
+        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+    )
     html = await dashboard.render_for_browser(show_reports=show_reports)
     return Response(html, media_type="text/html")
 

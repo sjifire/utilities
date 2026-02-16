@@ -17,7 +17,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from sjifire.core.config import local_now
-from sjifire.ops.auth import UserContext, get_easyauth_user, set_current_user
+from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user, set_current_user
 from sjifire.ops.chat.engine import stream_chat, stream_general_chat
 from sjifire.ops.chat.store import ConversationStore
 from sjifire.ops.dashboard import get_dashboard_data
@@ -55,8 +55,11 @@ async def reports_list(request: Request) -> Response:
 
         user = _current_user.get()
 
-    # Only officers (or dev mode) can access reports
-    if not is_dev and (user is None or not user.is_officer):
+    # Only editors (or dev mode) can access reports
+    is_editor = is_dev or (
+        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+    )
+    if not is_editor:
         return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     # Reuse the dashboard data pipeline — dispatch calls cross-referenced
@@ -75,7 +78,7 @@ async def reports_list(request: Request) -> Response:
         open_calls=data.get("open_calls", 0),
         today=local_now().date().isoformat(),
         active_page="reports",
-        show_reports=is_dev or (user is not None and user.is_officer),
+        show_reports=is_editor,
     )
     return Response(html, media_type="text/html")
 
@@ -99,8 +102,8 @@ async def create_report(request: Request) -> Response:
     if not user:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
-    # Only officers (or dev mode) can create reports
-    if not is_dev and not user.is_officer:
+    # Only editors (or dev mode) can create reports
+    if not is_dev and not await check_is_editor(user.user_id, fallback=user.is_editor):
         return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     try:
@@ -146,7 +149,10 @@ async def print_report(request: Request) -> Response:
     if not user and not is_dev:
         return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=" + str(request.url.path))
 
-    if not is_dev and (user is None or not user.is_officer):
+    is_editor = is_dev or (
+        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+    )
+    if not is_editor:
         return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     incident_id = request.path_params["incident_id"]
@@ -178,8 +184,11 @@ async def chat_page(request: Request) -> Response:
     if not user and not is_dev:
         return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=" + str(request.url.path))
 
-    # Only officers (or dev mode) can access reports
-    if not is_dev and (user is None or not user.is_officer):
+    # Only editors (or dev mode) can access reports
+    is_editor = is_dev or (
+        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+    )
+    if not is_editor:
         return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     incident_id = request.path_params["incident_id"]
@@ -224,7 +233,7 @@ async def chat_page(request: Request) -> Response:
         incident_status=doc.status,
         completeness=doc.completeness() if not doc.neris_incident_id else None,
         dispatch=dispatch_context,
-        show_reports=is_dev or (user is not None and user.is_officer),
+        show_reports=is_editor,
     )
     return Response(html, media_type="text/html")
 
@@ -240,7 +249,10 @@ async def conversation_history(request: Request) -> Response:
     if not user and not is_dev:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
-    if not is_dev and (user is None or not user.is_officer):
+    is_editor = is_dev or (
+        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+    )
+    if not is_editor:
         return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     incident_id = request.path_params["incident_id"]
@@ -289,7 +301,10 @@ async def chat_stream(request: Request) -> Response:
     if not user and not is_dev:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
-    if not is_dev and (user is None or not user.is_officer):
+    is_editor = is_dev or (
+        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+    )
+    if not is_editor:
         return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     # In dev mode, user may be set by middleware

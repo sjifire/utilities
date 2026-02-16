@@ -168,7 +168,7 @@ class OrgConfig:
     neris_entity_id: str = ""
     default_city: str = ""
     default_state: str = ""
-    officer_group_name: str = ""
+    editor_group_name: str = ""
     position_order: tuple[str, ...] = ()
     schedule_excluded_sections: frozenset[str] = field(default_factory=frozenset)
     schedule_section_order: tuple[str, ...] = ()
@@ -250,7 +250,7 @@ def load_org_config() -> OrgConfig:
         neris_entity_id=config_data.get("neris_entity_id", ""),
         default_city=config_data.get("default_city", ""),
         default_state=config_data.get("default_state", ""),
-        officer_group_name=config_data.get("officer_group_name", ""),
+        editor_group_name=config_data.get("editor_group_name", ""),
         position_order=tuple(config_data.get("position_order", ())),
         schedule_excluded_sections=frozenset(
             s.lower() for s in config_data.get("schedule_excluded_sections", ())

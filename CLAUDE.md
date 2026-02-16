@@ -145,7 +145,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 
 **Access control**:
 - Any `@sjifire.org` Entra user can connect (sign-in audience: `AzureADMyOrg`)
-- Officer group (`MCP Incident Officers`) gates: submit incidents, view all incidents
+- Editor group (`Incident Report Editors`) gates: submit incidents, view all incidents. Membership is checked live via Graph API with 5-minute cache (not stale token claims)
 - All other tools (dispatch, schedule, personnel) are open to any authenticated user
 
 **MCP tools registered** (19 tools):
@@ -178,7 +178,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 - Prod: `.github/workflows/ops-deploy.yml` (on push to main — calls `deploy-ops.sh` with `TAG=${{ github.sha }}`)
 
 **Key env vars** (set on Container App, secrets via Key Vault references):
-- `ENTRA_MCP_API_CLIENT_ID`, `ENTRA_MCP_API_CLIENT_SECRET`, `ENTRA_MCP_OFFICER_GROUP_ID`
+- `ENTRA_MCP_API_CLIENT_ID`, `ENTRA_MCP_API_CLIENT_SECRET`, `ENTRA_REPORT_EDITORS_GROUP_ID`
 - `COSMOS_ENDPOINT`, `MS_GRAPH_*`, `ALADTEC_*`, `ISPYFIRE_*`, `MCP_SERVER_URL`
 
 ### Group Sync Strategy Pattern
@@ -338,7 +338,7 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ALADTEC-URL`, `ALADTEC-USERNAME`, `ALADTEC-PASSWORD`
 - `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
 - `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
-- `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-MCP-OFFICER-GROUP-ID`
+- `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-REPORT-EDITORS-GROUP-ID`
 - `COSMOS-ENDPOINT`, `COSMOS-KEY`, `ACR-LOGIN-SERVER`, `ACR-USERNAME`, `ACR-PASSWORD`
 
 ### OIDC app registration

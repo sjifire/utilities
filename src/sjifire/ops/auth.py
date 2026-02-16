@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import os
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
@@ -22,6 +23,17 @@ logger = logging.getLogger(__name__)
 # Context variable holding the authenticated user for the current request
 _current_user: ContextVar[UserContext | None] = ContextVar("current_user", default=None)
 
+# Editor group ID — read once, supports old env var name for transition
+_EDITOR_GROUP_ID: str | None = None
+
+
+def _get_editor_group_id() -> str:
+    """Return the Entra ID group ID for incident report editors."""
+    global _EDITOR_GROUP_ID
+    if _EDITOR_GROUP_ID is None:
+        _EDITOR_GROUP_ID = os.getenv("ENTRA_REPORT_EDITORS_GROUP_ID", "")
+    return _EDITOR_GROUP_ID
+
 
 @dataclass(frozen=True)
 class UserContext:
@@ -33,14 +45,88 @@ class UserContext:
     groups: frozenset[str] = field(default_factory=frozenset)  # Group object IDs
 
     @property
-    def is_officer(self) -> bool:
-        """Check if user is in the incident officers group.
+    def is_editor(self) -> bool:
+        """Check if user is in the incident report editors group.
 
-        The officer group ID is configured via ENTRA_MCP_OFFICER_GROUP_ID.
-        If not configured, no one has officer privileges (safe default).
+        The group ID is configured via ENTRA_REPORT_EDITORS_GROUP_ID.
+        If not configured, no one has editor privileges (safe default).
         """
-        officer_group = os.getenv("ENTRA_MCP_OFFICER_GROUP_ID", "")
-        return bool(officer_group and officer_group in self.groups)
+        group_id = _get_editor_group_id()
+        return bool(group_id and group_id in self.groups)
+
+
+# ---------------------------------------------------------------------------
+# Live Graph API group membership check (5-minute cache)
+# ---------------------------------------------------------------------------
+
+_editor_check_cache: dict[str, tuple[bool, float]] = {}
+_EDITOR_CHECK_TTL = 300  # 5 minutes
+
+
+async def check_is_editor(user_id: str, *, fallback: bool = False) -> bool:
+    """Check group membership via Graph API with 5-minute cache.
+
+    Falls back to the token-based ``is_editor`` property if the Graph API
+    call fails (e.g., missing credentials in dev mode).
+
+    Args:
+        user_id: Entra object ID of the user
+        fallback: Value of ``user.is_editor`` to use if Graph API fails
+    """
+    now = time.monotonic()
+    cached = _editor_check_cache.get(user_id)
+    if cached is not None:
+        value, ts = cached
+        if (now - ts) < _EDITOR_CHECK_TTL:
+            return value
+
+    group_id = _get_editor_group_id()
+    if not group_id:
+        return False
+
+    try:
+        result = await _check_member_groups(user_id, group_id)
+        _editor_check_cache[user_id] = (result, now)
+        return result
+    except Exception:
+        logger.debug("Graph API group check failed for %s, using fallback", user_id, exc_info=True)
+        return fallback
+
+
+async def _check_member_groups(user_id: str, group_id: str) -> bool:
+    """Call MS Graph checkMemberGroups to verify membership."""
+    import httpx
+
+    tenant_id = os.getenv("ENTRA_MCP_API_TENANT_ID") or os.getenv("MS_GRAPH_TENANT_ID", "")
+    client_id = os.getenv("MS_GRAPH_CLIENT_ID", "")
+    client_secret = os.getenv("MS_GRAPH_CLIENT_SECRET", "")
+
+    if not all([tenant_id, client_id, client_secret]):
+        raise RuntimeError("Graph API credentials not configured")
+
+    # Get app-only token
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(
+            token_url,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "scope": "https://graph.microsoft.com/.default",
+            },
+        )
+        token_resp.raise_for_status()
+        access_token = token_resp.json()["access_token"]
+
+        # Check group membership
+        resp = await client.post(
+            f"https://graph.microsoft.com/v1.0/users/{user_id}/checkMemberGroups",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"groupIds": [group_id]},
+        )
+        resp.raise_for_status()
+        return group_id in resp.json().get("value", [])
 
 
 def get_current_user() -> UserContext:

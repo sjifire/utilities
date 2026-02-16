@@ -127,8 +127,8 @@ class TestConfigConsistency:
     def test_default_state_set(self):
         assert len(get_org_config().default_state) == 2
 
-    def test_officer_group_name_set(self):
-        assert get_org_config().officer_group_name != ""
+    def test_editor_group_name_set(self):
+        assert get_org_config().editor_group_name != ""
 
     def test_duty_event_subject_set(self):
         assert get_org_config().duty_event_subject != ""

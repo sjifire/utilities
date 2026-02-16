@@ -32,9 +32,9 @@ logging.getLogger("azure").setLevel(logging.WARNING)
 
 
 def _setup_officer_context(email: str, name: str) -> None:
-    """Set up an officer-privileged UserContext for local admin use."""
+    """Set up an editor-privileged UserContext for local admin use."""
     fake_group = "local-admin-officer"
-    os.environ["ENTRA_MCP_OFFICER_GROUP_ID"] = fake_group
+    os.environ["ENTRA_REPORT_EDITORS_GROUP_ID"] = fake_group
 
     from sjifire.ops.auth import UserContext, set_current_user
 

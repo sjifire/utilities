@@ -40,9 +40,9 @@ Once connected, Claude can:
 - **Incident Reporting** — Create, edit, and manage incident reports
 - **NERIS** — View and search NERIS incidents, look up valid NERIS codes (incident types, actions, locations, etc.)
 
-### Officer Features
+### Editor Features
 
-Users in the **MCP Incident Officers** Entra group can also:
+Users in the **Incident Report Editors** Entra group can also:
 
 - View all incidents (not just their own)
 - Submit completed reports to NERIS

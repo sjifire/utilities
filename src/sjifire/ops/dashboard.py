@@ -891,7 +891,7 @@ async def get_dashboard() -> dict:
     ) = await asyncio.gather(
         _fetch_recent_calls(),
         _fetch_schedule(),
-        _fetch_incidents(user.email, user.is_officer),
+        _fetch_incidents(user.email, user.is_editor),
         _read_neris_cache(),
         _fetch_fastest_enroute(),
         return_exceptions=True,
@@ -914,7 +914,7 @@ async def get_dashboard() -> dict:
         "user": {
             "email": user.email,
             "name": user.name,
-            "is_officer": user.is_officer,
+            "is_editor": user.is_editor,
         },
     }
 
@@ -1018,7 +1018,7 @@ async def _get_dashboard_cached(*, call_limit: int = 15) -> dict:
     ) = await asyncio.gather(
         _fetch_recent_calls(limit=call_limit),
         _fetch_schedule(),
-        _fetch_incidents(user.email, user.is_officer),
+        _fetch_incidents(user.email, user.is_editor),
         _read_neris_cache(),
         _fetch_fastest_enroute(),
         return_exceptions=True,
@@ -1041,7 +1041,7 @@ async def _get_dashboard_cached(*, call_limit: int = 15) -> dict:
         "user": {
             "email": user.email,
             "name": user.name,
-            "is_officer": user.is_officer,
+            "is_editor": user.is_editor,
         },
     }
 
@@ -1190,10 +1190,10 @@ async def _fetch_schedule():
     return await schedule_tools.get_on_duty_crew()
 
 
-async def _fetch_incidents(user_email: str, is_officer: bool) -> dict[str, dict]:
+async def _fetch_incidents(user_email: str, is_editor: bool) -> dict[str, dict]:
     """Fetch non-submitted incidents and build dispatch_id -> report info lookup."""
     async with IncidentStore() as store:
-        if is_officer:
+        if is_editor:
             incidents = await store.list_by_status(exclude_status="submitted", max_items=50)
         else:
             incidents = await store.list_for_user(

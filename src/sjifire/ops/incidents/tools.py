@@ -3,8 +3,8 @@
 Provides CRUD operations with role-based access control:
 - Any authenticated user can create incidents
 - Creator and personnel can view their incidents
-- Officers (Entra group) can view all incidents and submit to NERIS
-- Only creator and officers can edit incidents
+- Editors (Entra group) can view all incidents and submit to NERIS
+- Only creator and editors can edit incidents
 
 NERIS interaction is only through this module (no separate NERIS tools).
 """
@@ -277,14 +277,14 @@ async def _prefill_from_neris(neris_id: str) -> dict:
     return prefill
 
 
-def _check_view_access(doc: IncidentDocument, user_email: str, is_officer: bool) -> bool:
+def _check_view_access(doc: IncidentDocument, user_email: str, is_editor: bool) -> bool:
     """Check if user can view this incident."""
-    return is_officer or doc.created_by == user_email or user_email in doc.personnel_emails()
+    return is_editor or doc.created_by == user_email or user_email in doc.personnel_emails()
 
 
-def _check_edit_access(doc: IncidentDocument, user_email: str, is_officer: bool) -> bool:
+def _check_edit_access(doc: IncidentDocument, user_email: str, is_editor: bool) -> bool:
     """Check if user can edit this incident."""
-    return is_officer or doc.created_by == user_email
+    return is_editor or doc.created_by == user_email
 
 
 def _parse_units(raw: list[dict]) -> list[UnitAssignment]:
@@ -446,7 +446,7 @@ async def get_incident(incident_id: str) -> dict:
     if doc is None:
         return {"error": "Incident not found"}
 
-    if not _check_view_access(doc, user.email, user.is_officer):
+    if not _check_view_access(doc, user.email, user.is_editor):
         return {"error": "You don't have access to this incident"}
 
     return doc.model_dump(mode="json")
@@ -480,7 +480,7 @@ async def list_incidents(
     exclude_status = "submitted" if status is None else None
 
     async with IncidentStore() as store:
-        if user.is_officer:
+        if user.is_editor:
             incidents = await store.list_by_status(status, exclude_status=exclude_status)
         else:
             incidents = await store.list_for_user(
@@ -558,7 +558,7 @@ async def update_incident(
         if doc is None:
             return {"error": "Incident not found"}
 
-        if not _check_edit_access(doc, user.email, user.is_officer):
+        if not _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to edit this incident"}
 
         if doc.status == "submitted":
@@ -678,8 +678,8 @@ async def submit_incident(incident_id: str) -> dict:
     """
     user = get_current_user()
 
-    if not user.is_officer:
-        group = get_org_config().officer_group_name
+    if not user.is_editor:
+        group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to submit incidents to NERIS. "
             f"Ask an administrator to add you to the {group} group in Entra ID."
@@ -727,7 +727,7 @@ async def reset_incident(incident_id: str) -> dict:
         if doc is None:
             return {"error": "Incident not found"}
 
-        if not _check_edit_access(doc, user.email, user.is_officer):
+        if not _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to reset this incident"}
 
         if doc.status not in _RESETTABLE_STATUSES:
@@ -827,7 +827,7 @@ async def import_from_neris(
         if doc is None:
             return {"error": "Incident not found"}
 
-        if not _check_edit_access(doc, user.email, user.is_officer):
+        if not _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to edit this incident"}
 
         if doc.status == "submitted":
@@ -920,8 +920,8 @@ async def list_neris_incidents() -> dict:
     """
     user = get_current_user()
 
-    if not user.is_officer:
-        group = get_org_config().officer_group_name
+    if not user.is_editor:
+        group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to view or edit NERIS reports. "
             f"Ask an administrator to add you to the {group} group in Entra ID."
@@ -959,8 +959,8 @@ async def get_neris_incident(neris_incident_id: str) -> dict:
     """
     user = get_current_user()
 
-    if not user.is_officer:
-        group = get_org_config().officer_group_name
+    if not user.is_editor:
+        group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to view or edit NERIS reports. "
             f"Ask an administrator to add you to the {group} group in Entra ID."

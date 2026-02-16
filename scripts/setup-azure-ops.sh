@@ -230,23 +230,23 @@ if should_run 1; then
     az ad app permission admin-consent --id "$MCP_CLIENT_ID" 2>/dev/null || \
         warn "Admin consent may require Global Admin — grant manually if needed"
 
-    # Create officer security group
-    EXISTING_GROUP=$(az ad group list --display-name "MCP Incident Officers" --query "[0].id" -o tsv 2>/dev/null || true)
+    # Create report editors security group
+    EXISTING_GROUP=$(az ad group list --display-name "Incident Report Editors" --query "[0].id" -o tsv 2>/dev/null || true)
     if [ -n "$EXISTING_GROUP" ]; then
-        OFFICER_GROUP_ID="$EXISTING_GROUP"
-        warn "Officer group already exists: $OFFICER_GROUP_ID"
+        EDITOR_GROUP_ID="$EXISTING_GROUP"
+        warn "Editor group already exists: $EDITOR_GROUP_ID"
     else
-        info "Creating 'MCP Incident Officers' security group..."
-        OFFICER_GROUP_ID=$(az ad group create \
-            --display-name "MCP Incident Officers" \
-            --mail-nickname "mcp-incident-officers" \
+        info "Creating 'Incident Report Editors' security group..."
+        EDITOR_GROUP_ID=$(az ad group create \
+            --display-name "Incident Report Editors" \
+            --mail-nickname "incident-report-editors" \
             --query id -o tsv)
-        ok "Officer group created: $OFFICER_GROUP_ID"
+        ok "Editor group created: $EDITOR_GROUP_ID"
     fi
 
     # Store secrets in Key Vault
     store_secret "ENTRA-MCP-API-CLIENT-ID" "$MCP_CLIENT_ID"
-    store_secret "ENTRA-MCP-OFFICER-GROUP-ID" "$OFFICER_GROUP_ID"
+    store_secret "ENTRA-REPORT-EDITORS-GROUP-ID" "$EDITOR_GROUP_ID"
 
     ok "Phase 1 complete"
     echo ""
@@ -471,7 +471,7 @@ if should_run 3; then
     }
 
     ENTRA_MCP_CLIENT_ID=$(_get_secret "ENTRA-MCP-API-CLIENT-ID")
-    ENTRA_MCP_OFFICER_GROUP=$(_get_secret "ENTRA-MCP-OFFICER-GROUP-ID")
+    ENTRA_EDITORS_GROUP=$(_get_secret "ENTRA-REPORT-EDITORS-GROUP-ID")
     COSMOS_ENDPOINT_VAL=$(_get_secret "COSMOS-ENDPOINT")
     MS_GRAPH_TENANT_ID=$(_get_secret "MS-GRAPH-TENANT-ID")
     MS_GRAPH_CLIENT_ID=$(_get_secret "MS-GRAPH-CLIENT-ID")
@@ -502,7 +502,7 @@ if should_run 3; then
             --env-vars \
                 "ENTRA_MCP_API_TENANT_ID=$MS_GRAPH_TENANT_ID" \
                 "ENTRA_MCP_API_CLIENT_ID=$ENTRA_MCP_CLIENT_ID" \
-                "ENTRA_MCP_OFFICER_GROUP_ID=$ENTRA_MCP_OFFICER_GROUP" \
+                "ENTRA_REPORT_EDITORS_GROUP_ID=$ENTRA_EDITORS_GROUP" \
                 "COSMOS_DATABASE=$COSMOS_DATABASE" \
                 "COSMOS_ENDPOINT=$COSMOS_ENDPOINT_VAL" \
                 "MS_GRAPH_TENANT_ID=$MS_GRAPH_TENANT_ID" \
@@ -585,10 +585,10 @@ if should_run 3; then
         --output none
     ok "MCP_SERVER_URL set to https://$CUSTOM_DOMAIN"
 
-    # Configure EasyAuth session: 72h cookie + token store for /.auth/me
-    # and /.auth/refresh (proactive token refresh in base.html).
-    # authConfigs only supports PUT (not PATCH), so read-modify-write.
-    info "Configuring EasyAuth session (72h cookie + token store)..."
+    # Configure EasyAuth session: 72h cookie.
+    # Group membership changes are handled by live Graph API checks in auth.py
+    # (5-minute TTL cache), not by token refresh.
+    info "Configuring EasyAuth session (72h cookie)..."
     AUTH_URL="https://management.azure.com/subscriptions/${SUB_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.App/containerApps/${CA_APP}/authConfigs/current?api-version=2024-03-01"
     AUTH_CONFIG=$(az rest --method get --url "$AUTH_URL" 2>/dev/null || echo '{}')
     UPDATED_CONFIG=$(echo "$AUTH_CONFIG" | python3 -c "
@@ -600,17 +600,10 @@ login['cookieExpiration'] = {
     'convention': 'FixedTime',
     'timeToExpiration': '3.00:00:00',
 }
-# Token store enables /.auth/me and /.auth/refresh endpoints.
-# Without this, the proactive session keep-alive in base.html fails
-# silently and group claim changes don't take effect until cookie expiry.
-login['tokenStore'] = {
-    'enabled': True,
-    'tokenRefreshExtensionHours': 72,
-}
 json.dump(cfg, sys.stdout)
 ")
     az rest --method put --url "$AUTH_URL" --body "$UPDATED_CONFIG" --output none
-    ok "EasyAuth session: 72h cookie + token store enabled"
+    ok "EasyAuth session: 72h cookie configured"
 
     ok "Phase 3 complete"
     echo ""
@@ -626,7 +619,7 @@ if should_run 4; then
     REQUIRED_SECRETS=(
         "ENTRA-MCP-API-CLIENT-ID"
         "ENTRA-MCP-API-CLIENT-SECRET"
-        "ENTRA-MCP-OFFICER-GROUP-ID"
+        "ENTRA-REPORT-EDITORS-GROUP-ID"
         "COSMOS-ENDPOINT"
         "COSMOS-KEY"
         "ACR-LOGIN-SERVER"

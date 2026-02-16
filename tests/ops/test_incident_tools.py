@@ -29,10 +29,14 @@ from sjifire.ops.incidents.tools import (
 
 # Fixtures
 @pytest.fixture(autouse=True)
-def _officer_group_env():
-    """Set the officer group ID for all tests."""
-    with patch.dict(os.environ, {"ENTRA_MCP_OFFICER_GROUP_ID": "officer-group"}):
+def _editor_group_env():
+    """Set the editor group ID for all tests."""
+    import sjifire.ops.auth
+
+    sjifire.ops.auth._EDITOR_GROUP_ID = None
+    with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "officer-group"}):
         yield
+    sjifire.ops.auth._EDITOR_GROUP_ID = None
 
 
 @pytest.fixture
@@ -78,30 +82,30 @@ def sample_doc():
 # Access control tests
 class TestViewAccess:
     def test_creator_can_view(self, sample_doc):
-        assert _check_view_access(sample_doc, "ff@sjifire.org", is_officer=False)
+        assert _check_view_access(sample_doc, "ff@sjifire.org", is_editor=False)
 
     def test_crew_can_view(self, sample_doc):
-        assert _check_view_access(sample_doc, "crew1@sjifire.org", is_officer=False)
+        assert _check_view_access(sample_doc, "crew1@sjifire.org", is_editor=False)
 
     def test_officer_can_view(self, sample_doc):
-        assert _check_view_access(sample_doc, "random@sjifire.org", is_officer=True)
+        assert _check_view_access(sample_doc, "random@sjifire.org", is_editor=True)
 
     def test_stranger_cannot_view(self, sample_doc):
-        assert not _check_view_access(sample_doc, "stranger@sjifire.org", is_officer=False)
+        assert not _check_view_access(sample_doc, "stranger@sjifire.org", is_editor=False)
 
 
 class TestEditAccess:
     def test_creator_can_edit(self, sample_doc):
-        assert _check_edit_access(sample_doc, "ff@sjifire.org", is_officer=False)
+        assert _check_edit_access(sample_doc, "ff@sjifire.org", is_editor=False)
 
     def test_officer_can_edit(self, sample_doc):
-        assert _check_edit_access(sample_doc, "random@sjifire.org", is_officer=True)
+        assert _check_edit_access(sample_doc, "random@sjifire.org", is_editor=True)
 
     def test_crew_cannot_edit(self, sample_doc):
-        assert not _check_edit_access(sample_doc, "crew1@sjifire.org", is_officer=False)
+        assert not _check_edit_access(sample_doc, "crew1@sjifire.org", is_editor=False)
 
     def test_stranger_cannot_edit(self, sample_doc):
-        assert not _check_edit_access(sample_doc, "stranger@sjifire.org", is_officer=False)
+        assert not _check_edit_access(sample_doc, "stranger@sjifire.org", is_editor=False)
 
 
 # Tool tests with mocked store
@@ -268,7 +272,7 @@ class TestSubmitIncident:
     async def test_regular_user_cannot_submit(self, regular_user):
         result = await submit_incident("doc-123")
         assert "error" in result
-        assert "officer" in result["error"].lower()
+        assert "not authorized" in result["error"].lower()
 
     async def test_officer_gets_not_available(self, officer_user):
         result = await submit_incident("doc-123")
@@ -301,7 +305,7 @@ class TestListNerisIncidents:
     async def test_regular_user_denied(self, regular_user):
         result = await list_neris_incidents()
         assert "error" in result
-        assert "officer" in result["error"].lower()
+        assert "not authorized" in result["error"].lower()
 
     @patch("sjifire.ops.incidents.tools._list_neris_incidents")
     async def test_handles_api_error(self, mock_list, officer_user):
@@ -328,7 +332,7 @@ class TestGetNerisIncident:
     async def test_regular_user_denied(self, regular_user):
         result = await get_neris_incident("FD53055879|26SJ0001|123")
         assert "error" in result
-        assert "officer" in result["error"].lower()
+        assert "not authorized" in result["error"].lower()
 
     @patch("sjifire.ops.incidents.tools._get_neris_incident")
     async def test_not_found(self, mock_get, officer_user):

@@ -30,7 +30,7 @@
   "neris_entity_id": "FD53055879",
   "default_city": "Friday Harbor",
   "default_state": "WA",
-  "officer_group_name": "MCP Incident Officers",
+  "editor_group_name": "Incident Report Editors",
   "position_order": [
     "Chief",
     "Captain",

@@ -208,7 +208,7 @@ The ops server powers a guided incident reporting workflow through Claude.ai. Us
 - Suggests NERIS codes based on context (e.g., dispatch nature "Medical Aid" → `MEDICAL||INJURY||FALL`)
 - Drafts the outcome narrative from your answers
 - Flags missing required fields before saving
-- Officers can submit completed reports to NERIS
+- Editors (members of the Incident Report Editors group) can submit completed reports to NERIS
 
 **Reference docs:**
 - `docs/neris/incident-report-instructions.md` — Full workflow instructions for the Claude.ai Project
@@ -332,7 +332,7 @@ Runs on push to main (paths: `src/sjifire/ops/**`, `Dockerfile`, `pyproject.toml
 - Health check with version verification
 
 **Secrets (from Key Vault):**
-- `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-MCP-OFFICER-GROUP-ID`
+- `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-REPORT-EDITORS-GROUP-ID`
 - `COSMOS-ENDPOINT`, `MS-GRAPH-*`, `ALADTEC-*`, `ISPYFIRE-*`
 
 ## Azure Key Vault

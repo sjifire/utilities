@@ -126,7 +126,7 @@ _get_secret() {
 
 info "Fetching config from Key Vault..."
 ENTRA_MCP_API_CLIENT_ID=$(_get_secret "ENTRA-MCP-API-CLIENT-ID")
-ENTRA_MCP_OFFICER_GROUP_ID=$(_get_secret "ENTRA-MCP-OFFICER-GROUP-ID")
+ENTRA_REPORT_EDITORS_GROUP_ID=$(_get_secret "ENTRA-REPORT-EDITORS-GROUP-ID")
 COSMOS_ENDPOINT=$(_get_secret "COSMOS-ENDPOINT")
 MS_GRAPH_TENANT_ID=$(_get_secret "MS-GRAPH-TENANT-ID")
 MS_GRAPH_CLIENT_ID=$(_get_secret "MS-GRAPH-CLIENT-ID")
@@ -196,7 +196,7 @@ az containerapp update \
     --replace-env-vars \
         "ENTRA_MCP_API_TENANT_ID=${MS_GRAPH_TENANT_ID}" \
         "ENTRA_MCP_API_CLIENT_ID=${ENTRA_MCP_API_CLIENT_ID}" \
-        "ENTRA_MCP_OFFICER_GROUP_ID=${ENTRA_MCP_OFFICER_GROUP_ID}" \
+        "ENTRA_REPORT_EDITORS_GROUP_ID=${ENTRA_REPORT_EDITORS_GROUP_ID}" \
         "ENTRA_MCP_API_CLIENT_SECRET=secretref:entra-mcp-api-client-secret" \
         "COSMOS_ENDPOINT=${COSMOS_ENDPOINT}" \
         "COSMOS_KEY=secretref:cosmos-key" \
