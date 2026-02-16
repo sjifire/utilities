@@ -501,12 +501,14 @@
         <div class="subtitle">San Juan Island Fire &amp; Rescue</div>
       </div>
     </a>
+    {% if show_reports %}
     <div class="page-header-right">
       <nav class="page-header-nav">
         <a href="/dashboard" class="nav-page-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
-        {% if show_reports %}<a href="/reports" class="nav-page-link {% if active_page == 'reports' %}active{% endif %}">Reports</a>{% endif %}
+        <a href="/reports" class="nav-page-link {% if active_page == 'reports' %}active{% endif %}">Reports</a>
       </nav>
     </div>
+    {% endif %}
   </header>
   {% endblock %}
   {% block tab_bar %}{% endblock %}
