@@ -82,6 +82,11 @@ class IncidentDocument(BaseModel):
     # Narratives
     narratives: Narratives = Field(default_factory=Narratives)
 
+    # Actions & Tactics (NERIS discriminated union: ACTION or NOACTION)
+    action_taken: Literal["ACTION", "NOACTION"] | None = None
+    noaction_reason: str | None = Field(default=None, max_length=100)
+    action_codes: list[str] = Field(default_factory=list)
+
     # Internal tracking
     created_by: str  # Entra ID user email
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -157,6 +162,21 @@ class IncidentDocument(BaseModel):
         if self.timestamps:
             payload["timestamps"] = self.timestamps
 
+        if self.action_taken == "NOACTION" and self.noaction_reason:
+            payload["actions_tactics"] = {
+                "action_noaction": {
+                    "type": "NOACTION",
+                    "noaction_type": self.noaction_reason,
+                }
+            }
+        elif self.action_taken == "ACTION" and self.action_codes:
+            payload["actions_tactics"] = {
+                "action_noaction": {
+                    "type": "ACTION",
+                    "actions": self.action_codes,
+                }
+            }
+
         return payload
 
     def completeness(self) -> dict:
@@ -171,7 +191,11 @@ class IncidentDocument(BaseModel):
             "crew": len(self.crew) > 0,
             "timestamps": len(self.timestamps) > 0,
             "narrative": bool(self.narratives.outcome),
-            "actions_taken": bool(self.narratives.actions_taken),
+            "actions_taken": (
+                self.action_taken == "NOACTION"
+                or (self.action_taken == "ACTION" and len(self.action_codes) > 0)
+                or bool(self.narratives.actions_taken)  # legacy fallback
+            ),
             "address": bool(self.address),
         }
         filled = sum(sections.values())

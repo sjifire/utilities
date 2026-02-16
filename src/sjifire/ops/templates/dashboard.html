@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "partials/_crew_panel.html" import crew_column %}
+{% from "partials/_call_card.html" import call_cards %}
 
 {% block title %}SJIF&amp;R Dashboard{% endblock %}
 
@@ -52,13 +54,6 @@
 
     /* ── Crew ── */
     .crew-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .crew-table td, .crew-table th { white-space: nowrap; }
-    .crew-table .shift { text-align: right; }
-    .section-header {
-      padding: 8px 18px;
-      background: rgba(255, 255, 255, .02);
-      border-bottom: 1px solid var(--border-subtle);
-    }
     .contact-link {
       font-size: 11px;
       color: var(--text-dim);
@@ -224,32 +219,7 @@
           <span style="font-size:14px;color:var(--text-primary)" class="font-semibold">Recent Calls</span>
           <span style="font-size:11px;color:var(--text-dim)">Last 5 calls</span>
         </div>
-        <template x-if="D.recent_calls.length">
-          <div>
-            <template x-for="c in D.recent_calls.slice(0, 5)" :key="c.id">
-              <div class="call-card" :data-s="c.severity">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                  <div style="display:flex;gap:10px">
-                    <span style="font-size:20px;line-height:1" x-text="c.icon"></span>
-                    <div>
-                      <div style="font-size:14px;font-weight:600;color:var(--text-secondary)" x-text="c.nature"></div>
-                      <a :href="mapsUrl(c.address)" target="_blank" rel="noopener" class="address-link" style="display:block;font-size:13px;margin-top:2px" x-text="c.address"></a>
-                      <div x-show="c.short_dsc" style="font-size:12px;color:var(--text-muted);margin-top:3px" x-text="c.short_dsc"></div>
-                      <div x-show="c.summary" style="font-size:12px;color:var(--text-dim);margin-top:2px" x-text="c.summary"></div>
-                    </div>
-                  </div>
-                  <div class="call-card-right">
-                    <div class="nowrap font-semibold" style="font-size:12px;color:var(--text-muted)" x-text="c.date + ' ' + c.time"></div>
-                    <div class="mono font-semibold" style="font-size:12px;color:var(--text-secondary);margin-top:4px" x-text="c.id"></div>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </div>
-        </template>
-        <template x-if="!D.recent_calls.length">
-          <div class="empty-state">No recent calls.</div>
-        </template>
+        {{ call_cards("D.recent_calls", limit=5) }}
       </div>
     </div>
   </div>
@@ -295,105 +265,14 @@
   <!-- CREW TAB -->
   <div x-show="!loading && !error && activeTab === 'crew'">
     <div class="crew-grid">
-    <!-- Current crew -->
-    <div class="panel">
-      <div class="panel-header">
-        <span style="font-size:14px;color:var(--text-primary)" class="font-semibold" x-text="D.platoon + ' \u2014 ' + D.crew_date_range"></span>
-        <span class="badge" x-text="formatShiftEnd(D.shift_end) || 'On duty'"></span>
+      <!-- Current crew -->
+      <div class="panel" style="padding:14px 18px">
+        {{ crew_column("D.sections", "D.platoon + ' \u2014 ' + D.crew_date_range", "On Duty", badge_expr="formatShiftEnd(D.shift_end) || 'On duty'", show_contacts=true, show_shift=true) }}
       </div>
-      <template x-if="D.sections.length">
-        <div class="data-table-wrap">
-          <table class="data-table crew-table">
-            <thead><tr>
-              <th>Name</th>
-              <th>Rank</th>
-              <th class="shift">Shift</th>
-            </tr></thead>
-            <tbody>
-              <template x-for="s in D.sections.slice().reverse()" :key="s.key">
-                <template x-for="(c, i) in [{_header: true, label: s.label}, ...s.members]" :key="c._header ? 'h-' + s.key : c.name + c.shift">
-                  <tr :style="!c._header && s.key === 'Chief Officer' ? 'border-left:3px solid var(--color-amber-dark);background:rgba(245,158,11,.08)' : ''">
-                    <template x-if="c._header">
-                      <td colspan="3" class="section-header uppercase font-semibold" style="font-size:11px;color:var(--text-dim)" x-text="c.label"></td>
-                    </template>
-                    <template x-if="!c._header">
-                      <td class="nowrap font-semibold" style="font-size:13px;color:var(--text-secondary)">
-                        <span x-text="c.name"></span>
-                        <span x-show="c.email || c.mobile" style="font-size:11px">
-                          <template x-if="c.email">
-                            <a class="contact-link" :href="'mailto:' + c.email">email</a>
-                          </template>
-                          <template x-if="c.mobile">
-                            <a class="contact-link" :href="'tel:' + c.mobile">mobile</a>
-                          </template>
-                        </span>
-                      </td>
-                    </template>
-                    <template x-if="!c._header">
-                      <td class="nowrap"><span class="badge" :data-p="c.position" x-text="c.position"></span></td>
-                    </template>
-                    <template x-if="!c._header">
-                      <td class="mono nowrap shift" style="font-size:12px;color:var(--text-dim)" x-text="c.shift"></td>
-                    </template>
-                  </tr>
-                </template>
-              </template>
-            </tbody>
-          </table>
-        </div>
-      </template>
-      <template x-if="!D.sections.length">
-        <div class="empty-state">No crew data available.</div>
-      </template>
-    </div>
-    <!-- Upcoming crew -->
-    <div class="panel" x-show="D.upcoming_sections.length">
-      <div class="panel-header">
-        <span style="font-size:14px;color:var(--text-primary)" class="font-semibold" x-text="'Upcoming \u2014 ' + D.upcoming_platoon + ' ' + D.upcoming_date_range"></span>
-        <span class="badge" x-text="formatShiftStart(D.upcoming_shift_starts) || D.upcoming_crew.length + ' crew'"></span>
+      <!-- Upcoming crew -->
+      <div class="panel" style="padding:14px 18px" x-show="D.upcoming_sections.length">
+        {{ crew_column("D.upcoming_sections", "D.upcoming_platoon + ' ' + D.upcoming_date_range", "Upcoming", badge_expr="formatShiftStart(D.upcoming_shift_starts) || D.upcoming_crew.length + ' crew'", show_contacts=true, show_shift=true) }}
       </div>
-      <template x-if="D.upcoming_sections.length">
-        <div class="data-table-wrap">
-          <table class="data-table crew-table">
-            <thead><tr>
-              <th>Name</th>
-              <th>Rank</th>
-              <th class="shift">Shift</th>
-            </tr></thead>
-            <tbody>
-              <template x-for="s in D.upcoming_sections.slice().reverse()" :key="s.key">
-                <template x-for="(c, i) in [{_header: true, label: s.label}, ...s.members]" :key="c._header ? 'h-' + s.key : c.name + c.shift">
-                  <tr :style="!c._header && s.key === 'Chief Officer' ? 'border-left:3px solid var(--color-amber-dark);background:rgba(245,158,11,.08)' : ''">
-                    <template x-if="c._header">
-                      <td colspan="3" class="section-header uppercase font-semibold" style="font-size:11px;color:var(--text-dim)" x-text="c.label"></td>
-                    </template>
-                    <template x-if="!c._header">
-                      <td class="nowrap font-semibold" style="font-size:13px;color:var(--text-secondary)">
-                        <span x-text="c.name"></span>
-                        <span x-show="c.email || c.mobile" style="font-size:11px">
-                          <template x-if="c.email">
-                            <a class="contact-link" :href="'mailto:' + c.email">email</a>
-                          </template>
-                          <template x-if="c.mobile">
-                            <a class="contact-link" :href="'tel:' + c.mobile">mobile</a>
-                          </template>
-                        </span>
-                      </td>
-                    </template>
-                    <template x-if="!c._header">
-                      <td class="nowrap"><span class="badge" :data-p="c.position" x-text="c.position"></span></td>
-                    </template>
-                    <template x-if="!c._header">
-                      <td class="mono nowrap shift" style="font-size:12px;color:var(--text-dim)" x-text="c.shift"></td>
-                    </template>
-                  </tr>
-                </template>
-              </template>
-            </tbody>
-          </table>
-        </div>
-      </template>
-    </div>
     </div>
   </div>
 

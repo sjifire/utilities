@@ -423,6 +423,9 @@ async def update_incident(
     crew: list[dict] | None = None,
     outcome_narrative: str | None = None,
     actions_taken_narrative: str | None = None,
+    action_taken: str | None = None,
+    noaction_reason: str | None = None,
+    action_codes: list[str] | None = None,
     unit_responses: list[dict] | None = None,
     timestamps: dict[str, str] | None = None,
     internal_notes: str | None = None,
@@ -445,6 +448,9 @@ async def update_incident(
         crew: Replace crew list (each entry: name, email, rank, position, unit)
         outcome_narrative: What happened
         actions_taken_narrative: What actions were taken
+        action_taken: Was action taken? "ACTION" or "NOACTION"
+        noaction_reason: Why no action was taken (CANCELLED, STAGED_STANDBY, NO_INCIDENT_FOUND)
+        action_codes: NERIS action/tactic codes (when action_taken=ACTION)
         unit_responses: NERIS apparatus/unit response data
         timestamps: Event timestamps (dispatch, on_scene, etc.)
         internal_notes: Internal notes (not sent to NERIS)
@@ -528,6 +534,33 @@ async def update_incident(
                 fields_changed.append("outcome_narrative")
             if actions_taken_narrative is not None:
                 fields_changed.append("actions_taken_narrative")
+
+        if action_taken is not None:
+            if action_taken not in ("ACTION", "NOACTION"):
+                return {
+                    "error": f"Invalid action_taken '{action_taken}'. Must be ACTION or NOACTION"
+                }
+            doc.action_taken = action_taken
+            fields_changed.append("action_taken")
+            # Auto-clear the opposite field
+            if action_taken == "NOACTION":
+                doc.action_codes = []
+            elif action_taken == "ACTION":
+                doc.noaction_reason = None
+
+        if noaction_reason is not None:
+            valid_reasons = {"CANCELLED", "STAGED_STANDBY", "NO_INCIDENT_FOUND"}
+            if noaction_reason not in valid_reasons:
+                return {
+                    "error": f"Invalid noaction_reason '{noaction_reason}'. "
+                    f"Must be one of: {', '.join(sorted(valid_reasons))}"
+                }
+            doc.noaction_reason = noaction_reason
+            fields_changed.append("noaction_reason")
+
+        if action_codes is not None:
+            doc.action_codes = action_codes
+            fields_changed.append("action_codes")
 
         if unit_responses is not None:
             doc.unit_responses = unit_responses
@@ -693,6 +726,9 @@ async def reset_incident(incident_id: str) -> dict:
         doc.crew = []
         doc.unit_responses = []
         doc.narratives = Narratives()
+        doc.action_taken = None
+        doc.noaction_reason = None
+        doc.action_codes = []
         doc.internal_notes = ""
 
         # Apply dispatch pre-fill
@@ -886,26 +922,9 @@ async def list_neris_incidents() -> dict:
 
 def _list_neris_incidents() -> dict:
     """Fetch incidents from NERIS (blocking, for thread pool)."""
-    from sjifire.neris.client import NerisClient
+    from sjifire.ops.tasks.neris_cache import fetch_neris_summaries
 
-    with NerisClient() as client:
-        incidents = client.get_all_incidents()
-
-    summaries = []
-    for inc in incidents:
-        dispatch = inc.get("dispatch", {})
-        types = inc.get("incident_types", [])
-        status_info = inc.get("incident_status", {})
-        summaries.append(
-            {
-                "neris_id": inc.get("neris_id", ""),
-                "incident_number": dispatch.get("incident_number", ""),
-                "call_create": dispatch.get("call_create", ""),
-                "status": status_info.get("status", ""),
-                "incident_type": types[0].get("type", "") if types else "",
-            }
-        )
-
+    summaries = fetch_neris_summaries()
     return {"incidents": summaries, "count": len(summaries)}
 
 

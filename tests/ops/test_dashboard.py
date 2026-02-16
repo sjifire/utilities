@@ -146,7 +146,7 @@ class TestNormalizeIncidentNumber:
 
 
 class TestGetDashboard:
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -193,7 +193,7 @@ class TestGetDashboard:
         assert call_2["dispatch_id"] == "26-001650"
         assert call_2["report"] is None
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -216,7 +216,7 @@ class TestGetDashboard:
 
         assert all(c["report"] is None for c in result["recent_calls"])
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -235,7 +235,7 @@ class TestGetDashboard:
         assert result["call_count"] == 2
         assert len(result["recent_calls"]) == 2
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -254,7 +254,7 @@ class TestGetDashboard:
         assert result["call_count"] == 0
         assert result["on_duty"]["platoon"] == "A"
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -279,7 +279,7 @@ class TestGetDashboard:
         assert result["call_count"] == 2
         assert all(c["report"] is None for c in result["recent_calls"])
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -303,7 +303,7 @@ class TestGetDashboard:
         assert result["user"]["is_officer"] is True
         mock_incidents.assert_called_once_with("chief@sjifire.org", True)
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -327,7 +327,7 @@ class TestGetDashboard:
         assert result["user"]["is_officer"] is False
         mock_incidents.assert_called_once_with("ff@sjifire.org", False)
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -369,7 +369,7 @@ class TestGetDashboard:
 class TestNerisCrossReference:
     """Unit tests for NERIS report matching in get_dashboard."""
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -420,7 +420,7 @@ class TestNerisCrossReference:
         assert report["status"] == "PENDING_APPROVAL"
         assert report["neris_id"] == "FD53055879|26001980|123"
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -475,7 +475,7 @@ class TestNerisCrossReference:
         # NERIS entry consumed — not duplicated as a separate entry
         assert result["call_count"] == 1
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -500,7 +500,7 @@ class TestNerisCrossReference:
         assert result["call_count"] == 2
         assert all(c["report"] is None for c in result["recent_calls"])
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -551,7 +551,7 @@ class TestNerisCrossReference:
             assert entry["report"] is not None
             assert entry["report"]["source"] == "neris"
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
@@ -604,29 +604,6 @@ class TestNerisCrossReference:
         assert neris_call["dispatch_id"] == "1770796348"
         assert neris_call["report"]["source"] == "neris"
         assert neris_call["address"] is None
-
-
-# ---------------------------------------------------------------------------
-# Unit tests: _list_neris_reports
-# ---------------------------------------------------------------------------
-
-
-class TestListNerisReports:
-    """Unit tests for _list_neris_reports (blocking NERIS API call)."""
-
-    @patch("sjifire.ops.dashboard._list_neris_reports")
-    async def test_builds_lookup_by_normalized_number(self, mock_list):
-        from sjifire.ops.dashboard import _fetch_neris_reports
-
-        mock_list.return_value = {
-            "lookup": {"26001980": {"source": "neris", "status": "APPROVED"}},
-            "reports": [{"incident_number": "26001980"}],
-        }
-
-        result = await _fetch_neris_reports()
-
-        assert "26001980" in result["lookup"]
-        assert len(result["reports"]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -728,7 +705,7 @@ class TestDashboardIntegration:
     to verify cross-referencing works end-to-end.
     """
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     async def test_calls_matched_to_incidents(
         self,
@@ -765,7 +742,7 @@ class TestDashboardIntegration:
         assert call_2["dispatch_id"] == "26-001650"
         assert call_2["report"] is None
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     async def test_calls_without_any_incidents(
         self, mock_schedule, mock_neris, regular_user, sample_calls, schedule_result
@@ -783,7 +760,7 @@ class TestDashboardIntegration:
         assert result["call_count"] == 2
         assert all(c["report"] is None for c in result["recent_calls"])
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     async def test_submitted_incidents_excluded(
         self, mock_schedule, mock_neris, regular_user, schedule_result
@@ -821,7 +798,7 @@ class TestDashboardIntegration:
         assert result["call_count"] == 1
         assert result["recent_calls"][0]["report"] is None
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     async def test_multiple_incidents_mapped_correctly(
         self, mock_schedule, mock_neris, officer_user, schedule_result
@@ -876,7 +853,7 @@ class TestDashboardIntegration:
                 assert call_entry["report"]["status"] == "draft"
                 assert call_entry["report"]["incident_id"] == "inc-1"
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     async def test_regular_user_only_sees_own_incidents(
         self, mock_schedule, mock_neris, regular_user, schedule_result
@@ -914,7 +891,7 @@ class TestDashboardIntegration:
         assert result["call_count"] == 1
         assert result["recent_calls"][0]["report"] is None
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     async def test_officer_sees_all_incidents_in_dashboard(
         self, mock_schedule, mock_neris, officer_user, schedule_result
@@ -953,7 +930,7 @@ class TestDashboardIntegration:
         assert result["recent_calls"][0]["report"] is not None
         assert result["recent_calls"][0]["report"]["status"] == "draft"
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     async def test_completeness_reflects_actual_data(
         self, mock_schedule, mock_neris, regular_user, schedule_result
@@ -1000,7 +977,7 @@ class TestDashboardIntegration:
         )  # type + address + crew + narrative + timestamps
         assert report["completeness"]["total"] == 7
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     async def test_empty_stores_return_valid_structure(
         self, mock_schedule, mock_neris, regular_user, schedule_result
@@ -1017,7 +994,7 @@ class TestDashboardIntegration:
         assert result["recent_calls"] == []
         assert result["call_count"] == 0
 
-    @patch("sjifire.ops.dashboard._fetch_neris_reports", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
     async def test_neris_matches_dispatch_in_integration(
         self, mock_schedule, mock_neris, regular_user, schedule_result

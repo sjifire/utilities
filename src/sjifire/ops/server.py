@@ -195,7 +195,9 @@ async def dashboard_page(request: Request) -> Response:
     elif provider is not None:
         return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=/dashboard")
     # In dev mode, _DevAuthMiddleware already set the user
-    html = await dashboard.render_for_browser()
+    # Show reports nav: always in dev mode, only for officers in prod
+    show_reports = provider is None or (user is not None and user.is_officer)
+    html = await dashboard.render_for_browser(show_reports=show_reports)
     return Response(html, media_type="text/html")
 
 
@@ -227,6 +229,66 @@ async def open_calls_api(request: Request) -> Response:
 async def dashboard_logout(request: Request) -> Response:
     """Log out of the dashboard and redirect back."""
     return RedirectResponse("/.auth/logout?post_logout_redirect_uri=/dashboard")
+
+
+@mcp.custom_route("/kiosk", methods=["GET"])
+async def kiosk_page(request: Request) -> Response:
+    """Serve the kiosk display page (token-authenticated, no EasyAuth)."""
+    test_mode = request.query_params.get("test_mode", "").lower() == "true"
+
+    if not test_mode:
+        from sjifire.ops.kiosk.store import validate_token
+
+        token = request.query_params.get("token", "")
+        if not token or validate_token(token) is None:
+            return JSONResponse({"error": "Invalid or missing token"}, status_code=401)
+
+    html = await dashboard.render_kiosk()
+    return Response(html, media_type="text/html")
+
+
+@mcp.custom_route("/kiosk/data", methods=["GET"])
+async def kiosk_data(request: Request) -> Response:
+    """Return kiosk data as JSON (token-authenticated)."""
+    test_mode = request.query_params.get("test_mode", "").lower() == "true"
+
+    if test_mode:
+        from sjifire.ops.kiosk.test_data import get_test_kiosk_data
+
+        data = get_test_kiosk_data()
+        # Overlay real crew data from today's schedule (fall back to test crew)
+        try:
+            schedule = await dashboard._fetch_schedule_for_kiosk()
+            raw_crew = schedule.get("crew", [])
+            crew, sections = dashboard._build_crew_list(raw_crew)
+            if crew:
+                data["crew"] = crew
+                data["sections"] = sections
+                data["platoon"] = schedule.get("platoon", "")
+                crew_date = schedule.get("date", "")
+                data["shift_end"] = dashboard._compute_shift_end(raw_crew, crew_date)
+                upcoming = schedule.get("upcoming")
+                if upcoming and isinstance(upcoming, dict):
+                    raw_up = upcoming.get("crew", [])
+                    up_crew, up_sec = dashboard._build_crew_list(raw_up)
+                    data["upcoming_crew"] = up_crew
+                    data["upcoming_sections"] = up_sec
+                    data["upcoming_platoon"] = upcoming.get("platoon", "")
+                    data["upcoming_shift_starts"] = dashboard._compute_shift_start(
+                        raw_up, upcoming.get("date", "")
+                    )
+        except Exception:
+            logger.debug("Could not overlay real crew in test mode", exc_info=True)
+        return JSONResponse(data)
+
+    from sjifire.ops.kiosk.store import validate_token
+
+    token = request.query_params.get("token", "")
+    if not token or validate_token(token) is None:
+        return JSONResponse({"error": "Invalid or missing token"}, status_code=401)
+
+    data = await dashboard.get_kiosk_data()
+    return JSONResponse(data)
 
 
 @mcp.custom_route("/health", methods=["GET"])

@@ -9,6 +9,7 @@ Report status is cross-referenced from two sources:
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -26,10 +27,6 @@ from sjifire.ops.incidents.store import IncidentStore
 from sjifire.ops.schedule import tools as schedule_tools
 
 logger = logging.getLogger(__name__)
-
-# NERIS cache refresh tracking — live API fetch every _NERIS_REFRESH_INTERVAL
-_NERIS_REFRESH_INTERVAL = timedelta(hours=24)
-_neris_last_refresh: datetime | None = None
 
 # Path to docs directory — try source tree first, then /app (Docker).
 _SRC_DOCS = Path(__file__).resolve().parents[3] / "docs"
@@ -144,6 +141,50 @@ async def get_open_calls_cached() -> dict:
         _open_calls_cache = result
         _open_calls_ts = time.monotonic()
         return result
+
+
+# ---------------------------------------------------------------------------
+# Shift timing helpers
+# ---------------------------------------------------------------------------
+
+
+def _compute_shift_end(raw_crew: list[dict], crew_date: str) -> str:
+    """Compute shift end as ISO datetime string from raw crew data."""
+    end_times = [c.get("end_time", "") for c in raw_crew if c.get("end_time")]
+    if not end_times or not crew_date:
+        return ""
+    most_common_end = max(set(end_times), key=end_times.count)
+    try:
+        tz = get_timezone()
+        crew_dt = datetime.strptime(crew_date, "%Y-%m-%d").date()
+        end_parts = most_common_end.split(":")
+        end_h, end_m = int(end_parts[0]), int(end_parts[1]) if len(end_parts) > 1 else 0
+        shift_end_dt = datetime(crew_dt.year, crew_dt.month, crew_dt.day, end_h, end_m, tzinfo=tz)
+        start_times = [c.get("start_time", "") for c in raw_crew if c.get("start_time")]
+        if start_times:
+            most_common_start = max(set(start_times), key=start_times.count)
+            start_h = int(most_common_start.split(":")[0])
+            if end_h <= start_h:
+                shift_end_dt += timedelta(days=1)
+        return shift_end_dt.isoformat()
+    except (ValueError, IndexError):
+        return ""
+
+
+def _compute_shift_start(raw_crew: list[dict], crew_date: str) -> str:
+    """Compute shift start as ISO datetime string from raw crew data."""
+    start_times = [c.get("start_time", "") for c in raw_crew if c.get("start_time")]
+    if not start_times or not crew_date:
+        return ""
+    most_common_start = max(set(start_times), key=start_times.count)
+    try:
+        tz = get_timezone()
+        crew_dt = datetime.strptime(crew_date, "%Y-%m-%d").date()
+        sp = most_common_start.split(":")
+        s_h, s_m = int(sp[0]), int(sp[1]) if len(sp) > 1 else 0
+        return datetime(crew_dt.year, crew_dt.month, crew_dt.day, s_h, s_m, tzinfo=tz).isoformat()
+    except (ValueError, IndexError):
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -553,10 +594,246 @@ async def refresh_dashboard() -> dict:
     }
 
 
-async def render_for_browser() -> str:
+async def render_for_browser(*, show_reports: bool = False) -> str:
     """Render dashboard HTML shell. Data loaded client-side via Alpine.js."""
     template = _jinja_env.get_template("dashboard.html")
-    return template.render(active_page="dashboard")
+    return template.render(active_page="dashboard", show_reports=show_reports)
+
+
+async def render_kiosk() -> str:
+    """Render the kiosk HTML page for station bay monitors."""
+    template = _jinja_env.get_template("kiosk.html")
+    azure_maps_key = os.getenv("AZURE_MAPS_KEY", "")
+    return template.render(azure_maps_key=azure_maps_key)
+
+
+# ---------------------------------------------------------------------------
+# Kiosk data — adaptive caching for open calls + crew
+# ---------------------------------------------------------------------------
+
+# Track when each call was first seen (call_id -> monotonic timestamp)
+_kiosk_call_first_seen: dict[str, float] = {}
+
+# Kiosk cache
+_kiosk_cache: dict | None = None
+_kiosk_cache_ts: float = 0
+_kiosk_cache_lock = asyncio.Lock()
+
+
+def _kiosk_cache_ttl() -> float:
+    """Determine cache TTL based on active call state.
+
+    - No active calls: 5s
+    - Active call, first 5 min: 2s (data changing rapidly)
+    - Active call, after 5 min: 5s (data stabilized)
+    """
+    if not _kiosk_call_first_seen:
+        return 5.0
+
+    now = time.monotonic()
+    for first_seen in _kiosk_call_first_seen.values():
+        if (now - first_seen) < 300:  # 5 minutes
+            return 2.0
+    return 5.0
+
+
+async def get_kiosk_data() -> dict:
+    """Fetch enriched open calls + on-duty crew for the kiosk display.
+
+    Uses adaptive server-side caching: faster refresh during the first
+    5 minutes of a new call, slower once data stabilizes.
+    """
+    global _kiosk_cache, _kiosk_cache_ts
+
+    now = time.monotonic()
+    ttl = _kiosk_cache_ttl()
+    if _kiosk_cache is not None and (now - _kiosk_cache_ts) < ttl:
+        return _kiosk_cache
+
+    async with _kiosk_cache_lock:
+        # Re-check after acquiring lock
+        now = time.monotonic()
+        ttl = _kiosk_cache_ttl()
+        if _kiosk_cache is not None and (now - _kiosk_cache_ts) < ttl:
+            return _kiosk_cache
+
+        result = await _fetch_kiosk_data()
+        _kiosk_cache = result
+        _kiosk_cache_ts = time.monotonic()
+        return result
+
+
+async def _fetch_kiosk_data() -> dict:
+    """Fetch open calls (enriched) and schedule in parallel."""
+    open_calls_result, schedule_result = await asyncio.gather(
+        _fetch_open_calls_enriched(),
+        _fetch_schedule_for_kiosk(),
+        return_exceptions=True,
+    )
+
+    result: dict = {"timestamp": datetime.now(UTC).isoformat()}
+
+    # Open calls
+    if isinstance(open_calls_result, BaseException):
+        logger.exception("Kiosk: open calls fetch failed", exc_info=open_calls_result)
+        result["calls"] = []
+    else:
+        result["calls"] = open_calls_result
+
+    # Update first-seen tracking
+    current_ids = {c["dispatch_id"] for c in result["calls"]}
+    now = time.monotonic()
+    for call_id in current_ids:
+        if call_id not in _kiosk_call_first_seen:
+            _kiosk_call_first_seen[call_id] = now
+    # Remove cleared calls
+    for old_id in list(_kiosk_call_first_seen):
+        if old_id not in current_ids:
+            del _kiosk_call_first_seen[old_id]
+
+    # Schedule
+    if isinstance(schedule_result, BaseException):
+        logger.exception("Kiosk: schedule fetch failed", exc_info=schedule_result)
+        result["schedule"] = {}
+    else:
+        result["schedule"] = schedule_result
+
+    # Build crew list using existing helper
+    raw_crew = result["schedule"].get("crew", [])
+    crew, sections = _build_crew_list(raw_crew)
+    result["crew"] = crew
+    result["sections"] = sections
+    result["platoon"] = result["schedule"].get("platoon", "")
+
+    # Shift end timing
+    crew_date = result["schedule"].get("date", "")
+    result["shift_end"] = _compute_shift_end(raw_crew, crew_date)
+
+    # Upcoming crew
+    upcoming = result["schedule"].get("upcoming")
+    if upcoming and isinstance(upcoming, dict):
+        raw_upcoming = upcoming.get("crew", [])
+        up_crew, up_sections = _build_crew_list(raw_upcoming)
+        result["upcoming_crew"] = up_crew
+        result["upcoming_sections"] = up_sections
+        result["upcoming_platoon"] = upcoming.get("platoon", "")
+        up_date = upcoming.get("date", "")
+        result["upcoming_shift_starts"] = _compute_shift_start(raw_upcoming, up_date)
+    else:
+        result["upcoming_crew"] = []
+        result["upcoming_sections"] = []
+        result["upcoming_platoon"] = ""
+        result["upcoming_shift_starts"] = ""
+
+    return result
+
+
+async def _fetch_schedule_for_kiosk() -> dict:
+    """Fetch schedule without requiring auth context (for kiosk display).
+
+    Replicates the core logic of ``get_on_duty_crew()`` from schedule
+    tools, but skips the ``get_current_user()`` call since the kiosk
+    authenticates via signed token instead of Entra ID.
+    """
+    from sjifire.core.schedule import resolve_duty_date
+    from sjifire.ops.schedule.store import ScheduleStore
+    from sjifire.ops.schedule.tools import (
+        _build_crew_list as _build_schedule_crew,
+    )
+    from sjifire.ops.schedule.tools import (
+        _detect_shift_change_hour_from_cache,
+        _ensure_cache,
+    )
+
+    now = local_now()
+    dt = now.date()
+    needed = [
+        (dt - timedelta(days=1)).isoformat(),
+        dt.isoformat(),
+        (dt + timedelta(days=1)).isoformat(),
+    ]
+
+    async with ScheduleStore() as store:
+        cached = await _ensure_cache(store, needed)
+
+    shift_change_hour = _detect_shift_change_hour_from_cache(cached)
+    effective_hour = now.hour if shift_change_hour is not None else None
+    duty_date, upcoming_date = resolve_duty_date(dt, shift_change_hour, effective_hour)
+
+    day = cached.get(duty_date.isoformat())
+    if day is None:
+        return {"crew": [], "platoon": ""}
+
+    crew = _build_schedule_crew(day, include_admin=False)
+    result: dict = {
+        "date": duty_date.isoformat(),
+        "platoon": day.platoon,
+        "crew": crew,
+    }
+
+    if upcoming_date is not None:
+        upcoming_day = cached.get(upcoming_date.isoformat())
+        if upcoming_day:
+            result["upcoming"] = {
+                "date": upcoming_date.isoformat(),
+                "platoon": upcoming_day.platoon,
+                "crew": _build_schedule_crew(upcoming_day, include_admin=False),
+            }
+
+    return result
+
+
+async def _fetch_open_calls_enriched() -> list[dict]:
+    """Fetch open calls from iSpyFire and enrich each one.
+
+    For each call: parse geo_location, add severity/icon,
+    query site history, return full to_dict().
+    """
+    async with DispatchStore() as store:
+        docs = await store.fetch_open()
+
+        enriched = []
+        for doc in docs:
+            call_data = doc.to_dict()
+
+            # Parse geo_location into lat/lon
+            lat, lon = None, None
+            geo = doc.geo_location or ""
+            if geo:
+                parts = geo.replace(" ", "").split(",")
+                if len(parts) == 2:
+                    with contextlib.suppress(ValueError):
+                        lat, lon = float(parts[0]), float(parts[1])
+
+            call_data["dispatch_id"] = doc.long_term_call_id
+            call_data["latitude"] = lat
+            call_data["longitude"] = lon
+            call_data["severity"] = _get_severity(doc.nature)
+            call_data["icon"] = _get_icon(doc.nature)
+
+            # Site history (max 5)
+            if doc.address:
+                try:
+                    history = await store.list_by_address(
+                        doc.address, exclude_id=doc.id, max_items=5
+                    )
+                    call_data["site_history"] = [
+                        {
+                            "dispatch_id": h.long_term_call_id,
+                            "nature": h.nature,
+                            "date": h.time_reported.isoformat() if h.time_reported else "",
+                        }
+                        for h in history
+                    ]
+                except Exception:
+                    logger.warning("Site history lookup failed for %s", doc.address)
+                    call_data["site_history"] = []
+            else:
+                call_data["site_history"] = []
+
+            enriched.append(call_data)
+
+        return enriched
 
 
 async def get_dashboard_data(*, call_limit: int = 15) -> dict:
@@ -615,13 +892,13 @@ async def get_dashboard() -> dict:
         _fetch_recent_calls(),
         _fetch_schedule(),
         _fetch_incidents(user.email, user.is_officer),
-        _fetch_neris_reports(),
+        _read_neris_cache(),
         _fetch_fastest_enroute(),
         return_exceptions=True,
     )
 
     elapsed = (datetime.now(UTC) - t0).total_seconds()
-    labels = ["dispatch", "schedule", "incidents", "neris", "turnout"]
+    labels = ["dispatch", "schedule", "incidents", "neris_cache", "turnout"]
     statuses = [
         "err" if isinstance(r, BaseException) else "ok"
         for r in (calls_result, schedule_result, incidents_result, neris_result, turnout_result)
@@ -742,7 +1019,7 @@ async def _get_dashboard_cached(*, call_limit: int = 15) -> dict:
         _fetch_recent_calls(limit=call_limit),
         _fetch_schedule(),
         _fetch_incidents(user.email, user.is_officer),
-        _fetch_neris_cache(),
+        _read_neris_cache(),
         _fetch_fastest_enroute(),
         return_exceptions=True,
     )
@@ -934,90 +1211,12 @@ async def _fetch_incidents(user_email: str, is_officer: bool) -> dict[str, dict]
     return lookup
 
 
-def _list_neris_reports() -> dict:
-    """Fetch NERIS incidents (blocking, for thread pool)."""
-    from sjifire.neris.client import NerisClient
+async def _read_neris_cache() -> dict:
+    """Read NERIS reports from Cosmos DB cache (read-only).
 
-    with NerisClient() as client:
-        incidents = client.get_all_incidents()
-
-    lookup: dict[str, dict] = {}
-    reports: list[dict] = []
-
-    for inc in incidents:
-        dispatch = inc.get("dispatch", {})
-        types = inc.get("incident_types", [])
-        status_info = inc.get("incident_status", {})
-
-        neris_id = inc.get("neris_id", "")
-        incident_number = dispatch.get("incident_number", "")
-        determinant_code = str(dispatch.get("determinant_code") or "")
-        status = status_info.get("status", "")
-        incident_type = types[0].get("type", "") if types else ""
-        call_create = dispatch.get("call_create", "")
-
-        summary = {
-            "source": "neris",
-            "neris_id": neris_id,
-            "incident_number": incident_number,
-            "determinant_code": determinant_code,
-            "status": status,
-            "incident_type": incident_type,
-            "call_create": call_create,
-        }
-
-        reports.append(summary)
-
-        # Build lookup by normalized incident number for cross-referencing.
-        # Also index by determinant_code — ESO-originated NERIS reports
-        # store the dispatch ID there instead of in incident_number.
-        normalized = _normalize_incident_number(incident_number)
-        lookup[normalized] = summary
-        if determinant_code and determinant_code != normalized:
-            det_normalized = _normalize_incident_number(determinant_code)
-            lookup[det_normalized] = summary
-
-    return {"lookup": lookup, "reports": reports}
-
-
-async def _fetch_neris_reports() -> dict:
-    """Fetch NERIS reports via thread pool (blocking API).
-
-    Also writes summaries to NerisReportStore as a side effect,
-    so the cache can serve them without hitting the API.
+    The cache is populated by the Container Apps Job (``ops-tasks neris-cache``).
+    The dashboard never touches the NERIS API directly.
     """
-    global _neris_last_refresh
-
-    from sjifire.ops.neris.store import NerisReportStore
-
-    result = await asyncio.to_thread(_list_neris_reports)
-
-    try:
-        async with NerisReportStore() as store:
-            await store.bulk_upsert(result["reports"])
-    except Exception:
-        logger.warning("Failed to write NERIS cache", exc_info=True)
-
-    _neris_last_refresh = datetime.now(UTC)
-    return result
-
-
-async def _fetch_neris_cache() -> dict:
-    """Read NERIS reports, auto-refreshing from the live API periodically.
-
-    On the first call or after ``_NERIS_REFRESH_INTERVAL`` has elapsed,
-    fetches from the NERIS API (which also writes to the Cosmos cache).
-    Otherwise reads from the Cosmos cache for speed.
-    """
-    global _neris_last_refresh
-
-    now = datetime.now(UTC)
-    if _neris_last_refresh is None or (now - _neris_last_refresh) > _NERIS_REFRESH_INTERVAL:
-        logger.info("NERIS cache stale — refreshing from live API")
-        result = await _fetch_neris_reports()
-        _neris_last_refresh = now
-        return result
-
     from sjifire.ops.neris.store import NerisReportStore
 
     async with NerisReportStore() as store:

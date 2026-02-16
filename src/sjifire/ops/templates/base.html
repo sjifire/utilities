@@ -137,6 +137,15 @@
       background: var(--red-alpha);
       border-color: rgba(220, 38, 38, .3);
       color: var(--color-error);
+      animation: pulse-bg 1.5s ease-in-out infinite, glow-red 2s ease-in-out infinite;
+    }
+    @keyframes pulse-bg {
+      0%, 100% { background: var(--red-alpha); }
+      50% { background: rgba(220, 38, 38, .25); }
+    }
+    @keyframes glow-red {
+      0%, 100% { box-shadow: 0 0 8px rgba(220, 38, 38, .2); }
+      50% { box-shadow: 0 0 20px rgba(220, 38, 38, .4), 0 0 40px rgba(220, 38, 38, .15); }
     }
     .status-pill.active .pulse-dot { background: var(--color-error); }
     .pulse-dot {
@@ -370,6 +379,72 @@
     }
     .empty-state p { font-size: 14px; }
 
+    /* ── Crew Panel (shared by dashboard + kiosk) ── */
+    .crew-col-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 6px;
+      margin-bottom: 6px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .crew-col-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+    .crew-col-platoon {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--color-blue);
+    }
+    .crew-sec-hdr {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text-faint);
+      font-weight: 600;
+      padding: 6px 0 2px;
+    }
+    .crew-row {
+      padding: 4px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-radius: 4px;
+      gap: 8px;
+    }
+    .crew-row-chief {
+      border-left: 3px solid var(--color-amber-dark);
+      background: rgba(245, 158, 11, .08);
+    }
+    .crew-row-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .crew-row-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+    .crew-row-chief .crew-row-name { color: var(--text-primary); }
+    .crew-row-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .crew-row-shift {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .crew-row-contacts { font-size: 11px; }
+
     /* ── Utilities ── */
     .mono         { font-family: monospace; }
     .nowrap       { white-space: nowrap; }
@@ -429,7 +504,7 @@
     <div class="page-header-right">
       <nav class="page-header-nav">
         <a href="/dashboard" class="nav-page-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
-        <a href="/reports" class="nav-page-link {% if active_page == 'reports' %}active{% endif %}">Reports</a>
+        {% if show_reports %}<a href="/reports" class="nav-page-link {% if active_page == 'reports' %}active{% endif %}">Reports</a>{% endif %}
       </nav>
     </div>
   </header>

@@ -82,6 +82,21 @@ TOOL_SCHEMAS: list[dict] = [
                     "type": "string",
                     "description": "What actions were taken (narrative)",
                 },
+                "action_taken": {
+                    "type": "string",
+                    "enum": ["ACTION", "NOACTION"],
+                    "description": "Was action taken? ACTION = yes, NOACTION = no",
+                },
+                "noaction_reason": {
+                    "type": "string",
+                    "enum": ["CANCELLED", "STAGED_STANDBY", "NO_INCIDENT_FOUND"],
+                    "description": "Why no action (required when action_taken=NOACTION)",
+                },
+                "action_codes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "NERIS action codes (required when action_taken=ACTION)",
+                },
                 "unit_responses": {
                     "type": "array",
                     "description": "NERIS apparatus/unit response data",
@@ -559,7 +574,7 @@ async def _dispatch_general(name: str, tool_input: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Location lookup (Nominatim + Overpass — free, no API keys)
+# Location lookup (Azure Maps preferred, OSM Nominatim + Overpass fallback)
 # ---------------------------------------------------------------------------
 
 _OSM_HEADERS = {"User-Agent": "SJIFire-Ops/1.0 (incident-reporting)"}
@@ -568,10 +583,21 @@ _OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
 
 async def _lookup_location(lat: float, lon: float) -> dict:
-    """Reverse geocode and find nearby cross streets via OpenStreetMap.
+    """Reverse geocode and find nearby cross streets.
 
-    Uses Nominatim for the address and Overpass for nearby road names.
+    Uses Azure Maps when ``AZURE_MAPS_KEY`` is set (production),
+    falls back to OSM Nominatim + Overpass (dev/free tier).
     """
+    from sjifire.ops.geo import get_azure_maps_key, reverse_geocode
+
+    if get_azure_maps_key():
+        return await reverse_geocode(lat, lon)
+
+    return await _lookup_location_osm(lat, lon)
+
+
+async def _lookup_location_osm(lat: float, lon: float) -> dict:
+    """Reverse geocode via OpenStreetMap (fallback for dev without Azure Maps)."""
     async with httpx.AsyncClient(timeout=10, headers=_OSM_HEADERS) as client:
         # Reverse geocode
         resp = await client.get(

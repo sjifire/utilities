@@ -126,10 +126,14 @@ src/sjifire/
 │   │   └── tools.py       # MCP tools with role-based access control
 │   ├── neris/tools.py     # NERIS value set lookup tools
 │   ├── personnel/tools.py # Graph API personnel lookup
-│   └── schedule/          # On-duty crew lookup with Cosmos cache
-│       ├── models.py      # DayScheduleCache (Pydantic)
-│       ├── store.py       # Cosmos DB cache with in-memory fallback
-│       └── tools.py       # MCP tool with auto-refresh from Aladtec
+│   ├── schedule/          # On-duty crew lookup with Cosmos cache
+│   │   ├── models.py      # DayScheduleCache (Pydantic)
+│   │   ├── store.py       # Cosmos DB cache with in-memory fallback
+│   │   └── tools.py       # MCP tool with auto-refresh from Aladtec
+│   └── tasks/             # Background tasks (Container Apps Job)
+│       ├── registry.py    # TaskResult, @register, run_task, run_all
+│       ├── neris_cache.py # NERIS report cache refresh
+│       └── runner.py      # CLI: uv run ops-tasks
 └── scripts/               # CLI entry points
 ```
 
@@ -164,6 +168,8 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 **Session instructions**: `docs/mcp-start-session.md` — loaded by `start_session` tool, tells Claude how to present the dashboard and what actions to offer.
 
 **Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
+
+**Background tasks**: The NERIS report cache in Cosmos DB is populated by a Container Apps Job (`sjifire-mcp-tasks`) running `uv run ops-tasks` every 15 minutes. The dashboard reads from Cosmos only (never the NERIS API directly). New tasks are added via `@register("name")` in `ops/tasks/`.
 
 **Cosmos DB backup**: Continuous 30-day PITR (any-second point-in-time restore). For ad-hoc JSON exports beyond 30 days, use `uv run backup-cosmos`. Infrastructure provisioned via `./scripts/setup-azure-ops.sh --phase 2`.
 
@@ -290,6 +296,13 @@ The `ms-group-sync` command uses Entra ID as the source of truth for membership 
 - **New groups**: Created as Exchange mail-enabled security groups by default (no SharePoint sprawl)
 
 Note: Run `entra-user-sync` before `ms-group-sync` to ensure Entra ID has current data.
+
+### Run background tasks (NERIS cache, etc.)
+```bash
+uv run ops-tasks              # Run all tasks
+uv run ops-tasks neris-cache  # Run specific task
+uv run ops-tasks --list       # List available tasks
+```
 
 ### Cosmos DB backup (ad-hoc JSON export)
 ```bash

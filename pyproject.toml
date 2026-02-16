@@ -12,6 +12,7 @@ dependencies = [
     "cachetools>=7.0.1",
     "email-validator>=2.3.0",
     "httpx>=0.28.0",
+    "itsdangerous>=2.2.0",
     "jinja2>=3.1.6",
     "mcp[cli]>=1.26.0",
     "msgraph-sdk>=1.12.0",
@@ -42,6 +43,8 @@ ops-server = "sjifire.ops.server:main"
 backup-cosmos = "sjifire.scripts.backup_cosmos:main"
 generate-neris-reference = "sjifire.scripts.generate_neris_reference:main"
 ops-admin = "sjifire.scripts.ops_admin:main"
+kiosk-url = "sjifire.scripts.kiosk_url:main"
+ops-tasks = "sjifire.ops.tasks.runner:main"
 
 [dependency-groups]
 dev = [
@@ -93,7 +96,8 @@ convention = "google"
 "src/sjifire/ops/dispatch/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
 "src/sjifire/ops/token_store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
 "src/sjifire/ops/server.py" = ["S104"]  # Binding to 0.0.0.0 is intentional for container
-"src/sjifire/scripts/*.py" = ["T201"]  # CLI scripts use print for output
+"src/sjifire/scripts/*.py" = ["T201", "S603", "S607"]  # CLI scripts: print, subprocess calls
+"src/sjifire/ops/tasks/runner.py" = ["T201"]  # CLI runner uses print for output
 "scripts/*.py" = ["T201"]  # Utility scripts use print for output
 "tests/**/*.py" = ["S101", "S105", "S106", "D101", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords, skip docstrings, allow long lines
 

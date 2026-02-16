@@ -14,8 +14,8 @@ from sjifire.ops.chat.tools import _lookup_location, execute_tool
 
 @pytest.fixture(autouse=True)
 def _dev_mode():
-    """Ensure dev mode (no Entra config) so get_current_user() works."""
-    with patch.dict(os.environ, {"ENTRA_MCP_API_CLIENT_ID": ""}, clear=False):
+    """Ensure dev mode (no Entra config, no Azure Maps) so get_current_user() works."""
+    with patch.dict(os.environ, {"ENTRA_MCP_API_CLIENT_ID": "", "AZURE_MAPS_KEY": ""}, clear=False):
         set_current_user(None)
         yield
 

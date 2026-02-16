@@ -118,7 +118,7 @@ info "Using subscription: $SUB_ID"
 info "Tenant: $TENANT_ID"
 
 # Register resource providers (idempotent, no-op if already registered)
-for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices; do
+for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices Microsoft.Maps; do
     STATE=$(az provider show --namespace "$ns" --query registrationState -o tsv 2>/dev/null || echo "NotRegistered")
     if [ "$STATE" != "Registered" ]; then
         info "Registering provider $ns..."
@@ -126,7 +126,7 @@ for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microso
     fi
 done
 # Wait for registration to complete
-for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices; do
+for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices Microsoft.Maps; do
     STATE=$(az provider show --namespace "$ns" --query registrationState -o tsv)
     if [ "$STATE" != "Registered" ]; then
         info "Waiting for $ns to register..."
@@ -631,6 +631,8 @@ if should_run 4; then
         "ALADTEC-USERNAME"
         "ALADTEC-PASSWORD"
         "ANTHROPIC-API-KEY"
+        "AZURE-MAPS-KEY"
+        "KIOSK-SIGNING-KEY"
     )
 
     ALL_OK=true
@@ -929,6 +931,170 @@ if should_run 7; then
 
     echo ""
     ok "Phase 7 complete"
+    echo ""
+fi
+
+# =============================================================================
+# Phase 8: Azure Maps (geocoding for kiosk + dispatch tools)
+# =============================================================================
+
+if should_run 8; then
+    echo -e "${CYAN}━━━ Phase 8: Azure Maps ━━━${NC}"
+
+    MAPS_ACCOUNT="sjifire-maps"
+
+    if az maps account show --name "$MAPS_ACCOUNT" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+        warn "Azure Maps account $MAPS_ACCOUNT already exists"
+    else
+        info "Creating Azure Maps account ($MAPS_ACCOUNT, Gen2 tier)..."
+        az maps account create \
+            --name "$MAPS_ACCOUNT" \
+            --resource-group "$RESOURCE_GROUP" \
+            --sku G2 \
+            --kind Gen2 \
+            --output none
+        ok "Azure Maps account created"
+    fi
+
+    # Store primary key in Key Vault
+    MAPS_KEY=$(az maps account keys list \
+        --name "$MAPS_ACCOUNT" \
+        --resource-group "$RESOURCE_GROUP" \
+        --query primaryKey -o tsv)
+    store_secret "AZURE-MAPS-KEY" "$MAPS_KEY"
+
+    # Generate kiosk signing key (if not already in Key Vault)
+    if az keyvault secret show --vault-name "$KEY_VAULT" --name "KIOSK-SIGNING-KEY" &>/dev/null; then
+        warn "KIOSK-SIGNING-KEY already exists in Key Vault"
+    else
+        info "Generating kiosk signing key..."
+        KIOSK_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+        store_secret "KIOSK-SIGNING-KEY" "$KIOSK_KEY"
+    fi
+
+    # Add to Container App if it exists
+    if az containerapp show --name "$CA_APP" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+        info "Adding Azure Maps + kiosk keys to Container App..."
+
+        KIOSK_SIGNING_KEY=$(az keyvault secret show \
+            --vault-name "$KEY_VAULT" --name "KIOSK-SIGNING-KEY" \
+            --query value -o tsv)
+
+        az containerapp secret set \
+            --name "$CA_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --secrets \
+                "azure-maps-key=$MAPS_KEY" \
+                "kiosk-signing-key=$KIOSK_SIGNING_KEY" \
+            --output none 2>/dev/null || true
+        az containerapp update \
+            --name "$CA_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --set-env-vars \
+                "AZURE_MAPS_KEY=secretref:azure-maps-key" \
+                "KIOSK_SIGNING_KEY=secretref:kiosk-signing-key" \
+            --output none
+        ok "Container App updated with Azure Maps + kiosk config"
+    fi
+
+    ok "Phase 8 complete"
+    echo ""
+fi
+
+# =============================================================================
+# Phase 9: Container Apps Job (background tasks)
+# =============================================================================
+
+if should_run 9; then
+    echo -e "${CYAN}━━━ Phase 9: Container Apps Job (background tasks) ━━━${NC}"
+
+    CA_JOB="sjifire-mcp-tasks"
+
+    # Get ACR login server
+    ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query loginServer -o tsv 2>/dev/null) || \
+        fail "ACR $ACR_NAME not found. Run phase 3 first."
+
+    # Get the latest image tag from the Container App
+    CURRENT_IMAGE=$(az containerapp show \
+        --name "$CA_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --query "properties.template.containers[0].image" -o tsv 2>/dev/null || true)
+    JOB_IMAGE="${CURRENT_IMAGE:-${ACR_LOGIN_SERVER}/sjifire-mcp:latest}"
+    info "Job image: $JOB_IMAGE"
+
+    # Fetch secrets for job env vars
+    _get_secret() {
+        az keyvault secret show --vault-name "$KEY_VAULT" --name "$1" --query value -o tsv 2>/dev/null || echo ""
+    }
+
+    COSMOS_ENDPOINT_VAL=$(_get_secret "COSMOS-ENDPOINT")
+
+    VAULT_URL="https://${KEY_VAULT}.vault.azure.net"
+
+    if az containerapp job show --name "$CA_JOB" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+        warn "Container Apps Job $CA_JOB already exists — updating image"
+        az containerapp job update \
+            --name "$CA_JOB" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$JOB_IMAGE" \
+            --output none
+        ok "Job image updated"
+    else
+        info "Creating Container Apps Job ($CA_JOB, every 15 min)..."
+
+        # Get ACR credentials for registry auth
+        ACR_CREDS=$(az acr credential show --name "$ACR_NAME")
+        ACR_USERNAME=$(echo "$ACR_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['username'])")
+        ACR_PASSWORD=$(echo "$ACR_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['passwords'][0]['value'])")
+
+        az containerapp job create \
+            --name "$CA_JOB" \
+            --resource-group "$RESOURCE_GROUP" \
+            --environment "$CA_ENV" \
+            --image "$JOB_IMAGE" \
+            --registry-server "$ACR_LOGIN_SERVER" \
+            --registry-username "$ACR_USERNAME" \
+            --registry-password "$ACR_PASSWORD" \
+            --trigger-type Schedule \
+            --cron-expression "*/15 * * * *" \
+            --args ".venv/bin/ops-tasks" \
+            --cpu 0.25 \
+            --memory 0.5Gi \
+            --parallelism 1 \
+            --replica-timeout 300 \
+            --replica-retry-limit 1 \
+            --env-vars \
+                "COSMOS_ENDPOINT=${COSMOS_ENDPOINT_VAL}" \
+                "COSMOS_KEY=secretref:cosmos-key" \
+                "NERIS_CLIENT_ID=secretref:neris-client-id" \
+                "NERIS_CLIENT_SECRET=secretref:neris-client-secret" \
+            --secrets \
+                "cosmos-key=keyvaultref:${VAULT_URL}/secrets/COSMOS-KEY,identityref:system" \
+                "neris-client-id=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-ID,identityref:system" \
+                "neris-client-secret=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-SECRET,identityref:system" \
+            --output none
+        ok "Container Apps Job created"
+    fi
+
+    # Enable managed identity on the job
+    info "Enabling system-assigned managed identity on job..."
+    JOB_IDENTITY=$(az containerapp job identity assign \
+        --name "$CA_JOB" \
+        --resource-group "$RESOURCE_GROUP" \
+        --system-assigned \
+        --query principalId -o tsv 2>/dev/null || true)
+
+    if [ -n "$JOB_IDENTITY" ]; then
+        # Grant Key Vault secret access
+        az keyvault set-policy \
+            --name "$KEY_VAULT" \
+            --object-id "$JOB_IDENTITY" \
+            --secret-permissions get \
+            --output none 2>/dev/null || true
+        ok "Job managed identity: $JOB_IDENTITY (Key Vault access granted)"
+    fi
+
+    ok "Phase 9 complete"
     echo ""
 fi
 

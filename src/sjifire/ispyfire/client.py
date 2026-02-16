@@ -1,4 +1,9 @@
-"""iSpyFire API client."""
+"""iSpyFire API client.
+
+NOTE: ISPY_RAW_* log lines are temporarily at INFO level to capture
+full raw API responses during live events.  Once we have enough data
+to build realistic test fixtures, flip these back to DEBUG.
+"""
 
 import json
 import logging
@@ -750,7 +755,12 @@ class ISpyFireClient:
         if not results:
             return None
 
-        return DispatchCall.from_api(results[0])
+        raw = results[0]
+
+        # Log the complete raw API response for live event replay
+        logger.info("ISPY_RAW_DETAIL | %s", json.dumps(raw, default=str))
+
+        return DispatchCall.from_api(raw)
 
     def _get_call_by_dispatch_id(self, dispatch_id: str) -> DispatchCall | None:
         """Find a call by its dispatch ID (e.g. '26-001678').
@@ -788,11 +798,16 @@ class ISpyFireClient:
         url = f"{self.CENTRAL_API_BASE}/calls/headers/{self.leadispyid}/open?skipunit=true"
         response = self._central_request("GET", url)
         if not response or response.status_code != 200:
-            logger.error("Failed to fetch open calls")
+            status = response.status_code if response else "no response"
+            logger.error("Failed to fetch open calls: %s", status)
             return []
 
         data = response.json()
         results = data.get("results", [])
+
+        logger.info("ISPY_RAW_OPEN_HEADERS | count=%d", len(results))
+        for i, header in enumerate(results):
+            logger.info("ISPY_RAW_OPEN_HEADER[%d] | %s", i, json.dumps(header, default=str))
 
         # Open call headers have a different shape than full details.
         # Fetch full details for each open call.
@@ -803,6 +818,8 @@ class ISpyFireClient:
                 detail = self.get_call_details(call_id)
                 if detail:
                     calls.append(detail)
+                else:
+                    logger.warning("ISPY_OPEN_NO_DETAIL | _id=%s", call_id)
         return calls
 
     def get_call_log(self, call_id: str) -> list[dict]:
@@ -864,4 +881,8 @@ class ISpyFireClient:
             return []
 
         data = response.json()
-        return data.get("results", [])
+        results = data.get("results", [])
+        logger.info("ISPY_RAW_SEARCH | count=%d after=%s before=%s", len(results), after, before)
+        for i, entry in enumerate(results):
+            logger.info("ISPY_RAW_SEARCH[%d] | %s", i, json.dumps(entry, default=str))
+        return results

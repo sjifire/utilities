@@ -179,6 +179,8 @@ az containerapp secret set \
         "neris-client-secret=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-SECRET,identityref:system" \
         "anthropic-api-key=keyvaultref:${VAULT_URL}/secrets/ANTHROPIC-API-KEY,identityref:system" \
         "cosmos-key=keyvaultref:${VAULT_URL}/secrets/COSMOS-KEY,identityref:system" \
+        "azure-maps-key=keyvaultref:${VAULT_URL}/secrets/AZURE-MAPS-KEY,identityref:system" \
+        "kiosk-signing-key=keyvaultref:${VAULT_URL}/secrets/KIOSK-SIGNING-KEY,identityref:system" \
     --output none
 ok "Secrets linked to Key Vault"
 
@@ -211,9 +213,28 @@ az containerapp update \
         "NERIS_CLIENT_SECRET=secretref:neris-client-secret" \
         "ANTHROPIC_API_KEY=secretref:anthropic-api-key" \
         "MCP_SERVER_URL=https://${CUSTOM_DOMAIN}" \
+        "AZURE_MAPS_KEY=secretref:azure-maps-key" \
+        "KIOSK_SIGNING_KEY=secretref:kiosk-signing-key" \
         "BUILD_VERSION=${TAG}" \
     --output none
 ok "Container App updated with ${IMAGE_NAME}:${TAG}"
+
+# ---------------------------------------------------------------------------
+# Update Container Apps Job image (if job exists)
+# ---------------------------------------------------------------------------
+
+CA_JOB="sjifire-mcp-tasks"
+if az containerapp job show --name "$CA_JOB" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+    info "Updating Container Apps Job image..."
+    az containerapp job update \
+        --name "$CA_JOB" \
+        --resource-group "$RESOURCE_GROUP" \
+        --image "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${TAG}" \
+        --output none
+    ok "Job updated with ${IMAGE_NAME}:${TAG}"
+else
+    warn "Container Apps Job $CA_JOB not found — skipping (run setup-azure-ops.sh --phase 9 to create)"
+fi
 
 # ---------------------------------------------------------------------------
 # Configure EasyAuth (Azure Container Apps built-in auth)

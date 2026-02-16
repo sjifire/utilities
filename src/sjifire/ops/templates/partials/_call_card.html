@@ -1,0 +1,39 @@
+{#
+  Shared call card macro — used by dashboard overview.
+
+  Parameters:
+    calls_expr   – Alpine.js expression for the calls array (e.g. "D.recent_calls")
+    limit        – Max number of calls to show (0 = all)
+    show_summary – Show short_dsc and summary lines
+#}
+
+{% macro call_cards(calls_expr, limit=0, show_summary=true) %}
+<template x-if="{{ calls_expr }}.length">
+  <div>
+    <template x-for="c in {{ calls_expr }}{% if limit %}.slice(0, {{ limit }}){% endif %}" :key="c.id">
+      <div class="call-card" :data-s="c.severity">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="display:flex;gap:10px">
+            <span style="font-size:20px;line-height:1" x-text="c.icon"></span>
+            <div>
+              <div style="font-size:14px;font-weight:600;color:var(--text-secondary)" x-text="c.nature"></div>
+              <a :href="mapsUrl(c.address)" target="_blank" rel="noopener" class="address-link" style="display:block;font-size:13px;margin-top:2px" x-text="c.address"></a>
+              {% if show_summary %}
+              <div x-show="c.short_dsc" style="font-size:12px;color:var(--text-muted);margin-top:3px" x-text="c.short_dsc"></div>
+              <div x-show="c.summary" style="font-size:12px;color:var(--text-dim);margin-top:2px" x-text="c.summary"></div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="call-card-right">
+            <div class="mono font-semibold" style="font-size:12px;color:var(--text-secondary)" x-text="c.id"></div>
+            <div class="nowrap" style="font-size:12px;color:var(--text-muted);margin-top:4px" x-text="c.time"></div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>
+<template x-if="!{{ calls_expr }}.length">
+  <div class="empty-state">No recent calls.</div>
+</template>
+{% endmacro %}
