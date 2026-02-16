@@ -749,9 +749,6 @@ function chatApp() {
       // If the server has messages we missed, add them to the UI.
       // Returns true if we recovered (no retry needed).
       try {
-        // Brief delay — give the server time to finish saving before we check
-        await new Promise(r => setTimeout(r, 1500));
-
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
         if (!res.ok) return false;
         const data = await res.json();
