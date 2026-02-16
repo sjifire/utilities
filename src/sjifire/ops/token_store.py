@@ -11,14 +11,12 @@ for local development with ``mcp dev``.
 import asyncio
 import contextlib
 import logging
-import os
 import time
 from typing import ClassVar
 
 from cachetools import TTLCache
-from dotenv import load_dotenv
 
-from sjifire.core.config import get_cosmos_database
+from sjifire.core.config import get_cosmos_container
 from sjifire.ops.auth import UserContext
 
 logger = logging.getLogger(__name__)
@@ -69,38 +67,14 @@ class TokenStore:
     def __init__(self) -> None:
         """Create store. Call ``initialize()`` to connect."""
         self._l1: TTLCache = TTLCache(maxsize=256, ttl=120)
-        self._client = None
         self._container = None
-        self._credential = None
         self._in_memory = False
 
     async def initialize(self) -> None:
-        """Connect to Cosmos DB, or fall back to in-memory mode."""
-        load_dotenv()
-
-        endpoint = os.getenv("COSMOS_ENDPOINT")
-        key = os.getenv("COSMOS_KEY")
-
-        if key:
-            from azure.cosmos.aio import CosmosClient
-
-            self._client = CosmosClient(endpoint, credential=key)
-        elif endpoint:
-            from azure.cosmos.aio import CosmosClient
-            from azure.identity.aio import DefaultAzureCredential
-
-            self._credential = DefaultAzureCredential()
-            self._client = CosmosClient(endpoint, credential=self._credential)
-        else:
-            logger.warning("No COSMOS_ENDPOINT set — using in-memory token store (dev only)")
+        """Get a container client from the shared Cosmos connection pool."""
+        self._container = await get_cosmos_container(CONTAINER_NAME)
+        if self._container is None:
             self._in_memory = True
-            return
-
-        database = self._client.get_database_client(get_cosmos_database())
-        self._container = database.get_container_client(CONTAINER_NAME)
-        logger.info(
-            "TokenStore connected to Cosmos DB: %s/%s", get_cosmos_database(), CONTAINER_NAME
-        )
 
     async def get(self, token_type: str, token_id: str) -> dict | None:
         """Load a token document by type and ID.
@@ -255,13 +229,7 @@ class TokenStore:
         return first_doc
 
     async def close(self) -> None:
-        """Close Cosmos DB connections."""
-        if self._client:
-            await self._client.close()
-            self._client = None
-        if self._credential:
-            await self._credential.close()
-            self._credential = None
+        """Clear local state (shared Cosmos client stays alive)."""
         self._container = None
 
 

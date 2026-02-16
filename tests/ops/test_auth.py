@@ -86,6 +86,12 @@ class TestCurrentUserContext:
 class TestCheckIsEditor:
     """Tests for the live Graph API group membership check."""
 
+    def setup_method(self):
+        """Clear the editor cache between tests."""
+        import sjifire.ops.auth
+
+        sjifire.ops.auth._editor_cache.clear()
+
     async def test_returns_false_when_no_group_configured(self):
         with patch.dict(os.environ, {}, clear=True):
             result = await check_is_editor("user-1", fallback=True)
@@ -102,15 +108,15 @@ class TestCheckIsEditor:
         mock_check.assert_called_once_with("user-1", "grp-1")
 
     @patch("sjifire.ops.auth._check_member_groups", new_callable=AsyncMock)
-    async def test_calls_graph_api_every_time(self, mock_check):
-        """No caching — each call hits Graph API."""
+    async def test_caches_result_for_same_user(self, mock_check):
+        """Result is cached — second call for same user skips Graph API."""
         mock_check.return_value = True
 
         with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "grp-1"}):
-            await check_is_editor("user-1")
-            await check_is_editor("user-1")
+            await check_is_editor("user-cache-1")
+            await check_is_editor("user-cache-1")
 
-        assert mock_check.call_count == 2
+        assert mock_check.call_count == 1
 
     @patch("sjifire.ops.auth._check_member_groups", new_callable=AsyncMock)
     async def test_falls_back_on_error(self, mock_check):

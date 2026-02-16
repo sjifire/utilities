@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import os
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
@@ -18,6 +19,14 @@ from jwt import PyJWKClient
 from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
+
+# Cached Graph API app-only token (shared across requests)
+_graph_token: str | None = None
+_graph_token_expires: float = 0
+
+# Cached editor check results: {user_id: (is_editor, expires_at)}
+_editor_cache: dict[str, tuple[bool, float]] = {}
+_EDITOR_CACHE_TTL = 60  # seconds
 
 # Context variable holding the authenticated user for the current request
 _current_user: ContextVar[UserContext | None] = ContextVar("current_user", default=None)
@@ -60,7 +69,7 @@ class UserContext:
 
 
 async def check_is_editor(user_id: str, *, fallback: bool = False) -> bool:
-    """Check group membership via Graph API.
+    """Check group membership via Graph API (cached for 60s).
 
     Falls back to the token-based ``is_editor`` property if the Graph API
     call fails (e.g., missing credentials in dev mode).
@@ -73,15 +82,27 @@ async def check_is_editor(user_id: str, *, fallback: bool = False) -> bool:
     if not group_id:
         return False
 
+    # Check cache first
+    cached = _editor_cache.get(user_id)
+    if cached and cached[1] > time.monotonic():
+        return cached[0]
+
     try:
-        return await _check_member_groups(user_id, group_id)
+        result = await _check_member_groups(user_id, group_id)
+        _editor_cache[user_id] = (result, time.monotonic() + _EDITOR_CACHE_TTL)
+        return result
     except Exception:
         logger.debug("Graph API group check failed for %s, using fallback", user_id, exc_info=True)
         return fallback
 
 
-async def _check_member_groups(user_id: str, group_id: str) -> bool:
-    """Call MS Graph checkMemberGroups to verify membership."""
+async def _get_graph_app_token() -> str:
+    """Get a cached app-only Graph API token, refreshing if expired."""
+    global _graph_token, _graph_token_expires
+
+    if _graph_token and _graph_token_expires > time.monotonic():
+        return _graph_token
+
     import httpx
 
     tenant_id = os.getenv("ENTRA_MCP_API_TENANT_ID") or os.getenv("MS_GRAPH_TENANT_ID", "")
@@ -91,10 +112,9 @@ async def _check_member_groups(user_id: str, group_id: str) -> bool:
     if not all([tenant_id, client_id, client_secret]):
         raise RuntimeError("Graph API credentials not configured")
 
-    # Get app-only token
     token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     async with httpx.AsyncClient() as client:
-        token_resp = await client.post(
+        resp = await client.post(
             token_url,
             data={
                 "grant_type": "client_credentials",
@@ -103,10 +123,22 @@ async def _check_member_groups(user_id: str, group_id: str) -> bool:
                 "scope": "https://graph.microsoft.com/.default",
             },
         )
-        token_resp.raise_for_status()
-        access_token = token_resp.json()["access_token"]
+        resp.raise_for_status()
+        data = resp.json()
 
-        # Check group membership
+    _graph_token = data["access_token"]
+    # Token typically valid for 3600s; refresh 5 min early
+    _graph_token_expires = time.monotonic() + data.get("expires_in", 3600) - 300
+    return _graph_token
+
+
+async def _check_member_groups(user_id: str, group_id: str) -> bool:
+    """Call MS Graph checkMemberGroups to verify membership."""
+    import httpx
+
+    access_token = await _get_graph_app_token()
+
+    async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"https://graph.microsoft.com/v1.0/users/{user_id}/checkMemberGroups",
             headers={"Authorization": f"Bearer {access_token}"},

@@ -11,13 +11,17 @@ from sjifire.ops.chat.budget import (
 from sjifire.ops.chat.store import BudgetStore
 
 
+async def _noop_container(name):
+    return None
+
+
 @pytest.fixture(autouse=True)
 def _clear_memory_and_env(monkeypatch):
     """Reset in-memory store and ensure Cosmos env vars are unset."""
     BudgetStore._memory.clear()
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
-    monkeypatch.setattr("sjifire.ops.chat.store.load_dotenv", lambda: None)
+    monkeypatch.setattr("sjifire.ops.chat.store.get_cosmos_container", _noop_container)
     yield
     BudgetStore._memory.clear()
 

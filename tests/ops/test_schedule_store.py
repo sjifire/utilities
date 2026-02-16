@@ -8,13 +8,17 @@ from sjifire.ops.schedule.models import DayScheduleCache, ScheduleEntryCache
 from sjifire.ops.schedule.store import ScheduleStore, _entry_covers_time
 
 
+async def _noop_container(name):
+    return None
+
+
 @pytest.fixture(autouse=True)
 def _clear_memory_and_env(monkeypatch):
     """Reset in-memory store and ensure Cosmos env vars are unset."""
     ScheduleStore._memory.clear()
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
-    monkeypatch.setattr("sjifire.ops.schedule.store.load_dotenv", lambda: None)
+    monkeypatch.setattr("sjifire.ops.schedule.store.get_cosmos_container", _noop_container)
     yield
     ScheduleStore._memory.clear()
 

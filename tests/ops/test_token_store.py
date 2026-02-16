@@ -21,6 +21,10 @@ _TEST_USER = UserContext(
 )
 
 
+async def _noop_container(name):
+    return None
+
+
 @pytest.fixture(autouse=True)
 def _clear_state(monkeypatch):
     """Reset in-memory store, L1 cache, and singleton."""
@@ -30,7 +34,7 @@ def _clear_state(monkeypatch):
     mod._instance = None
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
-    monkeypatch.setattr("sjifire.ops.token_store.load_dotenv", lambda: None)
+    monkeypatch.setattr("sjifire.ops.token_store.get_cosmos_container", _noop_container)
     yield
     TokenStore._memory.clear()
     mod._instance = None

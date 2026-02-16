@@ -23,6 +23,10 @@ from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.ops.incidents.store import IncidentStore
 
 
+async def _noop_container(name):
+    return None
+
+
 @pytest.fixture(autouse=True)
 def _clear_memory_and_env(monkeypatch):
     """Reset all in-memory stores."""
@@ -32,9 +36,9 @@ def _clear_memory_and_env(monkeypatch):
     DispatchStore._memory.clear()
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
-    monkeypatch.setattr("sjifire.ops.chat.store.load_dotenv", lambda: None)
-    monkeypatch.setattr("sjifire.ops.incidents.store.load_dotenv", lambda: None)
-    monkeypatch.setattr("sjifire.ops.dispatch.store.load_dotenv", lambda: None)
+    monkeypatch.setattr("sjifire.ops.chat.store.get_cosmos_container", _noop_container)
+    monkeypatch.setattr("sjifire.ops.incidents.store.get_cosmos_container", _noop_container)
+    monkeypatch.setattr("sjifire.ops.dispatch.store.get_cosmos_container", _noop_container)
     yield
     ConversationStore._memory.clear()
     BudgetStore._memory.clear()

@@ -929,7 +929,6 @@ class TestContextManager:
     async def test_in_memory_mode_without_cosmos(self):
         async with DispatchStore() as store:
             assert store._in_memory is True
-            assert store._client is None
             assert store._container is None
 
     async def test_multiple_contexts_share_memory(self):
