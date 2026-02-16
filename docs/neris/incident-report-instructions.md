@@ -66,14 +66,16 @@ create_incident(
 )
 ```
 
-Present what you've pre-filled:
+Present what you've pre-filled. Put each field on its own line with a bold label — never run them together as a paragraph:
+
 > I pulled the dispatch data and crew schedule. Here's what I have so far:
 >
-> - **Incident**: 26-001678, Feb 12, 2026
-> - **Address**: 200 Spring St, Friday Harbor
-> - **Nature (from dispatch)**: Medical Aid
-> - **Responding units**: E31, M31
-> - **On-duty crew**: [names]
+> **Incident**: 26-001678 — Feb 12, 2026
+> **Address**: 200 Spring St, Friday Harbor, WA
+> **Nature**: Medical Aid
+> **CAD Summary**: Patient fell in bathroom, conscious and breathing, possible hip injury.
+> **Responding Units**: E31, M31
+> **On-Duty Crew**: Capt. Smith, Lt. Jones, FF Williams
 >
 > Let me walk you through what I still need.
 
