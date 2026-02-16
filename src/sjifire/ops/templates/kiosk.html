@@ -475,7 +475,7 @@
                       <span><span style="color:var(--text-muted)">Note:</span> <span style="color:var(--text-muted);font-style:italic" x-text="rd.radio_log"></span></span>
                     </template>
                     <template x-if="!(rd.radio_log && (rd.status === 'Note' || rd.status === 'NOTE'))">
-                      <span x-text="rd.status"></span>
+                      <span x-text="displayStatus(rd.status)"></span>
                     </template>
                   </div>
                 </template>
@@ -839,6 +839,11 @@ function kioskApp() {
     relTime(iso) {
       if (!iso) return '';
       return dayjs(iso).fromNow();
+    },
+
+    displayStatus(s) {
+      const map = { 'Returning': 'Complete', 'RTQ': 'Complete' };
+      return map[s] || s;
     },
 
     fmtTime(iso) {
