@@ -690,8 +690,12 @@ async def _stream_loop(
         # Current turn uses full results for accurate tool-use reasoning
         api_messages.append({"role": "user", "content": full_tool_results})
 
-    # If we exhausted tool rounds
+    # If we exhausted tool rounds, notify the user
     logger.warning("Chat hit max tool rounds for incident %s", conversation.incident_id)
+    yield _sse(
+        "text",
+        {"content": "\n\n*Tool call limit reached. Send another message to continue.*\n\n"},
+    )
 
 
 def _summarize_tool_result(name: str, data: dict) -> str:
@@ -1067,6 +1071,10 @@ async def _stream_general_loop(
         api_messages.append({"role": "user", "content": full_tool_results})
 
     logger.warning("General chat hit max tool rounds for %s", user.email)
+    yield _sse(
+        "text",
+        {"content": "\n\n*Tool call limit reached. Send another message to continue.*\n\n"},
+    )
 
 
 def _log_cache_stats(usage: object) -> None:
