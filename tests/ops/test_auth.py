@@ -7,7 +7,6 @@ import pytest
 
 from sjifire.ops.auth import (
     UserContext,
-    _editor_check_cache,
     check_is_editor,
     get_current_user,
     set_current_user,
@@ -20,10 +19,8 @@ def _clear_caches():
     import sjifire.ops.auth
 
     sjifire.ops.auth._EDITOR_GROUP_ID = None
-    _editor_check_cache.clear()
     yield
     sjifire.ops.auth._EDITOR_GROUP_ID = None
-    _editor_check_cache.clear()
 
 
 class TestUserContext:
@@ -89,7 +86,7 @@ class TestCurrentUserContext:
 class TestCheckIsEditor:
     """Tests for the live Graph API group membership check."""
 
-    async def test_returns_fallback_when_no_group_configured(self):
+    async def test_returns_false_when_no_group_configured(self):
         with patch.dict(os.environ, {}, clear=True):
             result = await check_is_editor("user-1", fallback=True)
             assert result is False  # No group ID → False
@@ -105,15 +102,15 @@ class TestCheckIsEditor:
         mock_check.assert_called_once_with("user-1", "grp-1")
 
     @patch("sjifire.ops.auth._check_member_groups", new_callable=AsyncMock)
-    async def test_caches_result(self, mock_check):
+    async def test_calls_graph_api_every_time(self, mock_check):
+        """No caching — each call hits Graph API."""
         mock_check.return_value = True
 
         with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "grp-1"}):
             await check_is_editor("user-1")
             await check_is_editor("user-1")
 
-        # Only called once due to cache
-        mock_check.assert_called_once()
+        assert mock_check.call_count == 2
 
     @patch("sjifire.ops.auth._check_member_groups", new_callable=AsyncMock)
     async def test_falls_back_on_error(self, mock_check):
@@ -125,7 +122,7 @@ class TestCheckIsEditor:
         assert result is True  # Uses fallback
 
     @patch("sjifire.ops.auth._check_member_groups", new_callable=AsyncMock)
-    async def test_different_users_cached_separately(self, mock_check):
+    async def test_different_users_checked_independently(self, mock_check):
         mock_check.side_effect = [True, False]
 
         with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "grp-1"}):

@@ -10,7 +10,6 @@ import base64
 import json
 import logging
 import os
-import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
@@ -56,15 +55,12 @@ class UserContext:
 
 
 # ---------------------------------------------------------------------------
-# Live Graph API group membership check (5-minute cache)
+# Live Graph API group membership check
 # ---------------------------------------------------------------------------
-
-_editor_check_cache: dict[str, tuple[bool, float]] = {}
-_EDITOR_CHECK_TTL = 300  # 5 minutes
 
 
 async def check_is_editor(user_id: str, *, fallback: bool = False) -> bool:
-    """Check group membership via Graph API with 5-minute cache.
+    """Check group membership via Graph API.
 
     Falls back to the token-based ``is_editor`` property if the Graph API
     call fails (e.g., missing credentials in dev mode).
@@ -73,21 +69,12 @@ async def check_is_editor(user_id: str, *, fallback: bool = False) -> bool:
         user_id: Entra object ID of the user
         fallback: Value of ``user.is_editor`` to use if Graph API fails
     """
-    now = time.monotonic()
-    cached = _editor_check_cache.get(user_id)
-    if cached is not None:
-        value, ts = cached
-        if (now - ts) < _EDITOR_CHECK_TTL:
-            return value
-
     group_id = _get_editor_group_id()
     if not group_id:
         return False
 
     try:
-        result = await _check_member_groups(user_id, group_id)
-        _editor_check_cache[user_id] = (result, now)
-        return result
+        return await _check_member_groups(user_id, group_id)
     except Exception:
         logger.debug("Graph API group check failed for %s, using fallback", user_id, exc_info=True)
         return fallback

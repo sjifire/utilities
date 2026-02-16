@@ -24,7 +24,7 @@ Claude.ai  ←→  Ops Server (OAuth AS)  ←→  Entra ID (user login)
 - **Backend**: Ops server on Azure Container Apps (scales to zero)
 - **Database**: Azure Cosmos DB (NoSQL, serverless) — incidents, schedules, dispatch calls, OAuth tokens
 - **Auth**: Entra ID → MCP OAuth proxy → Claude.ai (Dynamic Client Registration)
-- **RBAC**: Editor group (`Incident Report Editors`) gates submit and view-all; checked live via Graph API with 5-min cache
+- **RBAC**: Editor group (`Incident Report Editors`) gates submit and view-all; checked live via Graph API on every request
 
 ## MCP Tools (registered on server)
 

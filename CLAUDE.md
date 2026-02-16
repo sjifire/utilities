@@ -145,7 +145,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 
 **Access control**:
 - Any `@sjifire.org` Entra user can connect (sign-in audience: `AzureADMyOrg`)
-- Editor group (`Incident Report Editors`) gates: submit incidents, view all incidents. Membership is checked live via Graph API with 5-minute cache (not stale token claims)
+- Editor group (`Incident Report Editors`) gates: submit incidents, view all incidents. Membership is checked live via Graph API on every request (no cache — works across multiple container replicas)
 - All other tools (dispatch, schedule, personnel) are open to any authenticated user
 
 **MCP tools registered** (19 tools):
