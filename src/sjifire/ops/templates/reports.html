@@ -806,7 +806,7 @@ function reportsApp() {
               }
             }
           }
-          this.chatScrollToBottom();
+          this.chatScrollToBottom(true);
         }
       } catch (e) {
         console.error('Failed to load chat history:', e);
@@ -819,10 +819,13 @@ function reportsApp() {
       ta.style.height = Math.min(ta.scrollHeight, 80) + 'px';
     },
 
-    chatScrollToBottom() {
+    chatScrollToBottom(force) {
       this.$nextTick(() => {
         const el = this.$refs.chatMessages;
-        if (el) el.scrollTop = el.scrollHeight;
+        if (!el) return;
+        // Only auto-scroll if user is near the bottom (within 80px) or forced
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        if (force || nearBottom) el.scrollTop = el.scrollHeight;
       });
     },
 
@@ -834,7 +837,7 @@ function reportsApp() {
       this.chatInput = '';
       this.chatStreaming = true;
       this.chatCurrentText = '';
-      this.chatScrollToBottom();
+      this.chatScrollToBottom(true);
 
       if (this.$refs.chatInput) this.$refs.chatInput.style.height = 'auto';
 
@@ -896,7 +899,7 @@ function reportsApp() {
         this.chatCurrentText = '';
       }
       this.chatStreaming = false;
-      this.chatScrollToBottom();
+      this.chatScrollToBottom(true);
       this.$nextTick(() => { if (this.$refs.chatInput) this.$refs.chatInput.focus(); });
     },
 

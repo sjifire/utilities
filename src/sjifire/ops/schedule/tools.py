@@ -27,8 +27,11 @@ from sjifire.ops.schedule.store import ScheduleStore
 
 logger = logging.getLogger(__name__)
 
-# Maximum cache age before triggering an Aladtec refresh
+# Maximum cache age before triggering an Aladtec refresh.
+# Today/future: 24 hours (schedules may change with trades/swaps).
+# Past dates: 7 days (data rarely changes, but corrections happen).
 CACHE_MAX_AGE_HOURS = 24.0
+CACHE_MAX_AGE_HOURS_PAST = 168.0  # 7 days
 
 
 def _detect_shift_change_hour_from_cache(cached: dict[str, DayScheduleCache]) -> int | None:
@@ -119,11 +122,14 @@ async def _ensure_cache(
     """
     cached = await store.get_range(needed_dates)
 
-    # Find dates that are missing or stale
+    # Find dates that are missing or stale.
+    # Past dates use a longer TTL (7 days) since they rarely change.
+    today_str = date.today().isoformat()
     stale_dates = []
     for date_str in needed_dates:
         day = cached.get(date_str)
-        if day is None or day.is_stale(CACHE_MAX_AGE_HOURS):
+        max_age = CACHE_MAX_AGE_HOURS if date_str >= today_str else CACHE_MAX_AGE_HOURS_PAST
+        if day is None or day.is_stale(max_age):
             stale_dates.append(date_str)
 
     if not stale_dates:

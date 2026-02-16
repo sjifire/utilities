@@ -183,17 +183,20 @@ def _format_unit_times_table(
     lines.append("")
     lines.append("UNIT RESPONSE TIMES (save via units=[...]):")
     lines.append("(-- = missing, needs to be filled in or confirmed N/A)")
-    header = "Unit     | Dispatched | Enroute  | On Scene | Cleared  | In Quarters"
-    divider = "---------|------------|----------|----------|----------|------------"
+    lines.append("(Staged = ARSTN, unit waiting at a location but NOT on scene)")
+    header = "Unit     | Dispatched | Enroute  | Staged   | On Scene | Cleared  | In Quarters"
+    divider = "---------|------------|----------|----------|----------|----------|------------"
     lines.extend([header, divider])
     for ut in unit_times:
         unit = (ut.get("unit") or "?").ljust(8)
         paged = _time(ut.get("paged") or default_dispatched).ljust(10)
         enroute = _time(ut.get("enroute", "")).ljust(8)
+        staged = _time(ut.get("staged", "")).ljust(8)
         arrived = _time(ut.get("arrived", "")).ljust(8)
         completed = _time(ut.get("completed", "")).ljust(8)
         in_quarters = _time(ut.get("in_quarters", ""))
-        lines.append(f"{unit} | {paged} | {enroute} | {arrived} | {completed} | {in_quarters}")
+        row = f"{unit} | {paged} | {enroute} | {staged} | {arrived} | {completed} | {in_quarters}"
+        lines.append(row)
 
     return "\n".join(lines)
 

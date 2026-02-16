@@ -33,6 +33,9 @@ class UnitTiming(BaseModel):
     enroute: str = ""
     """ISO timestamp when this unit went enroute."""
 
+    staged: str = ""
+    """ISO timestamp when this unit staged (ARSTN status). Not on scene."""
+
     arrived: str = ""
     """ISO timestamp when this unit arrived on scene."""
 

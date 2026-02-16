@@ -157,6 +157,14 @@ async def analyze_dispatch(
     if not doc.responder_details and not doc.cad_comments:
         return DispatchAnalysis()
 
+    n_entries = len(doc.responder_details)
+    logger.info(
+        "Analyzing %s (%s) — %d responder entries, %d char CAD comments",
+        doc.long_term_call_id,
+        doc.nature,
+        n_entries,
+        len(doc.cad_comments),
+    )
     prompt = _build_prompt(doc, crew_context)
     text = await _call_llm(_SYSTEM_PROMPT, prompt)
     if not text:

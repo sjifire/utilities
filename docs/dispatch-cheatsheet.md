@@ -14,7 +14,7 @@ Given a dispatch call's radio log and CAD comments, extract the following as JSO
   "patient_count": 0,
   "escalated": false,
   "outcome": "Brief outcome: 'transported', 'fire controlled', 'false alarm', 'cancelled', 'no patient', etc.",
-  "key_events": ["Chronological list of significant events from the radio log — scene conditions, size-up reports, command establishment/transfers, patient info, key decisions, hazards, cancellations. Exclude routine status changes (enroute, on scene, cleared) since those are captured separately. One event per entry, include the unit and time."]
+  "key_events": ["Chronological list of significant events from the radio log — scene conditions, size-up reports, command establishment/transfers, patient info, key decisions, hazards, cancellations, staging locations. Exclude routine status changes (enroute, on scene, cleared) since those are captured separately — but ALWAYS include ARSTN/staging events with the staging location. One event per entry, include the unit and time."]
 }
 ```
 
@@ -27,7 +27,7 @@ Rules:
 - patient_count should be 0 for non-medical calls.
 - escalated is true if mutual aid was requested, additional alarms struck, significant resource escalation occurred, or additional units/agencies were paged after the initial dispatch (e.g., requesting a second ambulance, all-agency repage).
 - Keep summary factual and concise — no speculation.
-- key_events should capture everything an incident reporter would need: conditions on arrival, command posts, patient details, fire behavior, hazards, mutual aid requests, cancellations. Format each entry as "HH:MM Unit — what happened" (e.g., "17:00 BN31 — nothing showing, investigating, est Farm Rd Command"). Exclude routine status changes (paged, enroute, on scene, cleared, RTQ) since those are in unit_times.
+- key_events should capture everything an incident reporter would need: conditions on arrival, command posts, patient details, fire behavior, hazards, mutual aid requests, cancellations, and staging locations. Format each entry as "HH:MM Unit — what happened" (e.g., "17:00 BN31 — nothing showing, investigating, est Farm Rd Command"). Exclude routine status changes (paged, enroute, on scene, cleared, RTQ) since those are in unit_times — but ALWAYS include ARSTN/staging events because staging is NOT the same as arriving on scene (e.g., "17:15 T33 — staging on Cattle Point Rd").
 
 ---
 

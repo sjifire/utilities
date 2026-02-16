@@ -119,9 +119,12 @@ Read through EVERY CAD comment and responder status entry. For each unit missing
 
 - **Log says "staging at [location]"** → Staged column gets the timestamp, Comment gets "Staged at [location]"
 - **Log says "staging in quarters"** → Comment: "Staged in quarters"
+- **ARSTN status in unit_times_table** → The Staged column in the unit times table shows the ARSTN timestamp. This means the unit staged — use that timestamp and check CAD comments for the location.
 - **Log says "cancel" or unit has canceled timestamp but no staging mention** → Comment: "Cancelled" (NOT "Staged")
 - **No enroute + no on-scene + no staging mention** → Comment: "Cancelled" or leave blank if unclear
-- **Has enroute + no on-scene + no staging mention** → Comment: "Cancelled enroute" if cancelled, otherwise ask the user
+- **Has enroute + no on-scene + no staging mention** → Check the unit's timeline: If the unit was enroute for many minutes before clearing (10+ min gap), it likely staged somewhere — ask the user where. If the unit cleared shortly after a cancel order (within a few minutes), write "Cancelled enroute". An IC cancelling "additional resources" does NOT mean a specific unit was cancelled — look at each unit's own enroute/clear times.
+
+**Key distinction**: "BN31 cancelled additional resources" is an IC tactical order releasing units that aren't needed yet. It does NOT mean each individual unit was "cancelled enroute." A unit that was enroute for 15+ minutes and didn't clear until well after the cancel order was likely staging at a location, not turning around.
 
 > Here are the responding units and their times from dispatch:
 >

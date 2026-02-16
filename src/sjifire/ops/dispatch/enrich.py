@@ -233,6 +233,7 @@ def _most_senior_officer(entries: list[ScheduleEntryCache]) -> str:
 _STATUS_TO_FIELD: dict[str, str] = {
     "PAGED": "paged",
     "ENRT": "enroute",
+    "ARSTN": "staged",
     "ARRVD": "arrived",
     "CMPLT": "completed",
     "RTQ": "in_quarters",
@@ -288,6 +289,7 @@ def _extract_unit_times(
             unit=unit,
             paged=times.get("paged", ""),
             enroute=times.get("enroute", ""),
+            staged=times.get("staged", ""),
             arrived=times.get("arrived", ""),
             completed=times.get("completed", ""),
             in_quarters=times.get("in_quarters", ""),

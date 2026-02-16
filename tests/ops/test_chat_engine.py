@@ -671,10 +671,10 @@ class TestFormatUnitTimesTable:
         table = _format_unit_times_table(unit_times)
         assert "First Dispatched" in table
         assert "first_unit_dispatched" in table
-        # Unit row should have 5 dashes (dispatched, enroute, on scene, cleared, in quarters)
+        # Unit row should have 6 dashes (dispatched, enroute, staged, on scene, cleared, in quarters)
         lines = table.split("\n")
         unit_row = next(line for line in lines if "M31" in line)
-        assert unit_row.count("--") == 5
+        assert unit_row.count("--") == 6
 
     def test_no_time_reported_shows_dashes(self):
         unit_times = [

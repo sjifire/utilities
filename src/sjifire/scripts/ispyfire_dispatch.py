@@ -6,6 +6,8 @@ Commands:
     detail  - Show full details for a specific call
     open    - Show currently active/open calls
     archive - Archive completed calls to Cosmos DB
+              --enrich   Enrich calls missing analysis
+              --force    Force re-enrich ALL calls (implies --enrich)
 """
 
 import argparse
@@ -194,15 +196,21 @@ def cmd_archive(args) -> int:
         else:
             print("All calls already archived.")
 
-    # Enrich any archived docs that are missing structured analysis
-    if not getattr(args, "dry_run", False):
-        force = getattr(args, "force", False)
-        limit = 999 if force else 100
+    # Enrich if requested (--force requires --enrich)
+    enrich = getattr(args, "enrich", False)
+    force = getattr(args, "force", False)
+    if force and not enrich:
+        print("Error: --force requires --enrich")
+        return 1
+    if enrich and not getattr(args, "dry_run", False):
+        limit = 9999 if force else 100
         enriched = asyncio.run(_enrich_stored(force=force, limit=limit))
         if enriched:
             _print_enrichment_results(enriched)
             count = sum(1 for d in enriched if d.analysis.incident_commander or d.analysis.summary)
             print(f"\nEnriched {count} calls with structured analysis")
+        else:
+            print("All calls already have analysis.")
 
     return 0
 
@@ -249,8 +257,12 @@ async def _store_completed(calls: list) -> int:
 
 async def _enrich_stored(*, force: bool = False, limit: int = 100) -> list:
     from sjifire.ops.dispatch.store import DispatchStore
+    from sjifire.ops.tasks.dispatch_sync import _prewarm_schedule
 
     async with DispatchStore() as store:
+        if force:
+            docs = await store.list_recent(limit=limit)
+            await _prewarm_schedule(docs)
         return await store.enrich_stored(force=force, limit=limit)
 
 
@@ -290,7 +302,12 @@ def main() -> int:
         "--dry-run", action="store_true", help="Show what would be archived without writing"
     )
     archive_parser.add_argument(
-        "--force", action="store_true", help="Re-analyze all calls, even those already enriched"
+        "--enrich", action="store_true", help="Enrich calls missing analysis after archiving"
+    )
+    archive_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-enrich ALL calls (implies --enrich)",
     )
     archive_parser.set_defaults(func=cmd_archive)
 
