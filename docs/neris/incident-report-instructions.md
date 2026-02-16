@@ -107,17 +107,21 @@ This step combines units, response times, and crew assignments — the core of t
 
 Present the unit response timeline from dispatch data. Include a **Staged** column and a **Comment** column. Do NOT include an "In Quarters" column — that's just a return-to-station time and isn't useful for reporting.
 
-**Before presenting the table**, read through ALL CAD comments and responder status entries for every unit. For any unit missing an on-scene time, you MUST search the dispatch log for:
-- Keywords: "staging", "staged", "stage", "in quarters", "available", "cancel", "cancelled"
-- The unit designator (T33, T36, etc.) near those keywords
-- The timestamp on that CAD comment entry → use as the Staged time
-- The location mentioned → put in the Comment column (e.g., "Staged on Cattle Point Rd")
+**Before presenting the table**, if any unit is missing an on-scene time, call `get_dispatch_call(incident_number)` to get the FULL dispatch record with all CAD comments and responder entries. The `dispatch_comments` snapshot on the incident may be a summary — the full record has timestamped entries you need to search.
 
-Fill in the table based on what you find:
+Read through EVERY CAD comment and responder status entry. For each unit missing an on-scene time, search for:
+- The unit designator (T33, T36, etc.) in the comments
+- Keywords near it: "staging", "staged", "stage", "in quarters", "available", "cancel", "cancelled", "hold at", "standing by"
+- A location name near the staging keyword → Comment column (e.g., "Staged on Cattle Point Rd")
+- The timestamp on that comment entry → Staged column
 
-- **No enroute + no on-scene** → Almost always staged in quarters. Comment: "Staged in quarters"
-- **Has enroute + no on-scene** → Went somewhere and staged. Find WHERE from CAD comments — there's usually a radio log entry like "T33 staging at Cattle Point" with a timestamp. Put the timestamp in the Staged column and the location in Comment.
-- **Has canceled timestamp** → Append "cancelled" to the comment.
+**Do NOT assume "staged" if the log doesn't say it.** A unit that was cancelled is just cancelled — not "staged in quarters" unless the log specifically says staging. Only use what the dispatch data actually says:
+
+- **Log says "staging at [location]"** → Staged column gets the timestamp, Comment gets "Staged at [location]"
+- **Log says "staging in quarters"** → Comment: "Staged in quarters"
+- **Log says "cancel" or unit has canceled timestamp but no staging mention** → Comment: "Cancelled" (NOT "Staged")
+- **No enroute + no on-scene + no staging mention** → Comment: "Cancelled" or leave blank if unclear
+- **Has enroute + no on-scene + no staging mention** → Comment: "Cancelled enroute" if cancelled, otherwise ask the user
 
 > Here are the responding units and their times from dispatch:
 >
@@ -128,7 +132,7 @@ Fill in the table based on what you find:
 > | OPS31| 16:49:35  | 16:52:44 | -- | 17:00:45 | 17:37:23 | |
 > | L31  | 16:49:35  | 17:02:05 | -- | 17:16:55 | 17:45:22 | |
 > | T33  | 16:49:35  | 17:03:31 | ~17:10 | -- | 17:28:08 | Staged on Cattle Point Rd, cancelled |
-> | T36  | 16:49:35  | -- | -- | -- | 17:17:17 | Staged in quarters, cancelled |
+> | T36  | 16:49:35  | -- | -- | -- | 17:17:17 | Cancelled |
 >
 > Do these look right? Any corrections?
 
