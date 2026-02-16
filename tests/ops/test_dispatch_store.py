@@ -662,6 +662,124 @@ class TestEnrichStored:
 
 
 # ------------------------------------------------------------------
+# _extract_unit_times (deterministic timing extraction)
+# ------------------------------------------------------------------
+
+
+class TestExtractUnitTimes:
+    """Tests for _extract_unit_times in the enrichment pipeline."""
+
+    def test_arstn_maps_to_staged(self):
+        """ARSTN status should populate the staged field on UnitTiming."""
+        from sjifire.ops.dispatch.enrich import _extract_unit_times
+
+        doc = _make_doc(
+            id="uuid-staging",
+            responder_details=[
+                {
+                    "unit_number": "SJF3",
+                    "agency_code": "SJF3",
+                    "status": "PAGED",
+                    "time_of_status_change": "2026-02-15T16:48:00",
+                },
+                {
+                    "unit_number": "T33",
+                    "agency_code": "SJF3",
+                    "status": "PAGED",
+                    "time_of_status_change": "2026-02-15T16:48:00",
+                },
+                {
+                    "unit_number": "T33",
+                    "agency_code": "SJF3",
+                    "status": "ENRT",
+                    "time_of_status_change": "2026-02-15T16:55:00",
+                },
+                {
+                    "unit_number": "T33",
+                    "agency_code": "SJF3",
+                    "status": "ARSTN",
+                    "time_of_status_change": "2026-02-15T17:15:00",
+                },
+                {
+                    "unit_number": "T33",
+                    "agency_code": "SJF3",
+                    "status": "CMPLT",
+                    "time_of_status_change": "2026-02-15T17:30:00",
+                },
+            ],
+        )
+        analysis = DispatchAnalysis()
+        _extract_unit_times(doc, analysis)
+
+        assert len(analysis.unit_times) == 1
+        t33 = analysis.unit_times[0]
+        assert t33.unit == "T33"
+        assert t33.staged == "2026-02-15T17:15:00"
+        assert t33.enroute == "2026-02-15T16:55:00"
+        assert t33.arrived == ""  # Never arrived on scene
+
+    def test_staged_appears_without_arrived(self):
+        """A unit with staging but no arrival should have staged set, arrived empty."""
+        from sjifire.ops.dispatch.enrich import _extract_unit_times
+
+        doc = _make_doc(
+            id="uuid-staging-2",
+            responder_details=[
+                {
+                    "unit_number": "E31",
+                    "agency_code": "SJF3",
+                    "status": "PAGED",
+                    "time_of_status_change": "2026-02-15T14:30:00",
+                },
+                {
+                    "unit_number": "E31",
+                    "agency_code": "SJF3",
+                    "status": "ENRT",
+                    "time_of_status_change": "2026-02-15T14:32:00",
+                },
+                {
+                    "unit_number": "E31",
+                    "agency_code": "SJF3",
+                    "status": "ARRVD",
+                    "time_of_status_change": "2026-02-15T14:38:00",
+                },
+                {
+                    "unit_number": "L31",
+                    "agency_code": "SJF3",
+                    "status": "PAGED",
+                    "time_of_status_change": "2026-02-15T14:30:00",
+                },
+                {
+                    "unit_number": "L31",
+                    "agency_code": "SJF3",
+                    "status": "ENRT",
+                    "time_of_status_change": "2026-02-15T14:33:00",
+                },
+                {
+                    "unit_number": "L31",
+                    "agency_code": "SJF3",
+                    "status": "ARSTN",
+                    "time_of_status_change": "2026-02-15T14:40:00",
+                },
+                {
+                    "unit_number": "L31",
+                    "agency_code": "SJF3",
+                    "status": "CMPLT",
+                    "time_of_status_change": "2026-02-15T15:00:00",
+                },
+            ],
+        )
+        analysis = DispatchAnalysis()
+        _extract_unit_times(doc, analysis)
+
+        units = {t.unit: t for t in analysis.unit_times}
+        assert units["E31"].arrived == "2026-02-15T14:38:00"
+        assert units["E31"].staged == ""
+        assert units["L31"].staged == "2026-02-15T14:40:00"
+        assert units["L31"].arrived == ""
+
+
+# ------------------------------------------------------------------
 # get_or_fetch (Cosmos first, iSpyFire fallback)
 # ------------------------------------------------------------------
 

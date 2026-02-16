@@ -398,7 +398,7 @@
   {% endif %}
 
   <!-- Messages -->
-  <div class="messages" x-ref="messages">
+  <div class="messages" x-ref="messages" @scroll="_onMessagesScroll()">
     <!-- Message list -->
     <template x-for="(msg, i) in messages" :key="i">
       <div>
@@ -499,10 +499,10 @@ function chatApp() {
     incidentId: '{{ incident_id }}',
     pendingImages: [],
     lightboxSrc: '',
+    _userScrolledAway: false,
+    _scrollRAF: null,
 
     async init() {
-      this.initScroll();
-
       // Load conversation history
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
@@ -590,23 +590,27 @@ function chatApp() {
       });
     },
 
-    _userScrolledUp: false,
-
-    initScroll() {
-      const el = this.$refs.messages;
-      if (!el) return;
-      el.addEventListener('scroll', () => {
-        // "Near bottom" = within 80px of the end
-        this._userScrolledUp = (el.scrollHeight - el.scrollTop - el.clientHeight) > 80;
-      });
-    },
-
     scrollToBottom(force) {
-      if (!force && this._userScrolledUp) return;
-      this.$nextTick(() => {
+      if (force) {
+        this._userScrolledAway = false;
+      } else if (this._userScrolledAway) {
+        return;  // User scrolled up — don't fight them
+      }
+      // Coalesce rapid calls (streaming text events) into one rAF
+      if (this._scrollRAF) return;
+      this._scrollRAF = requestAnimationFrame(() => {
+        this._scrollRAF = null;
         const el = this.$refs.messages;
         if (el) el.scrollTop = el.scrollHeight;
       });
+    },
+
+    _onMessagesScroll() {
+      const el = this.$refs.messages;
+      if (!el) return;
+      // "Near bottom" = within 120px of the end
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      this._userScrolledAway = !nearBottom;
     },
 
     async sendMessage(overrideText) {
@@ -624,7 +628,6 @@ function chatApp() {
       this.pendingImages = [];
       this.streaming = true;
       this.currentText = '';
-      this._userScrolledUp = false;
       this.scrollToBottom(true);
 
       // Reset textarea height
