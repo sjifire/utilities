@@ -30,6 +30,13 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 _jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=True)
 
 
+def _forbidden_page() -> Response:
+    """Render a styled 403 page for non-editors."""
+    template = _jinja_env.get_template("forbidden.html")
+    html = template.render(active_page="reports", show_reports=False)
+    return Response(html, status_code=403, media_type="text/html")
+
+
 def _get_user(request: Request) -> UserContext | None:
     """Extract authenticated user from request."""
     user = get_easyauth_user(request)
@@ -60,7 +67,7 @@ async def reports_list(request: Request) -> Response:
         user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
     )
     if not is_editor:
-        return JSONResponse({"error": "Forbidden"}, status_code=403)
+        return _forbidden_page()
 
     # Reuse the dashboard data pipeline — dispatch calls cross-referenced
     # with local incidents and NERIS records.  Fetch more calls than the
@@ -153,7 +160,7 @@ async def print_report(request: Request) -> Response:
         user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
     )
     if not is_editor:
-        return JSONResponse({"error": "Forbidden"}, status_code=403)
+        return _forbidden_page()
 
     incident_id = request.path_params["incident_id"]
 
@@ -189,7 +196,7 @@ async def chat_page(request: Request) -> Response:
         user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
     )
     if not is_editor:
-        return JSONResponse({"error": "Forbidden"}, status_code=403)
+        return _forbidden_page()
 
     incident_id = request.path_params["incident_id"]
 

@@ -186,6 +186,12 @@ async def entra_callback(request: Request) -> Response:
     return await provider.handle_callback(request)
 
 
+@mcp.custom_route("/", methods=["GET"])
+async def root_redirect(request: Request) -> Response:
+    """Redirect root to the dashboard."""
+    return RedirectResponse("/dashboard")
+
+
 @mcp.custom_route("/dashboard", methods=["GET"])
 async def dashboard_page(request: Request) -> Response:
     """Serve the authenticated browser dashboard (EasyAuth SSO)."""
