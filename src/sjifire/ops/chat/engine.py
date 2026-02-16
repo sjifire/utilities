@@ -183,7 +183,8 @@ def _format_unit_times_table(
     lines.append("")
     lines.append("UNIT RESPONSE TIMES (save via units=[...]):")
     lines.append("(-- = missing, needs to be filled in or confirmed N/A)")
-    lines.append("(Staged = ARSTN, unit waiting at a location but NOT on scene)")
+    lines.append("(Staged = ARSTN/ARRNL, unit waiting at a location but NOT on scene)")
+    lines.append("(Use these EXACT timestamps — do NOT round or estimate)")
     header = "Unit     | Dispatched | Enroute  | Staged   | On Scene | Cleared  | In Quarters"
     divider = "---------|------------|----------|----------|----------|----------|------------"
     lines.extend([header, divider])
