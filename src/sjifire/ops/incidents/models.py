@@ -49,10 +49,14 @@ class UnitAssignment(BaseModel):
     # Per-unit timestamps (ISO 8601 strings)
     dispatch: str = ""
     enroute: str = ""
+    staged: str = ""  # Approximate time unit staged (from CAD comments)
     on_scene: str = ""
     cleared: str = ""
     canceled: str = ""
     in_quarters: str = ""
+
+    # Free-text note for this unit (staging location, IC role, etc.)
+    comment: str = ""
 
 
 class EditEntry(BaseModel):

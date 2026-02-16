@@ -305,10 +305,12 @@ def _parse_units(raw: list[dict]) -> list[UnitAssignment]:
                 personnel=personnel,
                 dispatch=u.get("dispatch", ""),
                 enroute=u.get("enroute", ""),
+                staged=u.get("staged", ""),
                 on_scene=u.get("on_scene", ""),
                 cleared=u.get("cleared", ""),
                 canceled=u.get("canceled", ""),
                 in_quarters=u.get("in_quarters", ""),
+                comment=u.get("comment", ""),
             )
         )
     return units
@@ -562,7 +564,8 @@ async def update_incident(
         crew: Replace crew list (each entry: name, email, rank, position, unit)
         outcome_narrative: What happened
         actions_taken_narrative: What actions were taken
-        unit_responses: NERIS apparatus/unit response data
+        unit_responses: NERIS apparatus/unit response data (each entry can include
+            staged, comment, and response_mode alongside standard timestamps)
         timestamps: Event timestamps (dispatch, on_scene, etc.)
         internal_notes: Internal notes (not sent to NERIS)
         action_taken: "ACTION" or "NOACTION"

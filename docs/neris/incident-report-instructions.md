@@ -105,28 +105,36 @@ This step combines units, response times, and crew assignments — the core of t
 
 **4a — Responding Units & Times**
 
-Present the unit response timeline from dispatch data. Include a **Staged** column and a **Comment** column. Before presenting, cross-reference the unit timeline with CAD comments to fill in staging info and any other notes:
+Present the unit response timeline from dispatch data. Include a **Staged** column and a **Comment** column. Do NOT include an "In Quarters" column — that's just a return-to-station time and isn't useful for reporting.
 
-- **No enroute + no on-scene** → Check CAD for "staging", "in quarters", "available". Comment: "Staged in quarters"
-- **Has enroute + no on-scene** → Check CAD for staging location. Extract the timestamp from the CAD comment if available. Comment: "Staged on Cattle Point Rd"
-- **Has enroute + no on-scene + has canceled** → Comment: "Cancelled enroute"
+**Before presenting the table**, read through ALL CAD comments and responder status entries for every unit. For any unit missing an on-scene time, you MUST search the dispatch log for:
+- Keywords: "staging", "staged", "stage", "in quarters", "available", "cancel", "cancelled"
+- The unit designator (T33, T36, etc.) near those keywords
+- The timestamp on that CAD comment entry → use as the Staged time
+- The location mentioned → put in the Comment column (e.g., "Staged on Cattle Point Rd")
+
+Fill in the table based on what you find:
+
+- **No enroute + no on-scene** → Almost always staged in quarters. Comment: "Staged in quarters"
+- **Has enroute + no on-scene** → Went somewhere and staged. Find WHERE from CAD comments — there's usually a radio log entry like "T33 staging at Cattle Point" with a timestamp. Put the timestamp in the Staged column and the location in Comment.
+- **Has canceled timestamp** → Append "cancelled" to the comment.
 
 > Here are the responding units and their times from dispatch:
 >
 > | Unit | Dispatched | Enroute | Staged | On Scene | Cleared | Comment |
 > |------|-----------|---------|--------|----------|---------|---------|
-> | BN31 | 16:49:35  | 16:52:14 | -- | 16:59:26 | 17:37:23 | |
+> | BN31 | 16:49:35  | 16:52:14 | -- | 16:59:26 | 17:37:23 | IC |
 > | E31  | 16:49:35  | 16:52:44 | -- | 16:59:26 | 17:37:09 | |
 > | OPS31| 16:49:35  | 16:52:44 | -- | 17:00:45 | 17:37:23 | |
 > | L31  | 16:49:35  | 17:02:05 | -- | 17:16:55 | 17:45:22 | |
-> | T33  | 16:49:35  | 17:03:31 | ~17:10 | -- | 17:28:08 | Staged on Cattle Point Rd |
-> | T36  | 16:49:35  | -- | -- | -- | 17:17:17 | Staged in quarters |
+> | T33  | 16:49:35  | 17:03:31 | ~17:10 | -- | 17:28:08 | Staged on Cattle Point Rd, cancelled |
+> | T36  | 16:49:35  | -- | -- | -- | 17:17:17 | Staged in quarters, cancelled |
 >
 > Do these look right? Any corrections?
 
 For the **Staged** column: use the timestamp from the CAD comment if one exists (prefix with `~` if approximate). Leave blank for units that went on scene. For units that staged in quarters without going enroute, leave the staged time blank (they never moved).
 
-Only ask the user about gaps if the CAD comments don't explain them.
+Only ask the user about gaps if the CAD comments don't explain them. If you can't find staging info in the CAD comments, say so explicitly: "T33 has no on-scene time and I couldn't find staging info in the dispatch log — do you know where they staged?"
 
 Save unit times via `update_incident(unit_responses=[...])` and the incident-level timestamps (earliest dispatched, first enroute, first on scene, last cleared) via `update_incident(timestamps={...})`.
 
