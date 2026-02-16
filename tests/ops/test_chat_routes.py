@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from sjifire.ops.auth import UserContext
-from sjifire.ops.chat.routes import chat_stream, print_report
+from sjifire.ops.chat.routes import chat_stream, create_report, print_report
 from sjifire.ops.incidents.models import (
     EditEntry,
     IncidentDocument,
@@ -27,8 +27,9 @@ _TEST_USER = UserContext(
 class _FakeRequest:
     """Minimal Starlette Request stand-in for testing chat_stream."""
 
-    def __init__(self, body: dict):
+    def __init__(self, body: dict, *, method: str = "POST"):
         self._body = body
+        self.method = method
         self.path_params = {"incident_id": "inc-test"}
 
     async def json(self):
@@ -332,3 +333,20 @@ class TestPrintReport:
         body = resp.body.decode()
         assert "48.5234" in body
         assert "-123.0156" in body
+
+
+# ---------------------------------------------------------------------------
+# Create report route tests
+# ---------------------------------------------------------------------------
+
+
+class TestCreateReport:
+    """Tests for the POST /reports/new route."""
+
+    async def test_get_redirects_to_reports_list(self):
+        """GET /reports/new should redirect to /reports, not 500."""
+        req = _FakeRequest({}, method="GET")
+        resp = await create_report(req)
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/reports"
