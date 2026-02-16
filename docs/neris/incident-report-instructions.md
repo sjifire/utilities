@@ -93,6 +93,12 @@ If you're unsure, present the top-level categories and drill down:
 
 You can select up to 3 incident types (1 primary + 2 additional).
 
+**SJI-specific incident type guidance:**
+- **Chimney fires** are by far the most common structure fire on San Juan Island (woodstoves, fireplaces). If CAD mentions "chimney", "flue", "woodstove", "fireplace", "creosote", or "chimney fire", use `FIRE||STRUCTURE_FIRE||CHIMNEY_FIRE`. Do NOT default to `CONFINED_COOKING_APPLIANCE_FIRE` unless the CAD specifically mentions a cooking appliance (stove, oven, microwave, range, grease fire).
+- **Vegetation/grass fires** are more common than wildland fires unless CAD indicates a large or spreading wildland fire.
+- **Lift assists** are very common — `PUBSERV||CITIZEN_ASSIST||LIFT_ASSIST`.
+- **Gas leaks** are usually propane (not natural gas) — the island uses propane tanks, not municipal gas lines.
+
 ### Step 4 — Units, Times & Crew
 
 This step combines units, response times, and crew assignments — the core of the NERIS resources section. The dispatch data has most of this already.
