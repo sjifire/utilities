@@ -506,6 +506,10 @@ function chatApp() {
       // Load conversation history
       try {
         const res = await fetch(`/reports/${this.incidentId}/conversation`);
+        if (res.status === 401) {
+          window.location.href = '/.auth/login/aad?post_login_redirect_uri=' + window.location.pathname;
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           for (const msg of data.messages || []) {
@@ -644,6 +648,12 @@ function chatApp() {
         });
 
         if (!res.ok) {
+          if (res.status === 401) {
+            this.messages.push({type: 'error', content: 'Session expired. Redirecting to sign in...'});
+            this.streaming = false;
+            setTimeout(() => { window.location.href = '/.auth/login/aad?post_login_redirect_uri=' + window.location.pathname; }, 1500);
+            return;
+          }
           const err = await res.json().catch(() => ({error: 'Request failed'}));
           this.messages.push({type: 'error', content: err.error || 'Request failed'});
           this.streaming = false;
