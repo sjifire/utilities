@@ -225,11 +225,27 @@ For NERIS submission, `to_neris_payload()` reads from typed fields first, then p
 | 5 | POV responders | **Unit designator** | `unit_id: "POV"` with personnel nested |
 | 6 | Unable to dispatch | **Extras** | |
 
+### Fire Module (conditional: required for all FIRE incident types)
+
+| # | Field | Decision | Detail |
+|---|-------|----------|--------|
+| 1 | Arrival conditions | **First-class** | `arrival_conditions: str \| None` — 6 NERIS values (NO_SMOKE_FIRE_SHOWING, SMOKE_SHOWING, SMOKE_FIRE_SHOWING, STRUCTURE_INVOLVED, FIRE_SPREAD_BEYOND_STRUCTURE, FIRE_OUT_UPON_ARRIVAL). Auto-extract from CAD notes/radio log when possible. |
+| 2 | Water supply | **Extras** | Required for fire; 9 NERIS values |
+| 3 | Investigation needed | **Extras** | Required for fire; 6 NERIS values |
+| 4 | Investigation type | **Extras** | Conditional: if formal investigation |
+| 5 | Structure: floor of origin | **Extras** | Conditional: STRUCTURE_FIRE only |
+| 6 | Structure: room of origin | **Extras** | Conditional: STRUCTURE_FIRE only |
+| 7 | Structure: fire cause | **Extras** | Conditional: STRUCTURE_FIRE only |
+| 8 | Structure: damage type | **Extras** | Conditional: STRUCTURE_FIRE only |
+| 9 | Structure: progression | **Extras** | Conditional: STRUCTURE_FIRE only |
+| 10 | Outside: fire cause | **First-class** | `outside_fire_cause: str \| None` — 14 NERIS values. Conditional: OUTSIDE_FIRE only. |
+| 11 | Outside: acres burned | **First-class** | `outside_fire_acres: float \| None` — Conditional: OUTSIDE_FIRE only. |
+
 ### Risk Reduction / Alarms
 
 | # | Field | Decision | Detail |
 |---|-------|----------|--------|
-| 1-10 | All alarm/sprinkler fields | **Extras** | Prompted for fire, gas, electrical, CO incidents |
+| 1-10 | All alarm/sprinkler fields | **Extras** | Prompted for STRUCTURE_FIRE incidents. Presence uses `bool \| None` (True=present, False=not present, None=unknown). |
 
 ### Powergen / Emerging Hazards
 
@@ -262,7 +278,12 @@ For NERIS submission, `to_neris_payload()` reads from typed fields first, then p
 
 | Trigger | Claude Should Ask About |
 |---------|----------------------|
+| All fire incidents | Arrival conditions — auto-extract from CAD notes ("nothing showing", "smoke showing", etc.) and confirm with user |
+| All fire incidents | Water supply, investigation needed |
+| Structure fire incidents | Floor/room of origin, cause, damage type, progression |
+| Outside fire incidents | Fire cause, acres burned |
 | Fire, gas, electrical, CO incidents | Hazards checklist: alarms, sprinklers, solar/battery/generators, CSST |
+| Structure fire incidents | Risk reduction: smoke alarms, fire alarms, sprinklers (Yes/No/Unknown) |
 | Fire incidents with spread | Exposures: what was affected, damage level |
 | Medical incidents / any patient | Patient count, care disposition, transport, status at handoff |
 | Rescue incidents | Rescue actions, impediments, elevation |
@@ -284,6 +305,9 @@ For NERIS submission, `to_neris_payload()` reads from typed fields first, then p
 **Added:**
 - `additional_incident_types: list[str]`
 - `automatic_alarm: bool | None`
+- `arrival_conditions: str | None` — NERIS `fire_condition_arrival` value; auto-extracted from CAD notes when possible
+- `outside_fire_cause: str | None` — NERIS `fire_cause_out` value (14 codes); for outdoor fire incidents
+- `outside_fire_acres: float | None` — estimated acres burned; for outdoor fire incidents
 - `contributed_by: list[str]`
 - `zip_code: str`
 - `county: str`
