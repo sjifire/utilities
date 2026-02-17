@@ -84,63 +84,101 @@ def _get_section_labels() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Cached open-calls poller (30-second TTL)
+# Shared open-calls cache — single pathway to iSpyFire
 # ---------------------------------------------------------------------------
+#
+# Both the nav bar (/api/open-calls) and the kiosk (/kiosk/data) read from
+# this cache.  Only ONE iSpyFire poll happens per TTL period regardless of
+# how many consumers request data.
 
-_OPEN_CALLS_TTL = 5  # seconds
-_open_calls_cache: dict | None = None
-_open_calls_ts: float = 0
-_open_calls_lock = asyncio.Lock()
+_open_docs_cache: list | None = None  # list[DispatchCallDocument] | None
+_open_docs_ts: float = 0
+_open_docs_lock = asyncio.Lock()
+_call_first_seen: dict[str, float] = {}  # dispatch_id -> monotonic timestamp
 
 
-async def get_open_calls_cached() -> dict:
-    """Return open dispatch calls with a 30-second server-side cache.
+def _open_calls_ttl() -> float:
+    """Adaptive TTL based on active call state.
 
-    Polls iSpyFire's lightweight open-calls endpoint and caches the
-    result so multiple browser clients don't each trigger a fetch.
+    - No active calls: 5s
+    - Active call first seen < 5 min ago: 2s (data changing rapidly)
+    - Active call, after 5 min: 5s (data stabilised)
     """
-    global _open_calls_cache, _open_calls_ts
+    if not _call_first_seen:
+        return 5.0
 
     now = time.monotonic()
-    if _open_calls_cache is not None and (now - _open_calls_ts) < _OPEN_CALLS_TTL:
-        return _open_calls_cache
+    for first_seen in _call_first_seen.values():
+        if (now - first_seen) < 300:  # 5 minutes
+            return 2.0
+    return 5.0
 
-    async with _open_calls_lock:
-        # Re-check after acquiring lock (another request may have refreshed)
+
+async def _fetch_open_docs_cached() -> list:
+    """Fetch open calls from iSpyFire with adaptive caching.
+
+    Returns a list of ``DispatchCallDocument`` instances.  On error,
+    returns stale cache (or an empty list on first failure).
+    """
+    global _open_docs_cache, _open_docs_ts
+
+    now = time.monotonic()
+    ttl = _open_calls_ttl()
+    if _open_docs_cache is not None and (now - _open_docs_ts) < ttl:
+        return _open_docs_cache
+
+    async with _open_docs_lock:
+        # Re-check after acquiring lock
         now = time.monotonic()
-        if _open_calls_cache is not None and (now - _open_calls_ts) < _OPEN_CALLS_TTL:
-            return _open_calls_cache
+        ttl = _open_calls_ttl()
+        if _open_docs_cache is not None and (now - _open_docs_ts) < ttl:
+            return _open_docs_cache
 
         try:
             async with DispatchStore() as store:
                 docs = await store.fetch_open()
-
-            ts = local_now()
-            hour = ts.hour % 12 or 12
-            updated_time = f"{hour}:{ts.strftime('%M')} {'AM' if ts.hour < 12 else 'PM'}"
-
-            result = {
-                "open_calls": len(docs),
-                "updated_time": updated_time,
-                "calls": [
-                    {
-                        "dispatch_id": d.long_term_call_id,
-                        "nature": d.nature,
-                        "address": d.address,
-                    }
-                    for d in docs
-                ],
-            }
         except Exception:
-            logger.exception("Failed to fetch open calls")
-            # Return stale cache if available, otherwise empty
-            if _open_calls_cache is not None:
-                return _open_calls_cache
-            result = {"open_calls": 0, "updated_time": "", "calls": []}
+            logger.exception("Failed to fetch open calls from iSpyFire")
+            return _open_docs_cache if _open_docs_cache is not None else []
 
-        _open_calls_cache = result
-        _open_calls_ts = time.monotonic()
-        return result
+        # Update first-seen tracking (drives adaptive TTL)
+        current_ids = {d.long_term_call_id for d in docs}
+        now_mono = time.monotonic()
+        for call_id in current_ids:
+            if call_id not in _call_first_seen:
+                _call_first_seen[call_id] = now_mono
+        for old_id in list(_call_first_seen):
+            if old_id not in current_ids:
+                del _call_first_seen[old_id]
+
+        _open_docs_cache = docs
+        _open_docs_ts = time.monotonic()
+        return docs
+
+
+async def get_open_calls_cached() -> dict:
+    """Return open dispatch calls for the nav bar pill.
+
+    Thin wrapper over the shared cache — no separate iSpyFire fetch.
+    """
+    docs = await _fetch_open_docs_cached()
+
+    ts = local_now()
+    hour = ts.hour % 12 or 12
+    updated_time = f"{hour}:{ts.strftime('%M')} {'AM' if ts.hour < 12 else 'PM'}"
+
+    return {
+        "open_calls": len(docs),
+        "updated_time": updated_time,
+        "calls": [
+            {
+                "dispatch_id": d.long_term_call_id,
+                "nature": d.nature,
+                "address": d.address,
+            }
+            for d in docs
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -611,30 +649,10 @@ async def render_kiosk() -> str:
 # Kiosk data — adaptive caching for open calls + crew
 # ---------------------------------------------------------------------------
 
-# Track when each call was first seen (call_id -> monotonic timestamp)
-_kiosk_call_first_seen: dict[str, float] = {}
-
-# Kiosk cache
+# Kiosk cache (enriched calls + crew + schedule)
 _kiosk_cache: dict | None = None
 _kiosk_cache_ts: float = 0
 _kiosk_cache_lock = asyncio.Lock()
-
-
-def _kiosk_cache_ttl() -> float:
-    """Determine cache TTL based on active call state.
-
-    - No active calls: 5s
-    - Active call, first 5 min: 2s (data changing rapidly)
-    - Active call, after 5 min: 5s (data stabilized)
-    """
-    if not _kiosk_call_first_seen:
-        return 5.0
-
-    now = time.monotonic()
-    for first_seen in _kiosk_call_first_seen.values():
-        if (now - first_seen) < 300:  # 5 minutes
-            return 2.0
-    return 5.0
 
 
 async def get_kiosk_data() -> dict:
@@ -646,14 +664,14 @@ async def get_kiosk_data() -> dict:
     global _kiosk_cache, _kiosk_cache_ts
 
     now = time.monotonic()
-    ttl = _kiosk_cache_ttl()
+    ttl = _open_calls_ttl()
     if _kiosk_cache is not None and (now - _kiosk_cache_ts) < ttl:
         return _kiosk_cache
 
     async with _kiosk_cache_lock:
         # Re-check after acquiring lock
         now = time.monotonic()
-        ttl = _kiosk_cache_ttl()
+        ttl = _open_calls_ttl()
         if _kiosk_cache is not None and (now - _kiosk_cache_ts) < ttl:
             return _kiosk_cache
 
@@ -679,17 +697,6 @@ async def _fetch_kiosk_data() -> dict:
         result["calls"] = []
     else:
         result["calls"] = open_calls_result
-
-    # Update first-seen tracking
-    current_ids = {c["dispatch_id"] for c in result["calls"]}
-    now = time.monotonic()
-    for call_id in current_ids:
-        if call_id not in _kiosk_call_first_seen:
-            _kiosk_call_first_seen[call_id] = now
-    # Remove cleared calls
-    for old_id in list(_kiosk_call_first_seen):
-        if old_id not in current_ids:
-            del _kiosk_call_first_seen[old_id]
 
     # Schedule
     if isinstance(schedule_result, BaseException):
@@ -784,15 +791,15 @@ async def _fetch_schedule_for_kiosk() -> dict:
 
 
 async def _fetch_open_calls_enriched() -> list[dict]:
-    """Fetch open calls from iSpyFire and enrich each one.
+    """Enrich cached open-call docs with geo, severity, and site history.
 
-    For each call: parse geo_location, add severity/icon,
-    query site history, return full to_dict().
+    Reads from the shared open-calls cache — no separate iSpyFire fetch.
+    Only opens a DispatchStore for Cosmos DB site-history queries.
     """
-    async with DispatchStore() as store:
-        docs = await store.fetch_open()
+    docs = await _fetch_open_docs_cached()
 
-        enriched = []
+    enriched = []
+    async with DispatchStore() as store:
         for doc in docs:
             call_data = doc.to_dict()
 
@@ -833,7 +840,7 @@ async def _fetch_open_calls_enriched() -> list[dict]:
 
             enriched.append(call_data)
 
-        return enriched
+    return enriched
 
 
 async def get_dashboard_data(*, call_limit: int = 15) -> dict:
