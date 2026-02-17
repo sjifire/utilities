@@ -334,10 +334,35 @@ class ISpyFireClient:
 
         time.sleep(BULK_OPERATION_DELAY)
 
+        # Extract short endpoint label for timing logs
+        # e.g. ".../calls/headers/..." → "headers", ".../calls/details/..." → "details"
+        endpoint = "unknown"
+        for segment in ("headers", "details", "search", "logging"):
+            if segment in url:
+                endpoint = segment
+                break
+
+        t0 = time.monotonic()
         try:
-            return self.central_client.request(method, url, **kwargs)
+            response = self.central_client.request(method, url, **kwargs)
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            logger.info(
+                "ISPY_TIMING | method=%s endpoint=%s status=%d duration_ms=%.0f",
+                method,
+                endpoint,
+                response.status_code,
+                elapsed_ms,
+            )
+            return response
         except httpx.HTTPError as e:
-            logger.error(f"Central API request failed: {e}")
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            logger.error(
+                "ISPY_TIMING | method=%s endpoint=%s error=%s duration_ms=%.0f",
+                method,
+                endpoint,
+                e,
+                elapsed_ms,
+            )
             return None
 
     def get_people(
