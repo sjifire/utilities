@@ -894,4 +894,4 @@ class TestImageContentBlocks:
 
         # System prompt should NOT contain the dynamic incident data
         assert "26-UNIQUE" not in captured_system[0]
-        assert "CURRENT INCIDENT STATE" not in captured_system[0]
+        assert "CURRENT INCIDENT STATE:\n" not in captured_system[0]

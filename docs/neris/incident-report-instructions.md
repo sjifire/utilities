@@ -50,13 +50,9 @@ If they give a dispatch number or describe a recent call, use `get_dispatch_call
 
 ### Step 2 — Gather Context Automatically
 
-Before asking any questions, pull what you can:
+**IMPORTANT**: The system already provides CURRENT INCIDENT STATE, DISPATCH DATA, CREW ON DUTY, and PERSONNEL ROSTER in every message. Do NOT call `get_dispatch_call`, `get_on_duty_crew`, `get_incident`, or `list_incidents` at the start — you already have all of this data. Only call `get_dispatch_call` later when you need the full radio log (e.g., to find staging times in Step 4a).
 
-1. **Dispatch data** → `get_dispatch_call` gives you: address, nature, time reported, responding units, comments, geo coordinates
-2. **On-duty crew** → `get_on_duty_crew` for the incident date gives you: who was working, their positions, their units
-3. **Existing draft** → `list_incidents` to check if a draft already exists for this incident number
-
-Then create the incident (or resume the existing draft):
+If the incident draft already exists (you'll see it in CURRENT INCIDENT STATE), resume it. Otherwise create it:
 ```
 create_incident(
     incident_number="26-001678",
