@@ -236,7 +236,10 @@ class TestRunChat:
             published.append((event, data))
 
         with (
-            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=False, reason="Monthly limit reached")),
+            patch(
+                "sjifire.ops.chat.engine.check_budget",
+                return_value=BudgetStatus(allowed=False, reason="Monthly limit reached"),
+            ),
             patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
         ):
             await run_chat("inc-123", "hello", _TEST_USER, channel="test")
@@ -284,7 +287,10 @@ class TestRunChat:
             published.append((event, data))
 
         with (
-            patch("sjifire.ops.chat.engine.check_budget", side_effect=ConnectionError("Cosmos DB unavailable")),
+            patch(
+                "sjifire.ops.chat.engine.check_budget",
+                side_effect=ConnectionError("Cosmos DB unavailable"),
+            ),
             patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
         ):
             await run_chat("inc-789", "hello", _TEST_USER, channel="test")
@@ -307,7 +313,10 @@ class TestRunChat:
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
-            patch("sjifire.ops.chat.engine.ConversationStore.__aenter__", side_effect=ConnectionError("connection refused")),
+            patch(
+                "sjifire.ops.chat.engine.ConversationStore.__aenter__",
+                side_effect=ConnectionError("connection refused"),
+            ),
             patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
         ):
             await run_chat("inc-err", "hello", _TEST_USER, channel="test")
@@ -330,7 +339,10 @@ class TestRunChat:
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
-            patch("sjifire.ops.chat.engine._fetch_context", side_effect=RuntimeError("dispatch store down")),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                side_effect=RuntimeError("dispatch store down"),
+            ),
             patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
         ):
             await run_chat("inc-ctx", "hello", _TEST_USER, channel="test")
