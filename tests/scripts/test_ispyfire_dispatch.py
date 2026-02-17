@@ -123,7 +123,7 @@ class TestCmdArchive:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
-        args = MagicMock(days=7, dry_run=False)
+        args = MagicMock(days=7, dry_run=False, enrich=False, force=False)
 
         with patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client):
             result = cmd_archive(args)
@@ -145,7 +145,7 @@ class TestCmdArchive:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
-        args = MagicMock(days=7, dry_run=False)
+        args = MagicMock(days=7, dry_run=False, enrich=False, force=False)
 
         with patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client):
             result = cmd_archive(args)
@@ -166,7 +166,7 @@ class TestCmdArchive:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
-        args = MagicMock(days=7, dry_run=False)
+        args = MagicMock(days=7, dry_run=False, enrich=False, force=False)
 
         with patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client):
             result = cmd_archive(args)
@@ -183,7 +183,7 @@ class TestCmdArchive:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
-        args = MagicMock(days=7, dry_run=True)
+        args = MagicMock(days=7, dry_run=True, enrich=False, force=False)
 
         with patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client):
             result = cmd_archive(args)
@@ -199,7 +199,7 @@ class TestCmdArchive:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
-        args = MagicMock(days=7, dry_run=False)
+        args = MagicMock(days=7, dry_run=False, enrich=False, force=False)
 
         with patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client):
             result = cmd_archive(args)
@@ -216,7 +216,7 @@ class TestCmdArchive:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
-        args = MagicMock(days=7, dry_run=False)
+        args = MagicMock(days=7, dry_run=False, enrich=False, force=False)
 
         with patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client):
             result = cmd_archive(args)
@@ -236,7 +236,7 @@ class TestCmdArchive:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
-        args = MagicMock(days=7, dry_run=False)
+        args = MagicMock(days=7, dry_run=False, enrich=False, force=False)
 
         with patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client):
             result = cmd_archive(args)
@@ -255,7 +255,7 @@ class TestCmdArchive:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
-        args = MagicMock(days=7, dry_run=False)
+        args = MagicMock(days=7, dry_run=False, enrich=False, force=False)
 
         with patch("sjifire.scripts.ispyfire_dispatch.ISpyFireClient", return_value=mock_client):
             cmd_archive(args)
