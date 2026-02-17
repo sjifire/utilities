@@ -14,7 +14,6 @@ from sjifire.ops.chat.engine import (
     _build_system_prompt,
     _format_unit_times_table,
     _log_cache_stats,
-    _sse,
     _summarize_tool_result,
     _trim_messages,
 )
@@ -160,23 +159,6 @@ class TestTrimMessages:
         assert len(result) == 40
 
 
-class TestSSE:
-    def test_format(self):
-        result = _sse("text", {"content": "hello"})
-        assert result == 'event: text\ndata: {"content": "hello"}\n\n'
-
-    def test_error_event(self):
-        result = _sse("error", {"message": "budget exceeded"})
-        assert "error" in result
-        assert "budget exceeded" in result
-
-    def test_done_event_includes_tokens(self):
-        result = _sse("done", {"input_tokens": 100, "output_tokens": 50})
-        data = json.loads(result.split("data: ")[1].strip())
-        assert data["input_tokens"] == 100
-        assert data["output_tokens"] == 50
-
-
 class TestSummarizeToolResult:
     def test_get_incident(self):
         result = _summarize_tool_result(
@@ -240,26 +222,38 @@ class TestSummarizeToolResult:
         assert len(result) <= 200
 
 
-class TestStreamChat:
-    async def test_budget_exceeded_yields_error(self):
-        """When budget is exceeded, stream should yield an error event."""
-        from sjifire.ops.chat.budget import BudgetStatus
-        from sjifire.ops.chat.engine import stream_chat
+class TestRunChat:
+    """Test run_chat() which publishes events to a Centrifugo channel."""
 
-        with patch(
-            "sjifire.ops.chat.engine.check_budget",
-            return_value=BudgetStatus(allowed=False, reason="Monthly limit reached"),
+    async def test_budget_exceeded_publishes_error(self):
+        """When budget is exceeded, run_chat should publish an error event."""
+        from sjifire.ops.chat.budget import BudgetStatus
+        from sjifire.ops.chat.engine import run_chat
+
+        published: list[tuple] = []
+
+        async def fake_publish(channel, event, data):
+            published.append((event, data))
+
+        with (
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=False, reason="Monthly limit reached")),
+            patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
         ):
-            events = [e async for e in stream_chat("inc-123", "hello", _TEST_USER)]
+            await run_chat("inc-123", "hello", _TEST_USER, channel="test")
 
-        assert len(events) == 1
-        assert "error" in events[0]
-        assert "Monthly limit reached" in events[0]
+        assert len(published) == 1
+        assert published[0][0] == "error"
+        assert "Monthly limit reached" in published[0][1]["message"]
 
-    async def test_turn_limit_exceeded_yields_error(self):
-        """When turn count is at max, stream should yield an error event."""
+    async def test_turn_limit_exceeded_publishes_error(self):
+        """When turn count is at max, run_chat should publish an error event."""
         from sjifire.ops.chat.budget import BudgetStatus
-        from sjifire.ops.chat.engine import stream_chat
+        from sjifire.ops.chat.engine import run_chat
+
+        published: list[tuple] = []
+
+        async def fake_publish(channel, event, data):
+            published.append((event, data))
 
         # Create a conversation at the turn limit
         doc = ConversationDocument(
@@ -270,74 +264,82 @@ class TestStreamChat:
         async with ConversationStore() as store:
             await store.create(doc)
 
-        with patch(
-            "sjifire.ops.chat.engine.check_budget",
-            return_value=BudgetStatus(allowed=True),
+        with (
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
+            patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
         ):
-            events = [e async for e in stream_chat("inc-456", "hello", _TEST_USER)]
+            await run_chat("inc-456", "hello", _TEST_USER, channel="test")
 
-        assert len(events) == 1
-        assert "error" in events[0]
-        assert "limit" in events[0].lower()
+        assert len(published) == 1
+        assert published[0][0] == "error"
+        assert "limit" in published[0][1]["message"].lower()
 
-    async def test_budget_check_failure_yields_friendly_error(self):
+    async def test_budget_check_failure_publishes_friendly_error(self):
         """When budget check raises, error should be user-friendly with ref ID."""
-        from sjifire.ops.chat.engine import stream_chat
+        from sjifire.ops.chat.engine import run_chat
 
-        with patch(
-            "sjifire.ops.chat.engine.check_budget",
-            side_effect=ConnectionError("Cosmos DB unavailable"),
+        published: list[tuple] = []
+
+        async def fake_publish(channel, event, data):
+            published.append((event, data))
+
+        with (
+            patch("sjifire.ops.chat.engine.check_budget", side_effect=ConnectionError("Cosmos DB unavailable")),
+            patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
         ):
-            events = [e async for e in stream_chat("inc-789", "hello", _TEST_USER)]
+            await run_chat("inc-789", "hello", _TEST_USER, channel="test")
 
-        assert len(events) == 1
-        assert "usage limits" in events[0]
-        assert "ref:" in events[0]
-        assert "ConnectionError" not in events[0]
+        assert len(published) == 1
+        assert published[0][0] == "error"
+        assert "usage limits" in published[0][1]["message"]
+        assert "ref:" in published[0][1]["message"]
+        assert "ConnectionError" not in published[0][1]["message"]
 
-    async def test_conversation_load_failure_yields_friendly_error(self):
+    async def test_conversation_load_failure_publishes_friendly_error(self):
         """When conversation store raises, error should be user-friendly."""
         from sjifire.ops.chat.budget import BudgetStatus
-        from sjifire.ops.chat.engine import stream_chat
+        from sjifire.ops.chat.engine import run_chat
+
+        published: list[tuple] = []
+
+        async def fake_publish(channel, event, data):
+            published.append((event, data))
 
         with (
-            patch(
-                "sjifire.ops.chat.engine.check_budget",
-                return_value=BudgetStatus(allowed=True),
-            ),
-            patch(
-                "sjifire.ops.chat.engine.ConversationStore.__aenter__",
-                side_effect=ConnectionError("connection refused"),
-            ),
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
+            patch("sjifire.ops.chat.engine.ConversationStore.__aenter__", side_effect=ConnectionError("connection refused")),
+            patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
         ):
-            events = [e async for e in stream_chat("inc-err", "hello", _TEST_USER)]
+            await run_chat("inc-err", "hello", _TEST_USER, channel="test")
 
-        assert len(events) == 1
-        assert "load conversation" in events[0]
-        assert "ref:" in events[0]
-        assert "ConnectionError" not in events[0]
+        assert len(published) == 1
+        assert published[0][0] == "error"
+        assert "load conversation" in published[0][1]["message"]
+        assert "ref:" in published[0][1]["message"]
+        assert "ConnectionError" not in published[0][1]["message"]
 
-    async def test_context_fetch_failure_yields_friendly_error(self):
+    async def test_context_fetch_failure_publishes_friendly_error(self):
         """When _fetch_context raises, error should be user-friendly."""
         from sjifire.ops.chat.budget import BudgetStatus
-        from sjifire.ops.chat.engine import stream_chat
+        from sjifire.ops.chat.engine import run_chat
+
+        published: list[tuple] = []
+
+        async def fake_publish(channel, event, data):
+            published.append((event, data))
 
         with (
-            patch(
-                "sjifire.ops.chat.engine.check_budget",
-                return_value=BudgetStatus(allowed=True),
-            ),
-            patch(
-                "sjifire.ops.chat.engine._fetch_context",
-                side_effect=RuntimeError("dispatch store down"),
-            ),
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
+            patch("sjifire.ops.chat.engine._fetch_context", side_effect=RuntimeError("dispatch store down")),
+            patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
         ):
-            events = [e async for e in stream_chat("inc-ctx", "hello", _TEST_USER)]
+            await run_chat("inc-ctx", "hello", _TEST_USER, channel="test")
 
-        assert len(events) == 1
-        assert "incident data" in events[0]
-        assert "ref:" in events[0]
-        assert "RuntimeError" not in events[0]
+        assert len(published) == 1
+        assert published[0][0] == "error"
+        assert "incident data" in published[0][1]["message"]
+        assert "ref:" in published[0][1]["message"]
+        assert "RuntimeError" not in published[0][1]["message"]
 
 
 class TestBuildGeneralSystemPrompt:
@@ -746,28 +748,23 @@ class TestImageContentBlocks:
     async def test_images_build_multipart_content(self):
         """When images are passed, the API message should use content blocks."""
         from sjifire.ops.chat.budget import BudgetStatus
-        from sjifire.ops.chat.engine import stream_chat
+        from sjifire.ops.chat.engine import run_chat
 
         captured_messages: list = []
 
-        # Mock _stream_loop to capture the api_messages it receives
-        async def fake_stream_loop(client, system, api_messages, conv, user):
+        # Mock _run_loop to capture the api_messages it receives
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
             captured_messages.extend(api_messages)
-            yield _sse("text", {"content": "I can see the photo."})
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
             patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
-            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
+            patch("sjifire.ops.chat.engine.publish"),
         ):
             images = [{"media_type": "image/jpeg", "data": "abc123base64=="}]
-            events = [
-                e async for e in stream_chat("inc-img", "What is this?", _TEST_USER, images=images)
-            ]
-
-        # Should have produced text events
-        assert any("I can see the photo" in e for e in events)
+            await run_chat("inc-img", "What is this?", _TEST_USER, channel="test", images=images)
 
         # Last message in api_messages should have image + text content blocks
         last_msg = captured_messages[-1]
@@ -785,28 +782,26 @@ class TestImageContentBlocks:
     async def test_multiple_images_build_multiple_blocks(self):
         """Multiple images should produce multiple image content blocks."""
         from sjifire.ops.chat.budget import BudgetStatus
-        from sjifire.ops.chat.engine import stream_chat
+        from sjifire.ops.chat.engine import run_chat
 
         captured_messages: list = []
 
-        async def fake_stream_loop(client, system, api_messages, conv, user):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
             captured_messages.extend(api_messages)
-            yield _sse("text", {"content": "ok"})
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
             patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
-            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
+            patch("sjifire.ops.chat.engine.publish"),
         ):
             images = [
                 {"media_type": "image/jpeg", "data": "img1"},
                 {"media_type": "image/png", "data": "img2"},
                 {"media_type": "image/webp", "data": "img3"},
             ]
-            _ = [
-                e async for e in stream_chat("inc-multi", "Check these", _TEST_USER, images=images)
-            ]
+            await run_chat("inc-multi", "Check these", _TEST_USER, channel="test", images=images)
 
         last_msg = captured_messages[-1]
         content = last_msg["content"]
@@ -817,21 +812,21 @@ class TestImageContentBlocks:
     async def test_no_images_sends_prefixed_string(self):
         """Without images, the API message should be context + user text."""
         from sjifire.ops.chat.budget import BudgetStatus
-        from sjifire.ops.chat.engine import stream_chat
+        from sjifire.ops.chat.engine import run_chat
 
         captured_messages: list = []
 
-        async def fake_stream_loop(client, system, api_messages, conv, user):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
             captured_messages.extend(api_messages)
-            yield _sse("text", {"content": "ok"})
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
             patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
-            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
+            patch("sjifire.ops.chat.engine.publish"),
         ):
-            _ = [e async for e in stream_chat("inc-txt", "just text", _TEST_USER)]
+            await run_chat("inc-txt", "just text", _TEST_USER, channel="test")
 
         last_msg = captured_messages[-1]
         assert last_msg["role"] == "user"
@@ -842,25 +837,23 @@ class TestImageContentBlocks:
     async def test_images_not_stored_in_conversation(self):
         """Images should be one-shot — not persisted in conversation messages."""
         from sjifire.ops.chat.budget import BudgetStatus
-        from sjifire.ops.chat.engine import stream_chat
+        from sjifire.ops.chat.engine import run_chat
 
         saved_conv = None
 
-        async def fake_stream_loop(client, system, api_messages, conv, user):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
             nonlocal saved_conv
             saved_conv = conv
-            yield _sse("text", {"content": "Got it"})
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
             patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
-            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
+            patch("sjifire.ops.chat.engine.publish"),
         ):
             images = [{"media_type": "image/jpeg", "data": "photo123"}]
-            _ = [
-                e async for e in stream_chat("inc-store", "Look at this", _TEST_USER, images=images)
-            ]
+            await run_chat("inc-store", "Look at this", _TEST_USER, channel="test", images=images)
 
         # The stored user message should be text only (no context preamble, no images)
         assert saved_conv is not None
@@ -873,13 +866,12 @@ class TestImageContentBlocks:
     async def test_system_prompt_is_stable(self):
         """System prompt should not contain dynamic incident/dispatch data."""
         from sjifire.ops.chat.budget import BudgetStatus
-        from sjifire.ops.chat.engine import stream_chat
+        from sjifire.ops.chat.engine import run_chat
 
         captured_system: list = []
 
-        async def fake_stream_loop(client, system, api_messages, conv, user):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
             captured_system.append(system)
-            yield _sse("text", {"content": "ok"})
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
@@ -887,10 +879,11 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=('{"incident_number": "26-UNIQUE"}', "{}", "[]", "[]"),
             ),
-            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
+            patch("sjifire.ops.chat.engine.publish"),
         ):
-            _ = [e async for e in stream_chat("inc-stable", "hi", _TEST_USER)]
+            await run_chat("inc-stable", "hi", _TEST_USER, channel="test")
 
         # System prompt should NOT contain the dynamic incident data
         assert "26-UNIQUE" not in captured_system[0]
