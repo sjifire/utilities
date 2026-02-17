@@ -11,8 +11,8 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-# Module-level registry: name -> async callable
-_tasks: dict[str, object] = {}
+# Module-level registry: name -> (async callable, auto flag)
+_tasks: dict[str, tuple[object, bool]] = {}
 
 
 @dataclass
@@ -26,18 +26,28 @@ class TaskResult:
     error: str = ""
 
 
-def register(name: str):
+def register(name: str, *, auto: bool = True):
     """Decorator to register an async task function.
+
+    Args:
+        name: Task name used by the CLI runner.
+        auto: If True (default), included in ``run_all()``.
+            Set to False for expensive tasks that should only
+            run when explicitly requested by name.
 
     Usage::
 
         @register("neris-sync")
         async def neris_sync() -> int:
             ...  # returns count of items processed
+
+        @register("expensive-task", auto=False)
+        async def expensive() -> int:
+            ...  # only runs via: uv run ops-tasks expensive-task
     """
 
     def decorator(fn):
-        _tasks[name] = fn
+        _tasks[name] = (fn, auto)
         return fn
 
     return decorator
@@ -52,10 +62,11 @@ async def run_task(name: str) -> TaskResult:
     Returns:
         TaskResult with outcome details
     """
-    fn = _tasks.get(name)
-    if fn is None:
+    entry = _tasks.get(name)
+    if entry is None:
         return TaskResult(name=name, ok=False, error=f"Unknown task: {name}")
 
+    fn = entry[0]
     t0 = time.monotonic()
     try:
         count = await fn()
@@ -69,17 +80,29 @@ async def run_task(name: str) -> TaskResult:
 
 
 async def run_all() -> list[TaskResult]:
-    """Run all registered tasks sequentially.
+    """Run all auto-registered tasks sequentially.
+
+    Tasks registered with ``auto=False`` are skipped — they must
+    be run explicitly by name.
 
     Returns:
         List of TaskResult for each task
     """
     results = []
     for name in sorted(_tasks):
-        results.append(await run_task(name))  # noqa: PERF401 — can't use comprehension with await
+        _fn, auto = _tasks[name]
+        if not auto:
+            continue
+        results.append(await run_task(name))
     return results
 
 
 def list_tasks() -> list[str]:
     """Return sorted list of registered task names."""
     return sorted(_tasks)
+
+
+def is_auto(name: str) -> bool:
+    """Return whether a task is included in automatic runs."""
+    entry = _tasks.get(name)
+    return entry[1] if entry else False

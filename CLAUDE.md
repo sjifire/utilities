@@ -130,10 +130,12 @@ src/sjifire/
 │   │   ├── models.py      # DayScheduleCache (Pydantic)
 │   │   ├── store.py       # Cosmos DB cache with in-memory fallback
 │   │   └── tools.py       # MCP tool with auto-refresh from Aladtec
-│   └── tasks/             # Background tasks (Container Apps Job)
-│       ├── registry.py    # TaskResult, @register, run_task, run_all
+│   └── tasks/             # Background tasks (Container Apps Job, every 30 min)
+│       ├── registry.py    # TaskResult, @register(auto=True/False), run_task, run_all
+│       ├── dispatch_sync.py # Dispatch call sync + enrichment (3 tasks, 1 manual)
+│       ├── ispyfire_sync.py # iSpyFire user sync from Entra
 │       ├── neris_sync.py  # NERIS report sync
-│       └── runner.py      # CLI: uv run ops-tasks
+│       └── runner.py      # CLI: uv run ops-tasks (-h for help)
 └── scripts/               # CLI entry points
 ```
 
@@ -169,7 +171,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 
 **Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
 
-**Background tasks**: The NERIS report cache in Cosmos DB is populated by a Container Apps Job (`sjifire-ops-tasks`) running `uv run ops-tasks` every 15 minutes. The dashboard reads from Cosmos only (never the NERIS API directly). New tasks are added via `@register("name")` in `ops/tasks/`.
+**Background tasks**: Container Apps Job (`sjifire-ops-tasks`) runs `uv run ops-tasks` every 30 minutes. Runs all `auto=True` tasks: dispatch-sync, dispatch-enrich, ispyfire-sync, neris-sync. Tasks registered with `auto=False` (e.g., dispatch-reenrich) only run when explicitly requested by name. New tasks are added via `@register("name")` in `ops/tasks/`.
 
 **Cosmos DB backup**: Continuous 30-day PITR (any-second point-in-time restore). For ad-hoc JSON exports beyond 30 days, use `uv run backup-cosmos`. Infrastructure provisioned via `./scripts/setup-azure-ops.sh --phase 2`.
 
@@ -299,9 +301,10 @@ Note: Run `entra-user-sync` before `ms-group-sync` to ensure Entra ID has curren
 
 ### Run background tasks (NERIS cache, etc.)
 ```bash
-uv run ops-tasks              # Run all tasks
+uv run ops-tasks              # Run all scheduled (auto) tasks
 uv run ops-tasks neris-sync   # Run specific task
-uv run ops-tasks --list       # List available tasks
+uv run ops-tasks --list       # List available tasks (manual tasks shown with suffix)
+uv run ops-tasks dispatch-reenrich  # Run manual-only task explicitly
 ```
 
 ### Cosmos DB backup (ad-hoc JSON export)
@@ -349,7 +352,7 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 
 - `ci.yml`: Lint + test on PR/push
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
-- `ispyfire-sync.yml`: Daily iSpyFire state backup (dry-run sync + artifact upload). Actual sync runs every 15 min via Container Apps Job (`ops-tasks`)
+- `ispyfire-sync.yml`: Daily iSpyFire state backup (dry-run sync + artifact upload). Actual sync runs every 30 min via Container Apps Job (`ops-tasks`)
 - `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
 - `ops-deploy.yml`: Deploy ops server on push to main (paths: `src/sjifire/ops/**`, `Dockerfile`, `pyproject.toml`)
 

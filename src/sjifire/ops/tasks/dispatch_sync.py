@@ -109,7 +109,7 @@ async def dispatch_enrich() -> int:
     return 0
 
 
-@register("dispatch-reenrich")
+@register("dispatch-reenrich", auto=False)
 async def dispatch_reenrich() -> int:
     """Force re-enrichment of ALL stored dispatch calls.
 
@@ -117,6 +117,10 @@ async def dispatch_reenrich() -> int:
     extraction) on every stored call, regardless of existing analysis.
     Use after changing enrichment logic (e.g., new status mappings,
     updated prompts).
+
+    Excluded from automatic runs (``auto=False``) because it calls the
+    LLM for every stored call, which can take many minutes.
+    Run explicitly: ``uv run ops-tasks dispatch-reenrich``
 
     Returns:
         Number of calls re-enriched

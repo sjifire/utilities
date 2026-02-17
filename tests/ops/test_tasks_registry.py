@@ -3,6 +3,7 @@
 from sjifire.ops.tasks.registry import (
     TaskResult,
     _tasks,
+    is_auto,
     list_tasks,
     register,
     run_all,
@@ -31,7 +32,19 @@ class TestRegister:
             return 42
 
         assert "test-task" in _tasks
-        assert _tasks["test-task"] is my_task
+        fn, auto = _tasks["test-task"]
+        assert fn is my_task
+        assert auto is True
+
+    def test_registers_manual_task(self):
+        @register("manual-task", auto=False)
+        async def my_task():
+            return 42
+
+        assert "manual-task" in _tasks
+        fn, auto = _tasks["manual-task"]
+        assert fn is my_task
+        assert auto is False
 
     def test_multiple_registrations(self):
         @register("a")
@@ -128,9 +141,58 @@ class TestRunAll:
         assert results[1].ok is True
         assert results[1].count == 10
 
+    async def test_skips_manual_tasks(self):
+        @register("auto-task")
+        async def auto_task():
+            return 1
+
+        @register("manual-task", auto=False)
+        async def manual_task():
+            return 2
+
+        results = await run_all()
+
+        assert len(results) == 1
+        assert results[0].name == "auto-task"
+        assert results[0].count == 1
+
+    async def test_manual_task_runs_explicitly(self):
+        @register("manual-only", auto=False)
+        async def manual_only():
+            return 99
+
+        result = await run_task("manual-only")
+        assert result.ok is True
+        assert result.count == 99
+
     async def test_empty_registry(self):
         results = await run_all()
         assert results == []
+
+
+class TestIsAuto:
+    def setup_method(self):
+        _clear_registry()
+
+    def teardown_method(self):
+        _clear_registry()
+
+    def test_auto_task(self):
+        @register("auto")
+        async def t():
+            return 0
+
+        assert is_auto("auto") is True
+
+    def test_manual_task(self):
+        @register("manual", auto=False)
+        async def t():
+            return 0
+
+        assert is_auto("manual") is False
+
+    def test_unknown_task(self):
+        assert is_auto("nonexistent") is False
 
 
 class TestListTasks:

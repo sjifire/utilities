@@ -3,11 +3,16 @@
 from unittest.mock import patch
 
 from sjifire.ops.tasks.registry import _tasks, register
-from sjifire.ops.tasks.runner import _run
+from sjifire.ops.tasks.runner import _build_parser, _run
 
 
 def _clear_registry():
     _tasks.clear()
+
+
+def _parse(args: list[str]):
+    """Parse args using the real parser, same as main()."""
+    return _build_parser().parse_args(args)
 
 
 class TestRunnerCli:
@@ -27,16 +32,33 @@ class TestRunnerCli:
             return 0
 
         with patch("sjifire.ops.tasks.runner._import_tasks"):
-            exit_code = await _run(["--list"])
+            exit_code = await _run(_parse(["--list"]))
 
         assert exit_code == 0
         output = capsys.readouterr().out
         assert "alpha" in output
         assert "beta" in output
 
+    async def test_list_shows_manual_suffix(self, capsys):
+        @register("auto-task")
+        async def auto_task():
+            return 0
+
+        @register("manual-task", auto=False)
+        async def manual_task():
+            return 0
+
+        with patch("sjifire.ops.tasks.runner._import_tasks"):
+            exit_code = await _run(_parse(["--list"]))
+
+        assert exit_code == 0
+        output = capsys.readouterr().out
+        assert "auto-task" in output
+        assert "(manual)" in output
+
     async def test_list_empty_registry(self, capsys):
         with patch("sjifire.ops.tasks.runner._import_tasks"):
-            exit_code = await _run(["--list"])
+            exit_code = await _run(_parse(["--list"]))
 
         assert exit_code == 0
         assert "No tasks" in capsys.readouterr().out
@@ -47,14 +69,14 @@ class TestRunnerCli:
             return 7
 
         with patch("sjifire.ops.tasks.runner._import_tasks"):
-            exit_code = await _run(["my-task"])
+            exit_code = await _run(_parse(["my-task"]))
 
         assert exit_code == 0
         assert "OK" in capsys.readouterr().out
 
     async def test_run_unknown_task(self, capsys):
         with patch("sjifire.ops.tasks.runner._import_tasks"):
-            exit_code = await _run(["nonexistent"])
+            exit_code = await _run(_parse(["nonexistent"]))
 
         assert exit_code == 1
         assert "FAIL" in capsys.readouterr().out
@@ -69,7 +91,7 @@ class TestRunnerCli:
             return 2
 
         with patch("sjifire.ops.tasks.runner._import_tasks"):
-            exit_code = await _run([])
+            exit_code = await _run(_parse([]))
 
         assert exit_code == 0
         output = capsys.readouterr().out
@@ -83,7 +105,7 @@ class TestRunnerCli:
             raise RuntimeError(msg)
 
         with patch("sjifire.ops.tasks.runner._import_tasks"):
-            exit_code = await _run(["fail"])
+            exit_code = await _run(_parse(["fail"]))
 
         assert exit_code == 1
         assert "FAIL" in capsys.readouterr().out
@@ -99,6 +121,6 @@ class TestRunnerCli:
             raise RuntimeError(msg)
 
         with patch("sjifire.ops.tasks.runner._import_tasks"):
-            exit_code = await _run([])
+            exit_code = await _run(_parse([]))
 
         assert exit_code == 1

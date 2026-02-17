@@ -114,7 +114,7 @@ The sync:
 - Rate limiting handled with tenacity retry logic
 - Automatically backs up iSpyFire people before making changes
 
-**Automated sync:** Runs every 30 minutes via GitHub Actions. See `.github/workflows/ispyfire-sync.yml`.
+**Automated sync:** Runs every 30 minutes via Container Apps Job (`ops-tasks`). GitHub Actions runs a daily backup/dry-run — see `.github/workflows/ispyfire-sync.yml`.
 
 ### iSpyFire Admin
 
@@ -188,6 +188,28 @@ uv run ops-server
 **Setup guide for end users:** See `docs/mcp-setup-guide.md`
 
 **Infrastructure setup:** See `scripts/setup-azure-ops.sh` (one-time provisioning of ACR, Container Apps, Cosmos DB, Entra app registration, custom domain)
+
+#### Background Tasks
+
+A Container Apps Job (`sjifire-ops-tasks`) runs every 30 minutes:
+
+```bash
+uv run ops-tasks              # Run all scheduled (auto) tasks
+uv run ops-tasks neris-sync   # Run specific task(s)
+uv run ops-tasks --list       # List available tasks
+uv run ops-tasks -h           # Help
+```
+
+**Scheduled tasks** (run automatically):
+- `dispatch-sync` — Fetch recent dispatch calls from iSpyFire, store in Cosmos DB with AI enrichment
+- `dispatch-enrich` — Retry AI enrichment on calls that failed previously
+- `ispyfire-sync` — Sync Entra ID users to iSpyFire
+- `neris-sync` — Fetch NERIS incident summaries to Cosmos DB cache
+
+**Manual tasks** (run only when explicitly requested):
+- `dispatch-reenrich` — Force re-enrich ALL stored calls (expensive, uses LLM for every call)
+
+Tasks are registered with `@register("name")` in `ops/tasks/`. Use `auto=False` to exclude from scheduled runs.
 
 #### Incident Report Assistant
 
@@ -312,11 +334,10 @@ Runs weekdays at noon Pacific:
 - `ALADTEC-URL`, `ALADTEC-USERNAME`, `ALADTEC-PASSWORD`
 - `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
 
-### iSpyFire Sync (ispyfire-sync.yml)
-Runs every 30 minutes:
-- Syncs Entra ID users with operational positions to iSpyFire
-- Creates new users with invite emails
-- Deactivates users no longer in Entra (with device logout)
+### iSpyFire Backup (ispyfire-sync.yml)
+Runs daily at 6 AM Pacific:
+- Dry-run sync to capture state as backup artifact
+- Actual sync runs every 30 min via Container Apps Job (`ops-tasks`)
 - Uploads backup artifacts (30-day retention)
 - Can be triggered manually with dry-run option
 
@@ -422,7 +443,8 @@ src/sjifire/
 │   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
 │   ├── neris/             # NERIS value set lookup
 │   ├── personnel/         # Graph API personnel lookup
-│   └── schedule/          # On-duty crew with Cosmos cache
+│   ├── schedule/          # On-duty crew with Cosmos cache
+│   └── tasks/             # Background tasks (Container Apps Job, every 30 min)
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py
