@@ -549,8 +549,18 @@ function chatApp() {
     _queuedMessage: null,
 
     async init() {
+      // After a reset, skip stale history and start fresh
+      const params = new URLSearchParams(location.search);
+      const isReset = params.get('reset') === '1';
+      if (isReset) {
+        // Clean the URL so refresh doesn't re-trigger
+        params.delete('reset');
+        const clean = params.toString();
+        history.replaceState(null, '', location.pathname + (clean ? '?' + clean : ''));
+      }
+
       // Load conversation history
-      try {
+      if (!isReset) try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
         if (res.ok) {
           const data = await res.json();
@@ -1093,9 +1103,13 @@ function chatApp() {
           }
         }
         this.scrollToBottom();
-        // After a successful reset, reload to get fresh state
+        // After a successful reset, reload with ?reset flag to skip stale history
         if (data.name === 'reset_incident' && !(data.summary || '').startsWith('Error')) {
-          setTimeout(() => location.reload(), 800);
+          setTimeout(() => {
+            const url = new URL(location.href);
+            url.searchParams.set('reset', '1');
+            location.href = url.toString();
+          }, 800);
           return;
         }
       } else if (type === 'status_update') {
