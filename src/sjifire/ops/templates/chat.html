@@ -6,6 +6,7 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/centrifuge@5/dist/centrifuge.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.css">
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.js"></script>
 {% endblock %}
@@ -626,8 +627,10 @@ function chatApp() {
     lightbox: { open: false, items: [], index: 0 },
     _userScrolledAway: false,
     _scrollRAF: null,
-    _reconnectAttempts: 0,
+    _centrifuge: null,
+    _subscription: null,
     _queuedMessage: null,
+    _recoveryTimer: null,
 
     async init() {
       // After a reset, skip stale history and start fresh
@@ -639,6 +642,18 @@ function chatApp() {
         const clean = params.toString();
         history.replaceState(null, '', location.pathname + (clean ? '?' + clean : ''));
       }
+
+      // Set up Centrifuge WebSocket connection
+      const channel = `chat:incident:${this.incidentId}`;
+      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this._centrifuge = new Centrifuge(`${wsProto}//${location.host}/connection/websocket`);
+      this._subscription = this._centrifuge.newSubscription(channel);
+      this._subscription.on('publication', (ctx) => {
+        const {event, ...data} = ctx.data;
+        this.handleEvent(event, data);
+      });
+      this._subscription.subscribe();
+      this._centrifuge.connect();
 
       // Load conversation history
       if (!isReset) try {
@@ -694,7 +709,7 @@ function chatApp() {
         if (lastMsg && lastMsg.type === 'message' && lastMsg.role === 'user') {
           // Last saved message was from the user — agent never responded.
           // Retry silently (no new bubble) so it picks up where it left off.
-          this.$nextTick(() => this._streamRequest(lastMsg.content || 'Continue'));
+          this.$nextTick(() => this._postMessage(lastMsg.content || 'Continue'));
         }
       }
     },
@@ -1002,19 +1017,17 @@ function chatApp() {
       if (this.$refs.input) this.$refs.input.style.height = 'auto';
       this.scrollToBottom(true);
 
-      await this._streamRequest(displayText, images);
+      await this._postMessage(displayText, images);
     },
 
-    async _streamRequest(displayText, images) {
+    async _postMessage(displayText, images) {
       this.streaming = true;
       this.currentText = '';
 
       const reqBody = {message: displayText};
-      if (images.length) {
+      if (images && images.length) {
         reqBody.images = images.map(img => ({data: img.base64, media_type: img.mediaType}));
       }
-
-      let streamCompleted = false;
 
       try {
         const res = await authFetch(`/reports/${this.incidentId}/chat`, {
@@ -1029,139 +1042,68 @@ function chatApp() {
           this.streaming = false;
           return;
         }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          let result;
-          try {
-            result = await reader.read();
-          } catch {
-            break;
-          }
-          if (result.done) break;
-
-          buffer += decoder.decode(result.value, {stream: true});
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          let eventType = '';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith('data: ') && eventType) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (eventType === 'done') streamCompleted = true;
-                this.handleEvent(eventType, data);
-              } catch {}
-              eventType = '';
-            }
-          }
-        }
+        // 202 Accepted — events arrive via Centrifuge subscription.
+        // Start a recovery timer in case events don't arrive (Centrifugo down, publish failure, etc.)
+        this._startRecoveryTimer();
       } catch (e) {
         console.error('Chat error:', e);
+        this.messages.push({type: 'error', content: 'Failed to send message. Please try again.'});
+        this.streaming = false;
       }
+    },
 
-      // Finalize any partial streaming message
-      if (this.currentText) {
-        this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
-        this.currentText = '';
+    _startRecoveryTimer() {
+      this._clearRecoveryTimer();
+      this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 30000);
+    },
+
+    _clearRecoveryTimer() {
+      if (this._recoveryTimer) {
+        clearTimeout(this._recoveryTimer);
+        this._recoveryTimer = null;
       }
-      this.streaming = false;
-      this.scrollToBottom(true);
-
-      // If stream ended without 'done', connection was lost — try to recover
-      if (!streamCompleted) {
-        const recovered = await this._recoverFromServer();
-        if (!recovered) {
-          this._reconnectAttempts++;
-          if (this._reconnectAttempts <= 3) {
-            const delay = this._reconnectAttempts * 2000;
-            console.warn(`Stream lost (attempt ${this._reconnectAttempts}/3) — retrying in ${delay}ms`);
-            // Retry silently (no new user bubble) with the original message
-            setTimeout(() => this._streamRequest(displayText), delay);
-          } else {
-            this._reconnectAttempts = 0;
-            this.messages.push({type: 'error', content: 'Connection lost. Please try again.'});
-          }
-        }
-        return;
-      }
-
-      this._reconnectAttempts = 0;
-
-      // Send queued message if user typed while we were streaming
-      if (this._queuedMessage) {
-        const queued = this._queuedMessage;
-        this._queuedMessage = null;
-        await this._streamRequest(queued.displayText, queued.images);
-        return;
-      }
-
-      this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
     },
 
     async _recoverFromServer() {
-      // Fetch server conversation and diff with local state.
-      // If the server has messages we missed, add them to the UI.
-      // Returns true if we recovered (no retry needed).
+      if (!this.streaming) return;  // Already resolved
+      console.warn('No events received in 30s — polling conversation for recovery');
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
-        if (!res.ok) return false;
+        if (!res.ok) return;
         const data = await res.json();
         const serverMsgs = (data.messages || []).filter(m => m.content);
-
-        // Count local content messages (user + assistant text, not tool/error)
         const localCount = this.messages.filter(m => m.type === 'message').length;
-        if (serverMsgs.length <= localCount) return false;
 
-        // Server has messages we don't — add the delta
-        console.log(`Recovering ${serverMsgs.length - localCount} messages from server`);
-        for (let i = localCount; i < serverMsgs.length; i++) {
-          const msg = serverMsgs[i];
-          if (msg.content) {
-            this.messages.push({type: 'message', role: msg.role, content: msg.content});
+        if (serverMsgs.length > localCount) {
+          // Server has messages we missed — add the delta
+          console.log(`Recovering ${serverMsgs.length - localCount} messages from server`);
+          if (this.currentText) {
+            this.currentText = '';
           }
-          if (msg.tool_use) {
-            // Collapse consecutive same-tool entries
-            const grouped = [];
-            for (const tu of msg.tool_use) {
-              const prev = grouped[grouped.length - 1];
-              if (prev && prev.name === tu.name) { prev.count++; }
-              else { grouped.push({name: tu.name, count: 1}); }
-            }
-            for (const g of grouped) {
-              this.messages.push({
-                type: 'tool',
-                label: '',
-                toolName: g.name,
-                pending: false,
-                pendingCount: 0,
-                totalCount: g.count,
-                summary: g.count > 1 ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups` : g.name + ' completed',
-                is_error: false
-              });
+          for (let i = localCount; i < serverMsgs.length; i++) {
+            const msg = serverMsgs[i];
+            if (msg.content) {
+              this.messages.push({type: 'message', role: msg.role, content: msg.content});
             }
           }
+          if (data.status) this.status = data.status;
+          this.streaming = false;
+          this.scrollToBottom(true);
+          this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+        } else if (!this.currentText) {
+          // No new messages and no streaming text — server may still be processing.
+          // Retry recovery in another 15s.
+          this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 15000);
         }
-
-        // Update status from server if available
-        if (data.status) this.status = data.status;
-
-        this._reconnectAttempts = 0;
-        this.scrollToBottom(true);
-        this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
-        return true;
       } catch (e) {
-        console.warn('Recovery fetch failed:', e);
-        return false;
+        console.warn('Recovery poll failed:', e);
       }
     },
 
     handleEvent(type, data) {
+      // Any event means Centrifugo is working — reset recovery timer
+      this._clearRecoveryTimer();
+
       if (type === 'text') {
         this.currentText += data.content || '';
         this.scrollToBottom();
@@ -1242,15 +1184,31 @@ function chatApp() {
           this.status = data.status;
         }
       } else if (type === 'done') {
-        // Token usage could be shown but keeping it minimal
+        // Finalize any partial streaming message
+        if (this.currentText) {
+          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+          this.currentText = '';
+        }
+        this.streaming = false;
+        this.scrollToBottom(true);
+
+        // Send queued message if user typed while we were streaming
+        if (this._queuedMessage) {
+          const queued = this._queuedMessage;
+          this._queuedMessage = null;
+          this.$nextTick(() => this._postMessage(queued.displayText, queued.images));
+          return;
+        }
+        this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
       } else if (type === 'error') {
-        console.error('Chat SSE error:', data);
+        console.error('Chat error:', data);
         if (this.currentText) {
           this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
           this.currentText = '';
         }
         this.messages.push({type: 'error', content: data.message});
-        this.scrollToBottom();
+        this.streaming = false;
+        this.scrollToBottom(true);
       }
     }
   };

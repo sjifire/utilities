@@ -61,7 +61,7 @@ COSMOS_DATABASE="sjifire-incidents"
 # Container Registry + Container Apps
 ACR_NAME="sjifiremcp"
 CA_ENV="sjifire-mcp-env"
-CA_APP="sjifire-mcp"
+CA_APP="sjifire-ops"
 CA_JOB="sjifire-ops-tasks"
 # Azure Maps
 MAPS_ACCOUNT="sjifire-maps"
@@ -464,7 +464,7 @@ if should_run 3; then
     info "Building initial Docker image via ACR..."
     az acr build \
         --registry "$ACR_NAME" \
-        --image "sjifire-mcp:initial" \
+        --image "sjifire-ops:initial" \
         . \
         --output none
     ok "Image built and pushed"
@@ -494,7 +494,7 @@ if should_run 3; then
             --name "$CA_APP" \
             --resource-group "$RESOURCE_GROUP" \
             --environment "$CA_ENV" \
-            --image "$ACR_LOGIN_SERVER/sjifire-mcp:initial" \
+            --image "$ACR_LOGIN_SERVER/sjifire-ops:initial" \
             --registry-server "$ACR_LOGIN_SERVER" \
             --registry-username "$ACR_USERNAME" \
             --registry-password "$ACR_PASSWORD" \
@@ -1024,7 +1024,7 @@ if should_run 9; then
         --name "$CA_APP" \
         --resource-group "$RESOURCE_GROUP" \
         --query "properties.template.containers[0].image" -o tsv 2>/dev/null || true)
-    JOB_IMAGE="${CURRENT_IMAGE:-${ACR_LOGIN_SERVER}/sjifire-mcp:latest}"
+    JOB_IMAGE="${CURRENT_IMAGE:-${ACR_LOGIN_SERVER}/sjifire-ops:latest}"
     info "Job image: $JOB_IMAGE"
 
     # Fetch secrets for job env vars (direct values at creation time,

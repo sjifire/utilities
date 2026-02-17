@@ -25,6 +25,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "tenacity>=9.1.2",
     "uvicorn>=0.34.0",
+    "cent>=5.0.0",
+    "websockets>=15.0",
 ]
 
 [project.scripts]
@@ -99,6 +101,7 @@ convention = "google"
 "src/sjifire/ops/dispatch/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
 "src/sjifire/ops/token_store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
 "src/sjifire/ops/server.py" = ["S104"]  # Binding to 0.0.0.0 is intentional for container
+"src/sjifire/ops/chat/centrifugo.py" = ["S104"]  # localhost URLs for sidecar communication
 "src/sjifire/scripts/*.py" = ["T201", "S603", "S607"]  # CLI scripts: print, subprocess calls
 "src/sjifire/ops/tasks/runner.py" = ["T201"]  # CLI runner uses print for output
 "scripts/*.py" = ["T201"]  # Utility scripts use print for output

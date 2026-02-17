@@ -5,26 +5,30 @@ Routes:
 - POST /reports/new                        → Create new report (redirect)
 - GET  /reports/{incident_id}              → Chat page (HTML)
 - GET  /reports/{incident_id}/conversation → Conversation history (JSON)
-- POST /reports/{incident_id}/chat         → Streaming chat (SSE)
+- POST /reports/{incident_id}/chat         → Chat message (202 Accepted)
 """
 
+import asyncio
 import json
 import logging
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from sjifire.core.config import local_now
 from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user, set_current_user
-from sjifire.ops.chat.engine import stream_chat, stream_general_chat
+from sjifire.ops.chat.engine import run_chat, run_general_chat
 from sjifire.ops.chat.store import ConversationStore
 from sjifire.ops.dashboard import get_dashboard_data
 from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.ops.incidents.store import IncidentStore
 
 logger = logging.getLogger(__name__)
+
+# Hold references to background chat tasks so they aren't garbage-collected.
+_background_tasks: set[asyncio.Task] = set()
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 _jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=True)
@@ -86,6 +90,7 @@ async def reports_list(request: Request) -> Response:
         today=local_now().date().isoformat(),
         active_page="reports",
         show_reports=is_editor,
+        user_email=user.email if user else "",
     )
     return Response(html, media_type="text/html")
 
@@ -404,21 +409,20 @@ async def chat_stream(request: Request) -> Response:
             saved_image_refs,
         )
 
-    async def event_generator():
-        async for event in stream_chat(
-            incident_id, message, user, images=images, image_refs=saved_image_refs or None
-        ):
-            yield event
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+    channel = f"chat:incident:{incident_id}"
+    task = asyncio.create_task(
+        run_chat(
+            incident_id,
+            message,
+            user,
+            channel=channel,
+            images=images,
+            image_refs=saved_image_refs or None,
+        )
     )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return JSONResponse({"status": "accepted"}, status_code=202)
 
 
 async def general_chat_stream_endpoint(request: Request) -> Response:
@@ -453,19 +457,11 @@ async def general_chat_stream_endpoint(request: Request) -> Response:
 
     context = body.get("context")
 
-    async def event_generator():
-        async for event in stream_general_chat(message, user, context=context):
-            yield event
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    channel = f"chat:general:{user.email}"
+    task = asyncio.create_task(run_general_chat(message, user, channel=channel, context=context))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return JSONResponse({"status": "accepted"}, status_code=202)
 
 
 async def general_chat_history(request: Request) -> Response:

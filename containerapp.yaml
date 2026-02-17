@@ -1,0 +1,126 @@
+# =============================================================================
+# Azure Container App definition — sjifire-mcp
+# =============================================================================
+#
+# Two containers share a replica:
+#   1. ops-server (FastAPI) — primary, port 8000
+#   2. centrifugo (sidecar) — WebSocket real-time messaging, port 8001/9001
+#
+# deploy-ops.sh substitutes __IMAGE_TAG__ and __CENTRIFUGO_API_KEY__ before
+# applying with `az containerapp update --yaml`.
+#
+# Env vars referencing secrets use the format: secretref:<secret-name>
+# Secrets are Key Vault references configured separately via `az containerapp
+# secret set` (see deploy-ops.sh housekeeping).
+
+properties:
+  template:
+    containers:
+      # ── Primary: FastAPI ops server ──
+      - name: ops-server
+        image: sjifiremcp.azurecr.io/sjifire-ops:__IMAGE_TAG__
+        resources:
+          cpu: 0.5
+          memory: 1Gi
+        env:
+          - name: ENTRA_MCP_API_TENANT_ID
+            value: __MS_GRAPH_TENANT_ID__
+          - name: ENTRA_MCP_API_CLIENT_ID
+            value: __ENTRA_MCP_API_CLIENT_ID__
+          - name: ENTRA_REPORT_EDITORS_GROUP_ID
+            value: __ENTRA_REPORT_EDITORS_GROUP_ID__
+          - name: ENTRA_MCP_API_CLIENT_SECRET
+            secretRef: entra-mcp-api-client-secret
+          - name: COSMOS_ENDPOINT
+            value: __COSMOS_ENDPOINT__
+          - name: COSMOS_KEY
+            secretRef: cosmos-key
+          - name: MS_GRAPH_TENANT_ID
+            value: __MS_GRAPH_TENANT_ID__
+          - name: MS_GRAPH_CLIENT_ID
+            value: __MS_GRAPH_CLIENT_ID__
+          - name: MS_GRAPH_CLIENT_SECRET
+            secretRef: ms-graph-client-secret
+          - name: ALADTEC_URL
+            value: __ALADTEC_URL__
+          - name: ALADTEC_USERNAME
+            secretRef: aladtec-username
+          - name: ALADTEC_PASSWORD
+            secretRef: aladtec-password
+          - name: ISPYFIRE_URL
+            secretRef: ispyfire-url
+          - name: ISPYFIRE_USERNAME
+            secretRef: ispyfire-username
+          - name: ISPYFIRE_PASSWORD
+            secretRef: ispyfire-password
+          - name: NERIS_CLIENT_ID
+            secretRef: neris-client-id
+          - name: NERIS_CLIENT_SECRET
+            secretRef: neris-client-secret
+          - name: ANTHROPIC_API_KEY
+            secretRef: anthropic-api-key
+          - name: MCP_SERVER_URL
+            value: __MCP_SERVER_URL__
+          - name: AZURE_MAPS_KEY
+            secretRef: azure-maps-key
+          - name: KIOSK_SIGNING_KEY
+            secretRef: kiosk-signing-key
+          - name: AZURE_STORAGE_ACCOUNT_URL
+            value: __AZURE_STORAGE_ACCOUNT_URL__
+          - name: AZURE_STORAGE_ACCOUNT_KEY
+            value: __AZURE_STORAGE_ACCOUNT_KEY__
+          - name: BUILD_VERSION
+            value: __IMAGE_TAG__
+          - name: CENTRIFUGO_API_KEY
+            secretRef: centrifugo-api-key
+        probes:
+          - type: Liveness
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 30
+            failureThreshold: 3
+
+      # ── Sidecar: Centrifugo real-time messaging ──
+      - name: centrifugo
+        image: centrifugo/centrifugo:v6
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi
+        command: ["centrifugo"]
+        env:
+          - name: CENTRIFUGO_HTTP_SERVER_PORT
+            value: "8001"
+          - name: CENTRIFUGO_HTTP_SERVER_INTERNAL_PORT
+            value: "9001"
+          - name: CENTRIFUGO_CLIENT_PROXY_CONNECT_ENABLED
+            value: "true"
+          - name: CENTRIFUGO_CLIENT_PROXY_CONNECT_ENDPOINT
+            value: http://localhost:8000/centrifugo/connect
+          - name: CENTRIFUGO_CLIENT_PROXY_CONNECT_HTTP_HEADERS
+            value: '["Cookie","X-Ms-Client-Principal","X-Ms-Client-Principal-Id","X-Ms-Client-Principal-Name"]'
+          - name: CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_ENDPOINT
+            value: http://localhost:8000/centrifugo/subscribe
+          - name: CENTRIFUGO_HTTP_API_KEY
+            secretRef: centrifugo-api-key
+          - name: CENTRIFUGO_CLIENT_ALLOWED_ORIGINS
+            value: https://ops.sjifire.org
+          - name: CENTRIFUGO_CHANNEL_NAMESPACES
+            value: '[{"name":"chat","history_size":100,"history_ttl":"5m","force_recovery":true,"subscribe_proxy_enabled":true}]'
+        probes:
+          - type: Liveness
+            httpGet:
+              path: /health
+              port: 8001
+            periodSeconds: 30
+            failureThreshold: 3
+
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+
+  configuration:
+    ingress:
+      targetPort: 8000
+      transport: Auto
+      external: true
