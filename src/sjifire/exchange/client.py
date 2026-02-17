@@ -801,7 +801,8 @@ class ExchangeOnlineClient:
             ),
             (
                 "$result.current_members = @($members "
-                "| ForEach-Object { $_.PrimarySmtpAddress.ToLower() })"
+                "| ForEach-Object { $_.PrimarySmtpAddress.ToLower() } "
+                "| Where-Object { $_ -ne '' })"
             ),
         ]
 
