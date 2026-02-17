@@ -67,7 +67,7 @@ Present what you've pre-filled. Put each field on its own line with a bold label
 
 > I pulled the dispatch data and crew schedule. Here's what I have so far:
 >
-> **Incident**: 26-001678 — Feb 12, 2026
+> **Incident**: 26-001678 — Feb 12, 2026 at 16:48
 > **Address**: 200 Spring St, Friday Harbor, WA
 > **Nature**: Medical Aid
 > **CAD Summary**: Patient fell in bathroom, conscious and breathing, possible hip injury.
