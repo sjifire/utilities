@@ -109,8 +109,8 @@
     /* ── Inline map ── */
     .chat-map-wrap {
       float: right;
-      width: 220px;
-      height: 180px;
+      width: 275px;
+      height: 225px;
       margin: 0 0 10px 14px;
       border-radius: 8px;
       overflow: hidden;
@@ -682,9 +682,20 @@ function chatApp() {
           this._download(blob, `${num}-chat.md`);
 
         } else if (format === 'print') {
+          // Scan messages for GPS coordinates
+          let mapLat = null, mapLng = null;
+          for (const m of msgs) {
+            if (!m.content) continue;
+            const gps = m.content.match(/\*?\*?GPS\*?\*?:?\s*(-?\d+\.\d+),\s*(-?\d+\.\d+)/i)
+              || m.content.match(/\*?\*?(?:Lat|Latitude)\*?\*?:?\s*(-?\d+\.\d+).*?(?:Lon|Lng|Longitude):?\s*(-?\d+\.\d+)/i);
+            if (gps) { mapLat = parseFloat(gps[1]); mapLng = parseFloat(gps[2]); break; }
+          }
+
           const w = window.open('', '_blank');
           let html = `<!DOCTYPE html><html><head><meta charset="utf-8">
             <title>Chat — ${num}</title>
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.css">
+            <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.js"><\/script>
             <style>
               body { font-family: -apple-system, system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #1a1a1a; font-size: 14px; }
               h1 { font-size: 18px; border-bottom: 2px solid #c00; padding-bottom: 8px; }
@@ -694,6 +705,7 @@ function chatApp() {
               .msg-assistant { background: #f8f8f8; border: 1px solid #e0e0e0; }
               .msg-role { font-weight: 600; font-size: 11px; text-transform: uppercase; color: #666; margin-bottom: 4px; }
               .msg-tool { font-size: 12px; color: #888; padding: 2px 14px; font-style: italic; }
+              .print-map { float: right; width: 275px; height: 225px; margin: 0 0 10px 14px; border-radius: 8px; border: 1px solid #ddd; }
               p { margin: 6px 0; }
               table { border-collapse: collapse; width: 100%; margin: 8px 0; }
               th, td { padding: 4px 8px; border: 1px solid #ddd; text-align: left; font-size: 13px; }
@@ -702,13 +714,20 @@ function chatApp() {
             </style></head><body>`;
           html += `<h1>Chat History &mdash; ${this._esc(num)}</h1>`;
           html += `<div class="meta">Date: ${this._esc(date)} &nbsp;|&nbsp; Turns: ${data.turn_count || '?'} &nbsp;|&nbsp; Input: ${(data.total_input_tokens || 0).toLocaleString()} tokens &nbsp;|&nbsp; Output: ${(data.total_output_tokens || 0).toLocaleString()} tokens</div>`;
+          let mapInserted = false;
           for (const m of msgs) {
             const cls = m.role === 'user' ? 'msg-user' : 'msg-assistant';
             const label = m.role === 'user' ? 'User' : 'Assistant';
             const rendered = m.role === 'assistant'
               ? DOMPurify.sanitize(marked.parse(m.content || '', {breaks: true}))
               : this._esc(m.content || '');
-            html += `<div class="msg ${cls}"><div class="msg-role">${label}</div>${rendered}`;
+            html += `<div class="msg ${cls}"><div class="msg-role">${label}</div>`;
+            // Insert map in the message that contains GPS coordinates
+            if (!mapInserted && mapLat && m.content?.match(/GPS|Lat/i)) {
+              html += '<div id="print-map" class="print-map"></div>';
+              mapInserted = true;
+            }
+            html += rendered;
             if (m.tool_use?.length) {
               for (const t of m.tool_use) {
                 html += `<div class="msg-tool">Tool: ${this._esc(t.name || '')}</div>`;
@@ -721,10 +740,22 @@ function chatApp() {
             }
             html += '</div>';
           }
+          // Init map and print after tiles load
+          if (mapLat) {
+            html += `<script>
+              window.addEventListener('load', function() {
+                var map = L.map('print-map', {zoomControl: false, attributionControl: false}).setView([${mapLat}, ${mapLng}], 13);
+                var tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19}).addTo(map);
+                L.marker([${mapLat}, ${mapLng}]).addTo(map);
+                tileLayer.on('load', function() { setTimeout(function() { window.print(); }, 300); });
+              });
+            <\/script>`;
+          } else {
+            html += `<script>window.onload = function() { window.print(); };<\/script>`;
+          }
           html += '</body></html>';
           w.document.write(html);
           w.document.close();
-          w.onload = () => w.print();
         }
       } catch (e) {
         console.error('Export error:', e);
