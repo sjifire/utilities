@@ -239,9 +239,9 @@ async def dashboard_logout(request: Request) -> Response:
 @mcp.custom_route("/kiosk", methods=["GET"])
 async def kiosk_page(request: Request) -> Response:
     """Serve the kiosk display page (token-authenticated, no EasyAuth)."""
-    test_mode = request.query_params.get("test_mode", "").lower() == "true"
+    test_mode = request.query_params.get("test_mode", "").lower()
 
-    if not test_mode:
+    if test_mode not in ("true", "1", "2"):
         from sjifire.ops.kiosk.store import validate_token
 
         token = request.query_params.get("token", "")
@@ -254,10 +254,14 @@ async def kiosk_page(request: Request) -> Response:
 
 @mcp.custom_route("/kiosk/data", methods=["GET"])
 async def kiosk_data(request: Request) -> Response:
-    """Return kiosk data as JSON (token-authenticated)."""
-    test_mode = request.query_params.get("test_mode", "").lower() == "true"
+    """Return kiosk data as JSON (token-authenticated).
 
-    if test_mode:
+    test_mode=true or test_mode=1: Synthetic cycling scenario (test_data.py)
+    test_mode=2: Real pipeline with iSpyFire fixture data (from files)
+    """
+    test_mode = request.query_params.get("test_mode", "").lower()
+
+    if test_mode in ("true", "1"):
         from sjifire.ops.kiosk.test_data import get_test_kiosk_data
 
         data = get_test_kiosk_data()
@@ -284,6 +288,21 @@ async def kiosk_data(request: Request) -> Response:
                     )
         except Exception:
             logger.debug("Could not overlay real crew in test mode", exc_info=True)
+        return JSONResponse(data)
+
+    if test_mode == "2":
+        from sjifire.ispyfire.client import fixture_dir_override
+
+        fixture_path = os.getenv("ISPYFIRE_FIXTURE_DIR", "")
+        if not fixture_path:
+            return JSONResponse(
+                {"error": "test_mode=2 requires ISPYFIRE_FIXTURE_DIR env var"}, status_code=500
+            )
+        token = fixture_dir_override.set(fixture_path)
+        try:
+            data = await dashboard.get_kiosk_data()
+        finally:
+            fixture_dir_override.reset(token)
         return JSONResponse(data)
 
     from sjifire.ops.kiosk.store import validate_token
