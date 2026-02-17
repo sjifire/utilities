@@ -360,9 +360,11 @@ async def chat_stream(request: Request) -> Response:
                 return JSONResponse({"error": "Image too large (max ~1.5MB)"}, status_code=400)
             images.append({"media_type": media_type, "data": data})
 
-    # Auto-save uploaded images as incident attachments (fire-and-forget).
-    # This persists the ephemeral chat images to blob storage so they're
-    # linked to the report even if the chat session is lost.
+    # Auto-save uploaded images as incident attachments.
+    # Persists chat images to blob storage so they're linked to the
+    # report even if the chat session is lost. Title is intentionally
+    # minimal — the LLM will see the image and can update the title
+    # via the attachment tools if it identifies something specific.
     if images:
         from sjifire.ops.attachments.tools import upload_attachment
 
@@ -376,7 +378,6 @@ async def chat_stream(request: Request) -> Response:
                     filename=f"chat-photo-{idx}{suffix}",
                     data_base64=img["data"],
                     content_type=img["media_type"],
-                    title=f"Chat photo ({message[:60]})" if message else "Chat photo",
                 )
             except Exception:
                 logger.warning("Failed to auto-save chat image", exc_info=True)
