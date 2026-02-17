@@ -27,6 +27,7 @@ class PersonnelAssignment(BaseModel):
     email: str | None = Field(default=None, max_length=254)
     rank: str = Field(default="", max_length=100)
     position: str = Field(default="", max_length=100)
+    role: str = Field(default="", max_length=40)  # officer, driver, or both
 
     @field_validator("email", mode="before")
     @classmethod

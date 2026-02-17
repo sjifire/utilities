@@ -163,12 +163,14 @@ For fire incidents, also ask about: water on fire, fire under control, fire knoc
 
 For tenders (T33, T36), ladder (L31), and other apparatus, these are typically staffed by volunteers, off-duty personnel, or sometimes standby crew — ask the user for those.
 
-Using the on-duty schedule, assign personnel to each responding unit. Present grouped by unit. **List every responding unit** — if you don't know who was on a unit, show it as needing assignment:
+Using the on-duty schedule, assign personnel to each responding unit. Present grouped by unit. **List every responding unit** — if you don't know who was on a unit, show it as needing assignment.
+
+**Driver & Officer roles**: Only relevant for units with 2+ personnel — do NOT show or ask about roles for single-person units (they are implicitly both). For multi-person units, identify the **officer** (in charge) and **driver** (operating apparatus). The AO (Apparatus Operator) is always the driver. The highest-ranked person is usually the officer. Pre-fill based on rank and ask the user to confirm. Save using the `role` field: `"officer"` or `"driver"`.
 
 > Based on the on-duty schedule, here's who I have for each unit:
 >
-> - **BN31**: Pollack (Chief) — IC
-> - **E31**: Chadwick (Lieutenant), Smith (AO)
+> - **BN31**: Pollack (Chief)
+> - **E31**: Chadwick (Lieutenant) — officer, Smith (AO) — driver
 > - **M31**: Williams (Paramedic)
 >
 > **Still need crew for:**
@@ -176,11 +178,11 @@ Using the on-duty schedule, assign personnel to each responding unit. Present gr
 > - **T33**: ?
 > - **T36**: ?
 >
-> Who was on these units?
+> Who was on these units? And please confirm the driver/officer assignments for E31.
 
 Always list units needing crew **prominently** — don't bury them at the end of a paragraph. If the user gives a nickname, shorthand, or last name you can't match from the pre-loaded roster, call `get_personnel` to get the full list and match from there.
 
-Save crew via `update_incident(crew=[{name, email, rank, position, unit}, ...])`. Each person needs a `unit` assignment.
+Save crew via `update_incident(crew=[{name, email, rank, position, unit, role}, ...])`. Each person needs a `unit` and `role` assignment.
 
 **4c — Additional Responders**
 

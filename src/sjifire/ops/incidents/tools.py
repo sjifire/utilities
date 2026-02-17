@@ -295,6 +295,7 @@ def _parse_units(raw: list[dict]) -> list[UnitAssignment]:
                 email=p.get("email"),
                 rank=p.get("rank", ""),
                 position=p.get("position", ""),
+                role=p.get("role", ""),
             )
             for p in u.get("personnel", [])
         ]
@@ -339,7 +340,8 @@ async def create_incident(
         address: Incident address (optional)
         crew: List of crew members, each with "name", "email" (optional),
               "rank" (optional, snapshotted at incident time),
-              "position" (optional), "unit" (optional)
+              "position" (optional), "unit" (optional),
+              "role" (optional: "officer", "driver", or "officer/driver")
         neris_id: NERIS compound incident ID to import data from (optional)
 
     Returns:
@@ -377,6 +379,7 @@ async def create_incident(
                 email=c.get("email"),
                 rank=c.get("rank", ""),
                 position=c.get("position", ""),
+                role=c.get("role", ""),
             )
             unit_id = c.get("unit", "")
             crew_by_unit.setdefault(unit_id, []).append(p)
@@ -561,7 +564,7 @@ async def update_incident(
         city: City (defaults to Friday Harbor)
         latitude: GPS latitude
         longitude: GPS longitude
-        crew: Replace crew list (each entry: name, email, rank, position, unit)
+        crew: Replace crew list (each entry: name, email, rank, position, unit, role)
         outcome_narrative: What happened
         actions_taken_narrative: What actions were taken
         unit_responses: NERIS apparatus/unit response data (each entry can include
@@ -641,6 +644,7 @@ async def update_incident(
                     email=c.get("email"),
                     rank=c.get("rank", ""),
                     position=c.get("position", ""),
+                    role=c.get("role", ""),
                 )
                 unit_id = c.get("unit", "")
                 crew_by_unit.setdefault(unit_id, []).append(p)
