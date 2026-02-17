@@ -676,7 +676,6 @@ function reportsApp() {
     chatInput: '',
     chatStreaming: false,
     chatCurrentText: '',
-    chatLoaded: false,
     _centrifuge: null,
     _chatSubscription: null,
     _userEmail: '{{ user_email }}',
@@ -735,7 +734,7 @@ function reportsApp() {
       return d.toISOString().split('T')[0];
     },
 
-    // ── Chat drawer methods ──
+    // ── Chat panel methods ──
 
     renderMarkdown(text) {
       if (!text) return '';
@@ -746,27 +745,20 @@ function reportsApp() {
       }
     },
 
-    async openChat() {
-      this.chatOpen = true;
-      if (!this.chatLoaded) {
-        // Set up Centrifuge WebSocket connection for general chat
-        const channel = `chat:general:${this._userEmail}`;
-        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        this._centrifuge = new Centrifuge(`${wsProto}//${location.host}/connection/websocket`);
-        this._chatSubscription = this._centrifuge.newSubscription(channel);
-        this._chatSubscription.on('publication', (ctx) => {
-          const {event, ...data} = ctx.data;
-          this.handleChatEvent(event, data);
-        });
-        this._chatSubscription.subscribe();
-        this._centrifuge.connect();
-
-        await this.loadChatHistory();
-        this.chatLoaded = true;
-      }
-      this.$nextTick(() => {
-        if (this.$refs.chatInput) this.$refs.chatInput.focus();
+    async initChat() {
+      // Set up Centrifuge WebSocket connection for general chat
+      const channel = `chat:general:${this._userEmail}`;
+      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this._centrifuge = new Centrifuge(`${wsProto}//${location.host}/connection/websocket`);
+      this._chatSubscription = this._centrifuge.newSubscription(channel);
+      this._chatSubscription.on('publication', (ctx) => {
+        const {event, ...data} = ctx.data;
+        this.handleChatEvent(event, data);
       });
+      this._chatSubscription.subscribe();
+      this._centrifuge.connect();
+
+      await this.loadChatHistory();
     },
 
     async loadChatHistory() {
