@@ -105,7 +105,7 @@ class ISpyFireClient:
         if self._fixture_dir:
             self.base_url = "https://fixture.ispyfire.com"
             self.username = "fixture"
-            self.password = "fixture"
+            self.password = "fixture"  # noqa: S105
         else:
             self.base_url, self.username, self.password = get_ispyfire_credentials()
         self.client: httpx.Client | None = None
@@ -945,7 +945,8 @@ class ISpyFireClient:
         falls back to scanning all detail files for a matching
         LongTermCallID (dispatch ID lookup like "26-001678").
         """
-        assert self._fixture_dir is not None
+        if self._fixture_dir is None:
+            return None
 
         # Direct UUID lookup
         path = self._fixture_dir / "details" / f"{call_id}.json"
@@ -967,7 +968,8 @@ class ISpyFireClient:
 
     def _fixture_open_calls(self) -> list[DispatchCall]:
         """Read open call headers and fetch details for each."""
-        assert self._fixture_dir is not None
+        if self._fixture_dir is None:
+            return []
 
         headers_path = self._fixture_dir / "open_headers.json"
         if not headers_path.exists():
@@ -990,7 +992,8 @@ class ISpyFireClient:
 
     def _fixture_search_results(self) -> list[dict]:
         """Read search results from fixture file."""
-        assert self._fixture_dir is not None
+        if self._fixture_dir is None:
+            return []
 
         path = self._fixture_dir / "search_results.json"
         if not path.exists():
