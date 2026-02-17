@@ -13,8 +13,6 @@ import asyncio
 import logging
 import sys
 
-from dotenv import load_dotenv
-
 from sjifire.ops.tasks.registry import list_tasks, run_all, run_task
 
 logger = logging.getLogger(__name__)
@@ -70,7 +68,6 @@ def _print_result(result) -> None:
 
 def main() -> None:
     """Entry point for ``uv run ops-tasks``."""
-    load_dotenv()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

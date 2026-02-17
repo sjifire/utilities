@@ -18,7 +18,6 @@ import logging
 import os
 from urllib.parse import urlparse
 
-from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -65,8 +64,6 @@ logging.getLogger("azure.identity").setLevel(logging.WARNING)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-
-load_dotenv()
 
 ORG = get_org_config()
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", f"https://ops.{ORG.domain}")

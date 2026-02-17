@@ -4,7 +4,6 @@ import logging
 import os
 from typing import Self
 
-from dotenv import load_dotenv
 from neris_api_client import Config, GrantType, NerisApiClient
 from neris_api_client.models import TypeIncidentStatusPayloadValue
 
@@ -24,8 +23,6 @@ def get_neris_credentials() -> tuple[str, str]:
     Raises:
         ValueError: If any required credential is not set
     """
-    load_dotenv()
-
     client_id = os.getenv("NERIS_CLIENT_ID")
     client_secret = os.getenv("NERIS_CLIENT_SECRET")
 

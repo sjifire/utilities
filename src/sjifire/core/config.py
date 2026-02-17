@@ -9,8 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
-
 logger = logging.getLogger(__name__)
 
 
@@ -23,8 +21,6 @@ def get_graph_credentials() -> tuple[str, str, str]:
     Raises:
         ValueError: If any required credential is not set
     """
-    load_dotenv()
-
     tenant_id = os.getenv("MS_GRAPH_TENANT_ID")
     client_id = os.getenv("MS_GRAPH_CLIENT_ID")
     client_secret = os.getenv("MS_GRAPH_CLIENT_SECRET")
@@ -51,8 +47,6 @@ def get_service_account_credentials() -> tuple[str, str]:
     Raises:
         ValueError: If credentials are not set
     """
-    load_dotenv()
-
     email = os.getenv("SERVICE_EMAIL")
     password = os.getenv("SERVICE_PASSWORD")
 
@@ -97,8 +91,6 @@ def get_exchange_credentials() -> ExchangeCredentials:
     Raises:
         ValueError: If neither certificate method is configured
     """
-    load_dotenv()
-
     # Get tenant/client, with fallback to Graph credentials
     tenant_id = os.getenv("EXCHANGE_TENANT_ID") or os.getenv("MS_GRAPH_TENANT_ID")
     client_id = os.getenv("EXCHANGE_CLIENT_ID") or os.getenv("MS_GRAPH_CLIENT_ID")
@@ -201,8 +193,6 @@ def load_dispatch_config(require_mailbox: bool = True) -> DispatchConfig:
     Args:
         require_mailbox: If True, raise error if DISPATCH_MAILBOX_USER_ID not set
     """
-    load_dotenv()
-
     project_root = get_project_root()
     config_path = project_root / "config" / "email_dispatch.json"
 
@@ -343,7 +333,6 @@ async def get_cosmos_container(container_name: str):
         if _cosmos_db is not None:
             return _cosmos_db.get_container_client(container_name)
 
-        load_dotenv()
         endpoint = os.getenv("COSMOS_ENDPOINT")
         key = os.getenv("COSMOS_KEY")
 

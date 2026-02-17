@@ -5,7 +5,6 @@ import os
 from typing import Self
 
 import httpx
-from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +18,6 @@ def get_aladtec_credentials() -> tuple[str, str, str]:
     Raises:
         ValueError: If any required credential is not set
     """
-    load_dotenv()
-
     url = os.getenv("ALADTEC_URL")
     username = os.getenv("ALADTEC_USERNAME")
     password = os.getenv("ALADTEC_PASSWORD")

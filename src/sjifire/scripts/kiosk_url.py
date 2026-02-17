@@ -23,8 +23,6 @@ import os
 import sys
 from urllib.parse import parse_qs, urlparse
 
-from dotenv import load_dotenv
-
 
 def _server_url() -> str:
     from sjifire.core.config import get_org_config
@@ -45,7 +43,6 @@ def _extract_token(value: str) -> str:
 
 def cmd_create(args: argparse.Namespace) -> int:
     """Generate a kiosk URL for a label."""
-    load_dotenv(verbose=False)
     from sjifire.ops.kiosk.store import create_token
 
     token = create_token(label=args.label)
@@ -57,7 +54,6 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 def cmd_verify(args: argparse.Namespace) -> int:
     """Verify a kiosk URL or token."""
-    load_dotenv(verbose=False)
     from sjifire.ops.kiosk.store import validate_token
 
     token = _extract_token(args.value)
@@ -72,7 +68,6 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 def cmd_test(args: argparse.Namespace) -> int:
     """Print the test-mode URL."""
-    load_dotenv(verbose=False)
     print(f"{_server_url()}/kiosk?test_mode=true")
     return 0
 
@@ -82,7 +77,6 @@ def cmd_rotate(args: argparse.Namespace) -> int:
     import secrets
     import subprocess
 
-    load_dotenv(verbose=False)
     vault = os.getenv("KEY_VAULT_NAME", "gh-website-utilities")
     new_key = secrets.token_hex(32)
 

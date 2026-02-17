@@ -17,8 +17,6 @@ import logging
 import os
 import sys
 
-from dotenv import load_dotenv
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -121,13 +119,11 @@ async def _re_enrich(dispatch_id: str) -> int:
 
 def cmd_reset_incident(args: argparse.Namespace) -> int:
     """Reset a draft incident."""
-    load_dotenv()
     return asyncio.run(_reset_incident(args.incident_id, args.email))
 
 
 def cmd_re_enrich(args: argparse.Namespace) -> int:
     """Re-run enrichment on a dispatch call."""
-    load_dotenv()
     return asyncio.run(_re_enrich(args.dispatch_id))
 
 

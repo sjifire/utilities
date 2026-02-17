@@ -8,8 +8,6 @@ import logging
 import os
 from typing import ClassVar, Self
 
-from dotenv import load_dotenv
-
 from sjifire.core.config import get_cosmos_database
 from sjifire.ops.neris.models import NerisReportDocument
 
@@ -41,8 +39,6 @@ class NerisReportStore:
 
     async def __aenter__(self) -> Self:
         """Connect to Cosmos DB, or fall back to in-memory mode."""
-        load_dotenv()
-
         endpoint = os.getenv("COSMOS_ENDPOINT")
         key = os.getenv("COSMOS_KEY")
 

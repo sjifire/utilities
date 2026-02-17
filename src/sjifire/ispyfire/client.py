@@ -13,7 +13,6 @@ import time
 from typing import Self
 
 import httpx
-from dotenv import load_dotenv
 from tenacity import (
     RetryError,
     retry,
@@ -34,8 +33,6 @@ def get_ispyfire_credentials() -> tuple[str, str, str]:
     Raises:
         ValueError: If any required credential is not set
     """
-    load_dotenv()
-
     url = os.getenv("ISPYFIRE_URL")
     username = os.getenv("ISPYFIRE_USERNAME")
     password = os.getenv("ISPYFIRE_PASSWORD")

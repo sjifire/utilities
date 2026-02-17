@@ -25,7 +25,6 @@ class TestGetNerisCredentials:
 
     def test_raises_when_client_id_missing(self):
         with (
-            patch("sjifire.neris.client.load_dotenv"),
             patch.dict("os.environ", {"NERIS_CLIENT_SECRET": "test-secret"}, clear=True),
             pytest.raises(ValueError, match="NERIS_CLIENT_ID"),
         ):
@@ -33,7 +32,6 @@ class TestGetNerisCredentials:
 
     def test_raises_when_client_secret_missing(self):
         with (
-            patch("sjifire.neris.client.load_dotenv"),
             patch.dict("os.environ", {"NERIS_CLIENT_ID": "test-id"}, clear=True),
             pytest.raises(ValueError, match="NERIS_CLIENT_SECRET"),
         ):
@@ -41,7 +39,6 @@ class TestGetNerisCredentials:
 
     def test_raises_when_both_missing(self):
         with (
-            patch("sjifire.neris.client.load_dotenv"),
             patch.dict("os.environ", {}, clear=True),
             pytest.raises(ValueError, match="NERIS credentials not set"),
         ):
