@@ -610,8 +610,8 @@ function chatApp() {
         const lastMsg = this.messages[this.messages.length - 1];
         if (lastMsg && lastMsg.type === 'message' && lastMsg.role === 'user') {
           // Last saved message was from the user — agent never responded.
-          // Auto-continue so the user doesn't have to re-type.
-          this.$nextTick(() => this.sendMessage('Continue where we left off.'));
+          // Retry silently (no new bubble) so it picks up where it left off.
+          this.$nextTick(() => this._streamRequest(lastMsg.content || 'Continue'));
         }
       }
     },
@@ -967,7 +967,8 @@ function chatApp() {
           if (this._reconnectAttempts <= 3) {
             const delay = this._reconnectAttempts * 2000;
             console.warn(`Stream lost (attempt ${this._reconnectAttempts}/3) — retrying in ${delay}ms`);
-            setTimeout(() => this.sendMessage('Continue where we left off.'), delay);
+            // Retry silently (no new user bubble) with the original message
+            setTimeout(() => this._streamRequest(displayText), delay);
           } else {
             this._reconnectAttempts = 0;
             this.messages.push({type: 'error', content: 'Connection lost. Please try again.'});
