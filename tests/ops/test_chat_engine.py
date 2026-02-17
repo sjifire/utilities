@@ -127,6 +127,38 @@ class TestTrimMessages:
         for i, msg in enumerate(result):
             assert msg["content"] == f"msg {i + 10}"
 
+    def test_keeps_tool_use_when_tool_result_at_boundary(self):
+        """If trimming would orphan a tool_result, include the preceding tool_use."""
+        msgs = [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"}
+            for i in range(80)
+        ]
+        # Replace the message at the trim boundary with a tool_use/tool_result pair
+        boundary = len(msgs) - 40  # index 40
+        msgs[boundary - 1] = {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "toolu_123", "name": "get_incident"}],
+        }
+        msgs[boundary] = {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "toolu_123", "content": "ok"}],
+        }
+        result = _trim_messages(msgs)
+        # Should include the extra tool_use message (41 instead of 40)
+        assert len(result) == 41
+        assert result[0]["role"] == "assistant"
+        assert result[0]["content"][0]["type"] == "tool_use"
+        assert result[1]["content"][0]["type"] == "tool_result"
+
+    def test_no_backup_when_first_message_is_not_tool_result(self):
+        """Normal trim when no tool_result at boundary."""
+        msgs = [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"}
+            for i in range(80)
+        ]
+        result = _trim_messages(msgs)
+        assert len(result) == 40
+
 
 class TestSSE:
     def test_format(self):

@@ -203,10 +203,43 @@ def _format_unit_times_table(
 
 
 def _trim_messages(messages: list[dict]) -> list[dict]:
-    """Keep only the last MAX_CONTEXT_MESSAGES turns to stay under token limits."""
-    if len(messages) <= MAX_CONTEXT_MESSAGES * 2:
+    """Keep only the last MAX_CONTEXT_MESSAGES turns to stay under token limits.
+
+    Ensures tool_result blocks always have their matching tool_use in the
+    preceding message.  If trimming would orphan a tool_result, we back up
+    one more message to include the tool_use.
+    """
+    limit = MAX_CONTEXT_MESSAGES * 2
+    if len(messages) <= limit:
         return messages
-    return messages[-(MAX_CONTEXT_MESSAGES * 2) :]
+
+    trimmed = messages[-limit:]
+
+    # If the first kept message is a user message containing tool_result
+    # blocks, the preceding assistant message with the tool_use was trimmed.
+    # Back up to include it.
+    if trimmed and trimmed[0].get("role") == "user":
+        content = trimmed[0].get("content")
+        if isinstance(content, list) and any(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+        ):
+            start = len(messages) - limit
+            if start > 0:
+                trimmed = [messages[start - 1], *trimmed]
+
+    # Final safety check: drop any leading tool_result messages that still
+    # lack a preceding tool_use (e.g. corrupted conversation history).
+    while trimmed and trimmed[0].get("role") == "user":
+        content = trimmed[0].get("content")
+        if isinstance(content, list) and all(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+        ):
+            logger.warning("Dropping orphaned tool_result message from history")
+            trimmed = trimmed[1:]
+        else:
+            break
+
+    return trimmed
 
 
 _neris_incident_types_cache: str = ""
