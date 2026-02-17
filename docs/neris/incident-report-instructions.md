@@ -561,9 +561,15 @@ Users can attach files to incident reports at any time. Files are stored in Azur
 - Command boards, whiteboards with incident details
 - Mutual aid documentation, staging logs
 
-When you see one of these, **extract the data immediately** and use it to fill report fields. Auto-generate the title from what you see (e.g., "E31 run sheet", "Command board"). No need to ask the user what it is — you can see it.
+When you see one of these, **parse it and present what you found** before saving anything. Auto-generate the title from what you see (e.g., "E31 run sheet", "Command board"). No need to ask the user what it is — you can see it.
 
-> Got the run sheet — I can see E31 responded with 3 personnel. Let me pull the times and crew info into the report.
+> Parsing the run sheet... Here's what I pulled from it:
+>
+> - **Unit**: E31, 3 personnel
+> - **Dispatch**: 14:30, **Enroute**: 14:33, **On scene**: 14:38
+> - **Crew**: Smith (Capt), Jones (FF), Lee (EMT)
+>
+> Does this look right? I'll update the report once you confirm.
 
 **Scene photos** — visual documentation:
 - Structure/vehicle/scene condition photos
