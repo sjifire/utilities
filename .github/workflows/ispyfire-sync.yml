@@ -1,9 +1,9 @@
-name: iSpyFire Sync
+name: iSpyFire Backup
 
 on:
   schedule:
-    # Run hourly
-    - cron: '0 * * * *'
+    # Daily at 6am Pacific (14:00 UTC)
+    - cron: '0 14 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -26,8 +26,8 @@ permissions:
   statuses: none
 
 jobs:
-  sync:
-    name: Sync Entra to iSpyFire
+  backup:
+    name: Backup iSpyFire state
     runs-on: ubuntu-latest
     environment: production
 
@@ -81,16 +81,10 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run iSpyFire sync
-        run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run ispyfire-sync --dry-run
-          else
-            uv run ispyfire-sync
-          fi
+      - name: Backup iSpyFire state
+        run: uv run ispyfire-sync --backup --dry-run
 
       - name: Upload backup artifacts
-        if: ${{ inputs.dry_run != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ispyfire-backup-${{ github.run_id }}

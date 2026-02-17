@@ -1,11 +1,15 @@
 """Configuration loading utilities."""
 
+import asyncio
 import json
+import logging
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
+logger = logging.getLogger(__name__)
 
 
 def get_graph_credentials() -> tuple[str, str, str]:
@@ -17,8 +21,6 @@ def get_graph_credentials() -> tuple[str, str, str]:
     Raises:
         ValueError: If any required credential is not set
     """
-    load_dotenv()
-
     tenant_id = os.getenv("MS_GRAPH_TENANT_ID")
     client_id = os.getenv("MS_GRAPH_CLIENT_ID")
     client_secret = os.getenv("MS_GRAPH_CLIENT_SECRET")
@@ -45,8 +47,6 @@ def get_service_account_credentials() -> tuple[str, str]:
     Raises:
         ValueError: If credentials are not set
     """
-    load_dotenv()
-
     email = os.getenv("SERVICE_EMAIL")
     password = os.getenv("SERVICE_PASSWORD")
 
@@ -91,8 +91,6 @@ def get_exchange_credentials() -> ExchangeCredentials:
     Raises:
         ValueError: If neither certificate method is configured
     """
-    load_dotenv()
-
     # Get tenant/client, with fallback to Graph credentials
     tenant_id = os.getenv("EXCHANGE_TENANT_ID") or os.getenv("MS_GRAPH_TENANT_ID")
     client_id = os.getenv("EXCHANGE_CLIENT_ID") or os.getenv("MS_GRAPH_CLIENT_ID")
@@ -147,11 +145,32 @@ class DispatchConfig:
 
 @dataclass
 class OrgConfig:
-    """Organization configuration."""
+    """Organization configuration loaded from config/organization.json.
+
+    All org-specific data lives here rather than in code, so
+    customization requires only editing the JSON file.
+    """
 
     company_name: str
     domain: str
     service_email: str
+    timezone: str = ""
+    cosmos_database: str = ""
+    rank_hierarchy: tuple[str, ...] = ()
+    officer_positions: tuple[str, ...] = ()
+    operational_positions: frozenset[str] = field(default_factory=frozenset)
+    marine_positions: frozenset[str] = field(default_factory=frozenset)
+    chief_unit_prefixes: frozenset[str] = field(default_factory=frozenset)
+    neris_entity_id: str = ""
+    default_city: str = ""
+    default_state: str = ""
+    editor_group_name: str = ""
+    position_order: tuple[str, ...] = ()
+    schedule_excluded_sections: frozenset[str] = field(default_factory=frozenset)
+    schedule_section_order: tuple[str, ...] = ()
+    schedule_section_labels: dict[str, str] = field(default_factory=dict)
+    duty_event_subject: str = ""
+    calendar_category: str = ""
     skip_emails: list[str] = field(default_factory=list)
 
 
@@ -174,8 +193,6 @@ def load_dispatch_config(require_mailbox: bool = True) -> DispatchConfig:
     Args:
         require_mailbox: If True, raise error if DISPATCH_MAILBOX_USER_ID not set
     """
-    load_dotenv()
-
     project_root = get_project_root()
     config_path = project_root / "config" / "email_dispatch.json"
 
@@ -217,6 +234,25 @@ def load_org_config() -> OrgConfig:
         company_name=config_data["company_name"],
         domain=config_data["domain"],
         service_email=config_data["service_email"],
+        timezone=config_data.get("timezone", ""),
+        cosmos_database=config_data.get("cosmos_database", ""),
+        rank_hierarchy=tuple(config_data.get("rank_hierarchy", ())),
+        officer_positions=tuple(config_data.get("officer_positions", ())),
+        operational_positions=frozenset(config_data.get("operational_positions", ())),
+        marine_positions=frozenset(config_data.get("marine_positions", ())),
+        chief_unit_prefixes=frozenset(config_data.get("chief_unit_prefixes", ())),
+        neris_entity_id=config_data.get("neris_entity_id", ""),
+        default_city=config_data.get("default_city", ""),
+        default_state=config_data.get("default_state", ""),
+        editor_group_name=config_data.get("editor_group_name", ""),
+        position_order=tuple(config_data.get("position_order", ())),
+        schedule_excluded_sections=frozenset(
+            s.lower() for s in config_data.get("schedule_excluded_sections", ())
+        ),
+        schedule_section_order=tuple(config_data.get("schedule_section_order", ())),
+        schedule_section_labels=config_data.get("schedule_section_labels", {}),
+        duty_event_subject=config_data.get("duty_event_subject", ""),
+        calendar_category=config_data.get("calendar_category", ""),
         skip_emails=config_data.get("skip_emails", []),
     )
 
@@ -248,3 +284,93 @@ def get_domain() -> str:
 def get_service_email() -> str:
     """Get service account email from config."""
     return get_org_config().service_email
+
+
+def get_cosmos_database() -> str:
+    """Get Cosmos DB database name.
+
+    Reads from ``COSMOS_DATABASE`` env var first (for Container Apps),
+    falls back to ``organization.json``.
+    """
+    return os.getenv("COSMOS_DATABASE") or get_org_config().cosmos_database
+
+
+# ---------------------------------------------------------------------------
+# Shared Cosmos DB client (connection pool)
+# ---------------------------------------------------------------------------
+
+_cosmos_client = None
+_cosmos_db = None
+_cosmos_lock: asyncio.Lock | None = None
+_cosmos_in_memory: bool | None = None
+
+
+def _get_cosmos_lock() -> asyncio.Lock:
+    """Get or create the Cosmos init lock (must be called in an event loop)."""
+    global _cosmos_lock
+    if _cosmos_lock is None:
+        _cosmos_lock = asyncio.Lock()
+    return _cosmos_lock
+
+
+async def get_cosmos_container(container_name: str):
+    """Get a Cosmos DB container client from the shared connection pool.
+
+    All stores should use this instead of creating their own CosmosClient.
+    Returns None when Cosmos DB is not configured (in-memory fallback).
+    """
+    global _cosmos_client, _cosmos_db, _cosmos_in_memory
+
+    if _cosmos_in_memory is True:
+        return None
+    if _cosmos_db is not None:
+        return _cosmos_db.get_container_client(container_name)
+
+    async with _get_cosmos_lock():
+        # Re-check after acquiring lock
+        if _cosmos_in_memory is True:
+            return None
+        if _cosmos_db is not None:
+            return _cosmos_db.get_container_client(container_name)
+
+        endpoint = os.getenv("COSMOS_ENDPOINT")
+        key = os.getenv("COSMOS_KEY")
+
+        if key:
+            from azure.cosmos.aio import CosmosClient
+
+            _cosmos_client = CosmosClient(endpoint, credential=key)
+        elif endpoint:
+            from azure.cosmos.aio import CosmosClient
+            from azure.identity.aio import DefaultAzureCredential
+
+            _cosmos_client = CosmosClient(endpoint, credential=DefaultAzureCredential())
+        else:
+            logger.info("No COSMOS_ENDPOINT — stores will use in-memory mode")
+            _cosmos_in_memory = True
+            return None
+
+        db_name = get_cosmos_database()
+        _cosmos_db = _cosmos_client.get_database_client(db_name)
+        logger.info("Cosmos DB connection pool ready: %s", db_name)
+        return _cosmos_db.get_container_client(container_name)
+
+
+def get_timezone() -> ZoneInfo:
+    """Get organization timezone as a ZoneInfo object."""
+    return ZoneInfo(get_org_config().timezone)
+
+
+def get_timezone_name() -> str:
+    """Get organization timezone name string (e.g. 'America/Los_Angeles')."""
+    return get_org_config().timezone
+
+
+def local_now() -> datetime:
+    """Get the current datetime in the organization's configured timezone.
+
+    Use this instead of ``datetime.now()`` or ``date.today()`` in server
+    code — the container runs in UTC, so bare calls return the wrong
+    date/time after 4 PM Pacific.
+    """
+    return datetime.now(get_timezone())

@@ -114,7 +114,7 @@ The sync:
 - Rate limiting handled with tenacity retry logic
 - Automatically backs up iSpyFire people before making changes
 
-**Automated sync:** Runs every 30 minutes via GitHub Actions. See `.github/workflows/ispyfire-sync.yml`.
+**Automated sync:** Runs every 30 minutes via Container Apps Job (`ops-tasks`). GitHub Actions runs a daily backup/dry-run — see `.github/workflows/ispyfire-sync.yml`.
 
 ### iSpyFire Admin
 
@@ -160,6 +160,82 @@ The sync:
 - Use `--force` to update all events regardless of content changes
 - Use `--purge` to delete all Aladtec-categorized events
 - Use `--load-schedule` to skip Aladtec fetch and use cached schedule data
+
+### Ops Server (Remote, for Claude.ai)
+
+Operations platform (dashboard, incident reports, chat assistant) with MCP tools for Claude.ai. Deployed on Azure Container Apps at `ops.sjifire.org`. Users connect by adding the integration URL in Claude.ai Settings → Integrations.
+
+**Run locally (dev mode, no auth):**
+```bash
+uv run ops-server
+```
+
+**Deploy to Azure (dev):**
+```bash
+./scripts/deploy-ops.sh              # Build & deploy
+./scripts/deploy-ops.sh --build-only # Build image only
+./scripts/deploy-ops.sh --health     # Health check only
+```
+
+**Available tools for Claude.ai users:**
+- Operations dashboard (`start_session`) — status board with on-duty crew, recent calls, and report status; browser dashboard at `/dashboard` with EasyAuth SSO
+- Dispatch call lookup (recent calls, open calls, call details, search by date range)
+- Schedule lookup (on-duty crew for any date)
+- Personnel lookup (active personnel names and emails)
+- Incident reporting (create, edit, list, submit to NERIS)
+- NERIS value sets (look up valid codes for any field — incident types, actions, location use, etc.)
+
+**Setup guide for end users:** See `docs/mcp-setup-guide.md`
+
+**Infrastructure setup:** See `scripts/setup-azure-ops.sh` (one-time provisioning of ACR, Container Apps, Cosmos DB, Entra app registration, custom domain)
+
+#### Background Tasks
+
+A Container Apps Job (`sjifire-ops-tasks`) runs every 30 minutes:
+
+```bash
+uv run ops-tasks              # Run all scheduled (auto) tasks
+uv run ops-tasks neris-sync   # Run specific task(s)
+uv run ops-tasks --list       # List available tasks
+uv run ops-tasks -h           # Help
+```
+
+**Scheduled tasks** (run automatically):
+- `dispatch-sync` — Fetch recent dispatch calls from iSpyFire, store in Cosmos DB with AI enrichment
+- `dispatch-enrich` — Retry AI enrichment on calls that failed previously
+- `ispyfire-sync` — Sync Entra ID users to iSpyFire
+- `neris-sync` — Fetch NERIS incident summaries to Cosmos DB cache
+
+**Manual tasks** (run only when explicitly requested):
+- `dispatch-reenrich` — Force re-enrich ALL stored calls (expensive, uses LLM for every call)
+
+Tasks are registered with `@register("name")` in `ops/tasks/`. Use `auto=False` to exclude from scheduled runs.
+
+#### Incident Report Assistant
+
+The ops server powers a guided incident reporting workflow through Claude.ai. Users connect with their `@sjifire.org` Entra ID account and Claude walks them through completing NERIS-compliant reports — pulling dispatch data, crew schedules, and suggesting valid NERIS codes automatically.
+
+**Setup (Pro plan — per user):**
+
+1. Each user needs a [Claude Pro](https://claude.ai/upgrade) subscription ($20/month)
+2. In Claude.ai, go to **Settings → Integrations → Add Integration**
+3. Enter the server URL: `https://ops.sjifire.org/mcp`
+4. Sign in with your `@sjifire.org` Microsoft account
+5. Start a new chat — the integration provides prompts, resources, and tools automatically
+6. Select the **Operations Dashboard** prompt, or say "I need to write a report"
+
+**How it works:**
+- Claude pulls dispatch data and on-duty crew automatically
+- Guides you through each section: incident type, actions taken, location, times, resources, narrative
+- Suggests NERIS codes based on context (e.g., dispatch nature "Medical Aid" → `MEDICAL||INJURY||FALL`)
+- Drafts the outcome narrative from your answers
+- Flags missing required fields before saving
+- Editors (members of the Incident Report Editors group) can submit completed reports to NERIS
+
+**Reference docs:**
+- `docs/neris/incident-report-instructions.md` — Full workflow instructions for the Claude.ai Project
+- `docs/neris/neris-value-sets-reference.md` — Common NERIS value sets (auto-generated from `neris-api-client`; run `uv run generate-neris-reference` to regenerate)
+- `docs/neris/architecture.md` — System architecture and design decisions
 
 ### Aladtec Tools
 
@@ -258,17 +334,27 @@ Runs weekdays at noon Pacific:
 - `ALADTEC-URL`, `ALADTEC-USERNAME`, `ALADTEC-PASSWORD`
 - `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
 
-### iSpyFire Sync (ispyfire-sync.yml)
-Runs every 30 minutes:
-- Syncs Entra ID users with operational positions to iSpyFire
-- Creates new users with invite emails
-- Deactivates users no longer in Entra (with device logout)
+### iSpyFire Backup (ispyfire-sync.yml)
+Runs daily at 6 AM Pacific:
+- Dry-run sync to capture state as backup artifact
+- Actual sync runs every 30 min via Container Apps Job (`ops-tasks`)
 - Uploads backup artifacts (30-day retention)
 - Can be triggered manually with dry-run option
 
 **Secrets (from Key Vault):**
 - `MS-GRAPH-TENANT-ID`, `MS-GRAPH-CLIENT-ID`, `MS-GRAPH-CLIENT-SECRET`
 - `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
+
+### Ops Deploy (ops-deploy.yml)
+Runs on push to main (paths: `src/sjifire/ops/**`, `Dockerfile`, `pyproject.toml`):
+- Builds Docker image via ACR
+- Configures Key Vault secret references
+- Deploys to Container Apps
+- Health check with version verification
+
+**Secrets (from Key Vault):**
+- `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-REPORT-EDITORS-GROUP-ID`
+- `COSMOS-ENDPOINT`, `MS-GRAPH-*`, `ALADTEC-*`, `ISPYFIRE-*`
 
 ## Azure Key Vault
 
@@ -346,6 +432,19 @@ src/sjifire/
 │   ├── models.py          # OnDutyEvent, SyncResult dataclasses
 │   ├── duty_sync.py       # DutyCalendarSync for shared mailbox
 │   └── personal_sync.py   # PersonalCalendarSync for user calendars
+├── ops/               # Operations server (dashboard, reports, MCP tools)
+│   ├── server.py          # FastMCP app, OAuth auth, tool registration
+│   ├── auth.py            # Entra JWT validation, EasyAuth header parsing, UserContext
+│   ├── oauth_provider.py  # OAuth proxy: Claude.ai ↔ Entra ID
+│   ├── token_store.py     # OAuth token store (TTLCache + Cosmos DB)
+│   ├── dashboard.py       # Operations dashboard (client-side rendered) + session bootstrap
+│   ├── prompts.py         # MCP prompts and resources
+│   ├── dispatch/          # iSpyFire dispatch call lookup + archival
+│   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
+│   ├── neris/             # NERIS value set lookup
+│   ├── personnel/         # Graph API personnel lookup
+│   ├── schedule/          # On-duty crew with Cosmos cache
+│   └── tasks/             # Background tasks (Container Apps Job, every 30 min)
 └── scripts/           # CLI entry points
     ├── aladtec_list.py
     ├── analyze_mappings.py

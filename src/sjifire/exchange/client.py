@@ -43,6 +43,17 @@ MAX_RETRY_ATTEMPTS = 3
 RETRY_DELAYS_SECONDS = [10, 20, 30]  # Delays between retries
 
 
+def _escape_ps_string(value: str) -> str:
+    """Escape a value for use inside PowerShell single-quoted strings.
+
+    In PowerShell single-quoted strings, the ONLY special character is the
+    single quote itself, escaped by doubling it.  This is safe against
+    variable expansion ($var), sub-expressions ($()), and backtick escapes
+    because PowerShell does not interpret those inside single quotes.
+    """
+    return value.replace("'", "''")
+
+
 def is_transient_error(error_msg: str) -> bool:
     """Check if an error message indicates a transient Azure AD sync error."""
     return any(re.search(pattern, error_msg, re.IGNORECASE) for pattern in TRANSIENT_ERROR_PATTERNS)
@@ -210,9 +221,10 @@ class ExchangeOnlineClient:
         Returns:
             ExchangeGroup if found, None otherwise
         """
+        esc_id = _escape_ps_string(identity)
         select_fields = "Identity, DisplayName, PrimarySmtpAddress, RecipientTypeDetails"
         commands = [
-            f"$group = Get-DistributionGroup -Identity '{identity}' -ErrorAction SilentlyContinue",
+            f"$group = Get-DistributionGroup -Identity '{esc_id}' -ErrorAction SilentlyContinue",
             f"if ($group) {{ $group | Select-Object {select_fields} | ConvertTo-Json }}",
         ]
 
@@ -240,8 +252,9 @@ class ExchangeOnlineClient:
         """
         # Build a script that outputs both group info and members as JSON
         # Note: Commands are joined with "; " so each must be a complete statement
+        esc_id = _escape_ps_string(identity)
         commands = [
-            f"$group = Get-DistributionGroup -Identity '{identity}' -ErrorAction SilentlyContinue",
+            f"$group = Get-DistributionGroup -Identity '{esc_id}' -ErrorAction SilentlyContinue",
             (
                 "if ($group) { "
                 "$members = Get-DistributionGroupMember -Identity $group.Identity "
@@ -310,25 +323,23 @@ class ExchangeOnlineClient:
         """
         # Build New-DistributionGroup command
         cmd_parts = [
-            f"New-DistributionGroup -Name '{name}'",
-            f"-DisplayName '{display_name}'",
-            f"-Alias '{alias}'",
+            f"New-DistributionGroup -Name '{_escape_ps_string(name)}'",
+            f"-DisplayName '{_escape_ps_string(display_name)}'",
+            f"-Alias '{_escape_ps_string(alias)}'",
             "-Type 'Security'",  # Creates mail-enabled security group
         ]
 
         if primary_smtp_address:
-            cmd_parts.append(f"-PrimarySmtpAddress '{primary_smtp_address}'")
+            cmd_parts.append(f"-PrimarySmtpAddress '{_escape_ps_string(primary_smtp_address)}'")
 
         if managed_by:
-            cmd_parts.append(f"-ManagedBy '{managed_by}'")
+            cmd_parts.append(f"-ManagedBy '{_escape_ps_string(managed_by)}'")
 
         if notes:
-            # Escape single quotes in notes
-            escaped_notes = notes.replace("'", "''")
-            cmd_parts.append(f"-Notes '{escaped_notes}'")
+            cmd_parts.append(f"-Notes '{_escape_ps_string(notes)}'")
 
         if members:
-            members_str = "', '".join(members)
+            members_str = "', '".join(_escape_ps_string(m) for m in members)
             cmd_parts.append(f"-Members @('{members_str}')")
 
         create_cmd = " ".join(cmd_parts)
@@ -366,10 +377,10 @@ class ExchangeOnlineClient:
         Returns:
             True if successful
         """
-        # Escape single quotes in description
-        escaped_description = description.replace("'", "''")
+        esc_id = _escape_ps_string(identity)
+        esc_desc = _escape_ps_string(description)
         commands = [
-            f"Set-DistributionGroup -Identity '{identity}' -Description '{escaped_description}'",
+            f"Set-DistributionGroup -Identity '{esc_id}' -Description '{esc_desc}'",
             "Write-Output 'SUCCESS'",
         ]
 
@@ -395,9 +406,12 @@ class ExchangeOnlineClient:
         Returns:
             True if successful
         """
+        esc_id = _escape_ps_string(identity)
+        esc_mgr = _escape_ps_string(managed_by)
         commands = [
-            f"Set-DistributionGroup -Identity '{identity}' -ManagedBy '{managed_by}' "
-            "-BypassSecurityGroupManagerCheck",
+            f"Set-DistributionGroup -Identity '{esc_id}'"
+            f" -ManagedBy '{esc_mgr}'"
+            " -BypassSecurityGroupManagerCheck",
             "Write-Output 'SUCCESS'",
         ]
 
@@ -440,7 +454,7 @@ class ExchangeOnlineClient:
         addresses_str = '","'.join(alias_addresses)
 
         set_cmd = (
-            f"Set-DistributionGroup -Identity '{identity}' "
+            f"Set-DistributionGroup -Identity '{_escape_ps_string(identity)}' "
             f'-EmailAddresses @{{Add="{addresses_str}"}}'
         )
         commands = [set_cmd, "Write-Output 'SUCCESS'"]
@@ -477,16 +491,17 @@ class ExchangeOnlineClient:
 
         commands = []
 
+        esc_id = _escape_ps_string(identity)
         if description:
-            escaped_description = description.replace("'", "''")
-            commands.append(
-                f"Set-DistributionGroup -Identity '{identity}' -Description '{escaped_description}'"
-            )
+            esc_desc = _escape_ps_string(description)
+            commands.append(f"Set-DistributionGroup -Identity '{esc_id}' -Description '{esc_desc}'")
 
         if managed_by:
+            esc_mgr = _escape_ps_string(managed_by)
             commands.append(
-                f"Set-DistributionGroup -Identity '{identity}' "
-                f"-ManagedBy '{managed_by}' -BypassSecurityGroupManagerCheck"
+                f"Set-DistributionGroup -Identity '{esc_id}'"
+                f" -ManagedBy '{esc_mgr}'"
+                " -BypassSecurityGroupManagerCheck"
             )
 
         commands.append("Write-Output 'SUCCESS'")
@@ -512,7 +527,7 @@ class ExchangeOnlineClient:
             True if successful (or group didn't exist)
         """
         commands = [
-            f"Remove-DistributionGroup -Identity '{identity}' "
+            f"Remove-DistributionGroup -Identity '{_escape_ps_string(identity)}' "
             "-BypassSecurityGroupManagerCheck -Confirm:$false -ErrorAction Stop",
             "Write-Output 'SUCCESS'",
         ]
@@ -543,7 +558,7 @@ class ExchangeOnlineClient:
             List of member email addresses
         """
         commands = [
-            f"Get-DistributionGroupMember -Identity '{identity}' "
+            f"Get-DistributionGroupMember -Identity '{_escape_ps_string(identity)}' "
             "| Select-Object PrimarySmtpAddress | ConvertTo-Json",
         ]
 
@@ -579,9 +594,12 @@ class ExchangeOnlineClient:
         Returns:
             True if successful
         """
+        esc_id = _escape_ps_string(identity)
+        esc_member = _escape_ps_string(member)
         commands = [
-            f"Add-DistributionGroupMember -Identity '{identity}' "
-            f"-Member '{member}' -BypassSecurityGroupManagerCheck -ErrorAction Stop",
+            f"Add-DistributionGroupMember -Identity '{esc_id}'"
+            f" -Member '{esc_member}'"
+            " -BypassSecurityGroupManagerCheck -ErrorAction Stop",
             "Write-Output 'SUCCESS'",
         ]
 
@@ -614,8 +632,8 @@ class ExchangeOnlineClient:
             True if successful
         """
         commands = [
-            f"Remove-DistributionGroupMember -Identity '{identity}' "
-            f"-Member '{member}' -BypassSecurityGroupManagerCheck "
+            f"Remove-DistributionGroupMember -Identity '{_escape_ps_string(identity)}' "
+            f"-Member '{_escape_ps_string(member)}' -BypassSecurityGroupManagerCheck "
             "-Confirm:$false -ErrorAction Stop",
             "Write-Output 'SUCCESS'",
         ]
@@ -658,30 +676,42 @@ class ExchangeOnlineClient:
         ]
 
         # Add members
-        commands.extend(
-            f"try {{ "
-            f"Add-DistributionGroupMember -Identity '{identity}' "
-            f"-Member '{member}' -BypassSecurityGroupManagerCheck -ErrorAction Stop; "
-            f"$added += '{member}' "
-            f"}} catch {{ "
-            f"if ($_.Exception.Message -like '*already a member*') {{ $added += '{member}' }} "
-            f"else {{ $errors += '{member}: ' + $_.Exception.Message }} "
-            f"}}"
-            for member in members_to_add
-        )
+        esc_identity = _escape_ps_string(identity)
+        for member in members_to_add:
+            esc_m = _escape_ps_string(member)
+            commands.append(
+                f"try {{ "
+                f"Add-DistributionGroupMember"
+                f" -Identity '{esc_identity}'"
+                f" -Member '{esc_m}'"
+                f" -BypassSecurityGroupManagerCheck"
+                f" -ErrorAction Stop; "
+                f"$added += '{esc_m}' "
+                f"}} catch {{ "
+                f"if ($_.Exception.Message -like"
+                f" '*already a member*')"
+                f" {{ $added += '{esc_m}' }} "
+                f"else {{ $errors += '{esc_m}: '"
+                f" + $_.Exception.Message }} "
+                f"}}"
+            )
 
         # Remove members
-        commands.extend(
-            f"try {{ "
-            f"Remove-DistributionGroupMember -Identity '{identity}' "
-            f"-Member '{member}' -BypassSecurityGroupManagerCheck "
-            f"-Confirm:$false -ErrorAction Stop; "
-            f"$removed += '{member}' "
-            f"}} catch {{ "
-            f"$errors += '{member}: ' + $_.Exception.Message "
-            f"}}"
-            for member in members_to_remove
-        )
+        for member in members_to_remove:
+            esc_m = _escape_ps_string(member)
+            commands.append(
+                f"try {{ "
+                f"Remove-DistributionGroupMember"
+                f" -Identity '{esc_identity}'"
+                f" -Member '{esc_m}'"
+                f" -BypassSecurityGroupManagerCheck"
+                f" -Confirm:$false -ErrorAction Stop; "
+                f"$removed += '{esc_m}' "
+                f"}} catch {{ "
+                f"$errors += '{esc_m}: '"
+                f" + $_.Exception.Message "
+                f"}}"
+            )
 
         # Output results as JSON
         commands.append(
@@ -756,7 +786,8 @@ class ExchangeOnlineClient:
                 "added = @(); removed = @(); errors = @() }"
             ),
             # Get group
-            f"$group = Get-DistributionGroup -Identity '{identity}' -ErrorAction SilentlyContinue",
+            f"$group = Get-DistributionGroup -Identity '{_escape_ps_string(identity)}'"
+            " -ErrorAction SilentlyContinue",
             "if (-not $group) { $result | ConvertTo-Json -Depth 3; return }",
             # Store group info
             (
@@ -775,26 +806,26 @@ class ExchangeOnlineClient:
         ]
 
         # Update description if provided
+        esc_identity = _escape_ps_string(identity)
         if description:
-            escaped_desc = description.replace("'", "''")
             script_parts.append(
-                f"try {{ Set-DistributionGroup -Identity '{identity}' "
-                f"-Description '{escaped_desc}' }} "
+                f"try {{ Set-DistributionGroup -Identity '{esc_identity}' "
+                f"-Description '{_escape_ps_string(description)}' }} "
                 f"catch {{ $result.errors += 'Description: ' + $_.Exception.Message }}"
             )
 
         # Update managed_by if provided
         if managed_by:
             script_parts.append(
-                f"try {{ Set-DistributionGroup -Identity '{identity}' "
-                f"-ManagedBy '{managed_by}' -BypassSecurityGroupManagerCheck }} "
+                f"try {{ Set-DistributionGroup -Identity '{esc_identity}' "
+                f"-ManagedBy '{_escape_ps_string(managed_by)}' -BypassSecurityGroupManagerCheck }} "
                 f"catch {{ $result.errors += 'ManagedBy: ' + $_.Exception.Message }}"
             )
 
         # Build target members array in PowerShell
         if target_members:
-            members_ps_array = "@('" + "', '".join(m.lower() for m in target_members) + "')"
-            script_parts.append(f"$targetMembers = {members_ps_array}")
+            escaped = "', '".join(_escape_ps_string(m.lower()) for m in target_members)
+            script_parts.append(f"$targetMembers = @('{escaped}')")
         else:
             script_parts.append("$targetMembers = @()")
 
@@ -807,20 +838,31 @@ class ExchangeOnlineClient:
                 # Add members loop
                 (
                     "foreach ($member in $toAdd) { "
-                    f"try {{ Add-DistributionGroupMember -Identity '{identity}' -Member $member "
-                    "-BypassSecurityGroupManagerCheck -ErrorAction Stop; "
+                    "try { Add-DistributionGroupMember"
+                    f" -Identity '{esc_identity}'"
+                    " -Member $member"
+                    " -BypassSecurityGroupManagerCheck"
+                    " -ErrorAction Stop; "
                     "$result.added += $member } "
-                    "catch { if ($_.Exception.Message -like '*already a member*') "
+                    "catch { if ($_.Exception.Message"
+                    " -like '*already a member*') "
                     "{ $result.added += $member } "
-                    'else { $result.errors += "Add $member`: " + $_.Exception.Message } } }'
+                    "else { $result.errors +="
+                    ' "Add $member`: "'
+                    " + $_.Exception.Message } } }"
                 ),
                 # Remove members loop
                 (
                     "foreach ($member in $toRemove) { "
-                    f"try {{ Remove-DistributionGroupMember -Identity '{identity}' -Member $member "
-                    "-BypassSecurityGroupManagerCheck -Confirm:$false -ErrorAction Stop; "
+                    "try { Remove-DistributionGroupMember"
+                    f" -Identity '{esc_identity}'"
+                    " -Member $member"
+                    " -BypassSecurityGroupManagerCheck"
+                    " -Confirm:$false -ErrorAction Stop; "
                     "$result.removed += $member } "
-                    'catch { $result.errors += "Remove $member`: " + $_.Exception.Message } }'
+                    "catch { $result.errors +="
+                    ' "Remove $member`: "'
+                    " + $_.Exception.Message } }"
                 ),
                 # Output result
                 "$result | ConvertTo-Json -Depth 3",
@@ -880,10 +922,16 @@ class ExchangeOnlineClient:
                 # Retry adding failed members
                 still_failing = []
                 for member in transient_failures:
+                    esc_m = _escape_ps_string(member)
                     add_script = [
-                        f"try {{ Add-DistributionGroupMember -Identity '{identity}' "
-                        f"-Member '{member}' -BypassSecurityGroupManagerCheck -ErrorAction Stop; "
-                        f"'SUCCESS' }} catch {{ $_.Exception.Message }}"
+                        "try {"
+                        " Add-DistributionGroupMember"
+                        f" -Identity '{_escape_ps_string(identity)}'"
+                        f" -Member '{esc_m}'"
+                        " -BypassSecurityGroupManagerCheck"
+                        " -ErrorAction Stop;"
+                        " 'SUCCESS'"
+                        " } catch { $_.Exception.Message }"
                     ]
                     retry_result = self._run_powershell(add_script)
                     # Check for SUCCESS in string or raw dict output
@@ -917,7 +965,7 @@ class ExchangeOnlineClient:
             True if successful
         """
         enabled_str = "$true" if enabled else "$false"
-        cmd = f"Set-UnifiedGroup -Identity '{identity}' "
+        cmd = f"Set-UnifiedGroup -Identity '{_escape_ps_string(identity)}' "
         cmd += f"-UnifiedGroupWelcomeMessageEnabled:{enabled_str}"
         commands = [cmd]
 
@@ -949,7 +997,7 @@ class ExchangeOnlineClient:
         """
         auto_str = "$true" if auto_subscribe else "$false"
         always_str = "$true" if always_subscribe_calendar else "$false"
-        cmd = f"Set-UnifiedGroup -Identity '{identity}' "
+        cmd = f"Set-UnifiedGroup -Identity '{_escape_ps_string(identity)}' "
         cmd += f"-AutoSubscribeNewMembers:{auto_str} "
         cmd += f"-AlwaysSubscribeMembersToCalendarEvents:{always_str}"
         commands = [cmd]

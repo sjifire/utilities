@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from sjifire.core.constants import MARINE_POSITIONS, OPERATIONAL_POSITIONS
+from sjifire.core.config import get_org_config
 
 
 @runtime_checkable
@@ -326,7 +326,8 @@ class MarineStrategy(GroupStrategy):
 
     def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
         """Get members with marine positions."""
-        marine_members = [m for m in members if set(m.positions or []) & MARINE_POSITIONS]
+        marine_positions = get_org_config().marine_positions
+        marine_members = [m for m in members if set(m.positions or []) & marine_positions]
         return {"Marine": marine_members} if marine_members else {}
 
     def get_config(self, group_key: str) -> GroupConfig:
@@ -367,7 +368,7 @@ class VolunteerStrategy(GroupStrategy):
 
             # Must have at least one operational position
             member_positions = set(member.positions or [])
-            if member_positions & OPERATIONAL_POSITIONS:
+            if member_positions & get_org_config().operational_positions:
                 volunteers.append(member)
 
         return {"Volunteers": volunteers} if volunteers else {}
@@ -506,7 +507,7 @@ class AllPersonnelStrategy(GroupStrategy):
     def _has_operational_position(self, member: GroupMember) -> bool:
         """Check if member has at least one operational position."""
         positions = set(member.positions or [])
-        return bool(positions & OPERATIONAL_POSITIONS)
+        return bool(positions & get_org_config().operational_positions)
 
     def get_config(self, group_key: str) -> GroupConfig:
         """Return group configuration."""

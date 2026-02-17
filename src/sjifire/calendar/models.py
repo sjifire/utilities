@@ -1,83 +1,25 @@
 """Data models for calendar events."""
 
-import re
 from dataclasses import dataclass, field
 from datetime import date
 from html import escape
 
 from sjifire.aladtec.client import get_aladtec_credentials
+from sjifire.core.config import get_org_config
+from sjifire.core.schedule import (
+    clean_position,
+    position_sort_key,
+    section_sort_key,
+)
 
-# Position ordering: officers first, then AO, then firefighters
-POSITION_ORDER = {
-    "Chief": 0,
-    "Captain": 1,
-    "Lieutenant": 2,
-    "Apparatus Operator": 3,
-    "Firefighter": 4,
-    "EMT": 5,
-    "Support": 6,
-    "Marine Pilot": 7,
-    "Marine Mate": 8,
-    "Backup Duty Officer": 9,
-}
+# Re-export so existing importers (tests, dashboard, enrich) keep working.
+__all__ = ["clean_position", "position_sort_key", "section_sort_key"]
 
 
 def get_aladtec_url() -> str:
     """Get Aladtec URL from credentials."""
     url, _, _ = get_aladtec_credentials()
     return url
-
-
-def section_sort_key(section: str) -> tuple[int, int, str]:
-    """Sort key for sections with custom priority order.
-
-    Sorting priority (soft matching, case-insensitive):
-    1. Chief (matches "chief", "chief officer", "chief on call", etc.)
-    2. S31 (the primary station)
-    3. Backup (matches "backup", "backup duty officer", etc.)
-    4. Support (matches "support")
-    5. Other stations (S32, S33, etc.) - sorted by number
-    6. Everything else - sorted alphabetically
-    """
-    section_lower = section.lower()
-
-    # Priority 0: Chief (soft match)
-    if "chief" in section_lower:
-        return (0, 0, section)
-
-    # Priority 1: S31 specifically
-    if section_lower == "s31" or section_lower == "station 31":
-        return (1, 0, section)
-
-    # Priority 2: Backup (soft match)
-    if "backup" in section_lower:
-        return (2, 0, section)
-
-    # Priority 3: Support (soft match)
-    if "support" in section_lower:
-        return (3, 0, section)
-
-    # Priority 4: Other stations (sorted by number)
-    station_match = re.match(r"^S(\d+)$", section, re.IGNORECASE)
-    if station_match:
-        return (4, int(station_match.group(1)), section)
-
-    # Priority 5: Everything else alphabetically
-    return (5, 0, section)
-
-
-def position_sort_key(position: str) -> int:
-    """Sort key for positions within a section."""
-    cleaned = clean_position(position)
-    for key, order in POSITION_ORDER.items():
-        if key in cleaned:
-            return order
-    return 99
-
-
-def clean_position(position: str) -> str:
-    """Clean up position title - remove colons."""
-    return position.replace(":", "").strip()
 
 
 @dataclass
@@ -217,9 +159,9 @@ class AllDayDutyEvent:
     event_date: date
     until_crew: dict[str, list[CrewMember]]  # section -> list of CrewMember
     from_crew: dict[str, list[CrewMember]]  # section -> list of CrewMember
+    shift_change_hour: int  # Detected from data by detect_shift_change_hour()
     until_platoon: str = ""
     from_platoon: str = ""
-    shift_change_hour: int = 18  # Hour when shifts change (e.g., 18 = 6 PM)
     event_id: str | None = None  # M365 event ID if already created
 
     @property
@@ -230,7 +172,7 @@ class AllDayDutyEvent:
     @property
     def subject(self) -> str:
         """Generate event subject/title."""
-        return "On Duty"
+        return get_org_config().duty_event_subject
 
     @property
     def body_html(self) -> str:

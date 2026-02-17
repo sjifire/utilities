@@ -20,5 +20,9 @@ htmlcov/
 .vscode/
 *.swp
 
+# OS
+.DS_Store
+
 # Backups (contain sensitive member/user data)
 backups/
+docs/neris/reporting-field-analysis.md

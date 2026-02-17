@@ -1,0 +1,37 @@
+name: Ops Server Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/sjifire/ops/**'
+      - 'Dockerfile'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/ops-deploy.yml'
+      - 'scripts/deploy-ops.sh'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  packages: none
+
+jobs:
+  build-deploy:
+    name: Build & Deploy Ops Server
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: bb2cb591-58ff-4687-bf14-502049dee01b
+          tenant-id: 4122848f-c317-4267-9c07-7c504150d1bd
+          allow-no-subscriptions: true
+
+      - name: Build & Deploy
+        run: TAG=${{ github.sha }} ./scripts/deploy-ops.sh

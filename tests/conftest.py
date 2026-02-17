@@ -1,8 +1,62 @@
 """Shared pytest fixtures."""
 
+import os
 from unittest.mock import MagicMock
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# Credential isolation: strip ALL real service credentials before any test
+# runs so tests never accidentally hit external services, even if .env is
+# loaded by load_dotenv() during imports.
+# ---------------------------------------------------------------------------
+_CREDENTIAL_VARS = [
+    # Aladtec
+    "ALADTEC_URL",
+    "ALADTEC_USERNAME",
+    "ALADTEC_PASSWORD",
+    # Microsoft Graph
+    "MS_GRAPH_TENANT_ID",
+    "MS_GRAPH_CLIENT_ID",
+    "MS_GRAPH_CLIENT_SECRET",
+    # iSpyFire
+    "ISPYFIRE_URL",
+    "ISPYFIRE_USERNAME",
+    "ISPYFIRE_PASSWORD",
+    # Cosmos DB
+    "COSMOS_ENDPOINT",
+    "COSMOS_KEY",
+    # Entra MCP / OAuth
+    "ENTRA_MCP_API_CLIENT_ID",
+    "ENTRA_MCP_API_CLIENT_SECRET",
+    "ENTRA_REPORT_EDITORS_GROUP_ID",
+    # NERIS
+    "NERIS_ENTITY_ID",
+    "NERIS_CLIENT_ID",
+    "NERIS_CLIENT_SECRET",
+    # Anthropic
+    "ANTHROPIC_API_KEY",
+    # Exchange
+    "EXCHANGE_CERTIFICATE_THUMBPRINT",
+    "EXCHANGE_CERTIFICATE_PATH",
+    "EXCHANGE_CERTIFICATE_PASSWORD",
+    # ACR
+    "ACR_LOGIN_SERVER",
+    "ACR_USERNAME",
+    "ACR_PASSWORD",
+]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _strip_credentials():
+    """Remove real credentials from env so no test hits external services."""
+    saved = {}
+    for var in _CREDENTIAL_VARS:
+        if var in os.environ:
+            saved[var] = os.environ.pop(var)
+    yield
+    # Restore after the entire test session
+    os.environ.update(saved)
 
 
 @pytest.fixture
@@ -45,7 +99,6 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("MS_GRAPH_TENANT_ID", "test-tenant-id")
     monkeypatch.setenv("MS_GRAPH_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("MS_GRAPH_CLIENT_SECRET", "test-client-secret")
-    monkeypatch.setenv("TIMEZONE", "America/Los_Angeles")
 
 
 @pytest.fixture

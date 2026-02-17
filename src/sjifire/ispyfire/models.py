@@ -1,6 +1,27 @@
 """Data models for iSpyFire integration."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from datetime import datetime
+
+
+def _parse_dt(s: str) -> datetime | None:
+    """Parse an iSpyFire timestamp string to datetime, or None if empty.
+
+    Handles both ISO format ("2026-02-02T18:58:21") and the iSpyFire
+    non-standard format ("18:58:21 02/02/2026").
+    """
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        # iSpyFire sometimes returns "HH:MM:SS MM/DD/YYYY"
+        try:
+            return datetime.strptime(s, "%H:%M:%S %m/%d/%Y")
+        except ValueError:
+            return None
 
 
 @dataclass
@@ -67,3 +88,89 @@ class ISpyFirePerson:
             "messageEmail": self.message_email,
             "messageCell": self.message_cell,
         }
+
+
+@dataclass
+class UnitResponse:
+    """A unit's dispatch response detail from CAD."""
+
+    unit_number: str
+    agency_code: str
+    status: str
+    time_of_status_change: datetime | None = None
+    radio_log: str = ""
+
+    @classmethod
+    def from_api(cls, data: dict) -> UnitResponse:
+        """Create from API response data."""
+        return cls(
+            unit_number=data.get("UnitNumber", ""),
+            agency_code=data.get("AgencyCode", ""),
+            status=data.get("StatusDisplayCode", ""),
+            time_of_status_change=_parse_dt(data.get("TimeOfStatusChange", "")),
+            radio_log=data.get("RadioLog", ""),
+        )
+
+
+@dataclass
+class CallSummary:
+    """Minimal call reference from the list endpoint."""
+
+    id: str
+    ispy_timestamp: str | None = None
+
+    @classmethod
+    def from_api(cls, data: dict) -> CallSummary:
+        """Create from API response data."""
+        return cls(
+            id=data.get("_id", ""),
+            ispy_timestamp=data.get("iSpyTimestamp"),
+        )
+
+
+@dataclass
+class DispatchCall:
+    """Full dispatch call details from the central API."""
+
+    id: str
+    long_term_call_id: str
+    nature: str
+    address: str
+    agency_code: str
+    type: str = ""
+    zone_code: str = ""
+    time_reported: datetime | None = None
+    is_completed: bool = False
+    cad_comments: str = ""
+    responding_units: str = ""
+    responder_details: list[UnitResponse] = field(default_factory=list)
+    city: str = ""
+    state: str = ""
+    zip_code: str = ""
+    geo_location: str = ""
+    created_timestamp: int | None = None
+
+    @classmethod
+    def from_api(cls, data: dict) -> DispatchCall:
+        """Create from API response data."""
+        city_info = data.get("CityInfo", {}) or {}
+        details = [UnitResponse.from_api(d) for d in data.get("JoinedRespondersDetail", []) or []]
+        return cls(
+            id=data.get("_id", ""),
+            long_term_call_id=data.get("LongTermCallID", ""),
+            nature=data.get("Nature", ""),
+            address=data.get("RespondToAddress", ""),
+            agency_code=data.get("AgencyCode", ""),
+            type=data.get("Type", ""),
+            zone_code=data.get("ZoneCode", ""),
+            time_reported=_parse_dt(data.get("TimeDateReported", "")),
+            is_completed=data.get("IsCompleted", False),
+            cad_comments=data.get("JoinedComments", ""),
+            responding_units=data.get("JoinedResponders", ""),
+            responder_details=details,
+            city=city_info.get("City", ""),
+            state=city_info.get("StateAbbreviation", ""),
+            zip_code=city_info.get("ZIPCode", ""),
+            geo_location=data.get("iSpyGeoLocation", ""),
+            created_timestamp=data.get("iSpyCreatedTimestamp"),
+        )

@@ -121,9 +121,9 @@ class EntraUser:
         Operational positions are those that respond to emergencies
         (Firefighter, Apparatus Operator, Support, Wildland Firefighter, Marine roles).
         """
-        from sjifire.core.constants import OPERATIONAL_POSITIONS
+        from sjifire.core.config import get_org_config
 
-        return bool(self.positions & OPERATIONAL_POSITIONS)
+        return bool(self.positions & get_org_config().operational_positions)
 
     @property
     def station_number(self) -> str | None:

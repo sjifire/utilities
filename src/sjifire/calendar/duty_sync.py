@@ -2,9 +2,7 @@
 
 import asyncio
 import logging
-import os
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 
 import msal
 from azure.core.credentials import AccessToken, TokenCredential
@@ -29,7 +27,10 @@ from sjifire.core.config import (
     get_graph_credentials,
     get_service_account_credentials,
     get_service_email,
+    get_timezone,
+    get_timezone_name,
 )
+from sjifire.core.schedule import detect_shift_change_hour, should_exclude_section
 
 logger = logging.getLogger(__name__)
 
@@ -105,123 +106,20 @@ class ROPCCredential(TokenCredential):
         raise Exception(f"ROPC authentication failed: {error} - {error_desc}")
 
 
-# Default shift change hour (6 PM) - can be overridden by introspection
-DEFAULT_SHIFT_CHANGE_HOUR = 18
+def _detect_shift_change_hour_from_schedules(schedules: list[DaySchedule]) -> int | None:
+    """Detect shift change hour from Aladtec schedule data.
 
-
-def detect_shift_change_hour(schedules: list[DaySchedule]) -> int:
-    """Detect the shift change hour from schedule data.
-
-    Analyzes start/end times to find the most common shift boundary.
-    Full shifts typically start and end at the same hour (e.g., 18:00 to 18:00).
-
-    Args:
-        schedules: List of day schedules to analyze
-
-    Returns:
-        Hour (0-23) when shifts typically change, or DEFAULT_SHIFT_CHANGE_HOUR
+    Flattens all entries across schedule days and delegates to the
+    shared ``detect_shift_change_hour`` utility.
     """
-    from collections import Counter
-
-    # Count start hours from full-shift entries (where start == end time)
-    hour_counts: Counter[int] = Counter()
-
-    for day_schedule in schedules:
-        for entry in day_schedule.entries:
-            # Look for entries where start and end time are the same (24-hour shifts)
-            if entry.start_time == entry.end_time:
-                try:
-                    hour = int(entry.start_time.split(":")[0])
-                    hour_counts[hour] += 1
-                except (ValueError, IndexError):
-                    continue
-
-    if not hour_counts:
-        logger.debug(
-            f"No full-shift entries found, using default shift hour: {DEFAULT_SHIFT_CHANGE_HOUR}"
-        )
-        return DEFAULT_SHIFT_CHANGE_HOUR
-
-    # Return the most common shift change hour
-    most_common_hour, count = hour_counts.most_common(1)[0]
-    logger.info(f"Detected shift change hour: {most_common_hour}:00 ({count} entries)")
-    return most_common_hour
+    all_entries = [e for ds in schedules for e in ds.entries]
+    return detect_shift_change_hour(all_entries)
 
 
-def format_shift_hour(hour: int) -> str:
-    """Format hour as military time display (e.g., 18 -> '1800')."""
-    return f"{hour:02d}00"
-
-
-# Timezone for all operations (configurable via TIMEZONE env var)
-TIMEZONE_NAME = os.getenv("TIMEZONE", "America/Los_Angeles")
-TIMEZONE = ZoneInfo(TIMEZONE_NAME)
+# Timezone loaded from organization.json via get_timezone() / get_timezone_name().
 
 # Concurrency limit for parallel API calls (avoid rate limiting)
 MAX_CONCURRENT_REQUESTS = 10
-
-
-def is_operational_section(section: str) -> bool:
-    """Check if section is operational (should appear in calendar).
-
-    Operational sections are those involved in emergency response:
-    - Stations (S31, S32, S33, etc.)
-    - Chief/Command positions
-    - Backup Duty
-    - Support
-    - State Mobe (wildland mobilization)
-    - Marine operations
-
-    Non-operational sections (administration, training, trades, etc.)
-    are filtered out automatically by this pattern-based approach.
-    """
-    section_lower = section.lower()
-
-    # Stations: S31, S32, S33, Station 31, etc.
-    if section_lower.startswith("s3") and section_lower[2:].isdigit():
-        return True
-    if "station" in section_lower:
-        return True
-
-    # Chief positions (Chief Officer, Chief on Call, etc.)
-    if "chief" in section_lower:
-        return True
-
-    # Backup duty
-    if "backup" in section_lower:
-        return True
-
-    # Support section
-    if section_lower == "support":
-        return True
-
-    # State Mobe (wildland mobilization)
-    if "mobe" in section_lower or "mobilization" in section_lower:
-        return True
-
-    # Marine operations
-    return "marine" in section_lower
-
-
-def should_exclude_section(section: str) -> bool:
-    """Check if section should be excluded (not operational)."""
-    return not is_operational_section(section)
-
-
-def is_unfilled_position(entry: ScheduleEntry) -> bool:
-    """Check if this is an unfilled position placeholder.
-
-    Unfilled positions have names like "Section / Position".
-    Real person names don't contain " / ".
-    """
-    return " / " in entry.name
-
-
-def is_filled_entry(entry: ScheduleEntry) -> bool:
-    """Check if this entry represents a real person."""
-    if not entry.name:
-        return False
-    return not is_unfilled_position(entry)
 
 
 def normalize_html_for_comparison(html: str) -> str:
@@ -456,7 +354,12 @@ class DutyCalendarSync:
             return []
 
         # Introspect shift change hour from the data
-        shift_change_hour = detect_shift_change_hour(schedules)
+        shift_change_hour = _detect_shift_change_hour_from_schedules(schedules)
+        if shift_change_hour is None:
+            logger.warning(
+                "Could not detect shift change hour from %d days of data", len(schedules)
+            )
+            return []
 
         # Build a lookup by date for quick access
         schedules_by_date: dict[date, DaySchedule] = {ds.date: ds for ds in schedules}
@@ -516,16 +419,9 @@ class DutyCalendarSync:
 
     def _get_filled_entries(self, day_schedule: DaySchedule) -> list[ScheduleEntry]:
         """Get filled entries from a day schedule, filtering excluded sections."""
-        filled = []
-        for entry in day_schedule.entries:
-            # Skip excluded sections
-            if should_exclude_section(entry.section):
-                continue
-            # Skip unfilled positions
-            if not is_filled_entry(entry):
-                continue
-            filled.append(entry)
-        return filled
+        return [
+            e for e in day_schedule.get_filled_positions() if not should_exclude_section(e.section)
+        ]
 
     def _entries_to_crew(
         self,
@@ -581,9 +477,9 @@ class DutyCalendarSync:
             Dict mapping event date to (event_id, body_content) tuple
         """
         # Extend end date to capture full range
-        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=TIMEZONE)
+        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=get_timezone())
         end_dt = datetime.combine(
-            end_date + timedelta(days=1), datetime.min.time(), tzinfo=TIMEZONE
+            end_date + timedelta(days=1), datetime.min.time(), tzinfo=get_timezone()
         )
 
         # Check if this is a group calendar
@@ -677,11 +573,11 @@ class DutyCalendarSync:
             ),
             start=DateTimeTimeZone(
                 date_time=start_date,
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             end=DateTimeTimeZone(
                 date_time=end_date,
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             is_all_day=True,
             is_reminder_on=False,
@@ -719,11 +615,11 @@ class DutyCalendarSync:
             ),
             start=DateTimeTimeZone(
                 date_time=start_date,
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             end=DateTimeTimeZone(
                 date_time=end_date,
-                time_zone=TIMEZONE_NAME,
+                time_zone=get_timezone_name(),
             ),
             is_all_day=True,
             is_reminder_on=False,

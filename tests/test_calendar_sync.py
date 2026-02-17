@@ -6,207 +6,79 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sjifire.aladtec.schedule_scraper import DaySchedule, ScheduleEntry
-from sjifire.calendar.duty_sync import (
-    DutyCalendarSync,
-    is_filled_entry,
-    is_operational_section,
-    is_unfilled_position,
-    should_exclude_section,
-)
+from sjifire.calendar.duty_sync import DutyCalendarSync
 from sjifire.calendar.models import AllDayDutyEvent, CrewMember
-
-
-class TestIsOperationalSection:
-    """Tests for is_operational_section function.
-
-    Operational sections are those involved in emergency response:
-    - Stations (S31, S32, etc.)
-    - Chief positions
-    - Backup Duty
-    - Support
-    - State Mobe (wildland mobilization)
-    - Marine operations
-    """
-
-    def test_station_s31_is_operational(self):
-        """S31 (station) is operational."""
-        assert is_operational_section("S31") is True
-
-    def test_station_s32_is_operational(self):
-        """S32 (station) is operational."""
-        assert is_operational_section("S32") is True
-
-    def test_station_s33_is_operational(self):
-        """S33 (station) is operational."""
-        assert is_operational_section("S33") is True
-
-    def test_station_s35_is_operational(self):
-        """S35 (station) is operational."""
-        assert is_operational_section("S35") is True
-
-    def test_station_s36_is_operational(self):
-        """S36 (station) is operational."""
-        assert is_operational_section("S36") is True
-
-    def test_station_lowercase_is_operational(self):
-        """Lowercase station names are operational."""
-        assert is_operational_section("s31") is True
-
-    def test_station_word_is_operational(self):
-        """'Station 31' format is operational."""
-        assert is_operational_section("Station 31") is True
-
-    def test_chief_officer_is_operational(self):
-        """Chief Officer is operational."""
-        assert is_operational_section("Chief Officer") is True
-
-    def test_chief_on_call_is_operational(self):
-        """Chief on Call is operational."""
-        assert is_operational_section("Chief on Call") is True
-
-    def test_backup_duty_is_operational(self):
-        """Backup Duty is operational."""
-        assert is_operational_section("Backup Duty") is True
-
-    def test_backup_is_operational(self):
-        """Backup is operational."""
-        assert is_operational_section("Backup") is True
-
-    def test_support_is_operational(self):
-        """Support is operational."""
-        assert is_operational_section("Support") is True
-
-    def test_marine_is_operational(self):
-        """Marine section is operational."""
-        assert is_operational_section("Marine") is True
-
-    def test_administration_is_not_operational(self):
-        """Administration is not operational."""
-        assert is_operational_section("Administration") is False
-
-    def test_operations_is_not_operational(self):
-        """Operations (admin) is not operational."""
-        assert is_operational_section("Operations") is False
-
-    def test_prevention_is_not_operational(self):
-        """Prevention is not operational."""
-        assert is_operational_section("Prevention") is False
-
-    def test_training_is_not_operational(self):
-        """Training is not operational."""
-        assert is_operational_section("Training") is False
-
-    def test_trades_is_not_operational(self):
-        """Trades is not operational."""
-        assert is_operational_section("Trades") is False
-
-    def test_state_mobe_is_operational(self):
-        """State Mobe (wildland mobilization) is operational."""
-        assert is_operational_section("State Mobe") is True
-
-    def test_mobilization_is_operational(self):
-        """Mobilization sections are operational."""
-        assert is_operational_section("Mobilization") is True
-
-    def test_time_off_is_not_operational(self):
-        """Time Off is not operational."""
-        assert is_operational_section("Time Off") is False
+from sjifire.core.schedule import is_filled_entry, should_exclude_section
 
 
 class TestShouldExcludeSection:
-    """Tests for should_exclude_section (inverse of is_operational_section)."""
+    """Tests for should_exclude_section (denylist).
 
-    def test_excludes_non_operational(self):
-        """Non-operational sections are excluded."""
+    Only Administration and Time Off are excluded.  Everything
+    else (stations, chief, backup, support, standby, etc.) is shown.
+    """
+
+    def test_excludes_administration(self):
+        """Administration is excluded."""
         assert should_exclude_section("Administration") is True
-        assert should_exclude_section("Training") is True
+
+    def test_excludes_time_off(self):
+        """Time Off is excluded."""
         assert should_exclude_section("Time Off") is True
 
-    def test_includes_operational(self):
-        """Operational sections are not excluded."""
+    def test_case_insensitive(self):
+        """Matching is case-insensitive."""
+        assert should_exclude_section("administration") is True
+        assert should_exclude_section("TIME OFF") is True
+
+    def test_includes_stations(self):
+        """Stations are not excluded."""
         assert should_exclude_section("S31") is False
+        assert should_exclude_section("Station 31") is False
+
+    def test_includes_chief(self):
+        """Chief sections are not excluded."""
         assert should_exclude_section("Chief Officer") is False
+
+    def test_includes_backup(self):
+        """Backup sections are not excluded."""
         assert should_exclude_section("Backup Duty") is False
 
+    def test_includes_support(self):
+        """Support sections are not excluded."""
+        assert should_exclude_section("Support") is False
 
-class TestIsUnfilledPosition:
-    """Tests for is_unfilled_position function."""
+    def test_includes_training(self):
+        """Training is not excluded (denylist only hides admin/time-off)."""
+        assert should_exclude_section("Training") is False
 
-    def test_unfilled_with_slash(self):
-        """Unfilled positions have ' / ' in name."""
-        entry = ScheduleEntry(
-            date=date(2026, 2, 1),
-            section="S31",
-            position="Firefighter",
-            name="S31 / Firefighter",
-            start_time="18:00",
-            end_time="18:00",
-        )
-        assert is_unfilled_position(entry) is True
+    def test_excludes_trades(self):
+        """Trades are excluded (empty position placeholders)."""
+        assert should_exclude_section("Trades") is True
 
-    def test_filled_regular_name(self):
-        """Regular names don't have ' / '."""
-        entry = ScheduleEntry(
-            date=date(2026, 2, 1),
-            section="S31",
-            position="Firefighter",
-            name="John Doe",
-            start_time="18:00",
-            end_time="18:00",
-        )
-        assert is_unfilled_position(entry) is False
-
-    def test_filled_name_with_slash_no_spaces(self):
-        """Names with slash but no spaces are filled."""
-        entry = ScheduleEntry(
-            date=date(2026, 2, 1),
-            section="S31",
-            position="Firefighter",
-            name="John/Jane Doe",  # Unlikely but test edge case
-            start_time="18:00",
-            end_time="18:00",
-        )
-        assert is_unfilled_position(entry) is False
+    def test_includes_marine(self):
+        """Marine is not excluded."""
+        assert should_exclude_section("Marine") is False
 
 
 class TestIsFilledEntry:
-    """Tests for is_filled_entry function."""
+    """Tests for is_filled_entry (shared in core.schedule)."""
 
     def test_filled_with_name(self):
-        """Entry with name is filled."""
-        entry = ScheduleEntry(
-            date=date(2026, 2, 1),
-            section="S31",
-            position="Firefighter",
-            name="John Doe",
-            start_time="18:00",
-            end_time="18:00",
-        )
-        assert is_filled_entry(entry) is True
+        """Regular person name is filled."""
+        assert is_filled_entry("John Doe") is True
 
     def test_not_filled_empty_name(self):
-        """Entry with empty name is not filled."""
-        entry = ScheduleEntry(
-            date=date(2026, 2, 1),
-            section="S31",
-            position="Firefighter",
-            name="",
-            start_time="18:00",
-            end_time="18:00",
-        )
-        assert is_filled_entry(entry) is False
+        """Empty string is not filled."""
+        assert is_filled_entry("") is False
 
     def test_not_filled_unfilled_position(self):
-        """Unfilled position placeholder is not filled."""
-        entry = ScheduleEntry(
-            date=date(2026, 2, 1),
-            section="S31",
-            position="Firefighter",
-            name="S31 / Firefighter",
-            start_time="18:00",
-            end_time="18:00",
-        )
-        assert is_filled_entry(entry) is False
+        """Placeholder 'Section / Position' pattern is not filled."""
+        assert is_filled_entry("S31 / Firefighter") is False
+
+    def test_name_with_slash_no_spaces(self):
+        """Slash without surrounding spaces is a real name."""
+        assert is_filled_entry("John/Jane Doe") is True
 
 
 class TestDutyCalendarSyncFiltering:
@@ -570,10 +442,11 @@ class TestDutyCalendarSyncGraphAPI:
         """Create sample AllDayDutyEvent."""
         return AllDayDutyEvent(
             event_date=date(2026, 2, 1),
-            until_platoon="A",
             until_crew={"S31": [CrewMember(name="John Doe", position="Captain")]},
-            from_platoon="B",
             from_crew={"S31": [CrewMember(name="Jane Smith", position="Captain")]},
+            shift_change_hour=18,
+            until_platoon="A",
+            from_platoon="B",
         )
 
     @pytest.mark.asyncio
@@ -756,10 +629,11 @@ class TestDutyCalendarSyncBatchOperations:
         return [
             AllDayDutyEvent(
                 event_date=date(2026, 2, i),
-                until_platoon="A",
                 until_crew={},
-                from_platoon="B",
                 from_crew={},
+                shift_change_hour=18,
+                until_platoon="A",
+                from_platoon="B",
             )
             for i in range(1, 6)  # 5 events
         ]
@@ -855,17 +729,19 @@ class TestDutyCalendarSyncSyncEvents:
         return [
             AllDayDutyEvent(
                 event_date=date(2026, 2, 1),
-                until_platoon="A",
                 until_crew={},
-                from_platoon="B",
                 from_crew={},
+                shift_change_hour=18,
+                until_platoon="A",
+                from_platoon="B",
             ),
             AllDayDutyEvent(
                 event_date=date(2026, 2, 2),
-                until_platoon="B",
                 until_crew={},
-                from_platoon="A",
                 from_crew={},
+                shift_change_hour=18,
+                until_platoon="B",
+                from_platoon="A",
             ),
         ]
 
@@ -1027,17 +903,19 @@ class TestDutyCalendarSyncUpdateEventsBatch:
         events = [
             AllDayDutyEvent(
                 event_date=date(2026, 2, 1),
-                until_platoon="A",
                 until_crew={},
-                from_platoon="B",
                 from_crew={},
+                shift_change_hour=18,
+                until_platoon="A",
+                from_platoon="B",
             ),
             AllDayDutyEvent(
                 event_date=date(2026, 2, 2),
-                until_platoon="B",
                 until_crew={},
-                from_platoon="A",
                 from_crew={},
+                shift_change_hour=18,
+                until_platoon="B",
+                from_platoon="A",
             ),
         ]
         events[0].event_id = "id-1"

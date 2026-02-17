@@ -26,6 +26,7 @@ from sjifire.aladtec.schedule_scraper import (
     load_schedules,
 )
 from sjifire.calendar.personal_sync import PersonalCalendarSync
+from sjifire.core.schedule import is_filled_entry
 
 logging.basicConfig(
     level=logging.INFO,
@@ -311,8 +312,8 @@ def main() -> int:
 
     for day in schedules:
         for entry in day.entries:
-            # Skip entries with empty position (e.g., Trades)
-            if not entry.position or not entry.position.strip():
+            # Skip unfilled entries (empty name or "Section / Position" placeholder)
+            if not is_filled_entry(entry.name):
                 skipped_empty_position += 1
                 continue
 

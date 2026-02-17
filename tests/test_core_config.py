@@ -20,10 +20,7 @@ class TestGetAladtecCredentials:
     """
 
     def test_returns_credentials_when_set(self, mock_env_vars):
-        # mock_env_vars sets env vars, but load_dotenv may override them
-        # Patch load_dotenv to do nothing so our env vars are used
-        with patch("sjifire.aladtec.client.load_dotenv"):
-            url, username, password = get_aladtec_credentials()
+        url, username, password = get_aladtec_credentials()
 
         assert url == "https://test.aladtec.com"
         assert username == "testuser"
@@ -34,10 +31,7 @@ class TestGetAladtecCredentials:
         monkeypatch.setenv("ALADTEC_USERNAME", "user")
         monkeypatch.setenv("ALADTEC_PASSWORD", "pass")
 
-        with (
-            patch("sjifire.aladtec.client.load_dotenv"),
-            pytest.raises(ValueError, match="ALADTEC_URL"),
-        ):
+        with pytest.raises(ValueError, match="ALADTEC_URL"):
             get_aladtec_credentials()
 
     def test_raises_when_username_missing(self, monkeypatch):
@@ -45,10 +39,7 @@ class TestGetAladtecCredentials:
         monkeypatch.delenv("ALADTEC_USERNAME", raising=False)
         monkeypatch.setenv("ALADTEC_PASSWORD", "pass")
 
-        with (
-            patch("sjifire.aladtec.client.load_dotenv"),
-            pytest.raises(ValueError, match="ALADTEC_USERNAME"),
-        ):
+        with pytest.raises(ValueError, match="ALADTEC_USERNAME"):
             get_aladtec_credentials()
 
     def test_raises_when_password_missing(self, monkeypatch):
@@ -56,10 +47,7 @@ class TestGetAladtecCredentials:
         monkeypatch.setenv("ALADTEC_USERNAME", "user")
         monkeypatch.delenv("ALADTEC_PASSWORD", raising=False)
 
-        with (
-            patch("sjifire.aladtec.client.load_dotenv"),
-            pytest.raises(ValueError, match="ALADTEC_PASSWORD"),
-        ):
+        with pytest.raises(ValueError, match="ALADTEC_PASSWORD"):
             get_aladtec_credentials()
 
     def test_raises_when_all_missing(self, monkeypatch):
@@ -67,7 +55,7 @@ class TestGetAladtecCredentials:
         monkeypatch.delenv("ALADTEC_USERNAME", raising=False)
         monkeypatch.delenv("ALADTEC_PASSWORD", raising=False)
 
-        with patch("sjifire.aladtec.client.load_dotenv"), pytest.raises(ValueError):
+        with pytest.raises(ValueError):
             get_aladtec_credentials()
 
 
@@ -75,8 +63,7 @@ class TestGetGraphCredentials:
     """Tests for get_graph_credentials function."""
 
     def test_returns_credentials_when_set(self, mock_env_vars):
-        with patch("sjifire.core.config.load_dotenv"):
-            tenant_id, client_id, client_secret = get_graph_credentials()
+        tenant_id, client_id, client_secret = get_graph_credentials()
 
         assert tenant_id == "test-tenant-id"
         assert client_id == "test-client-id"
@@ -87,10 +74,7 @@ class TestGetGraphCredentials:
         monkeypatch.setenv("MS_GRAPH_CLIENT_ID", "client")
         monkeypatch.setenv("MS_GRAPH_CLIENT_SECRET", "secret")
 
-        with (
-            patch("sjifire.core.config.load_dotenv"),
-            pytest.raises(ValueError, match="MS_GRAPH_TENANT_ID"),
-        ):
+        with pytest.raises(ValueError, match="MS_GRAPH_TENANT_ID"):
             get_graph_credentials()
 
     def test_raises_when_client_id_missing(self, monkeypatch):
@@ -98,10 +82,7 @@ class TestGetGraphCredentials:
         monkeypatch.delenv("MS_GRAPH_CLIENT_ID", raising=False)
         monkeypatch.setenv("MS_GRAPH_CLIENT_SECRET", "secret")
 
-        with (
-            patch("sjifire.core.config.load_dotenv"),
-            pytest.raises(ValueError, match="MS_GRAPH_CLIENT_ID"),
-        ):
+        with pytest.raises(ValueError, match="MS_GRAPH_CLIENT_ID"):
             get_graph_credentials()
 
     def test_raises_when_client_secret_missing(self, monkeypatch):
@@ -109,10 +90,7 @@ class TestGetGraphCredentials:
         monkeypatch.setenv("MS_GRAPH_CLIENT_ID", "client")
         monkeypatch.delenv("MS_GRAPH_CLIENT_SECRET", raising=False)
 
-        with (
-            patch("sjifire.core.config.load_dotenv"),
-            pytest.raises(ValueError, match="MS_GRAPH_CLIENT_SECRET"),
-        ):
+        with pytest.raises(ValueError, match="MS_GRAPH_CLIENT_SECRET"):
             get_graph_credentials()
 
 

@@ -14,6 +14,14 @@ from sjifire.core.msgraph_client import get_graph_client
 logger = logging.getLogger(__name__)
 
 
+def _escape_odata_string(value: str) -> str:
+    """Escape a value for use in OData filter single-quoted strings.
+
+    Single quotes in the value are escaped by doubling them per the OData spec.
+    """
+    return value.replace("'", "''")
+
+
 class GroupType(Enum):
     """Types of Entra ID groups."""
 
@@ -357,7 +365,7 @@ class EntraGroupManager:
             EntraGroup if found, None otherwise
         """
         query_params = GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters(
-            filter=f"mailNickname eq '{mail_nickname}'",
+            filter=f"mailNickname eq '{_escape_odata_string(mail_nickname)}'",
             select=[
                 "id",
                 "displayName",
@@ -389,7 +397,7 @@ class EntraGroupManager:
             EntraGroup if found, None otherwise
         """
         query_params = GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters(
-            filter=f"displayName eq '{display_name}'",
+            filter=f"displayName eq '{_escape_odata_string(display_name)}'",
             select=[
                 "id",
                 "displayName",
