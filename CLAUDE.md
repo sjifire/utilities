@@ -134,6 +134,11 @@ src/sjifire/
 │   │   ├── models.py      # DispatchCallDocument (Pydantic)
 │   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
 │   │   └── tools.py       # MCP tools for dispatch calls
+│   ├── attachments/       # Incident report file attachments (Azure Blob Storage)
+│   │   ├── models.py      # AttachmentMeta (Pydantic), blob path builder
+│   │   ├── store.py       # Azure Blob Storage client with in-memory fallback
+│   │   ├── tools.py       # MCP tools: upload, list, get, delete
+│   │   └── routes.py      # HTTP routes for browser upload/download
 │   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
 │   │   ├── models.py      # IncidentDocument, CrewAssignment (Pydantic)
 │   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
@@ -165,11 +170,12 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 - Editor group (`Incident Report Editors`) gates: submit incidents, view all incidents. Membership is checked live via Graph API on every request (no cache — works across multiple container replicas)
 - All other tools (dispatch, schedule, personnel) are open to any authenticated user
 
-**MCP tools registered** (19 tools):
+**MCP tools registered** (23 tools):
 - `start_session` (text summary + browser dashboard URL + session bootstrap)
 - `refresh_dashboard` (refreshes data, returns updated summary + new URL)
 - `get_dashboard` (raw data: on-duty crew, recent calls, report status)
 - `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`, `reset_incident`
+- `upload_attachment`, `list_attachments`, `get_attachment`, `delete_attachment`
 - `list_neris_incidents`, `get_neris_incident` (NERIS federal reporting records)
 - `get_personnel`
 - `get_on_duty_crew` (hides admin by default; `include_admin=True` to show all)
@@ -197,6 +203,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 **Key env vars** (set on Container App, secrets via Key Vault references):
 - `ENTRA_MCP_API_CLIENT_ID`, `ENTRA_MCP_API_CLIENT_SECRET`, `ENTRA_REPORT_EDITORS_GROUP_ID`
 - `COSMOS_ENDPOINT`, `MS_GRAPH_*`, `ALADTEC_*`, `ISPYFIRE_*`, `MCP_SERVER_URL`
+- `AZURE_STORAGE_ACCOUNT_URL` (Blob Storage for incident attachments)
 
 ### Group Sync Strategy Pattern
 Group sync uses a strategy pattern with a `GroupMember` protocol that works with both Aladtec `Member` and `EntraUser` objects. The sync pulls membership data directly from Entra ID (which is synced from Aladtec via user sync).
@@ -358,6 +365,7 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
 - `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-REPORT-EDITORS-GROUP-ID`
 - `COSMOS-ENDPOINT`, `COSMOS-KEY`, `ACR-LOGIN-SERVER`, `ACR-USERNAME`, `ACR-PASSWORD`
+- `AZURE-STORAGE-ACCOUNT-URL` (Blob Storage for incident attachments)
 
 ### OIDC app registration
 - App: `utilities-sync` (client ID in workflow files)
