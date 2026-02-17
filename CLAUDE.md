@@ -116,6 +116,11 @@ src/sjifire/
 │   ├── token_store.py     # Two-layer OAuth token store (TTLCache + Cosmos DB)
 │   ├── dashboard.py       # Operations dashboard (client-side rendered) + session bootstrap
 │   ├── prompts.py         # MCP prompts and resources (project instructions, NERIS values)
+│   ├── chat/
+│   │   ├── centrifugo.py  # WebSocket proxy, auth callbacks, publish helper
+│   │   ├── engine.py      # Claude chat engine (publishes events to Centrifugo)
+│   │   ├── routes.py      # HTTP route handlers for chat UI
+│   │   └── store.py       # Conversation persistence (Cosmos DB)
 │   ├── dispatch/          # iSpyFire dispatch call lookup + archival
 │   │   ├── models.py      # DispatchCallDocument (Pydantic)
 │   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
@@ -170,7 +175,14 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 
 **Session instructions**: `docs/mcp-start-session.md` — loaded by `start_session` tool, tells Claude how to present the dashboard and what actions to offer.
 
-**Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
+**Infrastructure**: Container Apps (Consumption plan, two containers per replica), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS. Deployment defined in `containerapp.yaml`.
+
+**Centrifugo sidecar**: Real-time chat messaging via Centrifugo (Go-based) running as an ACA sidecar container alongside the FastAPI app. Client-side uses `centrifuge-js` over WebSocket.
+- Channel naming: `chat:incident:{id}` (editor role required), `chat:general:{email}` (matching user)
+- Architecture: Browser → ACA ingress (port 8000) → FastAPI WS proxy `/connection/websocket` → Centrifugo (localhost:8001). FastAPI publishes events via Centrifugo internal API (localhost:9001).
+- Auth: Centrifugo proxy mode — calls back to FastAPI `/centrifugo/connect` and `/centrifugo/subscribe` to validate EasyAuth cookies.
+- Recovery: Centrifugo history buffer (100 msgs, 5min TTL) with `force_recovery` — clients auto-recover missed messages on reconnect.
+- Config: Pure env vars (`CENTRIFUGO_*`) on sidecar container, no config file. API key in Key Vault.
 
 **Background tasks**: Container Apps Job (`sjifire-ops-tasks`) runs `uv run ops-tasks` every 30 minutes. Runs all `auto=True` tasks: dispatch-sync, dispatch-enrich, ispyfire-sync, neris-sync, schedule-refresh. Tasks registered with `auto=False` (e.g., dispatch-reenrich) only run when explicitly requested by name. New tasks are added via `@register("name")` in `ops/tasks/`.
 
@@ -183,6 +195,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 **Key env vars** (set on Container App, secrets via Key Vault references):
 - `ENTRA_MCP_API_CLIENT_ID`, `ENTRA_MCP_API_CLIENT_SECRET`, `ENTRA_REPORT_EDITORS_GROUP_ID`
 - `COSMOS_ENDPOINT`, `MS_GRAPH_*`, `ALADTEC_*`, `ISPYFIRE_*`, `MCP_SERVER_URL`
+- `CENTRIFUGO_API_KEY` (shared secret for FastAPI → Centrifugo internal API)
 
 ### Group Sync Strategy Pattern
 Group sync uses a strategy pattern with a `GroupMember` protocol that works with both Aladtec `Member` and `EntraUser` objects. The sync pulls membership data directly from Entra ID (which is synced from Aladtec via user sync).

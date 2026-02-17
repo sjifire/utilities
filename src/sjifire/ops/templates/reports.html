@@ -6,15 +6,24 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/centrifuge@5/dist/centrifuge.min.js"></script>
 {% endblock %}
 
 {% block extra_styles %}
 <style>
-    /* Reports main */
-    .reports-main {
-      max-width: 1100px;
+    /* Reports layout */
+    .reports-layout {
+      max-width: 1400px;
       margin: 0 auto;
       padding: 24px;
+    }
+    .reports-columns {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 20px;
+    }
+    .reports-table-col {
+      min-width: 0;
     }
     .reports-stats {
       display: grid;
@@ -151,70 +160,33 @@
     .help-intro  { padding: 16px 18px 8px; }
     .help-footer { padding: 16px 18px; border-top: 1px solid var(--border-default); }
 
-    /* ── Chat drawer ── */
-    .chat-fab {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      z-index: 50;
-      background: var(--color-blue);
-      color: #fff;
-      border: none;
-      border-radius: 28px;
-      padding: 12px 20px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, .4);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      transition: background .15s, transform .15s;
-    }
-    .chat-fab:hover { background: #4a94f0; transform: translateY(-1px); }
-    .chat-fab-icon { font-size: 16px; }
-
-    .chat-drawer {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      z-index: 60;
-      width: 400px;
-      height: 520px;
+    /* ── Chat panel ── */
+    .chat-panel {
       background: var(--bg-panel);
-      border: 1px solid var(--border-medium);
-      border-radius: 12px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
       display: flex;
       flex-direction: column;
+      height: calc(100vh - 200px);
+      min-height: 400px;
+      position: sticky;
+      top: 24px;
       overflow: hidden;
     }
-    .chat-drawer-header {
+    .chat-panel-header {
       padding: 12px 16px;
       border-bottom: 1px solid var(--border-default);
       display: flex;
       align-items: center;
-      justify-content: space-between;
       flex-shrink: 0;
       background: var(--bg-panel-alt);
     }
-    .chat-drawer-title {
+    .chat-panel-title {
       font-size: 14px;
       font-weight: 600;
       color: var(--text-primary);
     }
-    .chat-drawer-close {
-      background: none;
-      border: none;
-      color: var(--text-dim);
-      cursor: pointer;
-      font-size: 18px;
-      padding: 4px;
-      line-height: 1;
-    }
-    .chat-drawer-close:hover { color: var(--text-muted); }
-
-    .chat-drawer-messages {
+    .chat-panel-messages {
       flex: 1;
       overflow-y: auto;
       padding: 12px;
@@ -222,8 +194,8 @@
       flex-direction: column;
       gap: 10px;
     }
-    .chat-drawer-messages::-webkit-scrollbar       { width: 5px; }
-    .chat-drawer-messages::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+    .chat-panel-messages::-webkit-scrollbar       { width: 5px; }
+    .chat-panel-messages::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
 
     .chat-msg {
       max-width: 90%;
@@ -313,7 +285,7 @@
       align-self: stretch;
     }
 
-    .chat-drawer-input {
+    .chat-panel-input {
       border-top: 1px solid var(--border-default);
       padding: 10px 12px;
       display: flex;
@@ -321,7 +293,7 @@
       align-items: flex-end;
       flex-shrink: 0;
     }
-    .chat-drawer-input textarea {
+    .chat-panel-input textarea {
       flex: 1;
       background: var(--bg-page);
       border: 1px solid var(--border-medium);
@@ -335,9 +307,9 @@
       max-height: 80px;
       line-height: 1.4;
     }
-    .chat-drawer-input textarea:focus       { outline: none; border-color: var(--color-blue); }
-    .chat-drawer-input textarea::placeholder { color: var(--text-dim); }
-    .chat-drawer-input textarea:disabled    { opacity: .5; }
+    .chat-panel-input textarea:focus       { outline: none; border-color: var(--color-blue); }
+    .chat-panel-input textarea::placeholder { color: var(--text-dim); }
+    .chat-panel-input textarea:disabled    { opacity: .5; }
 
     /* ── Suggestion chips ── */
     .chat-hints {
@@ -378,7 +350,9 @@
 
     /* ── Reports responsive ── */
     @media (max-width: 768px) {
-      .reports-main { padding: 12px; }
+      .reports-layout { padding: 12px; }
+      .reports-columns { grid-template-columns: 1fr; }
+      .chat-panel { height: 400px; position: static; }
 
       /* Card layout tweaks for reports table */
       .data-table.mobile-cards .dt { font-size: 11px; color: var(--text-dim); padding-left: 18px; margin-bottom: 2px; }
@@ -392,15 +366,6 @@
 
       .help-row { flex-direction: column; gap: 6px; }
       .help-label { min-width: 0; }
-      .chat-drawer {
-        width: 100vw;
-        height: 100vh;
-        right: 0;
-        bottom: 0;
-        border-radius: 0;
-        border: none;
-      }
-      .chat-fab { bottom: 16px; right: 16px; }
     }
 </style>
 {% endblock %}
@@ -437,7 +402,7 @@
 {% endblock %}
 
 {% block body %}
-<div class="reports-main">
+<div class="reports-layout">
   <!-- Stats (hidden on help tab) -->
   <div class="reports-stats stats-compact" x-show="activeTab !== 'help'">
     <div class="stat-card accent-blue">
@@ -457,119 +422,182 @@
     </div>
   </div>
 
-  <!-- Help panel -->
-  <div x-show="activeTab === 'help'">
-    <div class="panel">
-      <div class="panel-header">
-        <span style="font-size:14px;color:var(--text-primary)" class="font-semibold">Assistant Commands</span>
-        <span style="font-size:11px;color:var(--text-dim)">Ask the assistant using the chat button below</span>
+  <!-- Two-column layout: table + chat -->
+  <div class="reports-columns">
+    <!-- Left column: help / table / empty state -->
+    <div class="reports-table-col">
+      <!-- Help panel -->
+      <div x-show="activeTab === 'help'">
+        <div class="panel">
+          <div class="panel-header">
+            <span style="font-size:14px;color:var(--text-primary)" class="font-semibold">Assistant Commands</span>
+            <span style="font-size:11px;color:var(--text-dim)">Try these in the chat panel</span>
+          </div>
+          <div class="help-intro">
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5">Use these commands to interact with dispatch, crew, and reporting.</p>
+          </div>
+          <template x-for="h in helpCommands" :key="h[0]">
+            <div class="help-row">
+              <div class="help-label"><code class="help-cmd" x-text="h[0]"></code></div>
+              <div style="font-size:12px;color:var(--text-muted);line-height:1.5" x-text="h[1]"></div>
+            </div>
+          </template>
+          <div class="help-footer">
+            <p style="font-size:12px;color:var(--text-faint);line-height:1.5">You can also ask anything in natural language using the chat panel.</p>
+          </div>
+        </div>
       </div>
-      <div class="help-intro">
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5">Use these commands to interact with dispatch, crew, and reporting.</p>
-      </div>
-      <template x-for="h in helpCommands" :key="h[0]">
-        <div class="help-row">
-          <div class="help-label"><code class="help-cmd" x-text="h[0]"></code></div>
-          <div style="font-size:12px;color:var(--text-muted);line-height:1.5" x-text="h[1]"></div>
+
+      <!-- Table -->
+      <template x-if="activeTab !== 'help' && filtered().length > 0">
+        <div>
+        <div class="panel data-table-wrap">
+          <table class="data-table mobile-cards">
+            <thead>
+              <tr>
+                <th class="dot-cell"></th>
+                <th>ID</th>
+                <th>Date/Time</th>
+                <th>Nature</th>
+                <th>Address</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="c in paged()" :key="c.id">
+                <tr>
+                  <td class="dot-cell"><span class="severity-dot" :class="c.severity"></span></td>
+                  <td class="call-id mobile-hide" x-text="c.id"></td>
+                  <td class="dt">
+                    <div x-text="c.date"></div>
+                    <div class="dt-time" x-text="c.time"></div>
+                  </td>
+                  <td>
+                    <div class="nature" x-text="c.icon + ' ' + c.nature"></div>
+                  </td>
+                  <td class="address" x-text="c.address || '\u2014'"></td>
+                  <td>
+                    <!-- NERIS only (no local draft) -->
+                    <template x-if="c.report_source === 'neris'">
+                      <div>
+                        <div class="report-status neris" x-text="'\u2713 In NERIS'"></div>
+                      </div>
+                    </template>
+                    <!-- Local draft -->
+                    <template x-if="c.report_source === 'local'">
+                      <div>
+                        <div class="report-status local" x-text="c.report_status || 'draft'"></div>
+                        <template x-if="c.completeness">
+                          <div class="completeness">
+                            <span x-text="c.completeness.filled + '/' + c.completeness.total"></span>
+                            <span class="completeness-bar"><span class="completeness-fill" :style="'width:' + (c.completeness.total ? (c.completeness.filled / c.completeness.total * 100) : 0) + '%'"></span></span>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                    <!-- No report -->
+                    <template x-if="!c.has_report">
+                      <div class="report-status missing">&triangledown; Missing</div>
+                    </template>
+                  </td>
+                  <td>
+                    <!-- Local draft: Edit -->
+                    <template x-if="c.report_source === 'local' && c.incident_id">
+                      <a class="action-btn edit" :href="'/reports/' + c.incident_id" @click.stop>Edit Report</a>
+                    </template>
+                    <!-- NERIS only: Import -->
+                    <template x-if="c.report_source === 'neris'">
+                      <button class="action-btn import" @click.stop="startReport(c)">Import from NERIS</button>
+                    </template>
+                    <!-- No report: Start -->
+                    <template x-if="!c.has_report">
+                      <button class="action-btn start" @click.stop="startReport(c)">Start Report</button>
+                    </template>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <!-- Pagination -->
+        <div x-show="totalPages() > 1" style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;font-size:13px;color:var(--text-muted)">
+          <span x-text="'Showing ' + (((page - 1) * perPage) + 1) + '\u2013' + Math.min(page * perPage, filtered().length) + ' of ' + filtered().length"></span>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="action-btn edit" :disabled="page <= 1" @click="page--" style="min-width:0;padding:5px 12px">&laquo; Prev</button>
+            <span x-text="page + ' / ' + totalPages()" style="min-width:60px;text-align:center"></span>
+            <button class="action-btn edit" :disabled="page >= totalPages()" @click="page++" style="min-width:0;padding:5px 12px">Next &raquo;</button>
+          </div>
+        </div>
         </div>
       </template>
-      <div class="help-footer">
-        <p style="font-size:12px;color:var(--text-faint);line-height:1.5">You can also ask anything in natural language using the chat assistant.</p>
+
+      <!-- Empty state -->
+      <template x-if="activeTab !== 'help' && filtered().length === 0">
+        <div class="empty-state" style="padding:60px 20px">
+          <h2>No calls match this filter</h2>
+          <p>Try a different filter or check back later.</p>
+        </div>
+      </template>
+    </div>
+
+    <!-- Right column: Chat panel (always visible) -->
+    <div class="chat-panel">
+      <div class="chat-panel-header">
+        <span class="chat-panel-title">Operations Assistant</span>
+      </div>
+      <div class="chat-panel-messages" x-ref="chatMessages">
+        <template x-for="(msg, i) in chatMessages" :key="i">
+          <div>
+            <template x-if="msg.type === 'message'">
+              <div class="chat-msg" :class="msg.role" x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content"></div>
+            </template>
+            <template x-if="msg.type === 'tool_call'">
+              <div class="chat-tool-indicator">
+                <template x-if="msg.pending"><div class="spinner"></div></template>
+                <span x-text="msg.label"></span>
+              </div>
+            </template>
+            <template x-if="msg.type === 'tool_result'">
+              <div class="chat-tool-result" x-text="'\u2713 ' + msg.summary"></div>
+            </template>
+            <template x-if="msg.type === 'error'">
+              <div class="chat-error" x-text="msg.content"></div>
+            </template>
+          </div>
+        </template>
+        <template x-if="chatStreaming && !chatCurrentText">
+          <div class="chat-typing"><span></span><span></span><span></span></div>
+        </template>
+        <template x-if="chatStreaming && chatCurrentText">
+          <div class="chat-msg assistant" x-html="renderMarkdown(chatCurrentText)"></div>
+        </template>
+      </div>
+      <!-- Suggestion chips (shown when conversation is empty) -->
+      <template x-if="chatMessages.length === 0 && !chatStreaming">
+        <div style="padding:8px 12px 0;display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0">
+          <p style="font-size:11px;color:var(--text-dim);margin:0">Try asking</p>
+          <div class="chat-hints">
+            <button class="chat-hint" @click="chatInput='Who is on duty today?';sendChatMessage()">Who's on duty?</button>
+            <button class="chat-hint" @click="chatInput='Show recent calls';sendChatMessage()">Recent calls</button>
+            <button class="chat-hint" @click="chatInput='Which reports are missing?';sendChatMessage()">Missing reports</button>
+            <button class="chat-hint" @click="chatInput='Look up a NERIS code for structure fire';sendChatMessage()">NERIS codes</button>
+          </div>
+        </div>
+      </template>
+      <div class="chat-panel-input">
+        <textarea
+          x-ref="chatInput"
+          x-model="chatInput"
+          :placeholder="chatStreaming ? 'Type your next message...' : 'Ask about calls, crew, NERIS codes...'"
+          @keydown.enter.prevent="if (!$event.shiftKey) sendChatMessage()"
+          @input="chatAutoResize($event)"
+          rows="1"
+        ></textarea>
+        <button class="chat-send-btn" :disabled="!chatInput.trim()" @click="sendChatMessage()">Send</button>
       </div>
     </div>
   </div>
-
-  <!-- Table -->
-  <template x-if="activeTab !== 'help' && filtered().length > 0">
-    <div>
-    <div class="panel data-table-wrap">
-      <table class="data-table mobile-cards">
-        <thead>
-          <tr>
-            <th class="dot-cell"></th>
-            <th>ID</th>
-            <th>Date/Time</th>
-            <th>Nature</th>
-            <th>Address</th>
-            <th>Status</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          <template x-for="c in paged()" :key="c.id">
-            <tr>
-              <td class="dot-cell"><span class="severity-dot" :class="c.severity"></span></td>
-              <td class="call-id mobile-hide" x-text="c.id"></td>
-              <td class="dt">
-                <div x-text="c.date"></div>
-                <div class="dt-time" x-text="c.time"></div>
-              </td>
-              <td>
-                <div class="nature" x-text="c.icon + ' ' + c.nature"></div>
-              </td>
-              <td class="address" x-text="c.address || '\u2014'"></td>
-              <td>
-                <!-- NERIS only (no local draft) -->
-                <template x-if="c.report_source === 'neris'">
-                  <div>
-                    <div class="report-status neris" x-text="'\u2713 In NERIS'"></div>
-                  </div>
-                </template>
-                <!-- Local draft -->
-                <template x-if="c.report_source === 'local'">
-                  <div>
-                    <div class="report-status local" x-text="c.report_status || 'draft'"></div>
-                    <template x-if="c.completeness">
-                      <div class="completeness">
-                        <span x-text="c.completeness.filled + '/' + c.completeness.total"></span>
-                        <span class="completeness-bar"><span class="completeness-fill" :style="'width:' + (c.completeness.total ? (c.completeness.filled / c.completeness.total * 100) : 0) + '%'"></span></span>
-                      </div>
-                    </template>
-                  </div>
-                </template>
-                <!-- No report -->
-                <template x-if="!c.has_report">
-                  <div class="report-status missing">&triangledown; Missing</div>
-                </template>
-              </td>
-              <td>
-                <!-- Local draft: Edit -->
-                <template x-if="c.report_source === 'local' && c.incident_id">
-                  <a class="action-btn edit" :href="'/reports/' + c.incident_id" @click.stop>Edit Report</a>
-                </template>
-                <!-- NERIS only: Import -->
-                <template x-if="c.report_source === 'neris'">
-                  <button class="action-btn import" @click.stop="startReport(c)">Import from NERIS</button>
-                </template>
-                <!-- No report: Start -->
-                <template x-if="!c.has_report">
-                  <button class="action-btn start" @click.stop="startReport(c)">Start Report</button>
-                </template>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-    </div>
-    <!-- Pagination -->
-    <div x-show="totalPages() > 1" style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;font-size:13px;color:var(--text-muted)">
-      <span x-text="'Showing ' + (((page - 1) * perPage) + 1) + '\u2013' + Math.min(page * perPage, filtered().length) + ' of ' + filtered().length"></span>
-      <div style="display:flex;gap:6px;align-items:center">
-        <button class="action-btn edit" :disabled="page <= 1" @click="page--" style="min-width:0;padding:5px 12px">&laquo; Prev</button>
-        <span x-text="page + ' / ' + totalPages()" style="min-width:60px;text-align:center"></span>
-        <button class="action-btn edit" :disabled="page >= totalPages()" @click="page++" style="min-width:0;padding:5px 12px">Next &raquo;</button>
-      </div>
-    </div>
-    </div>
-  </template>
-
-  <!-- Empty state -->
-  <template x-if="activeTab !== 'help' && filtered().length === 0">
-    <div class="empty-state" style="padding:60px 20px">
-      <h2>No calls match this filter</h2>
-      <p>Try a different filter or check back later.</p>
-    </div>
-  </template>
 </div>
 
 <!-- New Report Modal -->
@@ -597,70 +625,6 @@
     </div>
   </div>
 </template>
-
-<!-- Chat FAB (shown when drawer is closed) -->
-<button class="chat-fab" x-show="!chatOpen" @click="openChat()">
-  <span class="chat-fab-icon">&#128172;</span> Ask Assistant
-</button>
-
-<!-- Chat Drawer -->
-<div class="chat-drawer" x-show="chatOpen" x-transition.opacity>
-  <div class="chat-drawer-header">
-    <span class="chat-drawer-title">Operations Assistant</span>
-    <button class="chat-drawer-close" @click="chatOpen = false">&times;</button>
-  </div>
-  <div class="chat-drawer-messages" x-ref="chatMessages">
-    <!-- Suggestion chips (shown when conversation is empty) -->
-    <template x-if="chatMessages.length === 0 && !chatStreaming">
-      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px">
-        <p style="font-size:12px;color:var(--text-dim)">Try asking</p>
-        <div class="chat-hints">
-          <button class="chat-hint" @click="chatInput='Who is on duty today?';sendChatMessage()">Who's on duty?</button>
-          <button class="chat-hint" @click="chatInput='Show recent calls';sendChatMessage()">Recent calls</button>
-          <button class="chat-hint" @click="chatInput='Which reports are missing?';sendChatMessage()">Missing reports</button>
-          <button class="chat-hint" @click="chatInput='Look up a NERIS code for structure fire';sendChatMessage()">NERIS codes</button>
-        </div>
-      </div>
-    </template>
-    <template x-for="(msg, i) in chatMessages" :key="i">
-      <div>
-        <template x-if="msg.type === 'message'">
-          <div class="chat-msg" :class="msg.role" x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content"></div>
-        </template>
-        <template x-if="msg.type === 'tool_call'">
-          <div class="chat-tool-indicator">
-            <template x-if="msg.pending"><div class="spinner"></div></template>
-            <span x-text="msg.label"></span>
-          </div>
-        </template>
-        <template x-if="msg.type === 'tool_result'">
-          <div class="chat-tool-result" x-text="'\u2713 ' + msg.summary"></div>
-        </template>
-        <template x-if="msg.type === 'error'">
-          <div class="chat-error" x-text="msg.content"></div>
-        </template>
-      </div>
-    </template>
-    <template x-if="chatStreaming && !chatCurrentText">
-      <div class="chat-typing"><span></span><span></span><span></span></div>
-    </template>
-    <template x-if="chatStreaming && chatCurrentText">
-      <div class="chat-msg assistant" x-html="renderMarkdown(chatCurrentText)"></div>
-    </template>
-  </div>
-  <div class="chat-drawer-input">
-    <textarea
-      x-ref="chatInput"
-      x-model="chatInput"
-      :disabled="chatStreaming"
-      placeholder="Ask about calls, crew, NERIS codes..."
-      @keydown.enter.prevent="if (!$event.shiftKey) sendChatMessage()"
-      @input="chatAutoResize($event)"
-      rows="1"
-    ></textarea>
-    <button class="chat-send-btn" :disabled="chatStreaming || !chatInput.trim()" @click="sendChatMessage()">Send</button>
-  </div>
-</div>
 {% endblock %}
 
 {% block body_scripts %}
@@ -690,6 +654,7 @@ function reportsApp() {
       hashTab(['all','missing','local','neris','help'], 'all').init.call(this);
       this.$watch('activeTab', () => { this.page = 1; });
       setInterval(() => this.refreshData(), 60000);
+      this.initChat();
     },
 
     async refreshData() {
@@ -706,13 +671,17 @@ function reportsApp() {
     page: 1,
     perPage: 25,
 
-    // Chat drawer state
-    chatOpen: false,
+    // Chat panel state
     chatMessages: [],
     chatInput: '',
     chatStreaming: false,
     chatCurrentText: '',
     chatLoaded: false,
+    _centrifuge: null,
+    _chatSubscription: null,
+    _userEmail: '{{ user_email }}',
+    _chatRecoveryTimer: null,
+    _chatQueuedMessage: null,
 
     filtered() {
       if (this.activeTab === 'all') return this.calls;
@@ -780,6 +749,18 @@ function reportsApp() {
     async openChat() {
       this.chatOpen = true;
       if (!this.chatLoaded) {
+        // Set up Centrifuge WebSocket connection for general chat
+        const channel = `chat:general:${this._userEmail}`;
+        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        this._centrifuge = new Centrifuge(`${wsProto}//${location.host}/connection/websocket`);
+        this._chatSubscription = this._centrifuge.newSubscription(channel);
+        this._chatSubscription.on('publication', (ctx) => {
+          const {event, ...data} = ctx.data;
+          this.handleChatEvent(event, data);
+        });
+        this._chatSubscription.subscribe();
+        this._centrifuge.connect();
+
         await this.loadChatHistory();
         this.chatLoaded = true;
       }
@@ -831,7 +812,17 @@ function reportsApp() {
 
     async sendChatMessage() {
       const text = this.chatInput.trim();
-      if (!text || this.chatStreaming) return;
+      if (!text) return;
+
+      // If already streaming, queue the message for after completion
+      if (this.chatStreaming) {
+        this._chatQueuedMessage = text;
+        this.chatMessages.push({type: 'message', role: 'user', content: text});
+        this.chatInput = '';
+        if (this.$refs.chatInput) this.$refs.chatInput.style.height = 'auto';
+        this.chatScrollToBottom(true);
+        return;
+      }
 
       this.chatMessages.push({type: 'message', role: 'user', content: text});
       this.chatInput = '';
@@ -863,47 +854,55 @@ function reportsApp() {
           this.chatStreaming = false;
           return;
         }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const {done, value} = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, {stream: true});
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          let eventType = '';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith('data: ') && eventType) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                this.handleChatEvent(eventType, data);
-              } catch {}
-              eventType = '';
-            }
-          }
-        }
+        // 202 Accepted — events arrive via Centrifuge subscription.
+        // Recovery timer polls conversation if no events arrive in 30s.
+        this._clearChatRecoveryTimer();
+        this._chatRecoveryTimer = setTimeout(() => this._recoverChat(), 30000);
       } catch (e) {
         console.error('Chat error:', e);
         this.chatMessages.push({type: 'error', content: 'Connection error. Please try again.'});
+        this.chatStreaming = false;
       }
+    },
 
-      if (this.chatCurrentText) {
-        this.chatMessages.push({type: 'message', role: 'assistant', content: this.chatCurrentText});
-        this.chatCurrentText = '';
+    _clearChatRecoveryTimer() {
+      if (this._chatRecoveryTimer) {
+        clearTimeout(this._chatRecoveryTimer);
+        this._chatRecoveryTimer = null;
       }
-      this.chatStreaming = false;
-      this.chatScrollToBottom(true);
-      this.$nextTick(() => { if (this.$refs.chatInput) this.$refs.chatInput.focus(); });
+    },
+
+    async _recoverChat() {
+      if (!this.chatStreaming) return;
+      console.warn('No chat events in 30s — polling conversation for recovery');
+      try {
+        const res = await authFetch('/chat/history');
+        if (!res.ok) return;
+        const data = await res.json();
+        const serverMsgs = (data.messages || []).filter(m => m.content);
+        const localCount = this.chatMessages.filter(m => m.type === 'message').length;
+        if (serverMsgs.length > localCount) {
+          if (this.chatCurrentText) this.chatCurrentText = '';
+          for (let i = localCount; i < serverMsgs.length; i++) {
+            if (serverMsgs[i].content) {
+              this.chatMessages.push({type: 'message', role: serverMsgs[i].role, content: serverMsgs[i].content});
+            }
+          }
+          this.chatStreaming = false;
+          this.chatScrollToBottom(true);
+          this.$nextTick(() => { if (this.$refs.chatInput) this.$refs.chatInput.focus(); });
+        } else if (!this.chatCurrentText) {
+          // Still waiting — retry in 15s
+          this._chatRecoveryTimer = setTimeout(() => this._recoverChat(), 15000);
+        }
+      } catch (e) {
+        console.warn('Chat recovery poll failed:', e);
+      }
     },
 
     handleChatEvent(type, data) {
+      // Any event means Centrifugo is working — cancel recovery timer
+      this._clearChatRecoveryTimer();
       if (type === 'text') {
         this.chatCurrentText += data.content || '';
         this.chatScrollToBottom();
@@ -940,14 +939,29 @@ function reportsApp() {
         });
         this.chatScrollToBottom();
       } else if (type === 'done') {
-        // Turn complete
+        if (this.chatCurrentText) {
+          this.chatMessages.push({type: 'message', role: 'assistant', content: this.chatCurrentText});
+          this.chatCurrentText = '';
+        }
+        this.chatStreaming = false;
+        this.chatScrollToBottom(true);
+
+        // Send queued message if user typed while we were streaming
+        if (this._chatQueuedMessage) {
+          const queued = this._chatQueuedMessage;
+          this._chatQueuedMessage = null;
+          this.$nextTick(() => { this.chatInput = queued; this.sendChatMessage(); });
+          return;
+        }
+        this.$nextTick(() => { if (this.$refs.chatInput) this.$refs.chatInput.focus(); });
       } else if (type === 'error') {
         if (this.chatCurrentText) {
           this.chatMessages.push({type: 'message', role: 'assistant', content: this.chatCurrentText});
           this.chatCurrentText = '';
         }
         this.chatMessages.push({type: 'error', content: data.message});
-        this.chatScrollToBottom();
+        this.chatStreaming = false;
+        this.chatScrollToBottom(true);
       }
     }
   };

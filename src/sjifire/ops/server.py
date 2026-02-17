@@ -24,11 +24,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
-from starlette.routing import Route
+from starlette.routing import Route, WebSocketRoute
 
 from sjifire.core.config import get_org_config
 from sjifire.ops import dashboard
 from sjifire.ops.auth import check_is_editor, get_easyauth_user, set_current_user
+from sjifire.ops.chat.centrifugo import connect_proxy, subscribe_proxy, websocket_proxy
 from sjifire.ops.chat.routes import (
     chat_page,
     chat_stream,
@@ -335,7 +336,7 @@ async def health(request: Request) -> JSONResponse:
     return JSONResponse(
         {
             "status": "ok",
-            "service": "sjifire-mcp",
+            "service": "sjifire-ops",
             "version": os.getenv("BUILD_VERSION", "dev"),
         }
     )
@@ -360,6 +361,11 @@ app.routes.insert(0, Route("/reports", reports_list))
 # General chat routes (not tied to an incident)
 app.routes.insert(0, Route("/chat/stream", general_chat_stream_endpoint, methods=["POST"]))
 app.routes.insert(0, Route("/chat/history", general_chat_history))
+
+# Centrifugo routes — WebSocket proxy + auth callbacks
+app.routes.insert(0, WebSocketRoute("/connection/websocket", websocket_proxy))
+app.routes.insert(0, Route("/centrifugo/connect", connect_proxy, methods=["POST"]))
+app.routes.insert(0, Route("/centrifugo/subscribe", subscribe_proxy, methods=["POST"]))
 
 # Dev mode: inject synthetic user context on every request
 if provider is None:

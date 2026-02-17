@@ -27,8 +27,8 @@ set -euo pipefail
 
 RESOURCE_GROUP="rg-sjifire-mcp"
 ACR_NAME="sjifiremcp"
-CONTAINER_APP="sjifire-mcp"
-IMAGE_NAME="sjifire-mcp"
+CONTAINER_APP="sjifire-ops"
+IMAGE_NAME="sjifire-ops"
 CUSTOM_DOMAIN="ops.sjifire.org"
 KEY_VAULT="gh-website-utilities"
 
@@ -219,42 +219,38 @@ if [ "$EXISTING_SECRETS" -lt 5 ]; then
             "cosmos-key=keyvaultref:${VAULT_URL}/secrets/COSMOS-KEY,identityref:system" \
             "azure-maps-key=keyvaultref:${VAULT_URL}/secrets/AZURE-MAPS-KEY,identityref:system" \
             "kiosk-signing-key=keyvaultref:${VAULT_URL}/secrets/KIOSK-SIGNING-KEY,identityref:system" \
+            "centrifugo-api-key=keyvaultref:${VAULT_URL}/secrets/CENTRIFUGO-API-KEY,identityref:system" \
         --output none
     ok "Secrets configured"
 fi
 
 # ---------------------------------------------------------------------------
-# Update image and env vars — starts the rollout
+# Update via YAML template — starts the rollout
 # ---------------------------------------------------------------------------
 
-info "Updating Container App image and env vars..."
+YAML_TEMPLATE="$(cd "$(dirname "$0")/.." && pwd)/containerapp.yaml"
+if [ ! -f "$YAML_TEMPLATE" ]; then
+    fail "containerapp.yaml not found at $YAML_TEMPLATE"
+fi
+
+# Substitute placeholders into a temp copy
+YAML_RENDERED="$TMPDIR/containerapp-rendered.yaml"
+sed \
+    -e "s|__IMAGE_TAG__|${TAG}|g" \
+    -e "s|__MS_GRAPH_TENANT_ID__|${MS_GRAPH_TENANT_ID}|g" \
+    -e "s|__ENTRA_MCP_API_CLIENT_ID__|${ENTRA_MCP_API_CLIENT_ID}|g" \
+    -e "s|__ENTRA_REPORT_EDITORS_GROUP_ID__|${ENTRA_REPORT_EDITORS_GROUP_ID}|g" \
+    -e "s|__COSMOS_ENDPOINT__|${COSMOS_ENDPOINT}|g" \
+    -e "s|__MS_GRAPH_CLIENT_ID__|${MS_GRAPH_CLIENT_ID}|g" \
+    -e "s|__ALADTEC_URL__|${ALADTEC_URL}|g" \
+    -e "s|__MCP_SERVER_URL__|https://${CUSTOM_DOMAIN}|g" \
+    "$YAML_TEMPLATE" > "$YAML_RENDERED"
+
+info "Updating Container App via YAML (ops-server + centrifugo sidecar)..."
 az containerapp update \
     --name "$CONTAINER_APP" \
     --resource-group "$RESOURCE_GROUP" \
-    --image "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${TAG}" \
-    --replace-env-vars \
-        "ENTRA_MCP_API_TENANT_ID=${MS_GRAPH_TENANT_ID}" \
-        "ENTRA_MCP_API_CLIENT_ID=${ENTRA_MCP_API_CLIENT_ID}" \
-        "ENTRA_REPORT_EDITORS_GROUP_ID=${ENTRA_REPORT_EDITORS_GROUP_ID}" \
-        "ENTRA_MCP_API_CLIENT_SECRET=secretref:entra-mcp-api-client-secret" \
-        "COSMOS_ENDPOINT=${COSMOS_ENDPOINT}" \
-        "COSMOS_KEY=secretref:cosmos-key" \
-        "MS_GRAPH_TENANT_ID=${MS_GRAPH_TENANT_ID}" \
-        "MS_GRAPH_CLIENT_ID=${MS_GRAPH_CLIENT_ID}" \
-        "MS_GRAPH_CLIENT_SECRET=secretref:ms-graph-client-secret" \
-        "ALADTEC_URL=${ALADTEC_URL}" \
-        "ALADTEC_USERNAME=secretref:aladtec-username" \
-        "ALADTEC_PASSWORD=secretref:aladtec-password" \
-        "ISPYFIRE_URL=secretref:ispyfire-url" \
-        "ISPYFIRE_USERNAME=secretref:ispyfire-username" \
-        "ISPYFIRE_PASSWORD=secretref:ispyfire-password" \
-        "NERIS_CLIENT_ID=secretref:neris-client-id" \
-        "NERIS_CLIENT_SECRET=secretref:neris-client-secret" \
-        "ANTHROPIC_API_KEY=secretref:anthropic-api-key" \
-        "MCP_SERVER_URL=https://${CUSTOM_DOMAIN}" \
-        "AZURE_MAPS_KEY=secretref:azure-maps-key" \
-        "KIOSK_SIGNING_KEY=secretref:kiosk-signing-key" \
-        "BUILD_VERSION=${TAG}" \
+    --yaml "$YAML_RENDERED" \
     --output none
 ok "Container App updated with ${IMAGE_NAME}:${TAG} — rollout started"
 
@@ -304,6 +300,7 @@ _housekeeping_secrets() {
             "cosmos-key=keyvaultref:${VAULT_URL}/secrets/COSMOS-KEY,identityref:system" \
             "azure-maps-key=keyvaultref:${VAULT_URL}/secrets/AZURE-MAPS-KEY,identityref:system" \
             "kiosk-signing-key=keyvaultref:${VAULT_URL}/secrets/KIOSK-SIGNING-KEY,identityref:system" \
+            "centrifugo-api-key=keyvaultref:${VAULT_URL}/secrets/CENTRIFUGO-API-KEY,identityref:system" \
         --output none 2>/dev/null || true
     echo "ok" > "$TMPDIR/hk-secrets"
 }
