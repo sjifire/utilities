@@ -727,7 +727,7 @@ async def _stream_loop(
                         {"type": "text", "text": json.dumps(slim, default=str)},
                     ]
             except (json.JSONDecodeError, KeyError):
-                pass
+                pass  # Non-image tool result — use raw string as-is
 
             full_tool_results.append(
                 {

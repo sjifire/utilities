@@ -1220,7 +1220,7 @@ class TestImageContentBlockEdgeCases:
                     {"type": "text", "text": json.dumps(slim, default=str)},
                 ]
         except (json.JSONDecodeError, KeyError):
-            pass
+            pass  # Non-image tool result — use raw string as-is
         return tool_result_content
 
     def test_image_data_produces_multiblock_content(self):
