@@ -136,9 +136,7 @@ class TestCrewDataJsonEmbedding:
         """Until crew does not appear in from_crew."""
         event = _make_duty_event()
         data = event._crew_data_json
-        all_from_names = [
-            m["name"] for members in data["from_crew"].values() for m in members
-        ]
+        all_from_names = [m["name"] for members in data["from_crew"].values() for m in members]
         assert "Alice Smith" not in all_from_names
         assert "Bob Jones" not in all_from_names
 
