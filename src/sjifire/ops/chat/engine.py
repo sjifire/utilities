@@ -686,11 +686,19 @@ async def _stream_loop(
 
             is_error = summary.startswith("Error")
             evt: dict = {"name": tc["name"], "summary": summary, "is_error": is_error}
-            # Include image URL so the chat UI can render inline thumbnails
+            # Include image URL and title so the chat UI can render inline thumbnails
             if tc["name"] == "get_attachment" and not is_error:
                 aid = tc["input"].get("attachment_id", "")
                 if aid:
                     evt["image_url"] = f"/reports/{conversation.incident_id}/attachments/{aid}"
+                try:
+                    rd = json.loads(result_str)
+                    if rd.get("title"):
+                        evt["image_title"] = rd["title"]
+                    if rd.get("description"):
+                        evt["image_desc"] = rd["description"]
+                except (json.JSONDecodeError, KeyError):
+                    pass
             yield _sse("tool_result", evt)
 
             # After update_incident, emit live status update for the client
@@ -842,8 +850,8 @@ def _summarize_tool_result(name: str, data: dict) -> str:
         return f"{count} attachment(s)"
 
     if name == "get_attachment":
-        fname = data.get("filename", "")
-        return f"Attachment: {fname}"
+        title = data.get("title") or data.get("filename", "")
+        return f"Attachment: {title}"
 
     if name == "delete_attachment":
         fname = data.get("filename", "")

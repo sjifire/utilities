@@ -169,16 +169,22 @@
     .tool-result:hover { background: rgba(34, 197, 94, .2); }
     .tool-error { background: rgba(239, 68, 68, .1); border-color: rgba(239, 68, 68, .2); color: #f87171; }
     .tool-error:hover { background: rgba(239, 68, 68, .2); }
+    .tool-image-wrap { margin-top: 6px; }
     .tool-image {
       display: block;
       max-width: 240px;
       max-height: 180px;
-      margin-top: 6px;
       border-radius: 6px;
       cursor: pointer;
       transition: opacity .15s;
     }
     .tool-image:hover { opacity: .85; }
+    .tool-image-caption {
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--text-dim);
+      font-style: italic;
+    }
 
     /* ── Incident summary panel ── */
     .incident-summary {
@@ -478,7 +484,10 @@
             <template x-if="msg.pending"><div class="spinner"></div></template>
             <span x-text="msg.pending ? msg.label : ((msg.is_error ? '\u2717 ' : '\u2713 ') + msg.summary)"></span>
             <template x-if="!msg.pending && msg.image_url">
-              <img :src="msg.image_url" class="tool-image" @click="$dispatch('lightbox', {src: msg.image_url})">
+              <div class="tool-image-wrap">
+                <img :src="msg.image_url" class="tool-image" @click="window.open(msg.image_url, '_blank')">
+                <div class="tool-image-caption" x-show="msg.image_title" x-text="msg.image_title"></div>
+              </div>
             </template>
           </div>
         </template>
@@ -1109,6 +1118,7 @@ function chatApp() {
             if (data.is_error) m.is_error = true;
             m.summary = data.summary || data.name;
             if (data.image_url) m.image_url = data.image_url;
+            if (data.image_title) m.image_title = data.image_title;
             if (m.pendingCount <= 0) {
               m.pending = false;
               if (m.totalCount > 1) {
