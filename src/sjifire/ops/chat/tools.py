@@ -344,6 +344,66 @@ TOOL_SCHEMAS: list[dict] = [
             "required": ["latitude", "longitude"],
         },
     },
+    {
+        "name": "list_attachments",
+        "description": (
+            "List all attachments (photos, documents) on this incident report. "
+            "Returns metadata for each: ID, filename, title, description, "
+            "content type, size. Use after a reset to see what survived."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
+        "name": "get_attachment",
+        "description": (
+            "Fetch a single attachment by ID. Returns metadata and the image data "
+            "for vision analysis. Use this to view or re-analyze a photo."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
+                },
+                "attachment_id": {
+                    "type": "string",
+                    "description": "The attachment ID (from list_attachments or context)",
+                },
+            },
+            "required": ["incident_id", "attachment_id"],
+        },
+    },
+    {
+        "name": "delete_attachment",
+        "description": (
+            "Delete an attachment from the incident report. Removes the file "
+            "from storage and the metadata from the report."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
+                },
+                "attachment_id": {
+                    "type": "string",
+                    "description": "The attachment ID to delete",
+                },
+            },
+            "required": ["incident_id", "attachment_id"],
+        },
+    },
 ]
 
 # Mark last tool with cache_control so entire tool definition block is cached
@@ -450,6 +510,25 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
 
     if name == "lookup_location":
         return await _lookup_location(tool_input["latitude"], tool_input["longitude"])
+
+    if name == "list_attachments":
+        from sjifire.ops.attachments import tools as attachment_tools
+
+        return await attachment_tools.list_attachments(tool_input["incident_id"])
+
+    if name == "get_attachment":
+        from sjifire.ops.attachments import tools as attachment_tools
+
+        return await attachment_tools.get_attachment(
+            tool_input["incident_id"], tool_input["attachment_id"], include_data=True
+        )
+
+    if name == "delete_attachment":
+        from sjifire.ops.attachments import tools as attachment_tools
+
+        return await attachment_tools.delete_attachment(
+            tool_input["incident_id"], tool_input["attachment_id"]
+        )
 
     return {"error": f"Unknown tool: {name}"}
 
