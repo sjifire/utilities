@@ -119,6 +119,7 @@ def _build_context_message(
     dispatch_json: str,
     crew_json: str,
     personnel_json: str,
+    attachments_summary: str = "",
 ) -> str:
     """Build the context preamble injected into the first user message.
 
@@ -133,6 +134,8 @@ def _build_context_message(
         f"CREW ON DUTY:\n{crew_json}",
         "PERSONNEL ROSTER (use to match last names to full names + emails):\n" + personnel_json,
     ]
+    if attachments_summary:
+        parts.append(f"ATTACHMENTS ON FILE:\n{attachments_summary}")
     return "\n\n".join(parts)
 
 
@@ -293,7 +296,7 @@ def _get_all_neris_incident_types() -> str:
     return _neris_incident_types_cache
 
 
-async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str, str, str]:
+async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str, str, str, str]:
     """Fetch incident, dispatch, crew, and personnel for the system prompt."""
     from sjifire.ops.auth import set_current_user
 
@@ -370,7 +373,18 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
     except Exception:
         logger.warning("Failed to fetch personnel", exc_info=True)
 
-    return incident_json, dispatch_json, crew_json, personnel_json
+    # Build a concise summary of attachments on file
+    attachments_summary = ""
+    if doc and doc.attachments:
+        lines = []
+        for a in doc.attachments:
+            label = a.title or a.filename
+            size_kb = a.size_bytes // 1024
+            desc = f" — {a.description}" if a.description else ""
+            lines.append(f"- {label} ({a.content_type}, {size_kb}KB){desc}")
+        attachments_summary = "\n".join(lines)
+
+    return incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
 
 
 async def run_chat(
@@ -441,16 +455,20 @@ async def run_chat(
     # Build stable system prompt (static content only — cached by Anthropic)
     system_prompt = _build_system_prompt(user.name, user.email)
 
-    # Fetch dynamic context (incident, dispatch, crew, personnel)
+    # Fetch dynamic context (incident, dispatch, crew, personnel, attachments)
     try:
-        incident_json, dispatch_json, crew_json, personnel_json = await _fetch_context(
-            incident_id, user
-        )
+        (
+            incident_json,
+            dispatch_json,
+            crew_json,
+            personnel_json,
+            attachments_summary,
+        ) = await _fetch_context(incident_id, user)
     except Exception as exc:
         await publish(channel, "error", {"message": _user_error("context", exc)})
         return
     context_preamble = _build_context_message(
-        incident_json, dispatch_json, crew_json, personnel_json
+        incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
     )
 
     # Build messages for Claude API
@@ -491,8 +509,10 @@ async def run_chat(
         api_messages.append({"role": "user", "content": prefixed_message})
     api_messages = _trim_messages(api_messages)
 
-    # Record user message (text only — images are one-shot, not stored)
-    conversation.messages.append(ConversationMessage(role="user", content=user_message))
+    # Record user message with image references (attachment IDs for blob-backed display)
+    conversation.messages.append(
+        ConversationMessage(role="user", content=user_message, images=image_refs)
+    )
 
     # Broadcast user message to other subscribers (multi-user awareness).
     # The sender already has this message locally — clients filter by email.

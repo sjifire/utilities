@@ -158,6 +158,8 @@ _get_secret "COSMOS-ENDPOINT"               > "$TMPDIR/kv-3" &
 _get_secret "MS-GRAPH-TENANT-ID"            > "$TMPDIR/kv-4" &
 _get_secret "MS-GRAPH-CLIENT-ID"            > "$TMPDIR/kv-5" &
 _get_secret "ALADTEC-URL"                   > "$TMPDIR/kv-6" &
+_get_secret "AZURE-STORAGE-ACCOUNT-URL"     > "$TMPDIR/kv-7" &
+_get_secret "AZURE-STORAGE-ACCOUNT-KEY"     > "$TMPDIR/kv-8" &
 wait
 ENTRA_MCP_API_CLIENT_ID=$(cat "$TMPDIR/kv-1")
 ENTRA_REPORT_EDITORS_GROUP_ID=$(cat "$TMPDIR/kv-2")
@@ -165,6 +167,8 @@ COSMOS_ENDPOINT=$(cat "$TMPDIR/kv-3")
 MS_GRAPH_TENANT_ID=$(cat "$TMPDIR/kv-4")
 MS_GRAPH_CLIENT_ID=$(cat "$TMPDIR/kv-5")
 ALADTEC_URL=$(cat "$TMPDIR/kv-6")
+AZURE_STORAGE_ACCOUNT_URL=$(cat "$TMPDIR/kv-7")
+AZURE_STORAGE_ACCOUNT_KEY=$(cat "$TMPDIR/kv-8")
 ok "Config fetched"
 
 # ---------------------------------------------------------------------------
@@ -225,32 +229,39 @@ if [ "$EXISTING_SECRETS" -lt 5 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Update via YAML template — starts the rollout
+# Update Container App — starts the rollout
 # ---------------------------------------------------------------------------
 
-YAML_TEMPLATE="$(cd "$(dirname "$0")/.." && pwd)/containerapp.yaml"
-if [ ! -f "$YAML_TEMPLATE" ]; then
-    fail "containerapp.yaml not found at $YAML_TEMPLATE"
-fi
-
-# Substitute placeholders into a temp copy
-YAML_RENDERED="$TMPDIR/containerapp-rendered.yaml"
-sed \
-    -e "s|__IMAGE_TAG__|${TAG}|g" \
-    -e "s|__MS_GRAPH_TENANT_ID__|${MS_GRAPH_TENANT_ID}|g" \
-    -e "s|__ENTRA_MCP_API_CLIENT_ID__|${ENTRA_MCP_API_CLIENT_ID}|g" \
-    -e "s|__ENTRA_REPORT_EDITORS_GROUP_ID__|${ENTRA_REPORT_EDITORS_GROUP_ID}|g" \
-    -e "s|__COSMOS_ENDPOINT__|${COSMOS_ENDPOINT}|g" \
-    -e "s|__MS_GRAPH_CLIENT_ID__|${MS_GRAPH_CLIENT_ID}|g" \
-    -e "s|__ALADTEC_URL__|${ALADTEC_URL}|g" \
-    -e "s|__MCP_SERVER_URL__|https://${CUSTOM_DOMAIN}|g" \
-    "$YAML_TEMPLATE" > "$YAML_RENDERED"
-
-info "Updating Container App via YAML (ops-server + centrifugo sidecar)..."
+info "Updating Container App..."
 az containerapp update \
     --name "$CONTAINER_APP" \
     --resource-group "$RESOURCE_GROUP" \
-    --yaml "$YAML_RENDERED" \
+    --image "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${TAG}" \
+    --replace-env-vars \
+        "ENTRA_MCP_API_TENANT_ID=${MS_GRAPH_TENANT_ID}" \
+        "ENTRA_MCP_API_CLIENT_ID=${ENTRA_MCP_API_CLIENT_ID}" \
+        "ENTRA_REPORT_EDITORS_GROUP_ID=${ENTRA_REPORT_EDITORS_GROUP_ID}" \
+        "ENTRA_MCP_API_CLIENT_SECRET=secretref:entra-mcp-api-client-secret" \
+        "COSMOS_ENDPOINT=${COSMOS_ENDPOINT}" \
+        "COSMOS_KEY=secretref:cosmos-key" \
+        "MS_GRAPH_TENANT_ID=${MS_GRAPH_TENANT_ID}" \
+        "MS_GRAPH_CLIENT_ID=${MS_GRAPH_CLIENT_ID}" \
+        "MS_GRAPH_CLIENT_SECRET=secretref:ms-graph-client-secret" \
+        "ALADTEC_URL=${ALADTEC_URL}" \
+        "ALADTEC_USERNAME=secretref:aladtec-username" \
+        "ALADTEC_PASSWORD=secretref:aladtec-password" \
+        "ISPYFIRE_URL=secretref:ispyfire-url" \
+        "ISPYFIRE_USERNAME=secretref:ispyfire-username" \
+        "ISPYFIRE_PASSWORD=secretref:ispyfire-password" \
+        "NERIS_CLIENT_ID=secretref:neris-client-id" \
+        "NERIS_CLIENT_SECRET=secretref:neris-client-secret" \
+        "ANTHROPIC_API_KEY=secretref:anthropic-api-key" \
+        "MCP_SERVER_URL=https://${CUSTOM_DOMAIN}" \
+        "AZURE_MAPS_KEY=secretref:azure-maps-key" \
+        "KIOSK_SIGNING_KEY=secretref:kiosk-signing-key" \
+        "AZURE_STORAGE_ACCOUNT_URL=${AZURE_STORAGE_ACCOUNT_URL}" \
+        "AZURE_STORAGE_ACCOUNT_KEY=${AZURE_STORAGE_ACCOUNT_KEY}" \
+        "BUILD_VERSION=${TAG}" \
     --output none
 ok "Container App updated with ${IMAGE_NAME}:${TAG} — rollout started"
 

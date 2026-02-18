@@ -419,7 +419,7 @@ class TestBuildGeneralSystemPrompt:
 
 
 class TestParallelToolExecution:
-    """Verify that tool calls within _stream_loop execute concurrently."""
+    """Verify that tool calls within _run_loop execute concurrently."""
 
     async def test_multiple_tools_run_in_parallel(self):
         """When Claude returns multiple tool calls, they should run concurrently."""
@@ -435,7 +435,7 @@ class TestParallelToolExecution:
             return json.dumps({"status": "ok"})
 
         with patch("sjifire.ops.chat.engine.execute_tool", side_effect=slow_tool):
-            # Simulate what _stream_loop does with parallel tool calls
+            # Simulate what _run_loop does with parallel tool calls
             tool_calls = [
                 {"id": "t1", "name": "get_incident", "input": {"incident_id": "abc"}},
                 {"id": "t2", "name": "get_neris_values", "input": {"value_set": "incident"}},
@@ -593,7 +593,7 @@ class TestSlimDispatchContext:
                 return_value=[],
             ),
         ):
-            _, dispatch_json, _, _ = await _fetch_context("test-inc-1", _TEST_USER)
+            _, dispatch_json, _, _, _ = await _fetch_context("test-inc-1", _TEST_USER)
 
         data = json.loads(dispatch_json)
 
@@ -774,7 +774,10 @@ class TestImageContentBlocks:
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
-            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=("{}", "{}", "[]", "[]", ""),
+            ),
             patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
@@ -807,7 +810,10 @@ class TestImageContentBlocks:
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
-            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=("{}", "{}", "[]", "[]", ""),
+            ),
             patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
@@ -837,7 +843,10 @@ class TestImageContentBlocks:
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
-            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=("{}", "{}", "[]", "[]", ""),
+            ),
             patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
@@ -850,8 +859,8 @@ class TestImageContentBlocks:
         assert "just text" in last_msg["content"]
         assert "CURRENT INCIDENT STATE" in last_msg["content"]
 
-    async def test_images_not_stored_in_conversation(self):
-        """Images should be one-shot — not persisted in conversation messages."""
+    async def test_image_base64_not_stored_in_conversation(self):
+        """Raw base64 image data should not be persisted in conversation messages."""
         from sjifire.ops.chat.budget import BudgetStatus
         from sjifire.ops.chat.engine import run_chat
 
@@ -863,7 +872,10 @@ class TestImageContentBlocks:
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
-            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=("{}", "{}", "[]", "[]", ""),
+            ),
             patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
@@ -876,7 +888,7 @@ class TestImageContentBlocks:
         user_msgs = [m for m in saved_conv.messages if m.role == "user"]
         assert len(user_msgs) == 1
         assert user_msgs[0].content == "Look at this"
-        # Content is a plain string, no image data
+        # Raw base64 data should NOT be in the stored message
         assert "photo123" not in str(user_msgs[0].model_dump())
 
     async def test_system_prompt_is_stable(self):
@@ -893,7 +905,7 @@ class TestImageContentBlocks:
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
             patch(
                 "sjifire.ops.chat.engine._fetch_context",
-                return_value=('{"incident_number": "26-UNIQUE"}', "{}", "[]", "[]"),
+                return_value=('{"incident_number": "26-UNIQUE"}', "{}", "[]", "[]", ""),
             ),
             patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),

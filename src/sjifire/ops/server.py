@@ -28,6 +28,13 @@ from starlette.routing import Route, WebSocketRoute
 
 from sjifire.core.config import get_org_config
 from sjifire.ops import dashboard
+from sjifire.ops.attachments import tools as attachment_tools
+from sjifire.ops.attachments.routes import (
+    delete_attachment_route,
+    download_attachment_route,
+    list_attachments_route,
+    upload_attachment_route,
+)
 from sjifire.ops.auth import check_is_editor, get_easyauth_user, set_current_user
 from sjifire.ops.chat.centrifugo import connect_proxy, subscribe_proxy, websocket_proxy
 from sjifire.ops.chat.routes import (
@@ -159,6 +166,12 @@ mcp.tool()(neris_tools.get_neris_values)
 mcp.tool()(dashboard.get_dashboard)
 mcp.tool()(dashboard.start_session)
 mcp.tool()(dashboard.refresh_dashboard)
+
+# Register attachment tools
+mcp.tool()(attachment_tools.upload_attachment)
+mcp.tool()(attachment_tools.list_attachments)
+mcp.tool()(attachment_tools.get_attachment)
+mcp.tool()(attachment_tools.delete_attachment)
 
 # Register dispatch tools
 mcp.tool()(dispatch_tools.list_dispatch_calls)
@@ -357,6 +370,40 @@ app.routes.insert(0, Route("/reports/{incident_id}/print", print_report))
 app.routes.insert(0, Route("/reports/{incident_id}", chat_page))
 app.routes.insert(0, Route("/reports/new", create_report, methods=["GET", "POST"]))
 app.routes.insert(0, Route("/reports", reports_list))
+
+# Attachment routes — exact paths before parameterized paths.
+app.routes.insert(
+    0,
+    Route(
+        "/reports/{incident_id}/attachments/{attachment_id}",
+        download_attachment_route,
+        methods=["GET"],
+    ),
+)
+app.routes.insert(
+    0,
+    Route(
+        "/reports/{incident_id}/attachments/{attachment_id}",
+        delete_attachment_route,
+        methods=["DELETE"],
+    ),
+)
+app.routes.insert(
+    0,
+    Route(
+        "/reports/{incident_id}/attachments",
+        upload_attachment_route,
+        methods=["POST"],
+    ),
+)
+app.routes.insert(
+    0,
+    Route(
+        "/reports/{incident_id}/attachments",
+        list_attachments_route,
+        methods=["GET"],
+    ),
+)
 
 # General chat routes (not tied to an incident)
 app.routes.insert(0, Route("/chat/stream", general_chat_stream_endpoint, methods=["POST"]))

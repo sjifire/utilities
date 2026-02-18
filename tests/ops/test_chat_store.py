@@ -110,3 +110,34 @@ class TestBudgetStore:
         assert feb.id != mar.id
         assert feb.month == "2026-02"
         assert mar.month == "2026-03"
+
+
+class TestConversationMessageImages:
+    """Test the images field on ConversationMessage."""
+
+    def test_images_default_none(self):
+        msg = ConversationMessage(role="user", content="hello")
+        assert msg.images is None
+
+    def test_images_with_refs(self):
+        refs = [{"attachment_id": "att-1", "content_type": "image/jpeg"}]
+        msg = ConversationMessage(role="user", content="photo", images=refs)
+        assert msg.images == refs
+
+    def test_images_roundtrip_json(self):
+        refs = [
+            {"attachment_id": "att-1", "content_type": "image/jpeg"},
+            {"attachment_id": "att-2", "content_type": "image/png"},
+        ]
+        msg = ConversationMessage(role="user", content="photos", images=refs)
+        data = msg.model_dump(mode="json")
+        restored = ConversationMessage.model_validate(data)
+        assert restored.images == refs
+
+    def test_images_in_conversation_document_cosmos_roundtrip(self):
+        refs = [{"attachment_id": "att-1", "content_type": "image/jpeg"}]
+        doc = _make_conversation()
+        doc.messages.append(ConversationMessage(role="user", content="pic", images=refs))
+        cosmos_data = doc.to_cosmos()
+        restored = ConversationDocument.from_cosmos(cosmos_data)
+        assert restored.messages[0].images == refs

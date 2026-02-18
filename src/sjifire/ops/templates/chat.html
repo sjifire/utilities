@@ -330,8 +330,8 @@
       flex-wrap: wrap;
     }
     .msg-images img {
-      width: 80px;
-      height: 80px;
+      width: 120px;
+      height: 120px;
       object-fit: cover;
       border-radius: 6px;
       cursor: pointer;
@@ -556,7 +556,8 @@
     <button class="chat-hint" @click="sendMessage('Show the dispatch log')">Show dispatch log</button>
     <button class="chat-hint" @click="sendMessage('Add today\'s on-duty crew')">Add today's crew</button>
     <button class="chat-hint" @click="sendMessage('Fill in timestamps from dispatch')">Fill in timestamps</button>
-    <button class="chat-hint" @click="sendMessage('Write the narrative')">Write narrative</button>
+    <button class="chat-hint" @click="$refs.fileInput.click()">Attach accountability board</button>
+    <button class="chat-hint" @click="$refs.fileInput.click()">Attach scene photo</button>
     <button class="chat-hint" @click="sendMessage('What fields are still missing?')">What's missing?</button>
   </div>
 
@@ -707,7 +708,9 @@ function chatApp() {
           const data = await res.json();
           for (const msg of data.messages || []) {
             if (msg.content) {
-              this.messages.push({type: 'message', role: msg.role, content: msg.content});
+              const m = {type: 'message', role: msg.role, content: msg.content};
+              if (msg.images && msg.images.length) m.images = msg.images;
+              this.messages.push(m);
             }
             if (msg.tool_use) {
               // Collapse consecutive same-tool entries into one pill

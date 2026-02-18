@@ -13,9 +13,24 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - **msgraph-sdk** for Microsoft Graph API
 - **httpx** + **beautifulsoup4** for Aladtec web scraping
 - **httpx** + **tenacity** for iSpyFire API (with rate limit retry)
+- **azure-storage-blob** for Azure Blob Storage (incident attachments)
 - **pytest** + **pytest-asyncio** for testing
 - **ruff** for linting/formatting
 - **ty** for type checking
+
+## Stateless Containers — CRITICAL Architecture Rule
+
+The ops server runs on Azure Container Apps with **0-many replicas** that restart at any time (deploys, scaling, platform maintenance). Every replica must function identically from a cold start.
+
+**In-memory module-level state is ephemeral.** It will be lost on restart and is NOT shared across replicas.
+
+| OK | NOT OK |
+|---|---|
+| Short-lived TTL caches (seconds) that reduce redundant API calls. Rebuilt automatically on the next request. | Tracking state transitions between requests (e.g., "call was open, now it's gone → archive it"). |
+| Locks to prevent concurrent fetches within one process. | Accumulating data over time in dicts/lists that grow across requests. |
+| Static config loaded once at startup. | Any data that must survive a restart or be visible to other replicas. |
+
+**If it needs to survive a restart, it goes to Cosmos DB.** No exceptions. The `dispatch-sync` background task already stores completed calls, schedules are cached in Cosmos, and incidents are in Cosmos. Query those stores instead of trying to reconstruct state in memory.
 
 ## Key Concepts
 
@@ -119,12 +134,19 @@ src/sjifire/
 │   ├── chat/
 │   │   ├── centrifugo.py  # WebSocket proxy, auth callbacks, publish helper
 │   │   ├── engine.py      # Claude chat engine (publishes events to Centrifugo)
+│   │   ├── models.py      # ConversationMessage, ConversationDocument (Pydantic)
 │   │   ├── routes.py      # HTTP route handlers for chat UI
-│   │   └── store.py       # Conversation persistence (Cosmos DB)
+│   │   ├── store.py       # Conversation persistence (Cosmos DB)
+│   │   └── tools.py       # Chat tool schemas and execution
 │   ├── dispatch/          # iSpyFire dispatch call lookup + archival
 │   │   ├── models.py      # DispatchCallDocument (Pydantic)
 │   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
 │   │   └── tools.py       # MCP tools for dispatch calls
+│   ├── attachments/       # Incident report file attachments (Azure Blob Storage)
+│   │   ├── models.py      # AttachmentMeta (Pydantic), blob path builder
+│   │   ├── store.py       # Azure Blob Storage client with in-memory fallback
+│   │   ├── tools.py       # MCP tools: upload, list, get, delete
+│   │   └── routes.py      # HTTP routes for browser upload/download
 │   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
 │   │   ├── models.py      # IncidentDocument, CrewAssignment (Pydantic)
 │   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
@@ -156,11 +178,12 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 - Editor group (`Incident Report Editors`) gates: submit incidents, view all incidents. Membership is checked live via Graph API on every request (no cache — works across multiple container replicas)
 - All other tools (dispatch, schedule, personnel) are open to any authenticated user
 
-**MCP tools registered** (19 tools):
+**MCP tools registered** (23 tools):
 - `start_session` (text summary + browser dashboard URL + session bootstrap)
 - `refresh_dashboard` (refreshes data, returns updated summary + new URL)
 - `get_dashboard` (raw data: on-duty crew, recent calls, report status)
 - `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`, `reset_incident`
+- `upload_attachment`, `list_attachments`, `get_attachment`, `delete_attachment`
 - `list_neris_incidents`, `get_neris_incident` (NERIS federal reporting records)
 - `get_personnel`
 - `get_on_duty_crew` (hides admin by default; `include_admin=True` to show all)
@@ -175,7 +198,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 
 **Session instructions**: `docs/mcp-start-session.md` — loaded by `start_session` tool, tells Claude how to present the dashboard and what actions to offer.
 
-**Infrastructure**: Container Apps (Consumption plan, two containers per replica), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS. Deployment defined in `containerapp.yaml`.
+**Infrastructure**: Container Apps (Consumption plan, two containers per replica), Cosmos DB (Serverless NoSQL), Azure Blob Storage (incident attachments), ACR, Key Vault references for secrets. Custom domain with managed TLS. Deployment defined in `containerapp.yaml`. Blob storage provisioned via `./scripts/setup-azure-ops.sh --phase 10`.
 
 **Centrifugo sidecar**: Real-time chat messaging via Centrifugo (Go-based) running as an ACA sidecar container alongside the FastAPI app. Client-side uses `centrifuge-js` over WebSocket.
 - Channel naming: `chat:incident:{id}` (editor role required), `chat:general:{email}` (matching user)
@@ -204,6 +227,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 - `ENTRA_MCP_API_CLIENT_ID`, `ENTRA_MCP_API_CLIENT_SECRET`, `ENTRA_REPORT_EDITORS_GROUP_ID`
 - `COSMOS_ENDPOINT`, `MS_GRAPH_*`, `ALADTEC_*`, `ISPYFIRE_*`, `MCP_SERVER_URL`
 - `CENTRIFUGO_API_KEY` (shared secret for FastAPI → Centrifugo internal API)
+- `AZURE_STORAGE_ACCOUNT_URL`, `AZURE_STORAGE_ACCOUNT_KEY` (Blob Storage for incident attachments)
 
 ### Group Sync Strategy Pattern
 Group sync uses a strategy pattern with a `GroupMember` protocol that works with both Aladtec `Member` and `EntraUser` objects. The sync pulls membership data directly from Entra ID (which is synced from Aladtec via user sync).
@@ -365,6 +389,7 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
 - `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-REPORT-EDITORS-GROUP-ID`
 - `COSMOS-ENDPOINT`, `COSMOS-KEY`, `ACR-LOGIN-SERVER`, `ACR-USERNAME`, `ACR-PASSWORD`
+- `AZURE-STORAGE-ACCOUNT-URL`, `AZURE-STORAGE-ACCOUNT-KEY` (Blob Storage for incident attachments)
 
 ### OIDC app registration
 - App: `utilities-sync` (client ID in workflow files)
