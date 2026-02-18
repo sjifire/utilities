@@ -273,8 +273,11 @@ async def conversation_history(request: Request) -> Response:
     if conversation is None:
         return JSONResponse({"messages": [], "turn_count": 0})
 
-    messages = [
-        {
+    messages = []
+    for msg in conversation.messages:
+        if not msg.content and not msg.tool_use:
+            continue  # Skip tool-result-only messages in display
+        entry = {
             "role": msg.role,
             "content": msg.content,
             "tool_use": msg.tool_use,
@@ -286,9 +289,12 @@ async def conversation_history(request: Request) -> Response:
             else None,
             "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
         }
-        for msg in conversation.messages
-        if msg.content or msg.tool_use  # Skip tool-result-only messages in display
-    ]
+        # Include image download URLs for blob-backed chat images
+        if msg.images:
+            entry["images"] = [
+                f"/reports/{incident_id}/attachments/{ref['attachment_id']}" for ref in msg.images
+            ]
+        messages.append(entry)
 
     return JSONResponse(
         {
@@ -360,8 +366,48 @@ async def chat_stream(request: Request) -> Response:
                 return JSONResponse({"error": "Image too large (max ~1.5MB)"}, status_code=400)
             images.append({"media_type": media_type, "data": data})
 
+    # Auto-save uploaded images as incident attachments.
+    # Persists chat images to blob storage so they're linked to the
+    # report even if the chat session is lost. Title is intentionally
+    # minimal — the LLM will see the image and can update the title
+    # via the attachment tools if it identifies something specific.
+    # We capture the attachment metadata so the conversation message
+    # can reference the blob-backed images for display on reload.
+    saved_image_refs: list[dict] = []
+    if images:
+        from sjifire.ops.attachments.tools import upload_attachment
+
+        for idx, img in enumerate(images, 1):
+            suffix = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}.get(
+                img["media_type"], ".jpg"
+            )
+            try:
+                result = await upload_attachment(
+                    incident_id=incident_id,
+                    filename=f"chat-photo-{idx}{suffix}",
+                    data_base64=img["data"],
+                    content_type=img["media_type"],
+                )
+                if "error" not in result:
+                    saved_image_refs.append(
+                        {"attachment_id": result["id"], "content_type": img["media_type"]}
+                    )
+                else:
+                    logger.warning("Auto-save attachment returned error: %s", result["error"])
+            except Exception:
+                logger.warning("Failed to auto-save chat image", exc_info=True)
+
+    if saved_image_refs:
+        logger.info(
+            "Chat auto-saved %d image(s) as attachments: %s",
+            len(saved_image_refs),
+            saved_image_refs,
+        )
+
     async def event_generator():
-        async for event in stream_chat(incident_id, message, user, images=images):
+        async for event in stream_chat(
+            incident_id, message, user, images=images, image_refs=saved_image_refs or None
+        ):
             yield event
 
     return StreamingResponse(

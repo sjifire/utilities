@@ -62,6 +62,11 @@ COSMOS_DATABASE="sjifire-incidents"
 ACR_NAME="sjifiremcp"
 CA_ENV="sjifire-mcp-env"
 CA_APP="sjifire-mcp"
+CA_JOB="sjifire-ops-tasks"
+# Azure Maps
+MAPS_ACCOUNT="sjifire-maps"
+# Blob Storage (incident attachments)
+STORAGE_ACCOUNT="sjifireattachments"
 
 # Custom domain (derived from config/organization.json)
 CUSTOM_DOMAIN="ops.${DOMAIN}"
@@ -118,7 +123,7 @@ info "Using subscription: $SUB_ID"
 info "Tenant: $TENANT_ID"
 
 # Register resource providers (idempotent, no-op if already registered)
-for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices Microsoft.Maps; do
+for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices Microsoft.Maps Microsoft.Storage; do
     STATE=$(az provider show --namespace "$ns" --query registrationState -o tsv 2>/dev/null || echo "NotRegistered")
     if [ "$STATE" != "Registered" ]; then
         info "Registering provider $ns..."
@@ -126,7 +131,7 @@ for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microso
     fi
 done
 # Wait for registration to complete
-for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices Microsoft.Maps; do
+for ns in Microsoft.DocumentDB Microsoft.ContainerRegistry Microsoft.App Microsoft.CognitiveServices Microsoft.Maps Microsoft.Storage; do
     STATE=$(az provider show --namespace "$ns" --query registrationState -o tsv)
     if [ "$STATE" != "Registered" ]; then
         info "Waiting for $ns to register..."
@@ -945,8 +950,6 @@ fi
 if should_run 8; then
     echo -e "${CYAN}━━━ Phase 8: Azure Maps ━━━${NC}"
 
-    MAPS_ACCOUNT="sjifire-maps"
-
     if az maps account show --name "$MAPS_ACCOUNT" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
         warn "Azure Maps account $MAPS_ACCOUNT already exists"
     else
@@ -1011,8 +1014,6 @@ fi
 
 if should_run 9; then
     echo -e "${CYAN}━━━ Phase 9: Container Apps Job (background tasks) ━━━${NC}"
-
-    CA_JOB="sjifire-ops-tasks"
 
     # Get ACR login server
     ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query loginServer -o tsv 2>/dev/null) || \
@@ -1122,6 +1123,88 @@ if should_run 9; then
     fi
 
     ok "Phase 9 complete"
+    echo ""
+fi
+
+# =============================================================================
+# Phase 10: Azure Blob Storage (incident attachments)
+# =============================================================================
+
+if should_run 10; then
+    echo -e "${CYAN}━━━ Phase 10: Azure Blob Storage (attachments) ━━━${NC}"
+
+    # Ensure resource group exists
+    az group show --name "$RESOURCE_GROUP" &>/dev/null || \
+        fail "Resource group $RESOURCE_GROUP not found. Run phase 2 first."
+
+    # Create storage account (Standard_LRS, hot tier)
+    if az storage account show --name "$STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+        warn "Storage account $STORAGE_ACCOUNT already exists"
+    else
+        info "Creating Storage Account ($STORAGE_ACCOUNT, Standard_LRS)..."
+        az storage account create \
+            --name "$STORAGE_ACCOUNT" \
+            --resource-group "$RESOURCE_GROUP" \
+            --location "$LOCATION" \
+            --sku Standard_LRS \
+            --kind StorageV2 \
+            --access-tier Hot \
+            --min-tls-version TLS1_2 \
+            --allow-blob-public-access false \
+            --output none
+        ok "Storage account created: $STORAGE_ACCOUNT"
+    fi
+
+    # Create blob container for attachments
+    STORAGE_KEY=$(az storage account keys list \
+        --account-name "$STORAGE_ACCOUNT" \
+        --resource-group "$RESOURCE_GROUP" \
+        --query "[0].value" -o tsv)
+
+    if az storage container show \
+        --name "attachments" \
+        --account-name "$STORAGE_ACCOUNT" \
+        --account-key "$STORAGE_KEY" &>/dev/null; then
+        warn "Container 'attachments' already exists"
+    else
+        info "Creating blob container 'attachments'..."
+        az storage container create \
+            --name "attachments" \
+            --account-name "$STORAGE_ACCOUNT" \
+            --account-key "$STORAGE_KEY" \
+            --output none
+        ok "Container 'attachments' created"
+    fi
+
+    # Grant managed identity access (Storage Blob Data Contributor)
+    CA_IDENTITY=$(az containerapp show \
+        --name "$CA_APP" \
+        --resource-group "$RESOURCE_GROUP" \
+        --query "identity.principalId" -o tsv 2>/dev/null || true)
+
+    if [ -n "$CA_IDENTITY" ]; then
+        STORAGE_ID=$(az storage account show \
+            --name "$STORAGE_ACCOUNT" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query id -o tsv)
+
+        info "Granting Storage Blob Data Contributor to Container App identity..."
+        az role assignment create \
+            --assignee "$CA_IDENTITY" \
+            --role "Storage Blob Data Contributor" \
+            --scope "$STORAGE_ID" \
+            --output none 2>/dev/null || true
+        ok "RBAC: Container App → Storage Blob Data Contributor"
+    else
+        warn "Container App not found — skip RBAC (run phase 3 first)"
+    fi
+
+    # Store account URL and key in Key Vault for the Container App
+    STORAGE_URL="https://${STORAGE_ACCOUNT}.blob.core.windows.net"
+    store_secret "AZURE-STORAGE-ACCOUNT-URL" "$STORAGE_URL"
+    store_secret "AZURE-STORAGE-ACCOUNT-KEY" "$STORAGE_KEY"
+
+    ok "Phase 10 complete"
     echo ""
 fi
 

@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from sjifire.core.config import get_org_config
+from sjifire.ops.attachments.models import AttachmentMeta
 
 MAX_NARRATIVE_LENGTH = 100_000
 MAX_PERSONNEL = 50
@@ -135,6 +136,9 @@ class IncidentDocument(BaseModel):
     # Internal only — never sent to NERIS
     internal_notes: str | None = Field(default="", max_length=MAX_NARRATIVE_LENGTH)
     edit_history: list[EditEntry] = Field(default_factory=list, max_length=MAX_EDIT_HISTORY)
+
+    # Attachments — metadata only; blobs live in Azure Blob Storage
+    attachments: list[AttachmentMeta] = Field(default_factory=list)
 
     # Flexible extras for conditional NERIS sections (alarms, hazards,
     # exposures, casualties, etc.). Claude saves edge-case data with
