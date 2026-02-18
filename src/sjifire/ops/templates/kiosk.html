@@ -262,6 +262,45 @@
     padding: 3px 0;
   }
 
+  /* ── Archived (completed) call panel ── */
+  .call-panel.archived {
+    border: 2px solid rgba(107, 114, 128, .35);
+    animation: none;
+  }
+  .call-panel.archived .call-header {
+    background: rgba(107, 114, 128, .10);
+  }
+  .call-panel.archived .call-nature {
+    color: var(--text-muted);
+  }
+  .call-panel.archived .call-id {
+    color: var(--text-dim);
+  }
+  .call-panel.archived .call-address {
+    color: var(--text-dim);
+  }
+  .archived-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 6px;
+    background: rgba(34, 197, 94, .10);
+    border: 1px solid rgba(34, 197, 94, .25);
+    color: var(--color-green);
+    letter-spacing: .02em;
+  }
+  .archived-badge .check-icon {
+    font-size: 14px;
+  }
+  .call-pill.archived {
+    background: rgba(107, 114, 128, .08);
+    border-color: rgba(107, 114, 128, .25);
+    color: var(--text-dim);
+  }
+
   /* ── Idle State ── */
   .idle-state {
     flex: 1;
@@ -404,10 +443,10 @@
     </div>
   </div>
   <div class="kiosk-header-center">
-    <div class="kiosk-status" :class="$store.kiosk.calls.length > 0 ? 'active' : 'ok'">
+    <div class="kiosk-status" :class="$store.kiosk.activeCalls > 0 ? 'active' : 'ok'">
       <span class="pulse-dot"></span>
-      <span x-text="$store.kiosk.calls.length > 0
-        ? ($store.kiosk.calls.length === 1 ? 'ACTIVE CALL' : $store.kiosk.calls.length + ' ACTIVE CALLS')
+      <span x-text="$store.kiosk.activeCalls > 0
+        ? ($store.kiosk.activeCalls === 1 ? 'ACTIVE CALL' : $store.kiosk.activeCalls + ' ACTIVE CALLS')
         : 'All Clear'"></span>
     </div>
   </div>
@@ -427,7 +466,7 @@
     <div class="call-strip">
       <template x-for="(call, i) in $store.kiosk.calls" :key="call.dispatch_id">
         <div class="call-pill"
-             :class="[call._severity, i === currentCallIndex ? 'current' : '']"
+             :class="[call.archived ? 'archived' : call._severity, i === currentCallIndex ? 'current' : '']"
              @click="showCall(i)">
           <span x-text="call.dispatch_id + (call.nature ? ' ' + call.nature : ' Incoming')"></span>
         </div>
@@ -435,15 +474,28 @@
     </div>
   </template>
 
-  <!-- Active call detail -->
+  <!-- Active / archived call detail -->
   <template x-if="$store.kiosk.calls.length > 0">
-    <div class="call-panel">
+    <div class="call-panel" :class="{ archived: currentCall.archived }">
       <div class="call-header">
         <div>
           <span class="call-nature" x-text="currentCall.nature ? (currentCall.icon + ' ' + currentCall.nature) : 'Incoming Call'"></span>
-          <span class="call-reported" x-text="'  Reported ' + relTime(currentCall.time_reported)"></span>
+          <template x-if="!currentCall.archived">
+            <span class="call-reported" x-text="'  Reported ' + relTime(currentCall.time_reported)"></span>
+          </template>
+          <template x-if="currentCall.archived">
+            <span class="call-reported" x-text="'  Completed ' + relTime(currentCall.completed_at)"></span>
+          </template>
         </div>
-        <span class="call-id" x-text="currentCall.dispatch_id"></span>
+        <div style="display:flex;align-items:center;gap:12px">
+          <template x-if="currentCall.archived">
+            <div class="archived-badge">
+              <span class="check-icon">&#10003;</span>
+              <span>COMPLETED</span>
+            </div>
+          </template>
+          <span class="call-id" x-text="currentCall.dispatch_id"></span>
+        </div>
       </div>
       <div class="call-address" x-text="currentCall.address || 'Awaiting address...'"></div>
 
@@ -624,6 +676,7 @@ function kioskDataUrl() {
 document.addEventListener('alpine:init', () => {
   Alpine.store('kiosk', {
     calls: [],
+    activeCalls: 0,
     crew: [],
     sections: [],
     platoon: '',
@@ -709,26 +762,27 @@ function kioskApp() {
         // Enrich calls with severity, icon, and first-seen tracking
         const now = Date.now();
         const calls = (data.calls || []).map(c => {
-          if (!callFirstSeen[c.dispatch_id]) callFirstSeen[c.dispatch_id] = now;
+          if (!c.archived && !callFirstSeen[c.dispatch_id]) callFirstSeen[c.dispatch_id] = now;
           return {
             ...c,
             _severity: c.severity || 'low',
-            _firstSeen: callFirstSeen[c.dispatch_id],
+            _firstSeen: callFirstSeen[c.dispatch_id] || now,
             icon: c.icon || '',
           };
         });
 
-        // Clean up first-seen for cleared calls
-        const activeIds = new Set(calls.map(c => c.dispatch_id));
+        // Clean up first-seen for calls no longer active (but not archived)
+        const activeIds = new Set(calls.filter(c => !c.archived).map(c => c.dispatch_id));
         for (const id of Object.keys(callFirstSeen)) {
           if (!activeIds.has(id)) delete callFirstSeen[id];
         }
 
-        // Detect new calls
-        const oldIds = new Set(this.$store.kiosk.calls.map(c => c.dispatch_id));
-        const newCalls = calls.filter(c => !oldIds.has(c.dispatch_id));
+        // Detect new active (non-archived) calls
+        const oldActiveIds = new Set(this.$store.kiosk.calls.filter(c => !c.archived).map(c => c.dispatch_id));
+        const newCalls = calls.filter(c => !c.archived && !oldActiveIds.has(c.dispatch_id));
 
         this.$store.kiosk.calls = calls;
+        this.$store.kiosk.activeCalls = calls.filter(c => !c.archived).length;
         this.$store.kiosk.crew = data.crew || [];
         this.$store.kiosk.sections = data.sections || [];
         this.$store.kiosk.platoon = data.platoon || '';
@@ -751,9 +805,10 @@ function kioskApp() {
         // Manage rotation
         this.manageRotation();
 
-        // Clean up maps for cleared calls
+        // Clean up maps for calls no longer displayed
+        const allDisplayedIds = new Set(calls.map(c => c.dispatch_id));
         for (const id of Object.keys(maps)) {
-          if (!activeIds.has(id)) {
+          if (!allDisplayedIds.has(id)) {
             maps[id].dispose();
             delete maps[id];
           }
@@ -770,14 +825,17 @@ function kioskApp() {
 
     manageRotation() {
       const calls = this.$store.kiosk.calls;
-      if (calls.length <= 1) {
+      const activeCalls = calls.filter(c => !c.archived);
+
+      // Only rotate among active calls; archived calls don't rotate
+      if (activeCalls.length <= 1) {
         this.stopRotation();
         return;
       }
 
       // Check if current call is still in priority window (< 5 min)
       const current = calls[this.currentCallIndex];
-      if (current) {
+      if (current && !current.archived) {
         const age = Date.now() - (current._firstSeen || 0);
         if (age < 300000) {
           // Still in priority window — don't rotate
