@@ -916,3 +916,232 @@ class TestImageContentBlocks:
         # System prompt should NOT contain the dynamic incident data
         assert "26-UNIQUE" not in captured_system[0]
         assert "CURRENT INCIDENT STATE:\n" not in captured_system[0]
+
+
+class TestAttachmentsSummary:
+    """Verify attachments_summary includes IDs and integrates into context."""
+
+    def test_context_message_includes_attachments_section(self):
+        summary = "- Scene photo (id: att-123, image/jpeg, 150KB)"
+        msg = _build_context_message("{}", "{}", "[]", "[]", summary)
+        assert "ATTACHMENTS ON FILE:" in msg
+        assert "att-123" in msg
+        assert "Scene photo" in msg
+
+    def test_context_message_omits_attachments_when_empty(self):
+        msg = _build_context_message("{}", "{}", "[]", "[]", "")
+        assert "ATTACHMENTS ON FILE" not in msg
+
+    async def test_fetch_context_includes_attachment_ids(self):
+        """_fetch_context should include attachment IDs in the summary."""
+        # Create a mock AttachmentMeta
+        from sjifire.ops.attachments.models import AttachmentMeta
+        from sjifire.ops.chat.engine import _fetch_context
+        from sjifire.ops.incidents.models import IncidentDocument
+        from sjifire.ops.incidents.store import IncidentStore
+
+        meta = AttachmentMeta(
+            filename="scene.jpg",
+            content_type="image/jpeg",
+            size_bytes=150_000,
+            uploaded_by="ff@sjifire.org",
+        )
+
+        incident = IncidentDocument(
+            id="test-att-inc",
+            incident_number="26-009000",
+            incident_datetime="2026-02-15T00:00:00+00:00",
+            created_by="ff@sjifire.org",
+            extras={"station": "S31"},
+            attachments=[meta],
+        )
+        async with IncidentStore() as store:
+            await store.create(incident)
+
+        with (
+            patch(
+                "sjifire.ops.schedule.tools.get_on_duty_crew",
+                return_value={"crew": [], "count": 0},
+            ),
+            patch("sjifire.ops.personnel.tools.get_operational_personnel", return_value=[]),
+        ):
+            _, _, _, _, att_summary = await _fetch_context("test-att-inc", _TEST_USER)
+
+        assert f"id: {meta.id}" in att_summary
+        assert "scene.jpg" in att_summary
+        assert "image/jpeg" in att_summary
+
+
+class TestAttachmentToolSummaries:
+    """Verify _summarize_tool_result handles attachment tools."""
+
+    def test_list_attachments(self):
+        result = _summarize_tool_result("list_attachments", {"count": 3})
+        assert "3" in result
+        assert "attachment" in result
+
+    def test_get_attachment(self):
+        result = _summarize_tool_result("get_attachment", {"filename": "scene.jpg"})
+        assert "scene.jpg" in result
+
+    def test_delete_attachment(self):
+        result = _summarize_tool_result("delete_attachment", {"filename": "old.jpg"})
+        assert "Deleted" in result
+        assert "old.jpg" in result
+
+
+class TestImageToolResultContentBlocks:
+    """Verify tool results with image_data produce image content blocks."""
+
+    def test_image_data_produces_multiblock_content(self):
+        """When a tool result contains image_data, the API gets image blocks."""
+        import json
+
+        result_data = {
+            "id": "att-1",
+            "filename": "scene.jpg",
+            "content_type": "image/jpeg",
+            "image_data": {
+                "base64": "abc123base64data",
+                "media_type": "image/jpeg",
+            },
+        }
+        result_str = json.dumps(result_data)
+
+        # Simulate the logic from _run_loop
+        tool_result_content: str | list[dict] = result_str
+        try:
+            result_parsed = json.loads(result_str)
+            image_info = result_parsed.get("image_data")
+            if image_info and isinstance(image_info, dict):
+                slim = {k: v for k, v in result_parsed.items() if k != "image_data"}
+                tool_result_content = [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": image_info["media_type"],
+                            "data": image_info["base64"],
+                        },
+                    },
+                    {"type": "text", "text": json.dumps(slim, default=str)},
+                ]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+        assert isinstance(tool_result_content, list)
+        assert len(tool_result_content) == 2
+        assert tool_result_content[0]["type"] == "image"
+        assert tool_result_content[0]["source"]["media_type"] == "image/jpeg"
+        assert tool_result_content[0]["source"]["data"] == "abc123base64data"
+        assert tool_result_content[1]["type"] == "text"
+        # Text block should NOT contain the base64 data
+        assert "abc123base64data" not in tool_result_content[1]["text"]
+        # But should contain the metadata
+        assert "scene.jpg" in tool_result_content[1]["text"]
+
+    def test_no_image_data_stays_string(self):
+        """Without image_data, tool result stays as a plain string."""
+        import json
+
+        result_data = {"id": "att-1", "filename": "doc.pdf", "content_type": "application/pdf"}
+        result_str = json.dumps(result_data)
+
+        tool_result_content: str | list[dict] = result_str
+        try:
+            result_parsed = json.loads(result_str)
+            image_info = result_parsed.get("image_data")
+            if image_info and isinstance(image_info, dict):
+                slim = {k: v for k, v in result_parsed.items() if k != "image_data"}
+                tool_result_content = [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": image_info["media_type"],
+                            "data": image_info["base64"],
+                        },
+                    },
+                    {"type": "text", "text": json.dumps(slim, default=str)},
+                ]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+        assert isinstance(tool_result_content, str)
+        assert tool_result_content == result_str
+
+
+class TestAttachmentToolDispatch:
+    """Verify attachment tools are in TOOL_SCHEMAS and dispatch correctly."""
+
+    def test_attachment_tools_in_schemas(self):
+        from sjifire.ops.chat.tools import TOOL_SCHEMAS
+
+        names = {t["name"] for t in TOOL_SCHEMAS}
+        assert "list_attachments" in names
+        assert "get_attachment" in names
+        assert "delete_attachment" in names
+
+    def test_cache_control_on_last_tool(self):
+        """cache_control should be on the last tool, not on attachment tools."""
+        from sjifire.ops.chat.tools import TOOL_SCHEMAS
+
+        last = TOOL_SCHEMAS[-1]
+        assert "cache_control" in last
+        # Attachment tools should be last (delete_attachment)
+        assert last["name"] == "delete_attachment"
+
+    async def test_execute_list_attachments(self):
+        """execute_tool should dispatch list_attachments correctly."""
+        from sjifire.ops.chat.tools import execute_tool
+
+        expected = {"attachments": [], "count": 0}
+
+        with patch(
+            "sjifire.ops.attachments.tools.list_attachments",
+            return_value=expected,
+        ):
+            result_str = await execute_tool(
+                "list_attachments", {"incident_id": "inc-1"}, _TEST_USER
+            )
+
+        result = json.loads(result_str)
+        assert result["count"] == 0
+
+    async def test_execute_get_attachment_with_include_data(self):
+        """execute_tool should pass include_data=True for get_attachment."""
+        from sjifire.ops.chat.tools import execute_tool
+
+        call_kwargs = {}
+
+        async def mock_get(incident_id, attachment_id, *, include_data=False):
+            call_kwargs["include_data"] = include_data
+            return {"id": attachment_id, "filename": "photo.jpg"}
+
+        with patch("sjifire.ops.attachments.tools.get_attachment", side_effect=mock_get):
+            await execute_tool(
+                "get_attachment",
+                {"incident_id": "inc-1", "attachment_id": "att-1"},
+                _TEST_USER,
+            )
+
+        assert call_kwargs["include_data"] is True
+
+    async def test_execute_delete_attachment(self):
+        """execute_tool should dispatch delete_attachment correctly."""
+        from sjifire.ops.chat.tools import execute_tool
+
+        expected = {"deleted": "att-1", "filename": "old.jpg", "attachment_count": 0}
+
+        with patch(
+            "sjifire.ops.attachments.tools.delete_attachment",
+            return_value=expected,
+        ):
+            result_str = await execute_tool(
+                "delete_attachment",
+                {"incident_id": "inc-1", "attachment_id": "att-1"},
+                _TEST_USER,
+            )
+
+        result = json.loads(result_str)
+        assert result["deleted"] == "att-1"

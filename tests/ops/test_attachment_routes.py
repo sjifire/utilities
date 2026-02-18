@@ -233,8 +233,8 @@ class TestChatImageAutoSave:
             saved_calls.append(kwargs)
             return {"id": "att-1", "filename": kwargs["filename"]}
 
-        async def fake_stream(*args, **kwargs):
-            yield "event: done\ndata: {}\n\n"
+        async def fake_run_chat(*args, **kwargs):
+            pass
 
         req = _ChatRequest(
             {
@@ -244,13 +244,12 @@ class TestChatImageAutoSave:
         )
 
         with (
-            patch("sjifire.ops.chat.routes.stream_chat", side_effect=fake_stream),
+            patch("sjifire.ops.chat.routes.run_chat", side_effect=fake_run_chat),
             patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload),
             patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
+            patch("sjifire.ops.chat.routes.TurnLockStore"),
         ):
-            resp = await chat_stream(req)
-            async for _ in resp.body_iterator:
-                pass
+            await chat_stream(req)
 
         assert len(saved_calls) == 1
         assert saved_calls[0]["filename"] == "chat-photo-1.jpg"
@@ -258,18 +257,14 @@ class TestChatImageAutoSave:
         assert saved_calls[0]["content_type"] == "image/jpeg"
 
     async def test_auto_save_failure_does_not_block_chat(self):
-        """If auto-save fails, chat should still proceed."""
+        """If auto-save fails, chat should still proceed (returns 202)."""
         from sjifire.ops.chat.routes import chat_stream
 
         async def mock_upload_fail(**kwargs):
             raise RuntimeError("Blob storage unavailable")
 
-        stream_called = False
-
-        async def fake_stream(*args, **kwargs):
-            nonlocal stream_called
-            stream_called = True
-            yield "event: done\ndata: {}\n\n"
+        async def fake_run_chat(*args, **kwargs):
+            pass
 
         req = _ChatRequest(
             {
@@ -279,15 +274,15 @@ class TestChatImageAutoSave:
         )
 
         with (
-            patch("sjifire.ops.chat.routes.stream_chat", side_effect=fake_stream),
+            patch("sjifire.ops.chat.routes.run_chat", side_effect=fake_run_chat),
             patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload_fail),
             patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
+            patch("sjifire.ops.chat.routes.TurnLockStore"),
         ):
             resp = await chat_stream(req)
-            async for _ in resp.body_iterator:
-                pass
 
-        assert stream_called  # Chat proceeded despite upload failure
+        # Chat proceeds despite upload failure — returns 202 accepted
+        assert resp.status_code == 202
 
     async def test_multiple_images_get_numbered_filenames(self):
         """Multiple images get chat-photo-1, chat-photo-2, etc."""
@@ -299,8 +294,8 @@ class TestChatImageAutoSave:
             saved_calls.append(kwargs)
             return {"id": f"att-{len(saved_calls)}"}
 
-        async def fake_stream(*args, **kwargs):
-            yield "event: done\ndata: {}\n\n"
+        async def fake_run_chat(*args, **kwargs):
+            pass
 
         req = _ChatRequest(
             {
@@ -314,82 +309,17 @@ class TestChatImageAutoSave:
         )
 
         with (
-            patch("sjifire.ops.chat.routes.stream_chat", side_effect=fake_stream),
+            patch("sjifire.ops.chat.routes.run_chat", side_effect=fake_run_chat),
             patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload),
             patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
+            patch("sjifire.ops.chat.routes.TurnLockStore"),
         ):
-            resp = await chat_stream(req)
-            async for _ in resp.body_iterator:
-                pass
+            await chat_stream(req)
 
         assert len(saved_calls) == 3
         assert saved_calls[0]["filename"] == "chat-photo-1.jpg"
         assert saved_calls[1]["filename"] == "chat-photo-2.png"
         assert saved_calls[2]["filename"] == "chat-photo-3.webp"
-
-    async def test_image_refs_passed_to_stream_chat(self):
-        """Successful auto-save should pass image_refs to stream_chat."""
-        from sjifire.ops.chat.routes import chat_stream
-
-        captured_kwargs = {}
-
-        async def mock_upload(**kwargs):
-            return {"id": "att-saved-1", "filename": kwargs["filename"]}
-
-        async def fake_stream(*args, **kwargs):
-            captured_kwargs.update(kwargs)
-            yield "event: done\ndata: {}\n\n"
-
-        req = _ChatRequest(
-            {
-                "message": "Check this photo",
-                "images": [{"data": "abc123", "media_type": "image/jpeg"}],
-            }
-        )
-
-        with (
-            patch("sjifire.ops.chat.routes.stream_chat", side_effect=fake_stream),
-            patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload),
-            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
-        ):
-            resp = await chat_stream(req)
-            async for _ in resp.body_iterator:
-                pass
-
-        assert captured_kwargs["image_refs"] == [
-            {"attachment_id": "att-saved-1", "content_type": "image/jpeg"}
-        ]
-
-    async def test_failed_upload_passes_no_image_refs(self):
-        """When auto-save fails, image_refs should be None."""
-        from sjifire.ops.chat.routes import chat_stream
-
-        captured_kwargs = {}
-
-        async def mock_upload_fail(**kwargs):
-            return {"error": "something went wrong"}
-
-        async def fake_stream(*args, **kwargs):
-            captured_kwargs.update(kwargs)
-            yield "event: done\ndata: {}\n\n"
-
-        req = _ChatRequest(
-            {
-                "message": "Photo here",
-                "images": [{"data": "abc", "media_type": "image/png"}],
-            }
-        )
-
-        with (
-            patch("sjifire.ops.chat.routes.stream_chat", side_effect=fake_stream),
-            patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload_fail),
-            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
-        ):
-            resp = await chat_stream(req)
-            async for _ in resp.body_iterator:
-                pass
-
-        assert captured_kwargs["image_refs"] is None
 
 
 # -- Conversation history with images -----------------------------------------

@@ -381,7 +381,7 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
             label = a.title or a.filename
             size_kb = a.size_bytes // 1024
             desc = f" — {a.description}" if a.description else ""
-            lines.append(f"- {label} ({a.content_type}, {size_kb}KB){desc}")
+            lines.append(f"- {label} (id: {a.id}, {a.content_type}, {size_kb}KB){desc}")
         attachments_summary = "\n".join(lines)
 
     return incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
@@ -509,10 +509,8 @@ async def run_chat(
         api_messages.append({"role": "user", "content": prefixed_message})
     api_messages = _trim_messages(api_messages)
 
-    # Record user message with image references (attachment IDs for blob-backed display)
-    conversation.messages.append(
-        ConversationMessage(role="user", content=user_message, images=image_refs)
-    )
+    # Record user message (text only — images are one-shot, not stored)
+    conversation.messages.append(ConversationMessage(role="user", content=user_message))
 
     # Broadcast user message to other subscribers (multi-user awareness).
     # The sender already has this message locally — clients filter by email.
@@ -746,11 +744,34 @@ async def _run_loop(
                 except Exception:
                     logger.debug("Failed to emit status_update", exc_info=True)
 
+            # Build the full tool result for the current API round.
+            # For get_attachment with image_data, use a multi-block content
+            # array so Claude can see the image via vision.
+            tool_result_content: str | list[dict] = result_str
+            try:
+                result_parsed = json.loads(result_str)
+                image_info = result_parsed.get("image_data")
+                if image_info and isinstance(image_info, dict):
+                    slim = {k: v for k, v in result_parsed.items() if k != "image_data"}
+                    tool_result_content = [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": image_info["media_type"],
+                                "data": image_info["base64"],
+                            },
+                        },
+                        {"type": "text", "text": json.dumps(slim, default=str)},
+                    ]
+            except (json.JSONDecodeError, KeyError):
+                pass
+
             full_tool_results.append(
                 {
                     "type": "tool_result",
                     "tool_use_id": tc["id"],
-                    "content": result_str,
+                    "content": tool_result_content,
                 }
             )
             summary_tool_results.append(
@@ -849,6 +870,18 @@ def _summarize_tool_result(name: str, data: dict) -> str:
             names = [c["name"] if isinstance(c, dict) else c for c in cross[:3]]
             return f"{road} near {', '.join(names)}"
         return f"{road} (no cross streets found)"
+
+    if name == "list_attachments":
+        count = data.get("count", 0)
+        return f"{count} attachment(s)"
+
+    if name == "get_attachment":
+        fname = data.get("filename", "")
+        return f"Attachment: {fname}"
+
+    if name == "delete_attachment":
+        fname = data.get("filename", "")
+        return f"Deleted: {fname}"
 
     return json.dumps(data, default=str)[:200]
 
