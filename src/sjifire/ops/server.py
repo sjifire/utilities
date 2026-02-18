@@ -291,16 +291,21 @@ async def kiosk_data(request: Request) -> Response:
         return JSONResponse(data)
 
     if test_mode == "2":
+        from pathlib import Path
+
         from sjifire.ispyfire.client import fixture_dir_override
 
         fixture_path = os.getenv("ISPYFIRE_FIXTURE_DIR", "")
         if not fixture_path:
+            fixture_path = str(Path(__file__).resolve().parents[3] / "tests/fixtures/ispyfire")
+        if not Path(fixture_path).is_dir():
             return JSONResponse(
-                {"error": "test_mode=2 requires ISPYFIRE_FIXTURE_DIR env var"}, status_code=500
+                {"error": f"Fixture directory not found: {fixture_path}"}, status_code=500
             )
         token = fixture_dir_override.set(fixture_path)
         try:
-            data = await dashboard.get_kiosk_data()
+            # Bypass kiosk cache — fixture reads are instant
+            data = await dashboard._fetch_kiosk_data()
         finally:
             fixture_dir_override.reset(token)
         return JSONResponse(data)

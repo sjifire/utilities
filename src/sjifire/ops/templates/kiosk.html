@@ -610,7 +610,7 @@ const _params = new URLSearchParams(window.location.search);
 const KIOSK_TOKEN = _params.get('token') || '';
 const TEST_MODE = _params.get('test_mode') || '';
 const AZURE_MAPS_KEY = '{{ azure_maps_key }}';
-const POLL_INTERVAL = 2000; // Client polls at fixed 2s; server cache controls actual hit rate
+const POLL_INTERVAL = TEST_MODE === '2' ? 200 : 2000;
 
 // Build fetch URL with correct params
 function kioskDataUrl() {
