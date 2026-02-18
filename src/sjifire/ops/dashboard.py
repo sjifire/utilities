@@ -619,7 +619,7 @@ _kiosk_call_first_seen: dict[str, float] = {}
 _kiosk_archived_calls: dict[str, dict] = {}
 
 # Default hours to keep archived calls on the kiosk display.
-_KIOSK_ARCHIVE_HOURS = 6
+_KIOSK_ARCHIVE_HOURS = 12
 
 # Kiosk cache
 _kiosk_cache: dict | None = None
