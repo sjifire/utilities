@@ -291,23 +291,32 @@ async def kiosk_data(request: Request) -> Response:
         return JSONResponse(data)
 
     if test_mode == "2":
-        from pathlib import Path
+        from sjifire.ops.kiosk.replay_data import get_replay_kiosk_data
 
-        from sjifire.ispyfire.client import fixture_dir_override
-
-        fixture_path = os.getenv("ISPYFIRE_FIXTURE_DIR", "")
-        if not fixture_path:
-            fixture_path = str(Path(__file__).resolve().parents[3] / "tests/fixtures/ispyfire")
-        if not Path(fixture_path).is_dir():
-            return JSONResponse(
-                {"error": f"Fixture directory not found: {fixture_path}"}, status_code=500
-            )
-        token = fixture_dir_override.set(fixture_path)
+        data = get_replay_kiosk_data()
+        # Overlay real crew data from today's schedule (fall back to test crew)
         try:
-            # Bypass kiosk cache — fixture reads are instant
-            data = await dashboard._fetch_kiosk_data()
-        finally:
-            fixture_dir_override.reset(token)
+            schedule = await dashboard._fetch_schedule_for_kiosk()
+            raw_crew = schedule.get("crew", [])
+            crew, sections = dashboard._build_crew_list(raw_crew)
+            if crew:
+                data["crew"] = crew
+                data["sections"] = sections
+                data["platoon"] = schedule.get("platoon", "")
+                crew_date = schedule.get("date", "")
+                data["shift_end"] = dashboard._compute_shift_end(raw_crew, crew_date)
+                upcoming = schedule.get("upcoming")
+                if upcoming and isinstance(upcoming, dict):
+                    raw_up = upcoming.get("crew", [])
+                    up_crew, up_sec = dashboard._build_crew_list(raw_up)
+                    data["upcoming_crew"] = up_crew
+                    data["upcoming_sections"] = up_sec
+                    data["upcoming_platoon"] = upcoming.get("platoon", "")
+                    data["upcoming_shift_starts"] = dashboard._compute_shift_start(
+                        raw_up, upcoming.get("date", "")
+                    )
+        except Exception:
+            logger.debug("Could not overlay real crew in test mode", exc_info=True)
         return JSONResponse(data)
 
     from sjifire.ops.kiosk.store import validate_token
