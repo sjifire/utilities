@@ -1200,9 +1200,10 @@ if should_run 10; then
         warn "Container App not found — skip RBAC (run phase 3 first)"
     fi
 
-    # Store account URL in Key Vault for the Container App
+    # Store account URL and key in Key Vault for the Container App
     STORAGE_URL="https://${STORAGE_ACCOUNT}.blob.core.windows.net"
     store_secret "AZURE-STORAGE-ACCOUNT-URL" "$STORAGE_URL"
+    store_secret "AZURE-STORAGE-ACCOUNT-KEY" "$STORAGE_KEY"
 
     ok "Phase 10 complete"
     echo ""

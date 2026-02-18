@@ -203,7 +203,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 **Key env vars** (set on Container App, secrets via Key Vault references):
 - `ENTRA_MCP_API_CLIENT_ID`, `ENTRA_MCP_API_CLIENT_SECRET`, `ENTRA_REPORT_EDITORS_GROUP_ID`
 - `COSMOS_ENDPOINT`, `MS_GRAPH_*`, `ALADTEC_*`, `ISPYFIRE_*`, `MCP_SERVER_URL`
-- `AZURE_STORAGE_ACCOUNT_URL` (Blob Storage for incident attachments)
+- `AZURE_STORAGE_ACCOUNT_URL`, `AZURE_STORAGE_ACCOUNT_KEY` (Blob Storage for incident attachments)
 
 ### Group Sync Strategy Pattern
 Group sync uses a strategy pattern with a `GroupMember` protocol that works with both Aladtec `Member` and `EntraUser` objects. The sync pulls membership data directly from Entra ID (which is synced from Aladtec via user sync).
@@ -365,7 +365,7 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ISPYFIRE-URL`, `ISPYFIRE-USERNAME`, `ISPYFIRE-PASSWORD`
 - `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-REPORT-EDITORS-GROUP-ID`
 - `COSMOS-ENDPOINT`, `COSMOS-KEY`, `ACR-LOGIN-SERVER`, `ACR-USERNAME`, `ACR-PASSWORD`
-- `AZURE-STORAGE-ACCOUNT-URL` (Blob Storage for incident attachments)
+- `AZURE-STORAGE-ACCOUNT-URL`, `AZURE-STORAGE-ACCOUNT-KEY` (Blob Storage for incident attachments)
 
 ### OIDC app registration
 - App: `utilities-sync` (client ID in workflow files)
