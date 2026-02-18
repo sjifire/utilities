@@ -126,6 +126,12 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "-v --tb=short"
+filterwarnings = [
+    # Third-party deprecations we can't fix — suppress to keep CI clean
+    "ignore::DeprecationWarning:kiota_abstractions",
+    "ignore::DeprecationWarning:msgraph",
+    "ignore::SyntaxWarning:neris_api_client",
+]
 
 [tool.coverage.run]
 source = ["src/sjifire"]
