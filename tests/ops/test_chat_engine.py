@@ -575,7 +575,7 @@ class TestSlimDispatchContext:
                 return_value=[],
             ),
         ):
-            _, dispatch_json, _, _ = await _fetch_context("test-inc-1", _TEST_USER)
+            _, dispatch_json, _, _, _ = await _fetch_context("test-inc-1", _TEST_USER)
 
         data = json.loads(dispatch_json)
 
@@ -757,7 +757,10 @@ class TestImageContentBlocks:
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
-            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=("{}", "{}", "[]", "[]", ""),
+            ),
             patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
             patch("sjifire.ops.chat.engine.get_client"),
         ):
@@ -795,7 +798,10 @@ class TestImageContentBlocks:
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
-            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=("{}", "{}", "[]", "[]", ""),
+            ),
             patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
             patch("sjifire.ops.chat.engine.get_client"),
         ):
@@ -827,7 +833,10 @@ class TestImageContentBlocks:
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
-            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=("{}", "{}", "[]", "[]", ""),
+            ),
             patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
             patch("sjifire.ops.chat.engine.get_client"),
         ):
@@ -853,7 +862,10 @@ class TestImageContentBlocks:
 
         with (
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
-            patch("sjifire.ops.chat.engine._fetch_context", return_value=("{}", "{}", "[]", "[]")),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=("{}", "{}", "[]", "[]", ""),
+            ),
             patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
             patch("sjifire.ops.chat.engine.get_client"),
         ):
@@ -885,7 +897,7 @@ class TestImageContentBlocks:
             patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
             patch(
                 "sjifire.ops.chat.engine._fetch_context",
-                return_value=('{"incident_number": "26-UNIQUE"}', "{}", "[]", "[]"),
+                return_value=('{"incident_number": "26-UNIQUE"}', "{}", "[]", "[]", ""),
             ),
             patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
             patch("sjifire.ops.chat.engine.get_client"),

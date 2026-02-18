@@ -3,7 +3,7 @@
 import base64
 import os
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -95,12 +95,16 @@ SMALL_JPEG_B64 = base64.b64encode(b"fake jpeg data").decode()
 
 
 def _mock_store(doc):
-    """Build a mocked IncidentStore context manager."""
+    """Build a mocked IncidentStore context manager.
+
+    Uses MagicMock for the class (synchronous constructor) with
+    AsyncMock __aenter__/__aexit__ on the instance.
+    """
     mock = AsyncMock()
     mock.get_by_id = AsyncMock(return_value=doc)
     mock.update = AsyncMock(side_effect=lambda d: d)
 
-    cls = AsyncMock()
+    cls = MagicMock()
     cls.return_value.__aenter__ = AsyncMock(return_value=mock)
     cls.return_value.__aexit__ = AsyncMock(return_value=None)
     return cls, mock
@@ -127,11 +131,10 @@ class TestCheckEditAccess:
 
 
 class TestUploadAttachment:
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_upload_success(self, mock_store_cls, regular_user, sample_doc):
-        mock_store_cls, _mock = _mock_store(sample_doc)
+    async def test_upload_success(self, regular_user, sample_doc):
+        cls, _mock = _mock_store(sample_doc)
 
-        with patch("sjifire.ops.attachments.tools.IncidentStore", mock_store_cls):
+        with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
             result = await upload_attachment(
                 incident_id="doc-123",
                 filename="scene.jpg",
@@ -148,11 +151,10 @@ class TestUploadAttachment:
         # Blob was stored
         assert len(AttachmentBlobStore._memory) == 1
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_upload_without_title(self, mock_store_cls, regular_user, sample_doc):
-        mock_store_cls, _ = _mock_store(sample_doc)
+    async def test_upload_without_title(self, regular_user, sample_doc):
+        cls, _ = _mock_store(sample_doc)
 
-        with patch("sjifire.ops.attachments.tools.IncidentStore", mock_store_cls):
+        with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
             result = await upload_attachment(
                 incident_id="doc-123",
                 filename="chat-photo-1.jpg",
@@ -162,13 +164,10 @@ class TestUploadAttachment:
         assert "error" not in result
         assert result["title"] == ""
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_upload_for_parsing_returns_image_data(
-        self, mock_store_cls, regular_user, sample_doc
-    ):
-        mock_store_cls, _ = _mock_store(sample_doc)
+    async def test_upload_for_parsing_returns_image_data(self, regular_user, sample_doc):
+        cls, _ = _mock_store(sample_doc)
 
-        with patch("sjifire.ops.attachments.tools.IncidentStore", mock_store_cls):
+        with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
             result = await upload_attachment(
                 incident_id="doc-123",
                 filename="run-sheet.jpg",
@@ -181,13 +180,12 @@ class TestUploadAttachment:
         assert result["image_data"]["base64"] == SMALL_JPEG_B64
         assert result["image_data"]["media_type"] == "image/jpeg"
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_for_parsing_pdf_no_image_data(self, mock_store_cls, regular_user, sample_doc):
+    async def test_for_parsing_pdf_no_image_data(self, regular_user, sample_doc):
         """PDFs don't get image_data even with for_parsing=True."""
-        mock_store_cls, _ = _mock_store(sample_doc)
+        cls, _ = _mock_store(sample_doc)
         pdf_b64 = base64.b64encode(b"fake pdf").decode()
 
-        with patch("sjifire.ops.attachments.tools.IncidentStore", mock_store_cls):
+        with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
             result = await upload_attachment(
                 incident_id="doc-123",
                 filename="report.pdf",
@@ -219,13 +217,12 @@ class TestUploadAttachment:
         assert "error" in result
         assert "base64" in result["error"].lower()
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_rejects_oversized_file(self, mock_store_cls, regular_user, sample_doc):
-        mock_store_cls, _ = _mock_store(sample_doc)
+    async def test_rejects_oversized_file(self, regular_user, sample_doc):
+        cls, _ = _mock_store(sample_doc)
         # 21 MB of data
         big_data = base64.b64encode(b"x" * (21 * 1024 * 1024)).decode()
 
-        with patch("sjifire.ops.attachments.tools.IncidentStore", mock_store_cls):
+        with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
             result = await upload_attachment(
                 incident_id="doc-123",
                 filename="huge.jpg",
@@ -236,8 +233,7 @@ class TestUploadAttachment:
         assert "error" in result
         assert "too large" in result["error"].lower()
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_rejects_not_found_incident(self, mock_store_cls, regular_user):
+    async def test_rejects_not_found_incident(self, regular_user):
         cls, _ = _mock_store(None)
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
             result = await upload_attachment(
@@ -249,8 +245,7 @@ class TestUploadAttachment:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_rejects_submitted_incident(self, mock_store_cls, regular_user, sample_doc):
+    async def test_rejects_submitted_incident(self, regular_user, sample_doc):
         sample_doc.status = "submitted"
         cls, _ = _mock_store(sample_doc)
 
@@ -264,8 +259,7 @@ class TestUploadAttachment:
         assert "error" in result
         assert "submitted" in result["error"].lower()
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_stranger_cannot_upload(self, mock_store_cls, sample_doc):
+    async def test_stranger_cannot_upload(self, sample_doc):
         stranger = UserContext(email="stranger@sjifire.org", name="X", user_id="x")
         set_current_user(stranger)
 
@@ -280,10 +274,7 @@ class TestUploadAttachment:
         assert "error" in result
         assert "permission" in result["error"].lower()
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_officer_can_upload_to_others_incident(
-        self, mock_store_cls, officer_user, sample_doc
-    ):
+    async def test_officer_can_upload_to_others_incident(self, officer_user, sample_doc):
         cls, _ = _mock_store(sample_doc)
 
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
@@ -295,10 +286,7 @@ class TestUploadAttachment:
 
         assert "error" not in result
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_rejects_when_max_attachments_reached(
-        self, mock_store_cls, regular_user, sample_doc
-    ):
+    async def test_rejects_when_max_attachments_reached(self, regular_user, sample_doc):
         from sjifire.ops.attachments.models import MAX_ATTACHMENTS, AttachmentMeta
 
         sample_doc.attachments = [
@@ -326,8 +314,7 @@ class TestUploadAttachment:
 
 
 class TestListAttachments:
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_creator_lists(self, mock_store_cls, regular_user, sample_doc):
+    async def test_creator_lists(self, regular_user, sample_doc):
         from sjifire.ops.attachments.models import AttachmentMeta
 
         sample_doc.attachments = [
@@ -343,8 +330,7 @@ class TestListAttachments:
         assert result["count"] == 1
         assert result["attachments"][0]["filename"] == "photo.jpg"
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_crew_can_list(self, mock_store_cls, sample_doc):
+    async def test_crew_can_list(self, sample_doc):
         crew = UserContext(email="crew1@sjifire.org", name="Crew", user_id="c1")
         set_current_user(crew)
         cls, _ = _mock_store(sample_doc)
@@ -354,8 +340,7 @@ class TestListAttachments:
 
         assert "error" not in result
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_stranger_denied(self, mock_store_cls, sample_doc):
+    async def test_stranger_denied(self, sample_doc):
         stranger = UserContext(email="stranger@sjifire.org", name="X", user_id="x")
         set_current_user(stranger)
         cls, _ = _mock_store(sample_doc)
@@ -366,8 +351,7 @@ class TestListAttachments:
         assert "error" in result
         assert "access" in result["error"].lower()
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_empty_list(self, mock_store_cls, regular_user, sample_doc):
+    async def test_empty_list(self, regular_user, sample_doc):
         cls, _ = _mock_store(sample_doc)
 
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
@@ -376,8 +360,7 @@ class TestListAttachments:
         assert result["count"] == 0
         assert result["attachments"] == []
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_not_found(self, mock_store_cls, regular_user):
+    async def test_not_found(self, regular_user):
         cls, _ = _mock_store(None)
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
             result = await list_attachments("nonexistent")
@@ -390,8 +373,7 @@ class TestListAttachments:
 
 
 class TestGetAttachment:
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_get_metadata(self, mock_store_cls, regular_user, sample_doc):
+    async def test_get_metadata(self, regular_user, sample_doc):
         from sjifire.ops.attachments.models import AttachmentMeta
 
         meta = AttachmentMeta(
@@ -414,8 +396,7 @@ class TestGetAttachment:
         assert "download_url" in result
         assert "image_data" not in result  # include_data defaults to False
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_get_with_image_data(self, mock_store_cls, regular_user, sample_doc):
+    async def test_get_with_image_data(self, regular_user, sample_doc):
         from sjifire.ops.attachments.models import AttachmentMeta
 
         meta = AttachmentMeta(
@@ -435,8 +416,7 @@ class TestGetAttachment:
         assert "image_data" in result
         assert result["image_data"]["media_type"] == "image/jpeg"
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_attachment_not_found(self, mock_store_cls, regular_user, sample_doc):
+    async def test_attachment_not_found(self, regular_user, sample_doc):
         cls, _ = _mock_store(sample_doc)
 
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
@@ -445,8 +425,7 @@ class TestGetAttachment:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_stranger_denied(self, mock_store_cls, sample_doc):
+    async def test_stranger_denied(self, sample_doc):
         stranger = UserContext(email="stranger@sjifire.org", name="X", user_id="x")
         set_current_user(stranger)
         cls, _ = _mock_store(sample_doc)
@@ -462,8 +441,7 @@ class TestGetAttachment:
 
 
 class TestDeleteAttachment:
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_creator_deletes(self, mock_store_cls, regular_user, sample_doc):
+    async def test_creator_deletes(self, regular_user, sample_doc):
         from sjifire.ops.attachments.models import AttachmentMeta
 
         meta = AttachmentMeta(
@@ -488,8 +466,7 @@ class TestDeleteAttachment:
         # Blob deleted
         assert meta.blob_path not in AttachmentBlobStore._memory
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_officer_deletes_others(self, mock_store_cls, officer_user, sample_doc):
+    async def test_officer_deletes_others(self, officer_user, sample_doc):
         from sjifire.ops.attachments.models import AttachmentMeta
 
         meta = AttachmentMeta(
@@ -508,8 +485,7 @@ class TestDeleteAttachment:
 
         assert "error" not in result
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_stranger_cannot_delete(self, mock_store_cls, sample_doc):
+    async def test_stranger_cannot_delete(self, sample_doc):
         from sjifire.ops.attachments.models import AttachmentMeta
 
         stranger = UserContext(email="stranger@sjifire.org", name="X", user_id="x")
@@ -529,8 +505,7 @@ class TestDeleteAttachment:
         assert "error" in result
         assert "permission" in result["error"].lower()
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_cannot_delete_from_submitted(self, mock_store_cls, regular_user, sample_doc):
+    async def test_cannot_delete_from_submitted(self, regular_user, sample_doc):
         from sjifire.ops.attachments.models import AttachmentMeta
 
         sample_doc.status = "submitted"
@@ -548,8 +523,7 @@ class TestDeleteAttachment:
         assert "error" in result
         assert "submitted" in result["error"].lower()
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_attachment_not_found(self, mock_store_cls, regular_user, sample_doc):
+    async def test_attachment_not_found(self, regular_user, sample_doc):
         cls, _ = _mock_store(sample_doc)
 
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
@@ -558,8 +532,7 @@ class TestDeleteAttachment:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
-    @patch("sjifire.ops.attachments.tools.IncidentStore")
-    async def test_incident_not_found(self, mock_store_cls, regular_user):
+    async def test_incident_not_found(self, regular_user):
         cls, _ = _mock_store(None)
 
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):

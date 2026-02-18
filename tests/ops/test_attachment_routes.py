@@ -2,7 +2,7 @@
 
 import json
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -145,11 +145,11 @@ class TestDownloadRoute:
 
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=None)
-        cls = AsyncMock()
+        cls = MagicMock()
         cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("sjifire.ops.attachments.routes.IncidentStore", cls):
+        with patch("sjifire.ops.incidents.store.IncidentStore", cls):
             req = _FakeRequest(
                 path_params={"incident_id": "nonexistent", "attachment_id": "att-1"},
             )
@@ -176,14 +176,14 @@ class TestDownloadRoute:
 
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=doc)
-        cls = AsyncMock()
+        cls = MagicMock()
         cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
         # Put blob data in memory store
         AttachmentBlobStore._memory[meta.blob_path] = (b"jpeg bytes", "image/jpeg")
 
-        with patch("sjifire.ops.attachments.routes.IncidentStore", cls):
+        with patch("sjifire.ops.incidents.store.IncidentStore", cls):
             req = _FakeRequest(
                 path_params={"incident_id": "doc-1", "attachment_id": "att-1"},
             )
