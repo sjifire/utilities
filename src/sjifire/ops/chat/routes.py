@@ -292,8 +292,7 @@ async def conversation_history(request: Request) -> Response:
         # Include image download URLs for blob-backed chat images
         if msg.images:
             entry["images"] = [
-                f"/reports/{incident_id}/attachments/{ref['attachment_id']}"
-                for ref in msg.images
+                f"/reports/{incident_id}/attachments/{ref['attachment_id']}" for ref in msg.images
             ]
         messages.append(entry)
 
@@ -399,7 +398,11 @@ async def chat_stream(request: Request) -> Response:
                 logger.warning("Failed to auto-save chat image", exc_info=True)
 
     if saved_image_refs:
-        logger.info("Chat auto-saved %d image(s) as attachments: %s", len(saved_image_refs), saved_image_refs)
+        logger.info(
+            "Chat auto-saved %d image(s) as attachments: %s",
+            len(saved_image_refs),
+            saved_image_refs,
+        )
 
     async def event_generator():
         async for event in stream_chat(
