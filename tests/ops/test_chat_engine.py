@@ -19,6 +19,7 @@ from sjifire.ops.chat.engine import (
 )
 from sjifire.ops.chat.models import MAX_TURNS, ConversationDocument
 from sjifire.ops.chat.store import BudgetStore, ConversationStore
+from sjifire.ops.chat.turn_lock import TurnLockStore
 from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.ops.incidents.store import IncidentStore
 
@@ -34,16 +35,19 @@ def _clear_memory_and_env(monkeypatch):
     BudgetStore._memory.clear()
     IncidentStore._memory.clear()
     DispatchStore._memory.clear()
+    TurnLockStore._memory.clear()
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
     monkeypatch.setattr("sjifire.ops.chat.store.get_cosmos_container", _noop_container)
     monkeypatch.setattr("sjifire.ops.incidents.store.get_cosmos_container", _noop_container)
     monkeypatch.setattr("sjifire.ops.dispatch.store.get_cosmos_container", _noop_container)
+    monkeypatch.setattr("sjifire.ops.chat.turn_lock.get_cosmos_container", _noop_container)
     yield
     ConversationStore._memory.clear()
     BudgetStore._memory.clear()
     IncidentStore._memory.clear()
     DispatchStore._memory.clear()
+    TurnLockStore._memory.clear()
 
 
 _TEST_USER = UserContext(
@@ -244,9 +248,9 @@ class TestRunChat:
         ):
             await run_chat("inc-123", "hello", _TEST_USER, channel="test")
 
-        assert len(published) == 1
-        assert published[0][0] == "error"
-        assert "Monthly limit reached" in published[0][1]["message"]
+        assert published[0][0] == "turn_start"
+        assert published[1][0] == "error"
+        assert "Monthly limit reached" in published[1][1]["message"]
 
     async def test_turn_limit_exceeded_publishes_error(self):
         """When turn count is at max, run_chat should publish an error event."""
@@ -273,9 +277,9 @@ class TestRunChat:
         ):
             await run_chat("inc-456", "hello", _TEST_USER, channel="test")
 
-        assert len(published) == 1
-        assert published[0][0] == "error"
-        assert "limit" in published[0][1]["message"].lower()
+        assert published[0][0] == "turn_start"
+        assert published[1][0] == "error"
+        assert "limit" in published[1][1]["message"].lower()
 
     async def test_budget_check_failure_publishes_friendly_error(self):
         """When budget check raises, error should be user-friendly with ref ID."""
@@ -295,11 +299,11 @@ class TestRunChat:
         ):
             await run_chat("inc-789", "hello", _TEST_USER, channel="test")
 
-        assert len(published) == 1
-        assert published[0][0] == "error"
-        assert "usage limits" in published[0][1]["message"]
-        assert "ref:" in published[0][1]["message"]
-        assert "ConnectionError" not in published[0][1]["message"]
+        assert published[0][0] == "turn_start"
+        assert published[1][0] == "error"
+        assert "usage limits" in published[1][1]["message"]
+        assert "ref:" in published[1][1]["message"]
+        assert "ConnectionError" not in published[1][1]["message"]
 
     async def test_conversation_load_failure_publishes_friendly_error(self):
         """When conversation store raises, error should be user-friendly."""
@@ -321,11 +325,11 @@ class TestRunChat:
         ):
             await run_chat("inc-err", "hello", _TEST_USER, channel="test")
 
-        assert len(published) == 1
-        assert published[0][0] == "error"
-        assert "load conversation" in published[0][1]["message"]
-        assert "ref:" in published[0][1]["message"]
-        assert "ConnectionError" not in published[0][1]["message"]
+        assert published[0][0] == "turn_start"
+        assert published[1][0] == "error"
+        assert "load conversation" in published[1][1]["message"]
+        assert "ref:" in published[1][1]["message"]
+        assert "ConnectionError" not in published[1][1]["message"]
 
     async def test_context_fetch_failure_publishes_friendly_error(self):
         """When _fetch_context raises, error should be user-friendly."""
@@ -347,11 +351,11 @@ class TestRunChat:
         ):
             await run_chat("inc-ctx", "hello", _TEST_USER, channel="test")
 
-        assert len(published) == 1
-        assert published[0][0] == "error"
-        assert "incident data" in published[0][1]["message"]
-        assert "ref:" in published[0][1]["message"]
-        assert "RuntimeError" not in published[0][1]["message"]
+        assert published[0][0] == "turn_start"
+        assert published[1][0] == "error"
+        assert "incident data" in published[1][1]["message"]
+        assert "ref:" in published[1][1]["message"]
+        assert "RuntimeError" not in published[1][1]["message"]
 
 
 class TestBuildGeneralSystemPrompt:
