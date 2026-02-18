@@ -10,9 +10,11 @@ from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.incidents.models import IncidentDocument, PersonnelAssignment, UnitAssignment
 from sjifire.ops.incidents.tools import (
     _address_from_neris_location,
+    _build_import_comparison,
     _check_edit_access,
     _check_view_access,
     _extract_timestamps,
+    _parse_neris_record,
     _prefill_from_dispatch,
     _prefill_from_neris,
     create_incident,
@@ -1341,10 +1343,47 @@ class TestResetIncident:
         assert "not found" in result["error"].lower()
 
 
+_IMPORT_NERIS_RECORD = {
+    "neris_id": "FD53055879|26-000944|123",
+    "base": {
+        "outcome_narrative": "Fire extinguished.",
+        "location": {
+            "complete_number": "94",
+            "street": "Zepher Ln",
+            "incorporated_municipality": "Friday Harbor",
+            "state": "WA",
+        },
+    },
+    "incident_types": [{"primary": True, "type": "FIRE||STRUCTURE_FIRE"}],
+    "dispatch": {
+        "incident_number": "26-000944",
+        "call_create": "2026-02-12T14:30:15+00:00",
+        "incident_clear": "2026-02-12T16:00:00+00:00",
+        "unit_responses": [
+            {
+                "unit_neris_id": "FD53055879S001U005",
+                "response_mode": "EMERGENT",
+                "dispatch": "2026-02-12T14:30:15+00:00",
+                "enroute_to_scene": "2026-02-12T14:32:00+00:00",
+                "on_scene": "2026-02-12T14:40:00+00:00",
+                "unit_clear": "2026-02-12T16:00:00+00:00",
+            },
+        ],
+    },
+    "incident_status": {"status": "APPROVED"},
+}
+
+
 class TestImportFromNeris:
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    """Tests for import_from_neris with new signature: (neris_id, *, incident_id, station)."""
+
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_imports_neris_fields_into_draft(self, mock_store_cls, mock_neris, regular_user):
+    async def test_imports_neris_into_existing_draft(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
+    ):
         doc = IncidentDocument(
             id="doc-import-1",
             incident_number="26-000944",
@@ -1355,19 +1394,9 @@ class TestImportFromNeris:
             timestamps={"psap_answer": "2026-02-12T14:30:00"},
         )
 
-        mock_neris.return_value = {
-            "neris_incident_id": "FD53055879|26SJ0001|123",
-            "incident_type": "FIRE||STRUCTURE_FIRE",
-            "narrative": "Fire extinguished.",
-            "address": "94 Zepher Ln",
-            "city": "Friday Harbor",
-            "state": "WA",
-            "units": [UnitAssignment(unit_id="FD53055879S001U005")],
-            "timestamps": {
-                "psap_answer": "2026-02-12T14:30:15+00:00",
-                "first_unit_dispatched": "2026-02-12T14:32:00+00:00",
-            },
-        }
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {"address": "200 Spring St", "city": "Friday Harbor"}
+        mock_crew.return_value = []
 
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=doc)
@@ -1375,110 +1404,177 @@ class TestImportFromNeris:
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await import_from_neris("doc-import-1", neris_id="FD53055879|26SJ0001|123")
+        result = await import_from_neris("FD53055879|26-000944|123", incident_id="doc-import-1")
 
-        assert result["neris_incident_id"] == "FD53055879|26SJ0001|123"
+        assert result["neris_incident_id"] == "FD53055879|26-000944|123"
         assert result["incident_type"] == "FIRE||STRUCTURE_FIRE"
         assert result["narrative"] == "Fire extinguished."
-        assert result["address"] == "94 Zepher Ln"
+        assert result["address"] == "94 Zepher Ln"  # NERIS corrected address
         assert result["city"] == "Friday Harbor"
-        assert result["state"] == "WA"
-        assert len(result["units"]) >= 1
-        assert result["timestamps"]["first_unit_dispatched"] == "2026-02-12T14:32:00+00:00"
+        assert "import_comparison" in result
 
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_uses_existing_neris_id_when_param_omitted(
-        self, mock_store_cls, mock_neris, regular_user
+    async def test_creates_new_incident_from_neris(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
-        doc = IncidentDocument(
-            id="doc-import-2",
-            incident_number="26-000944",
-            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
-            created_by="ff@sjifire.org",
-            extras={"station": "S31"},
-            neris_incident_id="FD53055879|26SJ0001|123",
-        )
-
-        mock_neris.return_value = {
-            "neris_incident_id": "FD53055879|26SJ0001|123",
-            "incident_type": "MEDICAL||ILLNESS",
+        """When no incident_id is provided, creates a new incident."""
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {
+            "address": "200 Spring St",
+            "city": "Friday Harbor",
+            "state": "WA",
+            "latitude": 48.5343,
+            "longitude": -123.017,
+            "timestamps": {"psap_answer": "2026-02-12T14:30:00"},
+            "dispatch_comments": "18:30 Dispatched\n18:32 Enroute",
         }
+        mock_crew.return_value = [
+            {
+                "name": "Capt Smith",
+                "position": "Captain",
+                "section": "S31",
+                "start_time": "18:00",
+                "end_time": "18:00",
+            },
+        ]
 
         mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=doc)
-        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store.get_by_number = AsyncMock(return_value=None)  # No duplicate
+        mock_store.create = AsyncMock(side_effect=lambda doc: doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await import_from_neris("doc-import-2")
+        result = await import_from_neris("FD53055879|26-000944|123")
 
-        assert result["incident_type"] == "MEDICAL||ILLNESS"
-        mock_neris.assert_called_once_with("FD53055879|26SJ0001|123")
+        assert result["incident_number"] == "26-000944"
+        assert result["neris_incident_id"] == "FD53055879|26-000944|123"
+        assert result["incident_type"] == "FIRE||STRUCTURE_FIRE"
+        assert result["narrative"] == "Fire extinguished."
+        assert result["latitude"] == pytest.approx(48.5343)
+        assert result["dispatch_comments"] == "18:30 Dispatched\n18:32 Enroute"
+        assert result["status"] == "draft"
+        assert result["created_by"] == "ff@sjifire.org"
+        assert "import_comparison" in result
 
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_param_neris_id_overrides_existing(
-        self, mock_store_cls, mock_neris, regular_user
+    async def test_returns_comparison_with_discrepancies(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
-        doc = IncidentDocument(
-            id="doc-import-3",
-            incident_number="26-000944",
-            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
-            created_by="ff@sjifire.org",
-            extras={"station": "S31"},
-            neris_incident_id="FD|OLD|111",
-        )
-
-        mock_neris.return_value = {
-            "neris_incident_id": "FD|NEW|222",
-            "incident_type": "FIRE||CHIMNEY",
+        """Comparison detects timestamp and address differences."""
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {
+            "address": "200 Spring St",
+            "timestamps": {
+                "psap_answer": "2026-02-12T14:29:55",  # Different from NERIS
+                "alarm_time": "2026-02-12T14:30:30",  # Only in dispatch
+            },
         }
+        mock_crew.return_value = [
+            {
+                "name": "FF Jones",
+                "position": "Firefighter",
+                "section": "S31",
+                "start_time": "18:00",
+                "end_time": "18:00",
+            },
+        ]
 
         mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=doc)
-        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store.get_by_number = AsyncMock(return_value=None)
+        mock_store.create = AsyncMock(side_effect=lambda doc: doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await import_from_neris("doc-import-3", neris_id="FD|NEW|222")
+        result = await import_from_neris("FD53055879|26-000944|123")
 
-        assert result["neris_incident_id"] == "FD|NEW|222"
-        mock_neris.assert_called_once_with("FD|NEW|222")
+        comp = result["import_comparison"]
+        assert comp["sources"]["neris"] is True
+        assert comp["sources"]["dispatch"] is True
+        assert comp["sources"]["schedule"] is True
 
+        # Should have timestamp discrepancy for psap_answer
+        ts_disc = [d for d in comp["discrepancies"] if d["field"] == "psap_answer"]
+        assert len(ts_disc) == 1
+        assert ts_disc[0]["used"] == "dispatch"
+
+        # Should have address discrepancy
+        addr_disc = [d for d in comp["discrepancies"] if d["field"] == "address"]
+        assert len(addr_disc) == 1
+        assert addr_disc[0]["neris"] == "94 Zepher Ln"
+        assert addr_disc[0]["dispatch"] == "200 Spring St"
+
+        # alarm_time only in dispatch → gap filled
+        alarm_gaps = [g for g in comp["gaps_filled"] if g["field"] == "alarm_time"]
+        assert len(alarm_gaps) == 1
+        assert alarm_gaps[0]["source"] == "dispatch"
+
+        # Crew on duty included
+        assert len(comp["crew_on_duty"]) == 1
+        assert comp["crew_on_duty"][0]["name"] == "FF Jones"
+
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_error_no_neris_id_available(self, mock_store_cls, regular_user):
-        doc = IncidentDocument(
-            id="doc-import-4",
-            incident_number="26-000944",
-            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
-            created_by="ff@sjifire.org",
-        )
+    async def test_dispatch_timestamps_are_ground_truth(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
+    ):
+        """Dispatch timestamps overwrite NERIS; NERIS fills gaps only."""
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {
+            "timestamps": {
+                "psap_answer": "2026-02-12T14:29:55",  # Dispatch wins
+                "alarm_time": "2026-02-12T14:30:30",  # Only dispatch
+            },
+        }
+        mock_crew.return_value = []
 
         mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.get_by_number = AsyncMock(return_value=None)
+        mock_store.create = AsyncMock(side_effect=lambda doc: doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await import_from_neris("doc-import-4")
+        result = await import_from_neris("FD53055879|26-000944|123")
 
-        assert "error" in result
-        assert "No NERIS ID" in result["error"]
+        # Dispatch timestamp wins over NERIS
+        assert result["timestamps"]["psap_answer"] == "2026-02-12T14:29:55"
+        # Dispatch-only timestamp present
+        assert result["timestamps"]["alarm_time"] == "2026-02-12T14:30:30"
+        # NERIS-only timestamp fills gap
+        assert result["timestamps"]["incident_clear"] == "2026-02-12T16:00:00+00:00"
 
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_error_not_found(self, mock_store_cls, regular_user):
-        mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=None)
-        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    async def test_error_neris_not_found(self, mock_get_neris, regular_user):
+        mock_get_neris.return_value = None
 
-        result = await import_from_neris("nonexistent")
+        result = await import_from_neris("FD|BOGUS|999")
 
         assert "error" in result
         assert "not found" in result["error"].lower()
 
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    async def test_error_neris_api_unavailable(self, mock_get_neris, regular_user):
+        mock_get_neris.side_effect = RuntimeError("Connection refused")
+
+        result = await import_from_neris("FD|X|Y")
+
+        assert "error" in result
+        assert "Failed to fetch" in result["error"]
+
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_error_submitted_incident(self, mock_store_cls, regular_user):
+    async def test_error_submitted_incident(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
+    ):
         doc = IncidentDocument(
             id="doc-import-5",
             incident_number="26-000944",
@@ -1487,42 +1583,27 @@ class TestImportFromNeris:
             status="submitted",
         )
 
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {}
+        mock_crew.return_value = []
+
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await import_from_neris("doc-import-5", neris_id="FD|X|Y")
+        result = await import_from_neris("FD53055879|26-000944|123", incident_id="doc-import-5")
 
         assert "error" in result
         assert "submitted" in result["error"].lower()
 
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_error_neris_fetch_fails(self, mock_store_cls, mock_neris, regular_user):
-        doc = IncidentDocument(
-            id="doc-import-6",
-            incident_number="26-000944",
-            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
-            created_by="ff@sjifire.org",
-        )
-
-        mock_neris.return_value = {}  # Fetch failed, returns empty
-
-        mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=doc)
-        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        result = await import_from_neris("doc-import-6", neris_id="FD|BAD|999")
-
-        assert "error" in result
-        assert "Failed to fetch" in result["error"]
-        # Verify store.update was NOT called (incident not corrupted)
-        mock_store.update.assert_not_called()
-
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_access_denied_non_creator_non_officer(self, mock_store_cls):
+    async def test_access_denied_non_creator_non_officer(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew
+    ):
         stranger = UserContext(email="stranger@sjifire.org", name="X", user_id="x")
         set_current_user(stranger)
 
@@ -1533,21 +1614,28 @@ class TestImportFromNeris:
             created_by="ff@sjifire.org",
         )
 
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {}
+        mock_crew.return_value = []
+
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await import_from_neris("doc-import-7", neris_id="FD|X|Y")
+        result = await import_from_neris("FD53055879|26-000944|123", incident_id="doc-import-7")
 
         assert "error" in result
         assert "permission" in result["error"].lower()
 
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_timestamps_merge_preserves_local_keys(
-        self, mock_store_cls, mock_neris, regular_user
+    async def test_timestamps_merge_dispatch_wins(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
+        """Dispatch timestamps overwrite NERIS; local-only keys preserved."""
         doc = IncidentDocument(
             id="doc-import-8",
             incident_number="26-000944",
@@ -1559,13 +1647,11 @@ class TestImportFromNeris:
             },
         )
 
-        mock_neris.return_value = {
-            "neris_incident_id": "FD|X|Y",
-            "timestamps": {
-                "psap_answer": "2026-02-12T14:30:15+00:00",
-                "first_unit_dispatched": "2026-02-12T14:32:00+00:00",
-            },
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {
+            "timestamps": {"psap_answer": "2026-02-12T14:29:55"},
         }
+        mock_crew.return_value = []
 
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=doc)
@@ -1573,19 +1659,21 @@ class TestImportFromNeris:
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await import_from_neris("doc-import-8", neris_id="FD|X|Y")
+        result = await import_from_neris("FD53055879|26-000944|123", incident_id="doc-import-8")
 
-        # NERIS overwrites matching key
-        assert result["timestamps"]["psap_answer"] == "2026-02-12T14:30:15+00:00"
-        # NERIS adds new key
-        assert result["timestamps"]["first_unit_dispatched"] == "2026-02-12T14:32:00+00:00"
+        # Dispatch timestamp wins over NERIS
+        assert result["timestamps"]["psap_answer"] == "2026-02-12T14:29:55"
+        # NERIS-only timestamps fill gaps
+        assert "incident_clear" in result["timestamps"]
         # Local-only key preserved
         assert result["timestamps"]["local_custom_key"] == "2026-02-12T15:00:00"
 
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_edit_history_records_neris_import(
-        self, mock_store_cls, mock_neris, regular_user
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
         doc = IncidentDocument(
             id="doc-import-9",
@@ -1594,10 +1682,9 @@ class TestImportFromNeris:
             created_by="ff@sjifire.org",
         )
 
-        mock_neris.return_value = {
-            "neris_incident_id": "FD|X|Y",
-            "incident_type": "MEDICAL||ILLNESS",
-        }
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {}
+        mock_crew.return_value = []
 
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=doc)
@@ -1605,30 +1692,61 @@ class TestImportFromNeris:
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await import_from_neris("doc-import-9", neris_id="FD|X|Y")
+        result = await import_from_neris("FD53055879|26-000944|123", incident_id="doc-import-9")
 
         history = result["edit_history"]
         assert len(history) == 1
         assert history[0]["fields_changed"] == ["neris_import"]
         assert history[0]["editor_email"] == "ff@sjifire.org"
 
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_preserves_existing_narrative_on_neris_import(
-        self, mock_store_cls, mock_neris, regular_user
+    async def test_duplicate_incident_number_returns_error(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
+    ):
+        """Creating from NERIS when incident_number already exists returns error."""
+        existing = IncidentDocument(
+            id="existing-doc",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+        )
+
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {}
+        mock_crew.return_value = []
+
+        mock_store = AsyncMock()
+        mock_store.get_by_number = AsyncMock(return_value=existing)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await import_from_neris("FD53055879|26-000944|123")
+
+        assert "error" in result
+        assert "already exists" in result["error"]
+        assert result["existing_id"] == "existing-doc"
+
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_neris_narrative_overwrites_existing(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
         doc = IncidentDocument(
             id="doc-import-10",
             incident_number="26-000944",
             incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
-            narrative="Old narrative. Pulled hose line, applied water.",
+            narrative="Old narrative. Pulled hose line.",
         )
 
-        mock_neris.return_value = {
-            "neris_incident_id": "FD|X|Y",
-            "narrative": "Updated NERIS narrative",
-        }
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {}
+        mock_crew.return_value = []
 
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=doc)
@@ -1636,7 +1754,146 @@ class TestImportFromNeris:
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await import_from_neris("doc-import-10", neris_id="FD|X|Y")
+        result = await import_from_neris("FD53055879|26-000944|123", incident_id="doc-import-10")
 
         # Narrative overwritten by NERIS
-        assert result["narrative"] == "Updated NERIS narrative"
+        assert result["narrative"] == "Fire extinguished."
+
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_comparison_includes_neris_data_section(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
+    ):
+        """The comparison includes NERIS metadata for later update proposals."""
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {}
+        mock_crew.return_value = []
+
+        mock_store = AsyncMock()
+        mock_store.get_by_number = AsyncMock(return_value=None)
+        mock_store.create = AsyncMock(side_effect=lambda doc: doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await import_from_neris("FD53055879|26-000944|123")
+
+        comp = result["import_comparison"]
+        assert "neris_data" in comp
+        assert comp["neris_data"]["neris_id"] == "FD53055879|26-000944|123"
+        assert comp["neris_data"]["status"] == "APPROVED"
+
+
+# ── parse_neris_record (the pure-parsing half) ──
+class TestParseNerisRecord:
+    def test_extracts_all_fields(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD53055879|26-000039|1767316361")
+
+        assert result["neris_incident_id"] == "FD53055879|26-000039|1767316361"
+        assert result["incident_type"] == "FIRE||OUTSIDE_FIRE||CONSTRUCTION_WASTE"
+        assert result["narrative"] == "Campfire extinguished at 94 Zepher."
+        assert result["address"] == "94 Zepher"
+        assert result["city"] == "Friday Harbor"
+        assert result["state"] == "WA"
+        assert len(result["units"]) == 2
+        assert result["timestamps"]["psap_answer"] == "2026-01-02T01:12:41+00:00"
+        assert result["timestamps"]["incident_clear"] == "2026-01-02T02:16:31+00:00"
+
+    def test_handles_empty_record(self):
+        result = _parse_neris_record(
+            {"base": {}, "incident_types": [], "dispatch": {"unit_responses": []}},
+            "FD|X|Y",
+        )
+        assert result["neris_incident_id"] == "FD|X|Y"
+        assert "incident_type" not in result
+        assert "narrative" not in result
+
+    def test_handles_missing_dispatch(self):
+        result = _parse_neris_record(
+            {"base": {"outcome_narrative": "Test"}, "incident_types": [{"type": "MEDICAL"}]},
+            "FD|X|Y",
+        )
+        assert result["incident_type"] == "MEDICAL"
+        assert result["narrative"] == "Test"
+        assert "units" not in result
+
+
+# ── build_import_comparison ──
+class TestBuildImportComparison:
+    def test_detects_timestamp_discrepancy(self):
+        neris = {"timestamps": {"psap_answer": "2026-02-12T14:30:15"}}
+        dispatch = {"timestamps": {"psap_answer": "2026-02-12T14:29:55"}}
+
+        comp = _build_import_comparison(neris, dispatch, [])
+
+        ts_disc = [d for d in comp["discrepancies"] if d["field"] == "psap_answer"]
+        assert len(ts_disc) == 1
+        assert ts_disc[0]["used"] == "dispatch"
+
+    def test_detects_address_discrepancy(self):
+        neris = {"address": "94 Zepher Ln"}
+        dispatch = {"address": "200 Spring St"}
+
+        comp = _build_import_comparison(neris, dispatch, [])
+
+        addr_disc = [d for d in comp["discrepancies"] if d["field"] == "address"]
+        assert len(addr_disc) == 1
+        assert addr_disc[0]["used"] == "neris"
+
+    def test_no_discrepancy_when_matching(self):
+        neris = {"address": "200 Spring St", "timestamps": {"psap_answer": "2026-02-12T14:30:00"}}
+        dispatch = {
+            "address": "200 Spring St",
+            "timestamps": {"psap_answer": "2026-02-12T14:30:00"},
+        }
+
+        comp = _build_import_comparison(neris, dispatch, [])
+
+        assert len(comp["discrepancies"]) == 0
+
+    def test_tracks_gaps_filled(self):
+        neris = {"incident_type": "FIRE||CHIMNEY", "narrative": "Fire out."}
+        dispatch = {
+            "timestamps": {"alarm_time": "2026-02-12T14:30:30"},
+            "dispatch_comments": "18:30 Dispatched",
+        }
+        crew = [{"name": "Smith", "position": "Captain", "section": "S31"}]
+
+        comp = _build_import_comparison(neris, dispatch, crew)
+
+        gap_fields = {g["field"] for g in comp["gaps_filled"]}
+        assert "alarm_time" in gap_fields  # dispatch-only timestamp
+        assert "incident_type" in gap_fields  # from NERIS
+        assert "narrative" in gap_fields  # from NERIS
+        assert "crew" in gap_fields  # from schedule
+        assert "dispatch_comments" in gap_fields  # from dispatch
+
+    def test_sources_flags(self):
+        comp = _build_import_comparison({}, {}, [])
+        assert comp["sources"] == {"neris": False, "dispatch": False, "schedule": False}
+
+        comp2 = _build_import_comparison({"incident_type": "X"}, {"address": "Y"}, [{"name": "Z"}])
+        assert comp2["sources"] == {"neris": True, "dispatch": True, "schedule": True}
+
+    def test_includes_neris_metadata(self):
+        record = {
+            "neris_id": "FD|X|Y",
+            "dispatch": {"incident_number": "26-001234", "call_create": "2026-02-12T14:30:00"},
+            "incident_status": {"status": "SUBMITTED"},
+        }
+
+        comp = _build_import_comparison({"incident_type": "FIRE"}, {}, [], record)
+
+        assert comp["neris_data"]["neris_id"] == "FD|X|Y"
+        assert comp["neris_data"]["status"] == "SUBMITTED"
+
+    def test_unit_discrepancy_with_different_ids(self):
+        neris = {"units": [UnitAssignment(unit_id="FD53055879S001U005")]}
+        dispatch = {"units": [UnitAssignment(unit_id="E31")]}
+
+        comp = _build_import_comparison(neris, dispatch, [])
+
+        unit_disc = [d for d in comp["discrepancies"] if d["field"] == "units"]
+        assert len(unit_disc) == 1
+        assert "NERIS" in unit_disc[0]["note"]

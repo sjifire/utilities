@@ -10,6 +10,7 @@ NERIS interaction is only through this module (no separate NERIS tools).
 """
 
 import asyncio
+import contextlib
 import logging
 from datetime import UTC, datetime
 
@@ -192,22 +193,19 @@ def _address_from_neris_location(loc: dict) -> str:
     return " ".join(parts)
 
 
-async def _prefill_from_neris(neris_id: str) -> dict:
-    """Fetch a NERIS incident and return pre-fill fields for a local draft.
+def _parse_neris_record(record: dict, neris_id: str) -> dict:
+    """Extract pre-fill fields from a NERIS incident record.
 
-    Extracts incident type, narrative, location, unit responses, and
-    timestamps from the NERIS record. Returns an empty dict on any error
-    so creation can proceed with dispatch data alone.
+    This is the pure-parsing half of the NERIS prefill pipeline.
+    ``_prefill_from_neris`` fetches the record and delegates here.
+
+    Args:
+        record: Full NERIS incident record dict
+        neris_id: NERIS compound ID for the record
+
+    Returns:
+        Dict of pre-fill field values
     """
-    try:
-        record = await asyncio.to_thread(_get_neris_incident, neris_id)
-    except Exception:
-        logger.warning("Failed to fetch NERIS incident %s for prefill", neris_id, exc_info=True)
-        return {}
-
-    if not record:
-        return {}
-
     prefill: dict = {"neris_incident_id": neris_id}
 
     # Incident type — first primary type
@@ -273,6 +271,223 @@ async def _prefill_from_neris(neris_id: str) -> dict:
         prefill["timestamps"] = timestamps
 
     return prefill
+
+
+async def _prefill_from_neris(neris_id: str) -> dict:
+    """Fetch a NERIS incident and return pre-fill fields for a local draft.
+
+    Extracts incident type, narrative, location, unit responses, and
+    timestamps from the NERIS record. Returns an empty dict on any error
+    so creation can proceed with dispatch data alone.
+    """
+    try:
+        record = await asyncio.to_thread(_get_neris_incident, neris_id)
+    except Exception:
+        logger.warning("Failed to fetch NERIS incident %s for prefill", neris_id, exc_info=True)
+        return {}
+
+    if not record:
+        return {}
+
+    return _parse_neris_record(record, neris_id)
+
+
+async def _get_crew_for_incident(incident_dt: datetime) -> list[dict]:
+    """Look up who was on duty at the time of an incident.
+
+    Uses the schedule store directly (no auth wrapper) to fetch
+    crew entries covering the incident datetime.
+
+    Args:
+        incident_dt: When the incident occurred
+
+    Returns:
+        List of crew dicts with name, position, section, start_time, end_time.
+        Empty list if schedule data is unavailable.
+    """
+    from sjifire.ops.schedule.store import ScheduleStore
+
+    try:
+        async with ScheduleStore() as store:
+            entries = await store.get_for_time(incident_dt)
+    except Exception:
+        logger.warning("Failed to look up schedule for %s", incident_dt, exc_info=True)
+        return []
+
+    return [
+        {
+            "name": e.name,
+            "position": e.position,
+            "section": e.section,
+            "start_time": e.start_time,
+            "end_time": e.end_time,
+        }
+        for e in entries
+    ]
+
+
+def _build_import_comparison(
+    neris_prefill: dict,
+    dispatch_prefill: dict,
+    crew: list[dict],
+    neris_record: dict | None = None,
+) -> dict:
+    """Compare NERIS, dispatch, and schedule data to find discrepancies.
+
+    Returns a structured comparison that the assistant can present to the
+    user, highlighting differences and gaps filled from each source.
+
+    Args:
+        neris_prefill: Parsed NERIS data (from ``_parse_neris_record``)
+        dispatch_prefill: Parsed dispatch data (from ``_prefill_from_dispatch``)
+        crew: On-duty crew list (from ``_get_crew_for_incident``)
+        neris_record: Raw NERIS record for extra context (optional)
+
+    Returns:
+        Dict with ``sources``, ``discrepancies``, ``gaps_filled``,
+        ``crew_on_duty``, and ``neris_data`` sections.
+    """
+    comparison: dict = {
+        "sources": {
+            "neris": bool(neris_prefill),
+            "dispatch": bool(dispatch_prefill),
+            "schedule": bool(crew),
+        },
+        "discrepancies": [],
+        "gaps_filled": [],
+        "crew_on_duty": crew,
+    }
+
+    discrepancies = comparison["discrepancies"]
+    gaps = comparison["gaps_filled"]
+
+    neris_ts = neris_prefill.get("timestamps", {})
+    dispatch_ts = dispatch_prefill.get("timestamps", {})
+
+    # Compare timestamps between NERIS and dispatch
+    for ts_key, label in [
+        ("psap_answer", "Call creation / PSAP answer"),
+        ("alarm_time", "Alarm time (agency paged)"),
+        ("first_unit_enroute", "First unit enroute"),
+        ("first_unit_arrived", "First unit arrived on scene"),
+        ("incident_clear", "Incident clear"),
+    ]:
+        neris_val = neris_ts.get(ts_key)
+        dispatch_val = dispatch_ts.get(ts_key)
+
+        if neris_val and dispatch_val and neris_val != dispatch_val:
+            discrepancies.append(
+                {
+                    "field": ts_key,
+                    "label": label,
+                    "neris": neris_val,
+                    "dispatch": dispatch_val,
+                    "used": "dispatch",
+                }
+            )
+        elif dispatch_val and not neris_val:
+            gaps.append({"field": ts_key, "label": label, "source": "dispatch"})
+        elif neris_val and not dispatch_val:
+            gaps.append({"field": ts_key, "label": label, "source": "neris"})
+
+    # Compare addresses
+    neris_addr = neris_prefill.get("address", "")
+    dispatch_addr = dispatch_prefill.get("address", "")
+    if neris_addr and dispatch_addr and neris_addr != dispatch_addr:
+        discrepancies.append(
+            {
+                "field": "address",
+                "label": "Incident address",
+                "neris": neris_addr,
+                "dispatch": dispatch_addr,
+                "used": "neris",
+                "note": "NERIS address may be corrected; dispatch address is from CAD.",
+            }
+        )
+
+    # Compare unit counts
+    neris_units = neris_prefill.get("units", [])
+    dispatch_units = dispatch_prefill.get("units", [])
+    if neris_units and dispatch_units:
+        neris_unit_ids = [u.unit_id for u in neris_units]
+        dispatch_unit_ids = [u.unit_id for u in dispatch_units]
+        if set(neris_unit_ids) != set(dispatch_unit_ids):
+            discrepancies.append(
+                {
+                    "field": "units",
+                    "label": "Responding units",
+                    "neris": neris_unit_ids,
+                    "dispatch": dispatch_unit_ids,
+                    "note": (
+                        "NERIS and dispatch list different units. NERIS may use "
+                        "NERIS-registered unit IDs (e.g. FD53055879S001U005) while "
+                        "dispatch uses local codes (e.g. E31). Dispatch units are "
+                        "used as the baseline."
+                    ),
+                }
+            )
+    elif dispatch_units and not neris_units:
+        gaps.append(
+            {
+                "field": "units",
+                "label": "Responding units",
+                "source": "dispatch",
+                "count": len(dispatch_units),
+            }
+        )
+
+    # Note what NERIS provides that dispatch doesn't
+    if neris_prefill.get("incident_type"):
+        gaps.append(
+            {
+                "field": "incident_type",
+                "label": "Incident type classification",
+                "source": "neris",
+                "value": neris_prefill["incident_type"],
+            }
+        )
+    if neris_prefill.get("narrative"):
+        gaps.append(
+            {
+                "field": "narrative",
+                "label": "Outcome narrative",
+                "source": "neris",
+            }
+        )
+
+    # Crew from schedule
+    if crew:
+        gaps.append(
+            {
+                "field": "crew",
+                "label": "On-duty crew roster",
+                "source": "schedule",
+                "count": len(crew),
+            }
+        )
+
+    # Include dispatch enrichment data if available
+    if dispatch_prefill.get("dispatch_comments"):
+        gaps.append(
+            {
+                "field": "dispatch_comments",
+                "label": "CAD comments / radio log",
+                "source": "dispatch",
+            }
+        )
+
+    # Stash NERIS-specific data the user might want to review or update later
+    if neris_record:
+        neris_dispatch = neris_record.get("dispatch") or {}
+        status_info = neris_record.get("incident_status") or {}
+        comparison["neris_data"] = {
+            "neris_id": neris_record.get("neris_id", ""),
+            "status": status_info.get("status", ""),
+            "incident_number": neris_dispatch.get("incident_number", ""),
+            "call_create": neris_dispatch.get("call_create", ""),
+        }
+
+    return comparison
 
 
 def _check_view_access(doc: IncidentDocument, user_email: str, is_editor: bool) -> bool:
@@ -361,12 +576,50 @@ async def create_incident(
         }
 
     # Pre-fill from dispatch data (address, coordinates, timestamps, units)
-    prefill = await _prefill_from_dispatch(incident_number)
+    dispatch_prefill = await _prefill_from_dispatch(incident_number)
 
-    # If a NERIS ID was provided, fetch and merge NERIS data over dispatch
+    # If a NERIS ID was provided, fetch NERIS data and build comparison
+    neris_prefill: dict = {}
+    neris_record: dict | None = None
+    comparison: dict | None = None
     if neris_id:
-        neris_prefill = await _prefill_from_neris(neris_id)
-        prefill = {**prefill, **neris_prefill}
+        try:
+            neris_record = await asyncio.to_thread(_get_neris_incident, neris_id)
+        except Exception:
+            logger.warning("Failed to fetch NERIS incident %s", neris_id, exc_info=True)
+        if neris_record:
+            neris_prefill = _parse_neris_record(neris_record, neris_id)
+
+    # Merge: dispatch base, NERIS overlay (NERIS wins for shared keys)
+    prefill = {**dispatch_prefill}
+    if neris_prefill:
+        # NERIS overwrites dispatch for keys it provides
+        prefill.update(neris_prefill)
+        # But for timestamps, dispatch is ground truth — NERIS fills gaps only
+        dispatch_ts = dispatch_prefill.get("timestamps", {})
+        neris_ts = neris_prefill.get("timestamps", {})
+        merged_ts = {**neris_ts, **dispatch_ts}  # dispatch overwrites NERIS
+        if merged_ts:
+            prefill["timestamps"] = merged_ts
+
+    # Fetch schedule data for cross-referencing when NERIS ID is present
+    schedule_crew: list[dict] = []
+    if neris_id:
+        dt_for_schedule = datetime.strptime(incident_date, "%Y-%m-%d").replace(tzinfo=UTC)
+        # Try to get more precise time from dispatch or NERIS
+        for ts_source in (dispatch_prefill, neris_prefill):
+            psap = ts_source.get("timestamps", {}).get("psap_answer")
+            if psap:
+                try:
+                    dt_for_schedule = datetime.fromisoformat(psap)
+                    break
+                except ValueError:
+                    pass
+        schedule_crew = await _get_crew_for_incident(dt_for_schedule)
+
+        comparison = _build_import_comparison(
+            neris_prefill, dispatch_prefill, schedule_crew, neris_record
+        )
 
     # Build units from prefill, then overlay crew assignments
     units = prefill.get("units", [])
@@ -400,6 +653,9 @@ async def create_incident(
                     if not u.personnel:
                         u.personnel = personnel
                         break
+    elif schedule_crew and units:
+        # Auto-assign schedule crew when no explicit crew provided
+        _overlay_crew_from_schedule(units, schedule_crew)
 
     # Parse incident_date as datetime (start of day)
     dt = datetime.strptime(incident_date, "%Y-%m-%d").replace(tzinfo=UTC)
@@ -426,7 +682,10 @@ async def create_incident(
         created = await store.create(doc)
 
     logger.info("User %s created incident %s", user.email, created.id)
-    return created.model_dump(mode="json")
+    result = created.model_dump(mode="json")
+    if comparison:
+        result["import_comparison"] = comparison
+    return result
 
 
 async def get_incident(incident_id: str) -> dict:
@@ -897,113 +1156,365 @@ async def reset_incident(incident_id: str) -> dict:
 
 
 async def import_from_neris(
-    incident_id: str,
-    neris_id: str | None = None,
+    neris_id: str,
+    *,
+    incident_id: str | None = None,
+    station: str = "S31",
 ) -> dict:
-    """Import or re-import data from a NERIS record into an existing incident.
+    """Import a NERIS record, cross-referencing with dispatch and schedule data.
 
-    Overwrites incident type, outcome narrative, location, unit responses,
-    and timestamps with values from the NERIS record. Timestamps are merged
-    (NERIS values overwrite matching keys, local-only keys preserved).
-    Does NOT overwrite actions_taken_narrative (local-only content).
+    Creates a new local incident if ``incident_id`` is not provided, or
+    updates an existing one. In both cases fetches the NERIS record,
+    looks up the corresponding dispatch call, and pulls the on-duty crew
+    schedule. Returns the merged incident document together with a
+    ``comparison`` section that highlights discrepancies between the
+    three data sources and notes which gaps were filled from where.
 
-    Use this when a NERIS record has been updated and you want to sync
-    those changes back into the local draft.
+    The merge strategy:
+    - **Dispatch timestamps** are ground truth (real-time CAD data)
+    - **NERIS** provides incident classification, narrative, and corrected
+      location
+    - **Schedule** provides crew assignments
+
+    After reviewing the report, the user can choose to update NERIS with
+    any corrections identified during the review.
 
     Args:
-        incident_id: The incident document ID
-        neris_id: NERIS compound ID (optional if already set on incident)
+        neris_id: NERIS compound incident ID
+            (e.g., "FD53055879|26001980|1770500761")
+        incident_id: Existing incident document ID to import into.
+            When omitted a new draft is created from the NERIS data.
+        station: Station code for new incidents (default "S31",
+            ignored when importing into an existing incident)
 
     Returns:
-        The updated incident document, or an error
+        The incident document with an ``import_comparison`` key showing
+        discrepancies, gaps filled, and crew on duty. Or an error dict.
     """
     user = get_current_user()
 
-    async with IncidentStore() as store:
-        doc = await store.get_by_id(incident_id)
+    # ── 1. Fetch the full NERIS record ──
+    try:
+        neris_record = await asyncio.to_thread(_get_neris_incident, neris_id)
+    except Exception:
+        logger.warning("Failed to fetch NERIS incident %s", neris_id, exc_info=True)
+        return {
+            "error": f"Failed to fetch NERIS record '{neris_id}'. The NERIS API may be unavailable."
+        }
+
+    if not neris_record:
+        return {"error": f"NERIS incident not found: {neris_id}. Verify the NERIS ID is correct."}
+
+    neris_prefill = _parse_neris_record(neris_record, neris_id)
+
+    # ── 2. Derive dispatch number and date from NERIS record ──
+    neris_dispatch = neris_record.get("dispatch") or {}
+    neris_incident_number = neris_dispatch.get("incident_number", "")
+    neris_call_create = neris_dispatch.get("call_create", "")
+
+    # ── 3. Fetch dispatch data ──
+    # Determine incident number: from existing doc, or from NERIS record
+    if incident_id:
+        async with IncidentStore() as store:
+            doc = await store.get_by_id(incident_id)
 
         if doc is None:
             return {"error": "Incident not found"}
-
         if not _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to edit this incident"}
-
         if doc.status == "submitted":
             return {"error": "Cannot modify a submitted incident"}
 
-        # Determine which NERIS ID to use
-        effective_neris_id = neris_id or doc.neris_incident_id
-        if not effective_neris_id:
-            return {
-                "error": "No NERIS ID available. Provide a neris_id parameter "
-                "or set one on the incident first."
-            }
+        dispatch_number = doc.incident_number
+    else:
+        dispatch_number = neris_incident_number
 
-        # Fetch NERIS data
-        prefill = await _prefill_from_neris(effective_neris_id)
-        if not prefill:
-            return {
-                "error": f"Failed to fetch NERIS record '{effective_neris_id}'. "
-                "The record may not exist or the NERIS API may be unavailable."
-            }
+    dispatch_prefill: dict = {}
+    if dispatch_number:
+        dispatch_prefill = await _prefill_from_dispatch(dispatch_number)
 
-        # Apply NERIS fields — overwrites existing values
-        fields_changed: list[str] = []
+    # ── 4. Determine incident datetime for schedule lookup ──
+    incident_dt: datetime | None = None
+    if incident_id and doc is not None:
+        incident_dt = doc.incident_datetime
+    elif neris_call_create:
+        with contextlib.suppress(ValueError):
+            incident_dt = datetime.fromisoformat(neris_call_create)
 
-        doc.neris_incident_id = prefill.get("neris_incident_id", effective_neris_id)
-        fields_changed.append("neris_incident_id")
+    # ── 5. Fetch schedule data ──
+    crew: list[dict] = []
+    if incident_dt:
+        crew = await _get_crew_for_incident(incident_dt)
 
-        if "incident_type" in prefill:
-            doc.incident_type = prefill["incident_type"]
-            fields_changed.append("incident_type")
+    # ── 6. Build comparison ──
+    comparison = _build_import_comparison(neris_prefill, dispatch_prefill, crew, neris_record)
 
-        if "narrative" in prefill:
-            doc.narrative = prefill["narrative"]
-            fields_changed.append("narrative")
-
-        if "address" in prefill:
-            doc.address = prefill["address"]
-            fields_changed.append("address")
-        if "city" in prefill:
-            doc.city = prefill["city"]
-            fields_changed.append("city")
-        if "state" in prefill:
-            doc.state = prefill["state"]
-            fields_changed.append("state")
-
-        if "units" in prefill:
-            # Preserve existing personnel assignments when replacing unit data
-            existing_personnel = {u.unit_id: u.personnel for u in doc.units}
-            for u in prefill["units"]:
-                if u.unit_id in existing_personnel:
-                    u.personnel = existing_personnel[u.unit_id]
-            doc.units = prefill["units"]
-            fields_changed.append("units")
-
-        if "timestamps" in prefill:
-            doc.timestamps = {**doc.timestamps, **prefill["timestamps"]}
-            fields_changed.append("timestamps")
-
-        # Record edit history
-        doc.edit_history.append(
-            EditEntry(
-                editor_email=user.email,
-                editor_name=user.name,
-                fields_changed=["neris_import"],
-            )
+    # ── 7. Merge data and create/update the incident ──
+    if incident_id and doc is not None:
+        # Update existing incident
+        return await _apply_neris_import_to_existing(
+            doc, neris_prefill, dispatch_prefill, crew, comparison, user
+        )
+    else:
+        # Create new incident from NERIS
+        return await _create_incident_from_neris(
+            neris_prefill,
+            dispatch_prefill,
+            crew,
+            comparison,
+            neris_incident_number,
+            neris_call_create,
+            station,
+            user,
         )
 
-        doc.updated_at = datetime.now(UTC)
+
+async def _apply_neris_import_to_existing(
+    doc: IncidentDocument,
+    neris_prefill: dict,
+    dispatch_prefill: dict,
+    crew: list[dict],
+    comparison: dict,
+    user,
+) -> dict:
+    """Apply merged NERIS + dispatch + schedule data to an existing incident."""
+    fields_changed: list[str] = []
+
+    # NERIS ID
+    doc.neris_incident_id = neris_prefill.get("neris_incident_id", doc.neris_incident_id)
+    fields_changed.append("neris_incident_id")
+
+    # Incident type from NERIS (dispatch doesn't have this)
+    if "incident_type" in neris_prefill:
+        doc.incident_type = neris_prefill["incident_type"]
+        fields_changed.append("incident_type")
+
+    # Narrative from NERIS
+    if "narrative" in neris_prefill:
+        doc.narrative = neris_prefill["narrative"]
+        fields_changed.append("narrative")
+
+    # Address — prefer NERIS (may be corrected), fall back to dispatch
+    if "address" in neris_prefill:
+        doc.address = neris_prefill["address"]
+        fields_changed.append("address")
+    elif "address" in dispatch_prefill and not doc.address:
+        doc.address = dispatch_prefill["address"]
+        fields_changed.append("address")
+    if "city" in neris_prefill:
+        doc.city = neris_prefill["city"]
+    elif "city" in dispatch_prefill and not doc.city:
+        doc.city = dispatch_prefill["city"]
+    if "state" in neris_prefill:
+        doc.state = neris_prefill["state"]
+    elif "state" in dispatch_prefill and not doc.state:
+        doc.state = dispatch_prefill["state"]
+
+    # Coordinates from dispatch (NERIS doesn't provide these)
+    if "latitude" in dispatch_prefill and doc.latitude is None:
+        doc.latitude = dispatch_prefill["latitude"]
+        fields_changed.append("latitude")
+    if "longitude" in dispatch_prefill and doc.longitude is None:
+        doc.longitude = dispatch_prefill["longitude"]
+        fields_changed.append("longitude")
+
+    # Units — prefer dispatch (local unit codes), but keep NERIS response_mode
+    if "units" in dispatch_prefill:
+        neris_modes = {}
+        for u in neris_prefill.get("units", []):
+            if u.response_mode:
+                neris_modes[u.unit_id] = u.response_mode
+        existing_personnel = {u.unit_id: u.personnel for u in doc.units}
+        for u in dispatch_prefill["units"]:
+            if u.unit_id in existing_personnel:
+                u.personnel = existing_personnel[u.unit_id]
+        doc.units = dispatch_prefill["units"]
+        fields_changed.append("units")
+    elif "units" in neris_prefill:
+        existing_personnel = {u.unit_id: u.personnel for u in doc.units}
+        for u in neris_prefill["units"]:
+            if u.unit_id in existing_personnel:
+                u.personnel = existing_personnel[u.unit_id]
+        doc.units = neris_prefill["units"]
+        fields_changed.append("units")
+
+    # Timestamps — dispatch is ground truth, NERIS fills gaps
+    merged_ts = {**doc.timestamps}
+    neris_ts = neris_prefill.get("timestamps", {})
+    dispatch_ts = dispatch_prefill.get("timestamps", {})
+    # Dispatch timestamps overwrite everything (ground truth)
+    merged_ts.update(dispatch_ts)
+    # NERIS timestamps fill remaining gaps only
+    for k, v in neris_ts.items():
+        if k not in merged_ts:
+            merged_ts[k] = v
+    if merged_ts != doc.timestamps:
+        doc.timestamps = merged_ts
+        fields_changed.append("timestamps")
+
+    # Dispatch comments
+    if "dispatch_comments" in dispatch_prefill and not doc.dispatch_comments:
+        doc.dispatch_comments = dispatch_prefill["dispatch_comments"]
+        fields_changed.append("dispatch_comments")
+
+    # Assign crew from schedule to units
+    if crew and doc.units:
+        _overlay_crew_from_schedule(doc.units, crew)
+        fields_changed.append("crew")
+
+    # Record edit history
+    doc.edit_history.append(
+        EditEntry(
+            editor_email=user.email,
+            editor_name=user.name,
+            fields_changed=["neris_import"],
+        )
+    )
+
+    doc.updated_at = datetime.now(UTC)
+
+    async with IncidentStore() as store:
         updated = await store.update(doc)
 
     logger.info(
-        "User %s imported NERIS data into incident %s from %s: %s",
+        "User %s imported NERIS data into incident %s: %s",
         user.email,
-        incident_id,
-        effective_neris_id,
+        doc.id,
         fields_changed,
     )
-    return updated.model_dump(mode="json")
+    result = updated.model_dump(mode="json")
+    result["import_comparison"] = comparison
+    return result
+
+
+async def _create_incident_from_neris(
+    neris_prefill: dict,
+    dispatch_prefill: dict,
+    crew: list[dict],
+    comparison: dict,
+    neris_incident_number: str,
+    neris_call_create: str,
+    station: str,
+    user,
+) -> dict:
+    """Create a new incident from merged NERIS + dispatch + schedule data."""
+    # Derive incident number — prefer dispatch format, fall back to NERIS
+    incident_number = neris_incident_number
+    if not incident_number:
+        return {
+            "error": "Cannot determine incident number from NERIS record. "
+            "The NERIS dispatch section may be incomplete."
+        }
+
+    # Check for duplicate
+    async with IncidentStore() as store:
+        existing = await store.get_by_number(incident_number)
+    if existing is not None:
+        return {
+            "error": f"An incident report for {incident_number} already exists "
+            f"(status: {existing.status}, created by {existing.created_by}). "
+            f"Use import_from_neris with incident_id='{existing.id}' to "
+            f"re-import NERIS data into the existing report.",
+            "existing_id": existing.id,
+        }
+
+    # Parse incident date
+    incident_dt = datetime.now(UTC)
+    if neris_call_create:
+        with contextlib.suppress(ValueError):
+            incident_dt = datetime.fromisoformat(neris_call_create)
+
+    # Merge: dispatch base, NERIS overlay
+    # Start with dispatch data as the base
+    merged: dict = {**dispatch_prefill}
+    # NERIS overwrites for fields it provides (incident_type, narrative, address)
+    for key in ("incident_type", "narrative", "address", "city", "state", "neris_incident_id"):
+        if key in neris_prefill:
+            merged[key] = neris_prefill[key]
+    # For coordinates, dispatch is the only source
+    # For timestamps, dispatch is ground truth; NERIS fills gaps
+    dispatch_ts = dispatch_prefill.get("timestamps", {})
+    neris_ts = neris_prefill.get("timestamps", {})
+    merged_ts = {**neris_ts, **dispatch_ts}  # dispatch overwrites NERIS
+    if merged_ts:
+        merged["timestamps"] = merged_ts
+
+    # Units: prefer dispatch (local codes), fall back to NERIS
+    if "units" not in merged and "units" in neris_prefill:
+        merged["units"] = neris_prefill["units"]
+
+    units = merged.get("units", [])
+
+    # Overlay crew from schedule
+    if crew and units:
+        _overlay_crew_from_schedule(units, crew)
+
+    doc = IncidentDocument(
+        incident_number=incident_number,
+        incident_datetime=incident_dt,
+        incident_type=merged.get("incident_type"),
+        address=merged.get("address"),
+        city=merged.get("city", ""),
+        state=merged.get("state", ""),
+        latitude=merged.get("latitude"),
+        longitude=merged.get("longitude"),
+        units=units,
+        timestamps=merged.get("timestamps", {}),
+        narrative=merged.get("narrative", ""),
+        dispatch_comments=merged.get("dispatch_comments", ""),
+        neris_incident_id=merged.get("neris_incident_id"),
+        extras={"station": station},
+        created_by=user.email,
+    )
+
+    async with IncidentStore() as store:
+        created = await store.create(doc)
+
+    logger.info("User %s created incident %s from NERIS import", user.email, created.id)
+    result = created.model_dump(mode="json")
+    result["import_comparison"] = comparison
+    return result
+
+
+def _overlay_crew_from_schedule(
+    units: list[UnitAssignment],
+    crew: list[dict],
+) -> None:
+    """Best-effort assignment of on-duty crew to units.
+
+    Does NOT overwrite existing personnel assignments. Only fills in units
+    that have no personnel yet. Career crew from S31 are assigned to the
+    first ``*31`` unit (typically E31). Other crew are left unassigned for
+    the user to place.
+    """
+    # Find units with no personnel
+    empty_units = [u for u in units if not u.personnel]
+    if not empty_units:
+        return
+
+    # Career positions that ride together on S31 primary apparatus
+    career_positions = {"Captain", "Lieutenant", "Apparatus Operator"}
+
+    # Separate career S31 crew from others
+    s31_crew = [
+        c
+        for c in crew
+        if c.get("section", "").startswith("S31") or c.get("position") in career_positions
+    ]
+
+    # Find the first *31 unit with no personnel
+    primary_31 = next((u for u in empty_units if u.unit_id.endswith("31")), None)
+    if primary_31 and s31_crew:
+        primary_31.personnel = [
+            PersonnelAssignment(
+                name=c["name"],
+                position=c.get("position", ""),
+                role="officer"
+                if c.get("position") in ("Captain", "Lieutenant")
+                else ("driver" if c.get("position") == "Apparatus Operator" else ""),
+            )
+            for c in s31_crew
+        ]
 
 
 async def list_neris_incidents() -> dict:
