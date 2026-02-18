@@ -799,6 +799,28 @@ class TestDutyCalendarSyncSyncEvents:
         calendar_sync.update_events_batch.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_sync_events_force_updates_unchanged(self, calendar_sync, sample_events):
+        """Force flag updates events even when content is identical."""
+        # Existing events have the SAME body as new events
+        calendar_sync.get_existing_events = AsyncMock(
+            return_value={
+                date(2026, 2, 1): ("id-1", sample_events[0].body_html),
+                date(2026, 2, 2): ("id-2", sample_events[1].body_html),
+            }
+        )
+        calendar_sync.create_events_batch = AsyncMock(return_value=(0, []))
+        calendar_sync.update_events_batch = AsyncMock(return_value=(2, []))
+
+        result = await calendar_sync.sync_events(
+            sample_events, date(2026, 2, 1), date(2026, 2, 28), force=True
+        )
+
+        # Without force these would be unchanged; with force they're updated
+        assert result.events_updated == 2
+        assert result.events_unchanged == 0
+        calendar_sync.update_events_batch.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_sync_events_dry_run(self, calendar_sync, sample_events):
         """Dry run doesn't call batch methods."""
         calendar_sync.get_existing_events = AsyncMock(return_value={})
@@ -1037,3 +1059,19 @@ class TestDutyCalendarSyncSyncWrapper:
         # Check dry_run was passed (4th positional arg)
         call_args = mock_sync_events.call_args
         assert call_args[0][3] is True
+
+    def test_sync_force_passed_through(self, calendar_sync, sample_schedules):
+        """Force flag is passed to sync_events."""
+        with (
+            patch.object(calendar_sync, "_load_user_contacts", new=AsyncMock(return_value={})),
+            patch.object(
+                calendar_sync,
+                "sync_events",
+                new=AsyncMock(return_value=MagicMock(events_created=0, events_updated=0)),
+            ) as mock_sync_events,
+        ):
+            calendar_sync.sync(sample_schedules, force=True)
+
+        # Check force was passed (5th positional arg)
+        call_args = mock_sync_events.call_args
+        assert call_args[0][4] is True

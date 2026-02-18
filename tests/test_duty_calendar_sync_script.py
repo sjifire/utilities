@@ -253,6 +253,30 @@ class TestMainCLI:
         mock_aladtec_scraper.get_schedule_range.assert_called_once()
         mock_calendar_sync.sync.assert_called_once()
 
+    def test_force_flag_passed_to_sync(
+        self, mock_calendar_sync, mock_aladtec_scraper, mock_env_vars
+    ):
+        """--force flag is passed through to sync()."""
+        mock_calendar_sync.sync.return_value = SyncResult(events_updated=10)
+
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "calendar-sync",
+                "--month",
+                "Jan 2026",
+                "--mailbox",
+                "test@sjifire.org",
+                "--force",
+            ],
+        ):
+            result = main()
+
+        assert result == 0
+        call_kwargs = mock_calendar_sync.sync.call_args[1]
+        assert call_kwargs["force"] is True
+
     def test_month_mode_aladtec_login_failure(
         self, mock_calendar_sync, mock_aladtec_scraper, mock_env_vars
     ):
