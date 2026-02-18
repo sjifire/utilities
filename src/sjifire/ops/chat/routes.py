@@ -393,8 +393,13 @@ async def chat_stream(request: Request) -> Response:
                     saved_image_refs.append(
                         {"attachment_id": result["id"], "content_type": img["media_type"]}
                     )
+                else:
+                    logger.warning("Auto-save attachment returned error: %s", result["error"])
             except Exception:
                 logger.warning("Failed to auto-save chat image", exc_info=True)
+
+    if saved_image_refs:
+        logger.info("Chat auto-saved %d image(s) as attachments: %s", len(saved_image_refs), saved_image_refs)
 
     async def event_generator():
         async for event in stream_chat(
