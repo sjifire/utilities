@@ -15,6 +15,7 @@ class ConversationMessage(BaseModel):
 
     role: Literal["user", "assistant"]
     content: str
+    images: list[dict] | None = None  # [{attachment_id, content_type}] for blob-backed images
     tool_use: list[dict] | None = None
     tool_results: list[dict] | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))

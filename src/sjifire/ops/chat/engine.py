@@ -383,6 +383,7 @@ async def stream_chat(
     user: UserContext,
     *,
     images: list[dict] | None = None,
+    image_refs: list[dict] | None = None,
 ) -> AsyncGenerator[str]:
     r"""Stream a chat response as Server-Sent Events.
 
@@ -488,8 +489,10 @@ async def stream_chat(
         api_messages.append({"role": "user", "content": prefixed_message})
     api_messages = _trim_messages(api_messages)
 
-    # Record user message (text only — images are one-shot, not stored)
-    conversation.messages.append(ConversationMessage(role="user", content=user_message))
+    # Record user message with image references (attachment IDs for blob-backed display)
+    conversation.messages.append(
+        ConversationMessage(role="user", content=user_message, images=image_refs)
+    )
 
     # Persist user message immediately so interrupted streams don't lose it.
     # If the SSE connection drops mid-stream, the generator is cancelled and
