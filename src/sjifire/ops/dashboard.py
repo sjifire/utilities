@@ -726,6 +726,10 @@ async def _fetch_recently_completed(*, hours: int = 12) -> list[dict]:
         call_data["archived"] = True
         call_data["completed_at"] = doc.stored_at.isoformat()
 
+        # Kiosk frontend uses unit_call_sign; real data has unit_number
+        for rd in call_data.get("responder_details", []):
+            rd.setdefault("unit_call_sign", rd.get("unit_number", ""))
+
         results.append(call_data)
 
     return results
@@ -875,6 +879,10 @@ async def _fetch_open_calls_enriched() -> list[dict]:
             call_data["longitude"] = lon
             call_data["severity"] = _get_severity(doc.nature)
             call_data["icon"] = _get_icon(doc.nature)
+
+            # Kiosk frontend uses unit_call_sign; real data has unit_number
+            for rd in call_data.get("responder_details", []):
+                rd.setdefault("unit_call_sign", rd.get("unit_number", ""))
 
             # Site history (max 5)
             if doc.address:
