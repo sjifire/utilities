@@ -1084,13 +1084,19 @@ function chatApp() {
           get_incident: 'Loading incident data...',
           update_incident: 'Saving changes...',
           reset_incident: 'Resetting report...',
+          submit_incident: 'Submitting to NERIS...',
           get_dispatch_call: 'Looking up dispatch data...',
+          list_dispatch_calls: 'Loading recent calls...',
           search_dispatch_calls: 'Searching dispatch calls...',
           get_on_duty_crew: 'Checking crew schedule...',
           get_neris_values: 'Looking up NERIS values...',
-          get_personnel: 'Looking up personnel...'
+          list_neris_value_sets: 'Loading value sets...',
+          get_personnel: 'Looking up personnel...',
+          list_attachments: 'Checking attachments...',
+          get_attachment: 'Loading attachment...',
+          delete_attachment: 'Removing attachment...',
         };
-        const label = labels[data.name] || `Running ${data.name}...`;
+        const label = labels[data.name] || data.name.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase()) + '...';
         // Collapse consecutive calls for the same tool into one indicator
         const last = this.messages[this.messages.length - 1];
         if (last && last.type === 'tool' && last.toolName === data.name && last.pending) {
