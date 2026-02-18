@@ -1275,7 +1275,7 @@ class TestKioskRecentlyCompleted:
 
         now = datetime.now(UTC)
 
-        # Store a recently completed call in the in-memory dispatch store
+        # Store a recently completed call with CAD comments, responders, and analysis
         doc = DispatchCallDocument(
             id="call-archived",
             year="2026",
@@ -1283,6 +1283,17 @@ class TestKioskRecentlyCompleted:
             nature="Fire Alarm",
             address="100 Guard St",
             agency_code="SJF",
+            cad_comments="Alarm sounding, keyholder notified",
+            responding_units="E31,BN31",
+            responder_details=[
+                {
+                    "unit_number": "E31",
+                    "agency_code": "SJF",
+                    "status": "Enroute",
+                    "time_of_status_change": "2026-02-17T09:05:00",
+                    "radio_log": "",
+                },
+            ],
             time_reported=now - timedelta(hours=3),
             is_completed=True,
             stored_at=now - timedelta(hours=2),
@@ -1298,6 +1309,13 @@ class TestKioskRecentlyCompleted:
         assert archived[0]["nature"] == "Fire Alarm"
         assert archived[0]["archived"] is True
         assert "completed_at" in archived[0]
+        # Full call data available (CAD notes, responders, analysis)
+        assert archived[0]["cad_comments"] == "Alarm sounding, keyholder notified"
+        assert archived[0]["responding_units"] == "E31,BN31"
+        assert "analysis" in archived[0]
+        # Responder details normalized with unit_call_sign for kiosk template
+        assert len(archived[0]["responder_details"]) == 1
+        assert archived[0]["responder_details"][0]["unit_call_sign"] == "E31"
 
     @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)

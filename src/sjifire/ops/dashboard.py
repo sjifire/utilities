@@ -706,7 +706,10 @@ async def _fetch_recently_completed(*, hours: int = 12) -> list[dict]:
         if doc.stored_at < cutoff:
             continue
 
-        # Parse geo_location into lat/lon
+        # Same enrichment as _fetch_open_calls_enriched(): full to_dict()
+        # plus geo, severity, icon — so the kiosk gets CAD notes, analysis, etc.
+        call_data = doc.to_dict()
+
         lat, lon = None, None
         geo = doc.geo_location or ""
         if geo:
@@ -715,20 +718,22 @@ async def _fetch_recently_completed(*, hours: int = 12) -> list[dict]:
                 with contextlib.suppress(ValueError):
                     lat, lon = float(parts[0]), float(parts[1])
 
-        results.append(
-            {
-                "dispatch_id": doc.long_term_call_id,
-                "nature": doc.nature,
-                "address": doc.address,
-                "severity": _get_severity(doc.nature),
-                "icon": _get_icon(doc.nature),
-                "latitude": lat,
-                "longitude": lon,
-                "archived": True,
-                "completed_at": doc.stored_at.isoformat(),
-            }
-        )
+        call_data["dispatch_id"] = doc.long_term_call_id
+        call_data["latitude"] = lat
+        call_data["longitude"] = lon
+        call_data["severity"] = _get_severity(doc.nature)
+        call_data["icon"] = _get_icon(doc.nature)
+        call_data["archived"] = True
+        call_data["completed_at"] = doc.stored_at.isoformat()
 
+        # Kiosk frontend uses unit_call_sign; real data has unit_number
+        for rd in call_data.get("responder_details", []):
+            rd.setdefault("unit_call_sign", rd.get("unit_number", ""))
+
+        results.append(call_data)
+
+    # Most recently completed first (matches active-call ordering)
+    results.sort(key=lambda c: c.get("completed_at", ""), reverse=True)
     return results
 
 
@@ -876,6 +881,10 @@ async def _fetch_open_calls_enriched() -> list[dict]:
             call_data["longitude"] = lon
             call_data["severity"] = _get_severity(doc.nature)
             call_data["icon"] = _get_icon(doc.nature)
+
+            # Kiosk frontend uses unit_call_sign; real data has unit_number
+            for rd in call_data.get("responder_details", []):
+                rd.setdefault("unit_call_sign", rd.get("unit_number", ""))
 
             # Site history (max 5)
             if doc.address:
