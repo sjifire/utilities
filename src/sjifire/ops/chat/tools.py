@@ -384,6 +384,36 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
+        "name": "update_attachment",
+        "description": (
+            "Update the title and/or description on an attachment. Call this "
+            "after analyzing a photo to label it (e.g., 'E31 accountability board', "
+            "'Scene photo — front of structure'). The title shows in the chat UI."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
+                },
+                "attachment_id": {
+                    "type": "string",
+                    "description": "The attachment ID to update",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Short descriptive title (e.g., 'E31 accountability board')",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Longer description of what the photo shows",
+                },
+            },
+            "required": ["incident_id", "attachment_id"],
+        },
+    },
+    {
         "name": "delete_attachment",
         "description": (
             "Delete an attachment from the incident report. Removes the file "
@@ -521,6 +551,16 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
 
         return await attachment_tools.get_attachment(
             tool_input["incident_id"], tool_input["attachment_id"], include_data=True
+        )
+
+    if name == "update_attachment":
+        from sjifire.ops.attachments import tools as attachment_tools
+
+        return await attachment_tools.update_attachment(
+            tool_input["incident_id"],
+            tool_input["attachment_id"],
+            title=tool_input.get("title"),
+            description=tool_input.get("description"),
         )
 
     if name == "delete_attachment":

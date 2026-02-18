@@ -1,8 +1,8 @@
 """MCP tools for incident report attachments.
 
-Provides upload, list, get, and delete operations for files attached
-to incident reports. Files are stored in Azure Blob Storage; metadata
-is embedded in the IncidentDocument in Cosmos DB.
+Provides upload, list, get, update, and delete operations for files
+attached to incident reports. Files are stored in Azure Blob Storage;
+metadata is embedded in the IncidentDocument in Cosmos DB.
 
 Two usage modes:
 1. **Parse mode** — upload an image so the LLM can extract data from it
@@ -220,6 +220,49 @@ async def get_attachment(
             }
 
     return result
+
+
+async def update_attachment(
+    incident_id: str,
+    attachment_id: str,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+) -> dict:
+    """Update title and/or description on an attachment.
+
+    Args:
+        incident_id: The incident document ID
+        attachment_id: The attachment ID
+        title: New title (e.g., "E31 accountability board")
+        description: New description
+
+    Returns:
+        Updated attachment metadata
+    """
+    user = get_current_user()
+
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+        if doc is None:
+            return {"error": "Incident not found"}
+
+        if not _check_edit_access(doc, user.email, user.is_editor):
+            return {"error": "You don't have permission to update attachments"}
+
+        meta = next((a for a in doc.attachments if a.id == attachment_id), None)
+        if meta is None:
+            return {"error": f"Attachment '{attachment_id}' not found on this incident"}
+
+        if title is not None:
+            meta.title = title
+        if description is not None:
+            meta.description = description
+
+        doc.updated_at = datetime.now(UTC)
+        await store.update(doc)
+
+    return meta.model_dump(mode="json")
 
 
 async def delete_attachment(incident_id: str, attachment_id: str) -> dict:

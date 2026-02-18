@@ -360,6 +360,7 @@
       inset: 0;
       background: rgba(0,0,0,.85);
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
       z-index: 1000;
@@ -367,8 +368,57 @@
     }
     .lightbox img {
       max-width: 90vw;
-      max-height: 90vh;
+      max-height: 80vh;
       border-radius: 8px;
+    }
+    .lightbox-caption {
+      color: #fff;
+      font-size: 14px;
+      margin-top: 10px;
+      text-align: center;
+      max-width: 80vw;
+    }
+    .lightbox-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(255,255,255,.15);
+      border: none;
+      color: #fff;
+      font-size: 28px;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background .15s;
+    }
+    .lightbox-nav:hover { background: rgba(255,255,255,.3); }
+    .lightbox-prev { left: 16px; }
+    .lightbox-next { right: 16px; }
+    .lightbox-close {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: rgba(255,255,255,.15);
+      border: none;
+      color: #fff;
+      font-size: 22px;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .lightbox-close:hover { background: rgba(255,255,255,.3); }
+    .lightbox-counter {
+      color: rgba(255,255,255,.6);
+      font-size: 12px;
+      margin-top: 6px;
     }
 
     /* ── Suggestion chips ── */
@@ -472,7 +522,7 @@
           <div class="msg" :class="msg.role">
             <div class="msg-images" x-show="msg.images && msg.images.length">
               <template x-for="(img, j) in (msg.images || [])" :key="j">
-                <img :src="img" @click="lightboxSrc = img">
+                <img :src="img" @click="openLightbox(msg.images, j)">
               </template>
             </div>
             <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content, false, i) : msg.content"></div>
@@ -485,7 +535,7 @@
             <span x-text="msg.pending ? msg.label : ((msg.is_error ? '\u2717 ' : '\u2713 ') + msg.summary)"></span>
             <template x-if="!msg.pending && msg.image_url">
               <div class="tool-image-wrap">
-                <img :src="msg.image_url" class="tool-image" @click="window.open(msg.image_url, '_blank')">
+                <img :src="msg.image_url" class="tool-image" @click="openLightbox([{src: msg.image_url, caption: msg.image_title}], 0, true)">
                 <div class="tool-image-caption" x-show="msg.image_title" x-text="msg.image_title"></div>
               </div>
             </template>
@@ -545,8 +595,17 @@
   </div>
 
   <!-- Lightbox -->
-  <div class="lightbox" x-show="lightboxSrc" @click="lightboxSrc = ''" x-cloak>
-    <img :src="lightboxSrc" @click.stop>
+  <div class="lightbox" x-show="lightbox.open" @click="lightbox.open = false" x-cloak>
+    <button class="lightbox-close" @click.stop="lightbox.open = false">&times;</button>
+    <template x-if="lightbox.items.length > 1">
+      <button class="lightbox-nav lightbox-prev" @click.stop="lightboxPrev()">&lsaquo;</button>
+    </template>
+    <img :src="lightbox.items[lightbox.index]?.src || ''" @click.stop>
+    <div class="lightbox-caption" x-show="lightbox.items[lightbox.index]?.caption" x-text="lightbox.items[lightbox.index]?.caption || ''"></div>
+    <div class="lightbox-counter" x-show="lightbox.items.length > 1" x-text="`${lightbox.index + 1} / ${lightbox.items.length}`"></div>
+    <template x-if="lightbox.items.length > 1">
+      <button class="lightbox-nav lightbox-next" @click.stop="lightboxNext()">&rsaquo;</button>
+    </template>
   </div>
 </div>
 {% endblock %}
@@ -563,7 +622,7 @@ function chatApp() {
     completeness: {{ completeness | tojson }},
     incidentId: '{{ incident_id }}',
     pendingImages: [],
-    lightboxSrc: '',
+    lightbox: { open: false, items: [], index: 0 },
     _userScrolledAway: false,
     _scrollRAF: null,
     _reconnectAttempts: 0,
@@ -858,6 +917,37 @@ function chatApp() {
       });
     },
 
+    openLightbox(items, index, isObjects) {
+      // items can be an array of URL strings or {src, caption} objects
+      this.lightbox.items = isObjects ? items : items.map(src => ({src, caption: ''}));
+      // Collect all attachment images from messages for prev/next navigation
+      if (!isObjects) {
+        // User-message images — just use the array as-is
+      } else {
+        // Tool images — gather all attachment images in the conversation
+        const all = [];
+        let startIdx = 0;
+        for (const m of this.messages) {
+          if (m.type === 'tool' && m.image_url) {
+            if (m.image_url === items[0]?.src) startIdx = all.length;
+            all.push({src: m.image_url, caption: m.image_title || ''});
+          }
+        }
+        if (all.length > 1) {
+          this.lightbox.items = all;
+          index = startIdx;
+        }
+      }
+      this.lightbox.index = index;
+      this.lightbox.open = true;
+    },
+    lightboxPrev() {
+      this.lightbox.index = (this.lightbox.index - 1 + this.lightbox.items.length) % this.lightbox.items.length;
+    },
+    lightboxNext() {
+      this.lightbox.index = (this.lightbox.index + 1) % this.lightbox.items.length;
+    },
+
     scrollToBottom(force) {
       if (force) {
         this._userScrolledAway = false;
@@ -1094,6 +1184,7 @@ function chatApp() {
           get_personnel: 'Looking up personnel...',
           list_attachments: 'Checking attachments...',
           get_attachment: 'Loading attachment...',
+          update_attachment: 'Labeling attachment...',
           delete_attachment: 'Removing attachment...',
         };
         const label = labels[data.name] || data.name.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase()) + '...';

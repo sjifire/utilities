@@ -853,6 +853,10 @@ def _summarize_tool_result(name: str, data: dict) -> str:
         title = data.get("title") or data.get("filename", "")
         return f"Attachment: {title}"
 
+    if name == "update_attachment":
+        title = data.get("title", "")
+        return f"Labeled: {title}" if title else "Attachment updated"
+
     if name == "delete_attachment":
         fname = data.get("filename", "")
         return f"Deleted: {fname}"
