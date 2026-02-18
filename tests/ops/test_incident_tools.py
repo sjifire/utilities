@@ -905,12 +905,49 @@ class TestPrefillFromNeris:
 
 
 # ── Create incident with NERIS import ──
+_CREATE_NERIS_RECORD = {
+    "neris_id": "FD53055879|26-000039|1767316361",
+    "base": {
+        "outcome_narrative": "Campfire extinguished.",
+        "location": {
+            "complete_number": "94",
+            "street": "Zepher",
+            "incorporated_municipality": "Friday Harbor",
+            "state": "WA",
+        },
+    },
+    "incident_types": [{"primary": True, "type": "FIRE||OUTSIDE_FIRE||CONSTRUCTION_WASTE"}],
+    "dispatch": {
+        "incident_number": "26-000039",
+        "call_create": "2026-01-02T01:12:41+00:00",
+        "unit_responses": [
+            {
+                "unit_neris_id": "FD53055879S001U005",
+                "response_mode": "EMERGENT",
+                "dispatch": "2026-01-02T01:12:41+00:00",
+                "enroute_to_scene": "2026-01-02T01:14:00+00:00",
+                "on_scene": "2026-01-02T01:20:00+00:00",
+                "unit_clear": "2026-01-02T02:00:00+00:00",
+            },
+        ],
+    },
+    "incident_status": {"status": "APPROVED"},
+}
+
+
 class TestCreateIncidentWithNeris:
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    """Tests for create_incident with neris_id.
+
+    create_incident now calls _get_neris_incident directly (via asyncio.to_thread)
+    and _get_crew_for_incident for schedule data.
+    """
+
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_neris_data_populates_draft(
-        self, mock_store_cls, mock_dispatch, mock_neris, regular_user
+        self, mock_store_cls, mock_dispatch, mock_get_neris, mock_crew, regular_user
     ):
         mock_dispatch.return_value = {
             "address": "165 San Juan Rd",
@@ -920,19 +957,8 @@ class TestCreateIncidentWithNeris:
             "longitude": -123.0,
             "timestamps": {"psap_answer": "2026-01-02T01:12:00"},
         }
-        mock_neris.return_value = {
-            "neris_incident_id": "FD53055879|26-000039|1767316361",
-            "incident_type": "FIRE||OUTSIDE_FIRE||CONSTRUCTION_WASTE",
-            "narrative": "Campfire extinguished.",
-            "address": "94 Zepher",
-            "city": "Friday Harbor",
-            "state": "WA",
-            "units": [UnitAssignment(unit_id="FD53055879S001U005")],
-            "timestamps": {
-                "psap_answer": "2026-01-02T01:12:41+00:00",
-                "first_unit_dispatched": "2026-01-02T01:12:41+00:00",
-            },
-        }
+        mock_get_neris.return_value = _CREATE_NERIS_RECORD
+        mock_crew.return_value = []
 
         mock_store = AsyncMock()
         mock_store.get_by_number = AsyncMock(return_value=None)
@@ -953,27 +979,25 @@ class TestCreateIncidentWithNeris:
         # NERIS address wins over dispatch
         assert result["address"] == "94 Zepher"
         assert len(result["units"]) >= 1
-        assert result["timestamps"]["first_unit_dispatched"] == "2026-01-02T01:12:41+00:00"
         # Dispatch latitude preserved (NERIS didn't supply one)
         assert result["latitude"] == 48.5
+        # Comparison included
+        assert "import_comparison" in result
 
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_neris_overrides_dispatch_for_shared_keys(
-        self, mock_store_cls, mock_dispatch, mock_neris, regular_user
+    async def test_dispatch_timestamps_win_over_neris(
+        self, mock_store_cls, mock_dispatch, mock_get_neris, mock_crew, regular_user
     ):
         mock_dispatch.return_value = {
             "address": "165 San Juan Rd",
             "city": "Friday Harbor",
             "timestamps": {"psap_answer": "2026-01-02T01:10:00"},
         }
-        mock_neris.return_value = {
-            "neris_incident_id": "FD|X|Y",
-            "address": "94 Zepher Ln",
-            "city": "Friday Harbor",
-            "timestamps": {"psap_answer": "2026-01-02T01:12:41+00:00"},
-        }
+        mock_get_neris.return_value = _CREATE_NERIS_RECORD
+        mock_crew.return_value = []
 
         mock_store = AsyncMock()
         mock_store.get_by_number = AsyncMock(return_value=None)
@@ -985,28 +1009,34 @@ class TestCreateIncidentWithNeris:
             incident_number="26-000039",
             incident_date="2026-01-02",
             station="S31",
-            neris_id="FD|X|Y",
+            neris_id="FD53055879|26-000039|1767316361",
         )
 
-        # NERIS values win
-        assert result["address"] == "94 Zepher Ln"
-        assert result["timestamps"]["psap_answer"] == "2026-01-02T01:12:41+00:00"
+        # NERIS address wins (corrected)
+        assert result["address"] == "94 Zepher"
+        # Dispatch timestamp wins over NERIS (ground truth)
+        assert result["timestamps"]["psap_answer"] == "2026-01-02T01:10:00"
 
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_dispatch_fills_gaps_neris_doesnt_cover(
-        self, mock_store_cls, mock_dispatch, mock_neris, regular_user
+        self, mock_store_cls, mock_dispatch, mock_get_neris, mock_crew, regular_user
     ):
         mock_dispatch.return_value = {
             "address": "165 San Juan Rd",
             "latitude": 48.5,
             "longitude": -123.0,
         }
-        mock_neris.return_value = {
-            "neris_incident_id": "FD|X|Y",
-            "incident_type": "FIRE||CHIMNEY",
+        mock_get_neris.return_value = {
+            "neris_id": "FD|X|Y",
+            "base": {},
+            "incident_types": [{"type": "FIRE||CHIMNEY"}],
+            "dispatch": {"incident_number": "26-000039", "unit_responses": []},
+            "incident_status": {},
         }
+        mock_crew.return_value = []
 
         mock_store = AsyncMock()
         mock_store.get_by_number = AsyncMock(return_value=None)
@@ -1027,19 +1057,19 @@ class TestCreateIncidentWithNeris:
         # NERIS values applied
         assert result["incident_type"] == "FIRE||CHIMNEY"
 
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_neris_failure_falls_back_to_dispatch(
-        self, mock_store_cls, mock_dispatch, mock_neris, regular_user
+        self, mock_store_cls, mock_dispatch, mock_get_neris, regular_user
     ):
         mock_dispatch.return_value = {
             "address": "165 San Juan Rd",
             "city": "Friday Harbor",
             "state": "WA",
         }
-        # NERIS fetch failed — returns empty
-        mock_neris.return_value = {}
+        # NERIS fetch failed
+        mock_get_neris.side_effect = RuntimeError("Connection refused")
 
         mock_store = AsyncMock()
         mock_store.get_by_number = AsyncMock(return_value=None)
@@ -1069,7 +1099,7 @@ class TestCreateIncidentWithNeris:
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("sjifire.ops.incidents.tools._prefill_from_neris") as mock_neris:
+        with patch("sjifire.ops.incidents.tools._get_neris_incident") as mock_neris:
             result = await create_incident(
                 incident_number="26-000944",
                 incident_date="2026-02-12",
@@ -1080,17 +1110,22 @@ class TestCreateIncidentWithNeris:
         assert result["address"] == "200 Spring St"
         assert result["neris_incident_id"] is None
 
-    @patch("sjifire.ops.incidents.tools._prefill_from_neris")
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_explicit_incident_type_overrides_neris(
-        self, mock_store_cls, mock_dispatch, mock_neris, regular_user
+        self, mock_store_cls, mock_dispatch, mock_get_neris, mock_crew, regular_user
     ):
         mock_dispatch.return_value = {}
-        mock_neris.return_value = {
-            "neris_incident_id": "FD|X|Y",
-            "incident_type": "FIRE||OUTSIDE_FIRE",
+        mock_get_neris.return_value = {
+            "neris_id": "FD|X|Y",
+            "base": {},
+            "incident_types": [{"type": "FIRE||OUTSIDE_FIRE"}],
+            "dispatch": {"incident_number": "26-000039", "unit_responses": []},
+            "incident_status": {},
         }
+        mock_crew.return_value = []
 
         mock_store = AsyncMock()
         mock_store.get_by_number = AsyncMock(return_value=None)
