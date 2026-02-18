@@ -519,7 +519,7 @@
             <div class="call-info-label">Dispatch Log</div>
             <template x-if="currentCall.responder_details && currentCall.responder_details.length > 0">
               <div>
-                <template x-for="rd in currentCall.responder_details.slice().reverse()" :key="rd.unit_call_sign + rd.status + rd.time_of_status_change">
+                <template x-for="rd in currentCall.responder_details.slice().sort((a,b) => (b.time_of_status_change||'').localeCompare(a.time_of_status_change||''))" :key="rd.unit_call_sign + rd.status + rd.time_of_status_change">
                   <div class="radio-line">
                     <span class="radio-time" x-text="fmtTime(rd.time_of_status_change)"></span>
                     <span class="radio-unit" x-text="rd.unit_call_sign"></span>
