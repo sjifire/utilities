@@ -16,7 +16,6 @@ from sjifire.ops.attachments.tools import (
     list_attachments,
     upload_attachment,
 )
-from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.incidents.models import (
     IncidentDocument,
     PersonnelAssignment,
@@ -52,22 +51,22 @@ def _no_azure(monkeypatch):
 
 @pytest.fixture
 def regular_user():
-    user = UserContext(
+    user = _auth_mod.UserContext(
         email="ff@sjifire.org", name="Firefighter", user_id="user-1", groups=frozenset()
     )
-    set_current_user(user)
+    _auth_mod.set_current_user(user)
     return user
 
 
 @pytest.fixture
 def officer_user():
-    user = UserContext(
+    user = _auth_mod.UserContext(
         email="chief@sjifire.org",
         name="Chief",
         user_id="user-2",
         groups=frozenset(["officer-group"]),
     )
-    set_current_user(user)
+    _auth_mod.set_current_user(user)
     return user
 
 
@@ -259,8 +258,8 @@ class TestUploadAttachment:
         assert "submitted" in result["error"].lower()
 
     async def test_stranger_cannot_upload(self, sample_doc):
-        stranger = UserContext(email="stranger@sjifire.org", name="X", user_id="x")
-        set_current_user(stranger)
+        stranger = _auth_mod.UserContext(email="stranger@sjifire.org", name="X", user_id="x")
+        _auth_mod.set_current_user(stranger)
 
         cls, _ = _mock_store(sample_doc)
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
@@ -330,8 +329,8 @@ class TestListAttachments:
         assert result["attachments"][0]["filename"] == "photo.jpg"
 
     async def test_crew_can_list(self, sample_doc):
-        crew = UserContext(email="crew1@sjifire.org", name="Crew", user_id="c1")
-        set_current_user(crew)
+        crew = _auth_mod.UserContext(email="crew1@sjifire.org", name="Crew", user_id="c1")
+        _auth_mod.set_current_user(crew)
         cls, _ = _mock_store(sample_doc)
 
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
@@ -340,8 +339,8 @@ class TestListAttachments:
         assert "error" not in result
 
     async def test_stranger_denied(self, sample_doc):
-        stranger = UserContext(email="stranger@sjifire.org", name="X", user_id="x")
-        set_current_user(stranger)
+        stranger = _auth_mod.UserContext(email="stranger@sjifire.org", name="X", user_id="x")
+        _auth_mod.set_current_user(stranger)
         cls, _ = _mock_store(sample_doc)
 
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
@@ -425,8 +424,8 @@ class TestGetAttachment:
         assert "not found" in result["error"].lower()
 
     async def test_stranger_denied(self, sample_doc):
-        stranger = UserContext(email="stranger@sjifire.org", name="X", user_id="x")
-        set_current_user(stranger)
+        stranger = _auth_mod.UserContext(email="stranger@sjifire.org", name="X", user_id="x")
+        _auth_mod.set_current_user(stranger)
         cls, _ = _mock_store(sample_doc)
 
         with patch("sjifire.ops.attachments.tools.IncidentStore", cls):
@@ -487,8 +486,8 @@ class TestDeleteAttachment:
     async def test_stranger_cannot_delete(self, sample_doc):
         from sjifire.ops.attachments.models import AttachmentMeta
 
-        stranger = UserContext(email="stranger@sjifire.org", name="X", user_id="x")
-        set_current_user(stranger)
+        stranger = _auth_mod.UserContext(email="stranger@sjifire.org", name="X", user_id="x")
+        _auth_mod.set_current_user(stranger)
 
         meta = AttachmentMeta(
             filename="photo.jpg",

@@ -13,6 +13,7 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - **msgraph-sdk** for Microsoft Graph API
 - **httpx** + **beautifulsoup4** for Aladtec web scraping
 - **httpx** + **tenacity** for iSpyFire API (with rate limit retry)
+- **azure-storage-blob** for Azure Blob Storage (incident attachments)
 - **pytest** + **pytest-asyncio** for testing
 - **ruff** for linting/formatting
 - **ty** for type checking
@@ -130,6 +131,12 @@ src/sjifire/
 │   ├── token_store.py     # Two-layer OAuth token store (TTLCache + Cosmos DB)
 │   ├── dashboard.py       # Operations dashboard (client-side rendered) + session bootstrap
 │   ├── prompts.py         # MCP prompts and resources (project instructions, NERIS values)
+│   ├── chat/
+│   │   ├── engine.py      # Claude chat engine (publishes events to Centrifugo)
+│   │   ├── models.py      # ConversationMessage, ConversationDocument (Pydantic)
+│   │   ├── routes.py      # HTTP route handlers for chat UI
+│   │   ├── store.py       # Conversation persistence (Cosmos DB)
+│   │   └── tools.py       # Chat tool schemas and execution
 │   ├── dispatch/          # iSpyFire dispatch call lookup + archival
 │   │   ├── models.py      # DispatchCallDocument (Pydantic)
 │   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
@@ -190,7 +197,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 
 **Session instructions**: `docs/mcp-start-session.md` — loaded by `start_session` tool, tells Claude how to present the dashboard and what actions to offer.
 
-**Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
+**Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), Azure Blob Storage (incident attachments), ACR, Key Vault references for secrets. Custom domain with managed TLS. Blob storage provisioned via `./scripts/setup-azure-ops.sh --phase 10`.
 
 **Background tasks**: Container Apps Job (`sjifire-ops-tasks`) runs `uv run ops-tasks` every 30 minutes. Runs all `auto=True` tasks: dispatch-sync, dispatch-enrich, ispyfire-sync, neris-sync, schedule-refresh. Tasks registered with `auto=False` (e.g., dispatch-reenrich) only run when explicitly requested by name. New tasks are added via `@register("name")` in `ops/tasks/`.
 

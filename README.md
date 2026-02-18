@@ -183,11 +183,12 @@ uv run ops-server
 - Schedule lookup (on-duty crew for any date)
 - Personnel lookup (active personnel names and emails)
 - Incident reporting (create, edit, list, submit to NERIS)
+- Attachment management (upload, list, download, delete photos and PDFs on incident reports)
 - NERIS value sets (look up valid codes for any field — incident types, actions, location use, etc.)
 
 **Setup guide for end users:** See `docs/mcp-setup-guide.md`
 
-**Infrastructure setup:** See `scripts/setup-azure-ops.sh` (one-time provisioning of ACR, Container Apps, Cosmos DB, Entra app registration, custom domain)
+**Infrastructure setup:** See `scripts/setup-azure-ops.sh` (one-time provisioning of ACR, Container Apps, Cosmos DB, Azure Blob Storage, Entra app registration, custom domain)
 
 #### Background Tasks
 
@@ -356,6 +357,7 @@ Runs on push to main (paths: `src/sjifire/ops/**`, `Dockerfile`, `pyproject.toml
 **Secrets (from Key Vault):**
 - `ENTRA-MCP-API-CLIENT-ID`, `ENTRA-MCP-API-CLIENT-SECRET`, `ENTRA-REPORT-EDITORS-GROUP-ID`
 - `COSMOS-ENDPOINT`, `MS-GRAPH-*`, `ALADTEC-*`, `ISPYFIRE-*`
+- `AZURE-STORAGE-ACCOUNT-URL`, `AZURE-STORAGE-ACCOUNT-KEY`
 
 ## Azure Key Vault
 
@@ -440,6 +442,8 @@ src/sjifire/
 │   ├── token_store.py     # OAuth token store (TTLCache + Cosmos DB)
 │   ├── dashboard.py       # Operations dashboard (client-side rendered) + session bootstrap
 │   ├── prompts.py         # MCP prompts and resources
+│   ├── attachments/       # Incident report file attachments (Azure Blob Storage)
+│   ├── chat/              # Chat assistant (Claude API streaming, conversation persistence)
 │   ├── dispatch/          # iSpyFire dispatch call lookup + archival
 │   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
 │   ├── neris/             # NERIS value set lookup
