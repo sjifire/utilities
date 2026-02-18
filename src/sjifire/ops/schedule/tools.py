@@ -14,12 +14,14 @@ day's crew is still on duty. The shift change hour is detected from
 the data (full-shift entries where start_time == end_time).
 """
 
+import json
 import logging
 import re
 from datetime import date, datetime, timedelta
 
 from bs4 import BeautifulSoup, Tag
 
+from sjifire.calendar.models import CREW_DATA_MARKER
 from sjifire.core.config import local_now
 from sjifire.core.schedule import (
     detect_shift_change_hour,
@@ -42,10 +44,52 @@ CACHE_MAX_AGE_HOURS_PAST = 168.0  # 7 days
 # Matches "From 1800 (A Platoon)" or "Until 1800 (B Platoon)"
 _SECTION_RE = re.compile(r"(Until|From)\s+(\d{4})\s*(?:\(([^)]+)\))?")
 
+# Regex to extract the CREW_DATA JSON from an HTML comment.
+# Uses the shared marker constant so writer and reader stay in sync.
+_CREW_DATA_RE = re.compile(rf"<!--\s*{re.escape(CREW_DATA_MARKER)}(.*?)-->", re.DOTALL)
+
 
 # ---------------------------------------------------------------------------
 # Outlook calendar → DayScheduleCache pipeline
 # ---------------------------------------------------------------------------
+
+
+def _parse_crew_data_json(html: str) -> tuple[list[ScheduleEntryCache], str] | None:
+    """Try to extract structured crew data from an embedded JSON comment.
+
+    Returns (entries, platoon) if the CREW_DATA comment is present and valid,
+    or None to signal the caller should fall back to HTML table parsing.
+    """
+    match = _CREW_DATA_RE.search(html)
+    if not match:
+        return None
+
+    try:
+        data = json.loads(match.group(1))
+    except (json.JSONDecodeError, IndexError):
+        logger.warning("CREW_DATA comment found but JSON is invalid, falling back to HTML parsing")
+        return None
+
+    shift_hour = data.get("shift_change_hour", 0)
+    shift_time_str = f"{shift_hour:02d}:00"
+    platoon = data.get("from_platoon", "")
+    from_crew: dict = data.get("from_crew", {})
+
+    entries: list[ScheduleEntryCache] = []
+    for section, members in from_crew.items():
+        entries.extend(
+            ScheduleEntryCache(
+                name=member["name"],
+                position=member["position"],
+                section=section,
+                start_time=shift_time_str,
+                end_time=shift_time_str,
+                platoon=platoon,
+            )
+            for member in members
+        )
+
+    return entries, platoon
 
 
 def parse_duty_event_html(html: str, event_date: date) -> tuple[list[ScheduleEntryCache], str]:
@@ -53,6 +97,9 @@ def parse_duty_event_html(html: str, event_date: date) -> tuple[list[ScheduleEnt
 
     Extracts only the "From" section (that date's assigned crew).
     The "Until" section is the previous day's crew, already cached.
+
+    Tries structured JSON (CREW_DATA comment) first for reliability,
+    then falls back to HTML table parsing for pre-JSON legacy events.
 
     Args:
         html: HTML body from the Outlook calendar event
@@ -62,6 +109,20 @@ def parse_duty_event_html(html: str, event_date: date) -> tuple[list[ScheduleEnt
         Tuple of (entries, platoon). Entries have start_time == end_time
         set to the shift change hour so detect_shift_change_hour() works.
     """
+    if not html or not html.strip():
+        return [], ""
+
+    # Fast path: extract structured JSON embedded by calendar-sync
+    result = _parse_crew_data_json(html)
+    if result is not None:
+        return result
+
+    # Legacy fallback: parse HTML tables (for events created before JSON embedding)
+    return _parse_duty_event_html_tables(html)
+
+
+def _parse_duty_event_html_tables(html: str) -> tuple[list[ScheduleEntryCache], str]:
+    """Legacy HTML table parser for pre-JSON calendar events."""
     soup = BeautifulSoup(html, "html.parser")
 
     entries: list[ScheduleEntryCache] = []

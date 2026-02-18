@@ -1,5 +1,6 @@
 """Data models for calendar events."""
 
+import json
 from dataclasses import dataclass, field
 from datetime import date
 from html import escape
@@ -137,12 +138,19 @@ def _format_crew_section_text(
 EVENT_BODY_TEMPLATE = """\
 {until_section}
 {from_section}
+{crew_data_comment}
 <hr style="margin-top: 24px;">
 <p style="font-size: 0.9em; color: #666; margin-top: 12px;">
 Schedule data from <a href="{aladtec_url}">Aladtec</a>.
 View your personal schedule and make changes there.
 </p>
 """
+
+# Marker used to embed/extract structured crew data in the HTML body.
+# The schedule-refresh reader extracts JSON from this comment instead of
+# parsing the HTML tables. DO NOT REMOVE — this is the data contract
+# between calendar-sync (writer) and schedule-refresh (reader).
+CREW_DATA_MARKER = "CREW_DATA:"
 
 SECTION_HEADER_TEMPLATE = '<h3 style="color: #1a5276;">{label}{platoon}</h3>'
 
@@ -175,6 +183,35 @@ class AllDayDutyEvent:
         return get_org_config().duty_event_subject
 
     @property
+    def _crew_data_json(self) -> dict:
+        """Structured crew data for machine consumption.
+
+        Embedded as an HTML comment in body_html so the schedule-refresh
+        reader can extract it via json.loads() instead of parsing HTML tables.
+        The HTML is purely presentational; this JSON is the data contract.
+        """
+
+        def _serialize_crew(crew: dict[str, list[CrewMember]]) -> dict[str, list[dict]]:
+            sorted_sections = sorted(crew.keys(), key=section_sort_key)
+            return {
+                section: [
+                    {"name": m.name, "position": clean_position(m.position)}
+                    for m in sorted(crew[section], key=lambda m: position_sort_key(m.position))
+                ]
+                for section in sorted_sections
+                if crew[section]
+            }
+
+        return {
+            "version": 1,
+            "shift_change_hour": self.shift_change_hour,
+            "until_platoon": self.until_platoon,
+            "from_platoon": self.from_platoon,
+            "until_crew": _serialize_crew(self.until_crew),
+            "from_crew": _serialize_crew(self.from_crew),
+        }
+
+    @property
     def body_html(self) -> str:
         """Generate event body as HTML with two time period sections."""
         shift_time = self._shift_time_display
@@ -201,9 +238,14 @@ class AllDayDutyEvent:
             crew_html = "\n".join(_format_crew_section_html(self.from_crew))
             from_section = f"{header}\n{crew_html}"
 
+        # Embed structured data as HTML comment for machine readers.
+        # DO NOT REMOVE — schedule-refresh reads this instead of parsing tables.
+        crew_data_comment = f"<!-- {CREW_DATA_MARKER}{json.dumps(self._crew_data_json)} -->"
+
         return EVENT_BODY_TEMPLATE.format(
             until_section=until_section,
             from_section=from_section,
+            crew_data_comment=crew_data_comment,
             aladtec_url=get_aladtec_url(),
         )
 
