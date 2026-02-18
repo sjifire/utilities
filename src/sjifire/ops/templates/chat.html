@@ -394,6 +394,52 @@
       text-align: center;
     }
 
+    /* ── Presence indicators ── */
+    .presence-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .presence-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+      border: 2px solid var(--bg-panel);
+      cursor: default;
+    }
+    .presence-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-left: 4px;
+      white-space: nowrap;
+    }
+
+    /* ── Turn lock banner ── */
+    .turn-lock-banner {
+      background: var(--amber-alpha);
+      border: 1px solid rgba(245, 158, 11, .3);
+      color: var(--color-amber);
+      padding: 8px 16px;
+      font-size: 13px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    /* ── Remote user message label ── */
+    .msg-attribution {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
     /* ── Chat responsive ── */
     @media (max-width: 640px) {
       .msg            { max-width: 95%; }
@@ -415,6 +461,13 @@
       <span class="status-badge {{ incident_status }}" x-text="status">{{ incident_status }}</span>
     </div>
     <div class="header-actions">
+      <!-- Presence: who else is viewing this report -->
+      <div class="presence-bar" x-show="Object.keys(presenceUsers).length > 0">
+        <template x-for="(u, email) in presenceUsers" :key="email">
+          <span class="presence-avatar" :style="'background:' + u.color" :title="u.name" x-text="u.initials"></span>
+        </template>
+        <span class="presence-label" x-text="presenceLabel"></span>
+      </div>
       <div class="export-wrap" x-data="{open: false}" @click.away="open = false">
         <button class="export-btn" @click="open = !open">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -447,6 +500,11 @@
   </div>
   {% endif %}
 
+  <!-- Turn lock banner (shown when another user's turn is active) -->
+  <div class="turn-lock-banner" x-show="turnHolder && turnHolder.email !== currentUserEmail" x-cloak>
+    Claude is responding to <strong x-text="turnHolder?.name || 'another user'"></strong> &mdash; you can watch and send when their turn finishes.
+  </div>
+
   <!-- Messages -->
   <div class="messages" x-ref="messages" @scroll="_onMessagesScroll()">
     <!-- Message list -->
@@ -455,6 +513,9 @@
         <!-- User or assistant message -->
         <template x-if="msg.type === 'message'">
           <div class="msg" :class="msg.role">
+            <template x-if="msg.role === 'user' && msg.sender_name && msg.sender_email !== currentUserEmail">
+              <div class="msg-attribution" x-text="msg.sender_name"></div>
+            </template>
             <template x-if="msg.images && msg.images.length">
               <div class="msg-images">
                 <template x-for="(img, j) in msg.images" :key="j">
@@ -534,6 +595,19 @@
 {% block body_scripts %}
 <script>
 function chatApp() {
+  // Stable color palette for presence avatars
+  const _avatarColors = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981','#06b6d4','#f97316','#6366f1'];
+  let _colorIdx = 0;
+  const _userColors = {};
+  function _colorFor(email) {
+    if (!_userColors[email]) _userColors[email] = _avatarColors[_colorIdx++ % _avatarColors.length];
+    return _userColors[email];
+  }
+  function _initials(name) {
+    const parts = (name || '?').split(/\s+/);
+    return parts.length > 1 ? (parts[0][0] + parts[parts.length-1][0]).toUpperCase() : name.slice(0,2).toUpperCase();
+  }
+
   return {
     messages: [],
     inputText: '',
@@ -550,6 +624,19 @@ function chatApp() {
     _subscription: null,
     _queuedMessage: null,
     _recoveryTimer: null,
+    // Multi-user state
+    currentUserEmail: '{{ user_email }}',
+    currentUserName: '{{ user_name }}',
+    presenceUsers: {},   // {email: {name, initials, color}} — excludes self
+    turnHolder: null,    // {email, name} — who has the current turn
+    _blockedMessage: null, // Message blocked by 409, auto-retry after done
+
+    get presenceLabel() {
+      const names = Object.values(this.presenceUsers).map(u => u.name.split(' ')[0]);
+      if (names.length === 0) return '';
+      if (names.length === 1) return names[0] + ' is also here';
+      return names.join(', ') + ' are also here';
+    },
 
     async init() {
       // After a reset, skip stale history and start fresh
@@ -571,8 +658,47 @@ function chatApp() {
         const {event, ...data} = ctx.data;
         this.handleEvent(event, data);
       });
+
+      // Presence: join/leave events for multi-user awareness
+      this._subscription.on('join', (ctx) => {
+        const info = ctx.info || {};
+        const email = info.user || '';
+        const connInfo = info.conn_info || {};
+        if (email && email !== this.currentUserEmail) {
+          this.presenceUsers[email] = {
+            name: connInfo.name || email.split('@')[0],
+            initials: _initials(connInfo.name || email),
+            color: _colorFor(email),
+          };
+        }
+      });
+      this._subscription.on('leave', (ctx) => {
+        const email = (ctx.info || {}).user || '';
+        if (email) delete this.presenceUsers[email];
+      });
+
       this._subscription.subscribe();
       this._centrifuge.connect();
+
+      // Query initial presence after subscription is ready
+      this._subscription.on('subscribed', async () => {
+        try {
+          const result = await this._subscription.presence();
+          for (const [, info] of Object.entries(result.clients || {})) {
+            const email = info.user || '';
+            const connInfo = info.conn_info || {};
+            if (email && email !== this.currentUserEmail) {
+              this.presenceUsers[email] = {
+                name: connInfo.name || email.split('@')[0],
+                initials: _initials(connInfo.name || email),
+                color: _colorFor(email),
+              };
+            }
+          }
+        } catch (e) {
+          console.debug('Presence query not available:', e);
+        }
+      });
 
       // Load conversation history
       if (!isReset) try {
@@ -922,6 +1048,16 @@ function chatApp() {
           body: JSON.stringify(reqBody)
         });
 
+        if (res.status === 409) {
+          // Turn lock conflict — another user's turn is active
+          const err = await res.json().catch(() => ({}));
+          this.turnHolder = {email: err.holder_email || '', name: err.holder_name || 'another user'};
+          // Queue for auto-retry after the done event
+          this._blockedMessage = {displayText, images};
+          this.streaming = false;
+          return;
+        }
+
         if (!res.ok) {
           const err = await res.json().catch(() => ({error: 'Request failed'}));
           this.messages.push({type: 'error', content: err.error || 'Request failed'});
@@ -989,6 +1125,32 @@ function chatApp() {
     handleEvent(type, data) {
       // Any event means Centrifugo is working — reset recovery timer
       this._clearRecoveryTimer();
+
+      if (type === 'turn_start') {
+        // Another user started a turn — show indicator
+        this.turnHolder = {email: data.user_email, name: data.user_name};
+        // If it's someone else's turn, mark streaming so we show their progress
+        if (data.user_email !== this.currentUserEmail) {
+          this.streaming = true;
+          this.currentText = '';
+        }
+        return;
+      }
+
+      if (type === 'user_message') {
+        // Message from another user — add it to our local view
+        if (data.user_email !== this.currentUserEmail) {
+          this.messages.push({
+            type: 'message',
+            role: 'user',
+            content: data.content,
+            sender_email: data.user_email,
+            sender_name: data.user_name,
+          });
+          this.scrollToBottom();
+        }
+        return;
+      }
 
       if (type === 'text') {
         this.currentText += data.content || '';
@@ -1067,6 +1229,7 @@ function chatApp() {
           this.currentText = '';
         }
         this.streaming = false;
+        this.turnHolder = null;  // Turn lock released
         this.scrollToBottom(true);
 
         // Send queued message if user typed while we were streaming
@@ -1074,6 +1237,13 @@ function chatApp() {
           const queued = this._queuedMessage;
           this._queuedMessage = null;
           this.$nextTick(() => this._postMessage(queued.displayText, queued.images));
+          return;
+        }
+        // Auto-retry message that was blocked by turn lock (409)
+        if (this._blockedMessage) {
+          const blocked = this._blockedMessage;
+          this._blockedMessage = null;
+          this.$nextTick(() => this._postMessage(blocked.displayText, blocked.images));
           return;
         }
         this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
@@ -1085,6 +1255,7 @@ function chatApp() {
         }
         this.messages.push({type: 'error', content: data.message});
         this.streaming = false;
+        this.turnHolder = null;  // Turn lock released on error too
         this.scrollToBottom(true);
       }
     }

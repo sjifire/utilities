@@ -180,9 +180,17 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 **Centrifugo sidecar**: Real-time chat messaging via Centrifugo (Go-based) running as an ACA sidecar container alongside the FastAPI app. Client-side uses `centrifuge-js` over WebSocket.
 - Channel naming: `chat:incident:{id}` (editor role required), `chat:general:{email}` (matching user)
 - Architecture: Browser → ACA ingress (port 8000) → FastAPI WS proxy `/connection/websocket` → Centrifugo (localhost:8001). FastAPI publishes events via Centrifugo internal API (localhost:9001).
-- Auth: Centrifugo proxy mode — calls back to FastAPI `/centrifugo/connect` and `/centrifugo/subscribe` to validate EasyAuth cookies.
+- Auth: Centrifugo proxy mode — calls back to FastAPI `/centrifugo/connect` and `/centrifugo/subscribe` to validate EasyAuth cookies. Connect proxy returns `conn_info` (name, email) for presence.
+- Presence: Enabled on `chat` namespace (`presence: true`, `join_leave: true`, `force_push_join_leave: true`). Clients query presence on subscribe and receive join/leave events for real-time user awareness.
 - Recovery: Centrifugo history buffer (100 msgs, 5min TTL) with `force_recovery` — clients auto-recover missed messages on reconnect.
 - Config: Pure env vars (`CENTRIFUGO_*`) on sidecar container, no config file. API key in Key Vault.
+
+**Multi-user shared editing**: Multiple editors can view and contribute to the same incident report simultaneously.
+- **Presence awareness**: Centrifugo presence shows who else is viewing the same report (avatar bar in header). Join/leave events update in real-time.
+- **Distributed turn lock**: Prevents concurrent Claude API calls for the same incident. Uses Cosmos DB conditional writes (`conversations` container, `id="turn-lock"` with 120s TTL auto-expiry). Works across multiple replicas.
+- **Turn flow**: User sends message → route acquires lock → if locked by another user, returns 409 with holder info → client shows banner and auto-retries after `done` event → engine releases lock in `finally` block.
+- **Event types for multi-user**: `turn_start` (who started), `user_message` (broadcast user messages to other subscribers), `done`/`error` include `user_email`/`user_name` for attribution.
+- **Client behavior**: Messages blocked by 409 are queued and auto-retried when the active turn completes. Other users see the conversation in real-time (all events broadcast to all subscribers).
 
 **Background tasks**: Container Apps Job (`sjifire-ops-tasks`) runs `uv run ops-tasks` every 30 minutes. Runs all `auto=True` tasks: dispatch-sync, dispatch-enrich, ispyfire-sync, neris-sync, schedule-refresh. Tasks registered with `auto=False` (e.g., dispatch-reenrich) only run when explicitly requested by name. New tasks are added via `@register("name")` in `ops/tasks/`.
 
