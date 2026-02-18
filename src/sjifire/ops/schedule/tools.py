@@ -1,9 +1,12 @@
 """Tools for schedule lookup with Cosmos DB caching.
 
-Schedule data flows: Aladtec → Cosmos DB cache → tool response.
-The cache auto-refreshes from Aladtec when stale (>24 hours old)
-or missing for the requested dates. The cache covers the target
-date +/- 1 day to capture crew around shift changes.
+Schedule data flows:
+    Aladtec → (calendar-sync GHA) → Outlook group calendar
+        → (schedule-refresh task, every 30 min) → Cosmos DB cache
+        → tool response
+
+If the cache is stale (>4 hours for today/future), falls back to
+reading the Outlook group calendar directly via Graph API.
 
 Shift-change logic: fire department shifts typically run 24 hours
 (e.g. 18:00 to 18:00). Before the shift change hour, the previous
@@ -11,9 +14,11 @@ day's crew is still on duty. The shift change hour is detected from
 the data (full-shift entries where start_time == end_time).
 """
 
-import asyncio
 import logging
+import re
 from datetime import date, datetime, timedelta
+
+from bs4 import BeautifulSoup, Tag
 
 from sjifire.core.config import local_now
 from sjifire.core.schedule import (
@@ -27,11 +32,211 @@ from sjifire.ops.schedule.store import ScheduleStore
 
 logger = logging.getLogger(__name__)
 
-# Maximum cache age before triggering an Aladtec refresh.
-# Today/future: 24 hours (schedules may change with trades/swaps).
-# Past dates: 7 days (data rarely changes, but corrections happen).
-CACHE_MAX_AGE_HOURS = 24.0
+# Maximum cache age before triggering an Outlook calendar fallback refresh.
+# The schedule-refresh background task keeps the cache fresh every 30 min;
+# this TTL is a safety net if that task fails.
+# Today/future: 4 hours.  Past dates: 7 days.
+CACHE_MAX_AGE_HOURS = 4.0
 CACHE_MAX_AGE_HOURS_PAST = 168.0  # 7 days
+
+# Matches "From 1800 (A Platoon)" or "Until 1800 (B Platoon)"
+_SECTION_RE = re.compile(r"(Until|From)\s+(\d{4})\s*(?:\(([^)]+)\))?")
+
+
+# ---------------------------------------------------------------------------
+# Outlook calendar → DayScheduleCache pipeline
+# ---------------------------------------------------------------------------
+
+
+def parse_duty_event_html(html: str, event_date: date) -> tuple[list[ScheduleEntryCache], str]:
+    """Parse an On Duty calendar event body into schedule entries.
+
+    Extracts only the "From" section (that date's assigned crew).
+    The "Until" section is the previous day's crew, already cached.
+
+    Args:
+        html: HTML body from the Outlook calendar event
+        event_date: The date this event represents
+
+    Returns:
+        Tuple of (entries, platoon). Entries have start_time == end_time
+        set to the shift change hour so detect_shift_change_hour() works.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    entries: list[ScheduleEntryCache] = []
+    platoon = ""
+    shift_time_str = ""
+
+    for h3 in soup.find_all("h3"):
+        text = h3.get_text(strip=True)
+        match = _SECTION_RE.match(text)
+        if not match:
+            continue
+
+        label, time_code, platoon_text = match.groups()
+
+        # Only extract the "From" section
+        if label != "From":
+            continue
+
+        shift_time_str = f"{time_code[:2]}:{time_code[2:]}"
+        platoon = platoon_text.strip() if platoon_text else ""
+
+        # Find the table following this h3
+        table = h3.find_next("table")
+        if not table or not isinstance(table, Tag):
+            continue
+
+        current_section = ""
+        for tr in table.find_all("tr"):
+            tds = tr.find_all("td")
+            if not tds:
+                continue
+
+            # Section header: single td with colspan
+            first_td = tds[0]
+            if first_td.get("colspan"):
+                current_section = first_td.get_text(strip=True)
+                continue
+
+            # Crew row: name | position | contacts
+            if len(tds) >= 2:
+                name = tds[0].get_text(strip=True)
+                position = tds[1].get_text(strip=True)
+                if name and position:
+                    entries.append(
+                        ScheduleEntryCache(
+                            name=name,
+                            position=position,
+                            section=current_section,
+                            start_time=shift_time_str,
+                            end_time=shift_time_str,
+                            platoon=platoon,
+                        )
+                    )
+
+    return entries, platoon
+
+
+async def _fetch_group_calendar_events(
+    start: date,
+    end: date,
+) -> dict[date, str]:
+    """Read On Duty events from the all-personnel group calendar.
+
+    Uses app-only auth (ClientSecretCredential) with Calendars.Read
+    application permission.
+
+    Returns:
+        Dict mapping event date to HTML body content.
+    """
+    from msgraph.generated.groups.groups_request_builder import GroupsRequestBuilder
+    from msgraph.generated.groups.item.calendar_view.calendar_view_request_builder import (
+        CalendarViewRequestBuilder as GroupCalendarViewRequestBuilder,
+    )
+
+    from sjifire.core.config import get_org_config, get_timezone
+    from sjifire.core.msgraph_client import get_graph_client
+
+    client = get_graph_client()
+    org = get_org_config()
+    tz = get_timezone()
+
+    # Find the all-personnel group by mailNickname
+    mail_nickname = "all-personnel"
+    query_params = GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters(
+        filter=f"mailNickname eq '{mail_nickname}'",
+        select=["id", "displayName", "mailNickname"],
+    )
+    config = GroupsRequestBuilder.GroupsRequestBuilderGetRequestConfiguration(
+        query_parameters=query_params,
+    )
+    result = await client.groups.get(request_configuration=config)
+    if not result or not result.value:
+        raise RuntimeError(f"Group '{mail_nickname}' not found in Entra ID")
+
+    group_id = result.value[0].id
+    logger.info("Found group %s (%s)", result.value[0].display_name, group_id)
+
+    # Fetch calendar events for date range
+    start_dt = datetime.combine(start, datetime.min.time(), tzinfo=tz)
+    end_dt = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=tz)
+
+    subject = org.duty_event_subject  # "On Duty"
+    cv_params = GroupCalendarViewRequestBuilder.CalendarViewRequestBuilderGetQueryParameters(
+        start_date_time=start_dt.isoformat(),
+        end_date_time=end_dt.isoformat(),
+        filter=f"startswith(subject, '{subject}')",
+        top=100,
+        select=["id", "subject", "start", "end", "isAllDay", "body"],
+    )
+    cv_config = GroupCalendarViewRequestBuilder.CalendarViewRequestBuilderGetRequestConfiguration(
+        query_parameters=cv_params,
+    )
+    events_result = await client.groups.by_group_id(group_id).calendar_view.get(
+        request_configuration=cv_config,
+    )
+
+    events_by_date: dict[date, str] = {}
+    if events_result and events_result.value:
+        for event in events_result.value:
+            if not event.start or not event.start.date_time:
+                continue
+            # All-day events have date_time like "2026-02-17T00:00:00.0000000"
+            event_date = datetime.fromisoformat(event.start.date_time).date()
+            body_content = event.body.content if event.body and event.body.content else ""
+            events_by_date[event_date] = body_content
+
+    logger.info(
+        "Fetched %d On Duty events from group calendar (%s to %s)",
+        len(events_by_date),
+        start,
+        end,
+    )
+    return events_by_date
+
+
+async def fetch_schedule_from_outlook(start: date, end: date) -> list[DayScheduleCache]:
+    """Fetch schedule data from Outlook group calendar.
+
+    Reads On Duty events, parses the HTML body, and returns
+    DayScheduleCache documents ready for Cosmos DB upsert.
+
+    Used by the schedule-refresh background task and as the
+    inline fallback when the cache is stale.
+
+    Args:
+        start: First date to fetch (inclusive)
+        end: Last date to fetch (inclusive)
+
+    Returns:
+        List of DayScheduleCache documents (may be empty).
+    """
+    events = await _fetch_group_calendar_events(start, end)
+
+    results: list[DayScheduleCache] = []
+    for event_date, html in sorted(events.items()):
+        entries, platoon = parse_duty_event_html(html, event_date)
+        if not entries:
+            logger.warning("No crew entries parsed for %s", event_date)
+            continue
+        results.append(
+            DayScheduleCache(
+                id=event_date.isoformat(),
+                date=event_date.isoformat(),
+                platoon=platoon,
+                entries=entries,
+            )
+        )
+
+    logger.info("Fetched %d days from Outlook calendar (%s to %s)", len(results), start, end)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Cosmos DB cache management
+# ---------------------------------------------------------------------------
 
 
 def _detect_shift_change_hour_from_cache(cached: dict[str, DayScheduleCache]) -> int | None:
@@ -64,46 +269,6 @@ def _build_crew_list(
     ]
 
 
-def _fetch_from_aladtec(start: date, end: date) -> list[DayScheduleCache]:
-    """Fetch schedule from Aladtec and convert to cache models (blocking).
-
-    Returns list of DayScheduleCache ready for Cosmos DB.
-    """
-    from sjifire.aladtec.schedule_scraper import AladtecScheduleScraper
-
-    with AladtecScheduleScraper() as scraper:
-        if not scraper.login():
-            logger.error("Failed to log in to Aladtec for schedule refresh")
-            return []
-        schedules = scraper.get_schedule_range(start, end)
-
-    results = []
-    for day in schedules:
-        date_str = day.date.isoformat()
-        entries = [
-            ScheduleEntryCache(
-                name=e.name,
-                position=e.position,
-                section=e.section,
-                start_time=e.start_time,
-                end_time=e.end_time,
-                platoon=e.platoon,
-            )
-            for e in day.get_filled_positions()
-        ]
-        results.append(
-            DayScheduleCache(
-                id=date_str,
-                date=date_str,
-                platoon=day.platoon,
-                entries=entries,
-            )
-        )
-
-    logger.info("Fetched %d days from Aladtec (%s to %s)", len(results), start, end)
-    return results
-
-
 async def _ensure_cache(
     store: ScheduleStore,
     needed_dates: list[str],
@@ -111,7 +276,7 @@ async def _ensure_cache(
     """Ensure cache has fresh data for the needed dates.
 
     Checks Cosmos DB for each date. If any are missing or stale,
-    fetches from Aladtec and updates the cache.
+    fetches from the Outlook group calendar and updates the cache.
 
     Args:
         store: Connected ScheduleStore
@@ -136,15 +301,15 @@ async def _ensure_cache(
         logger.info("Schedule cache hit for all %d dates", len(needed_dates))
         return cached
 
-    # Refresh stale dates from Aladtec
+    # Fallback: refresh stale dates from Outlook group calendar
     logger.info(
-        "Refreshing %d stale/missing schedule dates from Aladtec",
+        "Fallback: refreshing %d stale/missing schedule dates from Outlook",
         len(stale_dates),
     )
     start = datetime.strptime(min(stale_dates), "%Y-%m-%d").date()
     end = datetime.strptime(max(stale_dates), "%Y-%m-%d").date()
 
-    fresh = await asyncio.to_thread(_fetch_from_aladtec, start, end)
+    fresh = await fetch_schedule_from_outlook(start, end)
 
     # Write fresh data to cache
     for day_cache in fresh:
@@ -152,6 +317,11 @@ async def _ensure_cache(
         cached[day_cache.date] = day_cache
 
     return cached
+
+
+# ---------------------------------------------------------------------------
+# MCP tool
+# ---------------------------------------------------------------------------
 
 
 async def get_on_duty_crew(
@@ -179,8 +349,8 @@ async def get_on_duty_crew(
     By default, administration staff and Time Off entries are excluded
     — pass ``include_admin=True`` to see everyone.
 
-    Data is cached in Cosmos DB and auto-refreshes from Aladtec
-    if the cache is more than 24 hours old.
+    Data is cached in Cosmos DB (refreshed from Outlook every 30 min
+    by the schedule-refresh background task).
 
     Args:
         target_date: Date in YYYY-MM-DD format. Defaults to today (time-aware).
