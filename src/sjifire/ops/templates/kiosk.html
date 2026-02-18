@@ -736,6 +736,13 @@ function kioskApp() {
   // Track current map instances for cleanup
   const maps = {};
 
+  // Auto-scroll state for archived call logs
+  let autoScrollTimer = null;
+  let autoScrollDir = 1;  // 1 = down, -1 = up
+  const SCROLL_SPEED = 0.5;      // px per tick
+  const SCROLL_INTERVAL = 30;    // ms between ticks (~33fps)
+  const SCROLL_PAUSE = 3000;     // ms pause at top/bottom
+
   return {
     currentCallIndex: 0,
     rotationTimer: null,
@@ -802,8 +809,14 @@ function kioskApp() {
           }
         }
 
-        // Manage rotation
+        // Manage rotation + auto-scroll for archived calls
         this.manageRotation();
+        if (this.currentCall.archived) {
+          // Start auto-scroll if not already running
+          if (!autoScrollTimer) this.startAutoScroll();
+        } else {
+          this.stopAutoScroll();
+        }
 
         // Clean up maps for calls no longer displayed
         const allDisplayedIds = new Set(calls.map(c => c.dispatch_id));
@@ -821,6 +834,8 @@ function kioskApp() {
     showCall(index) {
       this.currentCallIndex = index;
       this.resetRotation();
+      // Restart auto-scroll for the newly selected call
+      this.$nextTick(() => this.startAutoScroll());
     },
 
     manageRotation() {
@@ -861,6 +876,53 @@ function kioskApp() {
       if (this.rotationTimer) {
         clearInterval(this.rotationTimer);
         this.rotationTimer = null;
+      }
+    },
+
+    // Auto-scroll the dispatch log for archived (static) calls
+    startAutoScroll() {
+      this.stopAutoScroll();
+      const call = this.currentCall;
+      if (!call.archived) return;
+
+      // Find the .call-log element inside the current panel
+      const el = document.querySelector('.call-panel .call-log');
+      if (!el || el.scrollHeight <= el.clientHeight) return;  // no overflow
+
+      autoScrollDir = 1;
+      el.scrollTop = 0;
+
+      autoScrollTimer = setInterval(() => {
+        const maxScroll = el.scrollHeight - el.clientHeight;
+        if (maxScroll <= 0) return;
+
+        el.scrollTop += SCROLL_SPEED * autoScrollDir;
+
+        // Hit bottom — pause then reverse
+        if (el.scrollTop >= maxScroll) {
+          el.scrollTop = maxScroll;
+          autoScrollDir = -1;
+          clearInterval(autoScrollTimer);
+          autoScrollTimer = setTimeout(() => {
+            autoScrollTimer = setInterval(() => {
+              el.scrollTop += SCROLL_SPEED * autoScrollDir;
+              if (el.scrollTop <= 0) {
+                el.scrollTop = 0;
+                autoScrollDir = 1;
+                clearInterval(autoScrollTimer);
+                autoScrollTimer = setTimeout(() => this.startAutoScroll(), SCROLL_PAUSE);
+              }
+            }, SCROLL_INTERVAL);
+          }, SCROLL_PAUSE);
+        }
+      }, SCROLL_INTERVAL);
+    },
+
+    stopAutoScroll() {
+      if (autoScrollTimer) {
+        clearInterval(autoScrollTimer);
+        clearTimeout(autoScrollTimer);
+        autoScrollTimer = null;
       }
     },
 

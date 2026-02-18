@@ -732,6 +732,8 @@ async def _fetch_recently_completed(*, hours: int = 12) -> list[dict]:
 
         results.append(call_data)
 
+    # Most recently completed first (matches active-call ordering)
+    results.sort(key=lambda c: c.get("completed_at", ""), reverse=True)
     return results
 
 
