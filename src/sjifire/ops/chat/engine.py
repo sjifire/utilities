@@ -685,7 +685,12 @@ async def _stream_loop(
                 summary = result_str[:200]
 
             is_error = summary.startswith("Error")
-            evt = {"name": tc["name"], "summary": summary, "is_error": is_error}
+            evt: dict = {"name": tc["name"], "summary": summary, "is_error": is_error}
+            # Include image URL so the chat UI can render inline thumbnails
+            if tc["name"] == "get_attachment" and not is_error:
+                aid = tc["input"].get("attachment_id", "")
+                if aid:
+                    evt["image_url"] = f"/reports/{conversation.incident_id}/attachments/{aid}"
             yield _sse("tool_result", evt)
 
             # After update_incident, emit live status update for the client
