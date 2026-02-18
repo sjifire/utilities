@@ -41,8 +41,14 @@ class ConversationDocument(BaseModel):
     updated_at: datetime | None = None
 
     def to_cosmos(self) -> dict:
-        """Serialize for Cosmos DB storage."""
-        return self.model_dump(mode="json")
+        """Serialize for Cosmos DB storage.
+
+        Sets ``ttl: -1`` so the document never expires, overriding the
+        container-level 90-day default TTL.
+        """
+        data = self.model_dump(mode="json")
+        data["ttl"] = -1
+        return data
 
     @classmethod
     def from_cosmos(cls, data: dict) -> Self:
