@@ -1,17 +1,23 @@
 """Tests for operations dashboard."""
 
 import os
+import time
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import sjifire.ops.dashboard as dashboard_mod
 from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.dashboard import (
+    _call_first_seen,
     _fetch_incidents,
+    _fetch_open_docs_cached,
     _fetch_recent_calls,
     _normalize_incident_number,
+    _open_calls_ttl,
     get_dashboard,
+    get_open_calls_cached,
 )
 from sjifire.ops.dispatch.models import DispatchCallDocument
 from sjifire.ops.dispatch.store import DispatchStore
@@ -1049,3 +1055,199 @@ class TestDashboardIntegration:
         assert report is not None
         assert report["source"] == "neris"
         assert report["status"] == "APPROVED"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: shared open-calls cache
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_open_calls_cache():
+    """Reset the shared open-calls cache between tests."""
+    dashboard_mod._open_docs_cache = None
+    dashboard_mod._open_docs_ts = 0
+    _call_first_seen.clear()
+    yield
+    dashboard_mod._open_docs_cache = None
+    dashboard_mod._open_docs_ts = 0
+    _call_first_seen.clear()
+
+
+class TestOpenCallsTTL:
+    """Unit tests for _open_calls_ttl adaptive TTL logic."""
+
+    def test_no_active_calls_returns_5s(self):
+        _call_first_seen.clear()
+        assert _open_calls_ttl() == 5.0
+
+    def test_recent_call_returns_2s(self):
+        _call_first_seen["26-001234"] = time.monotonic()
+        assert _open_calls_ttl() == 2.0
+
+    def test_old_call_returns_5s(self):
+        _call_first_seen["26-001234"] = time.monotonic() - 301  # > 5 min
+        assert _open_calls_ttl() == 5.0
+
+    def test_mix_of_old_and_new_returns_2s(self):
+        _call_first_seen["26-001234"] = time.monotonic() - 400  # old
+        _call_first_seen["26-005678"] = time.monotonic()  # new
+        assert _open_calls_ttl() == 2.0
+
+
+class TestFetchOpenDocsCached:
+    """Unit tests for the shared open-calls cache."""
+
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_fetches_and_caches_docs(self, mock_store_cls):
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+            time_reported=datetime(2026, 2, 12, 14, 30, tzinfo=UTC),
+        )
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[doc])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await _fetch_open_docs_cached()
+
+        assert len(result) == 1
+        assert result[0].long_term_call_id == "26-001678"
+        mock_store.fetch_open.assert_called_once()
+
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_cache_hit_within_ttl(self, mock_store_cls):
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[doc])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # First call populates cache
+        await _fetch_open_docs_cached()
+        # Second call should hit cache
+        await _fetch_open_docs_cached()
+
+        mock_store.fetch_open.assert_called_once()
+
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_tracks_first_seen(self, mock_store_cls):
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[doc])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        await _fetch_open_docs_cached()
+
+        assert "26-001678" in _call_first_seen
+
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_clears_old_calls_from_tracking(self, mock_store_cls):
+        _call_first_seen["26-OLD"] = time.monotonic() - 600
+
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[])  # no open calls
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        await _fetch_open_docs_cached()
+
+        assert "26-OLD" not in _call_first_seen
+
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_returns_stale_cache_on_error(self, mock_store_cls):
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[doc])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # Populate cache
+        await _fetch_open_docs_cached()
+
+        # Expire cache, make next fetch fail
+        dashboard_mod._open_docs_ts = 0
+        mock_store.fetch_open = AsyncMock(side_effect=RuntimeError("iSpyFire down"))
+
+        result = await _fetch_open_docs_cached()
+
+        assert len(result) == 1
+        assert result[0].long_term_call_id == "26-001678"
+
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_returns_empty_list_on_first_error(self, mock_store_cls):
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(side_effect=RuntimeError("iSpyFire down"))
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await _fetch_open_docs_cached()
+
+        assert result == []
+
+
+class TestGetOpenCallsCached:
+    """Unit tests for the nav bar open-calls endpoint."""
+
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_formats_docs_correctly(self, mock_store_cls):
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[doc])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await get_open_calls_cached()
+
+        assert result["open_calls"] == 1
+        assert result["updated_time"]  # non-empty string
+        assert len(result["calls"]) == 1
+        assert result["calls"][0]["dispatch_id"] == "26-001678"
+        assert result["calls"][0]["nature"] == "Medical Aid"
+        assert result["calls"][0]["address"] == "200 Spring St"
+
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_no_calls_returns_zero(self, mock_store_cls):
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await get_open_calls_cached()
+
+        assert result["open_calls"] == 0
+        assert result["calls"] == []
