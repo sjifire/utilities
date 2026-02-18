@@ -649,6 +649,16 @@ async def render_kiosk() -> str:
 # Kiosk data — adaptive caching for open calls + crew
 # ---------------------------------------------------------------------------
 
+# Track when each call was first seen (call_id -> monotonic timestamp)
+_kiosk_call_first_seen: dict[str, float] = {}
+
+# Recently-completed calls kept on kiosk in "archived" mode.
+# Maps dispatch_id -> {"data": <enriched call dict>, "completed_at": <ISO str>}
+_kiosk_archived_calls: dict[str, dict] = {}
+
+# Default hours to keep archived calls on the kiosk display.
+_KIOSK_ARCHIVE_HOURS = 12
+
 # Kiosk cache (enriched calls + crew + schedule)
 _kiosk_cache: dict | None = None
 _kiosk_cache_ts: float = 0
@@ -681,6 +691,17 @@ async def get_kiosk_data() -> dict:
         return result
 
 
+def _find_previous_call(dispatch_id: str) -> dict | None:
+    """Find a call's enriched data from the last kiosk cache snapshot."""
+    if _kiosk_cache is None:
+        return None
+    for call in _kiosk_cache.get("calls", []):
+        if call.get("dispatch_id") == dispatch_id and not call.get("archived"):
+            # Deep copy so archived snapshot is independent of future cache updates
+            return dict(call)
+    return None
+
+
 async def _fetch_kiosk_data() -> dict:
     """Fetch open calls (enriched) and schedule in parallel."""
     open_calls_result, schedule_result = await asyncio.gather(
@@ -698,6 +719,53 @@ async def _fetch_kiosk_data() -> dict:
     else:
         result["calls"] = open_calls_result
 
+    # Update first-seen tracking and detect newly-completed calls
+    active_calls = [c for c in result["calls"] if not c.get("archived")]
+    current_ids = {c["dispatch_id"] for c in active_calls}
+    now_mono = time.monotonic()
+    now_utc = datetime.now(UTC)
+
+    # Archive calls that just disappeared from the open list
+    for old_id in list(_kiosk_call_first_seen):
+        if old_id not in current_ids:
+            # Look up the last known enriched data from the previous cache
+            prev_call = _find_previous_call(old_id)
+            if prev_call:
+                prev_call["archived"] = True
+                prev_call["completed_at"] = now_utc.isoformat()
+                _kiosk_archived_calls[old_id] = {
+                    "data": prev_call,
+                    "completed_at": now_utc.isoformat(),
+                    "mono_ts": now_mono,
+                }
+                logger.info("Kiosk: archived completed call %s", old_id)
+            del _kiosk_call_first_seen[old_id]
+
+    for call_id in current_ids:
+        if call_id not in _kiosk_call_first_seen:
+            _kiosk_call_first_seen[call_id] = now_mono
+
+    # Determine archive window
+    archive_seconds = _KIOSK_ARCHIVE_HOURS * 3600
+
+    # Option A: any active call clears all archived calls
+    if current_ids and _kiosk_archived_calls:
+        logger.info(
+            "Kiosk: clearing %d archived call(s) — active call present",
+            len(_kiosk_archived_calls),
+        )
+        _kiosk_archived_calls.clear()
+
+    # Time-based expiry for archived calls (when no active calls)
+    for aid in list(_kiosk_archived_calls):
+        entry = _kiosk_archived_calls[aid]
+        if (now_mono - entry["mono_ts"]) > archive_seconds:
+            logger.info("Kiosk: expired archived call %s (age > %dh)", aid, _KIOSK_ARCHIVE_HOURS)
+            del _kiosk_archived_calls[aid]
+
+    # Append archived calls to the response (after active calls)
+    for entry in _kiosk_archived_calls.values():
+        result["calls"].append(entry["data"])
     # Schedule
     if isinstance(schedule_result, BaseException):
         logger.exception("Kiosk: schedule fetch failed", exc_info=schedule_result)
