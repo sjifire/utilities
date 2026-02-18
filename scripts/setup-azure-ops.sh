@@ -62,6 +62,11 @@ COSMOS_DATABASE="sjifire-incidents"
 ACR_NAME="sjifiremcp"
 CA_ENV="sjifire-mcp-env"
 CA_APP="sjifire-mcp"
+CA_JOB="sjifire-ops-tasks"
+# Azure Maps
+MAPS_ACCOUNT="sjifire-maps"
+# Blob Storage (incident attachments)
+STORAGE_ACCOUNT="sjifireattachments"
 
 # Custom domain (derived from config/organization.json)
 CUSTOM_DOMAIN="ops.${DOMAIN}"
@@ -945,8 +950,6 @@ fi
 if should_run 8; then
     echo -e "${CYAN}━━━ Phase 8: Azure Maps ━━━${NC}"
 
-    MAPS_ACCOUNT="sjifire-maps"
-
     if az maps account show --name "$MAPS_ACCOUNT" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
         warn "Azure Maps account $MAPS_ACCOUNT already exists"
     else
@@ -1011,8 +1014,6 @@ fi
 
 if should_run 9; then
     echo -e "${CYAN}━━━ Phase 9: Container Apps Job (background tasks) ━━━${NC}"
-
-    CA_JOB="sjifire-ops-tasks"
 
     # Get ACR login server
     ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query loginServer -o tsv 2>/dev/null) || \
@@ -1128,8 +1129,6 @@ fi
 # =============================================================================
 # Phase 10: Azure Blob Storage (incident attachments)
 # =============================================================================
-
-STORAGE_ACCOUNT="sjifireattachments"
 
 if should_run 10; then
     echo -e "${CYAN}━━━ Phase 10: Azure Blob Storage (attachments) ━━━${NC}"
