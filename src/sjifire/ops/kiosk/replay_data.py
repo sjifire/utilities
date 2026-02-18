@@ -35,7 +35,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # Cycle length in seconds before the scenario restarts
-CYCLE_SECONDS = 120
+# Call is active T+5 to T+100, then ~5s idle before the next loop.
+CYCLE_SECONDS = 105
 
 # Module-level caches
 _fixture_detail: dict | None = None
