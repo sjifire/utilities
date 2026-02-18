@@ -17,6 +17,20 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - **ruff** for linting/formatting
 - **ty** for type checking
 
+## Stateless Containers — CRITICAL Architecture Rule
+
+The ops server runs on Azure Container Apps with **0-many replicas** that restart at any time (deploys, scaling, platform maintenance). Every replica must function identically from a cold start.
+
+**In-memory module-level state is ephemeral.** It will be lost on restart and is NOT shared across replicas.
+
+| OK | NOT OK |
+|---|---|
+| Short-lived TTL caches (seconds) that reduce redundant API calls. Rebuilt automatically on the next request. | Tracking state transitions between requests (e.g., "call was open, now it's gone → archive it"). |
+| Locks to prevent concurrent fetches within one process. | Accumulating data over time in dicts/lists that grow across requests. |
+| Static config loaded once at startup. | Any data that must survive a restart or be visible to other replicas. |
+
+**If it needs to survive a restart, it goes to Cosmos DB.** No exceptions. The `dispatch-sync` background task already stores completed calls, schedules are cached in Cosmos, and incidents are in Cosmos. Query those stores instead of trying to reconstruct state in memory.
+
 ## Key Concepts
 
 ### Aladtec
