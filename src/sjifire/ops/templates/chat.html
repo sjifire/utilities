@@ -454,13 +454,11 @@
         <!-- User or assistant message -->
         <template x-if="msg.type === 'message'">
           <div class="msg" :class="msg.role">
-            <template x-if="msg.images && msg.images.length">
-              <div class="msg-images">
-                <template x-for="(img, j) in msg.images" :key="j">
-                  <img :src="img" @click="lightboxSrc = img">
-                </template>
-              </div>
-            </template>
+            <div class="msg-images" x-show="msg.images && msg.images.length">
+              <template x-for="(img, j) in (msg.images || [])" :key="j">
+                <img :src="img" @click="lightboxSrc = img">
+              </template>
+            </div>
             <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content, false, i) : msg.content"></div>
           </div>
         </template>
