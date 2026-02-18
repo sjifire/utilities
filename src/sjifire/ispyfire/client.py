@@ -5,11 +5,13 @@ full raw API responses during live events.  Once we have enough data
 to build realistic test fixtures, flip these back to DEBUG.
 """
 
+import contextvars
 import json
 import logging
 import os
 import re
 import time
+from pathlib import Path
 from typing import Self
 
 import httpx
@@ -46,6 +48,32 @@ def get_ispyfire_credentials() -> tuple[str, str, str]:
     return url, username, password
 
 
+# Context var for per-request fixture override (e.g., kiosk ?test_mode=2)
+fixture_dir_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "fixture_dir_override", default=None
+)
+
+
+def _get_fixture_dir() -> Path | None:
+    """Return fixture directory from context var override or env var."""
+    # Per-request override (set by kiosk endpoint for test_mode=2)
+    override = fixture_dir_override.get(None)
+    if override:
+        d = Path(override)
+        if d.is_dir():
+            return d
+        logger.warning("fixture_dir_override set but not a directory: %s", override)
+
+    # Global env var
+    path = os.getenv("ISPYFIRE_FIXTURE_DIR")
+    if path:
+        d = Path(path)
+        if d.is_dir():
+            return d
+        logger.warning("ISPYFIRE_FIXTURE_DIR set but not a directory: %s", path)
+    return None
+
+
 logger = logging.getLogger(__name__)
 
 # Rate limiting configuration
@@ -73,7 +101,13 @@ class ISpyFireClient:
 
     def __init__(self) -> None:
         """Initialize the client with credentials from environment."""
-        self.base_url, self.username, self.password = get_ispyfire_credentials()
+        self._fixture_dir = _get_fixture_dir()
+        if self._fixture_dir:
+            self.base_url = "https://fixture.ispyfire.com"
+            self.username = "fixture"
+            self.password = "fixture"  # noqa: S105
+        else:
+            self.base_url, self.username, self.password = get_ispyfire_credentials()
         self.client: httpx.Client | None = None
         self.central_client: httpx.Client | None = None
         self.bearer: str | None = None
@@ -83,6 +117,9 @@ class ISpyFireClient:
 
     def __enter__(self) -> Self:
         """Enter context manager - create HTTP client and login."""
+        if self._fixture_dir:
+            logger.info("Fixture mode: reading from %s", self._fixture_dir)
+            return self
         self.client = httpx.Client(
             follow_redirects=True,
             timeout=30.0,
@@ -93,6 +130,8 @@ class ISpyFireClient:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit context manager - close HTTP clients."""
+        if self._fixture_dir:
+            return
         if self.central_client:
             self.central_client.close()
             self.central_client = None
@@ -295,10 +334,35 @@ class ISpyFireClient:
 
         time.sleep(BULK_OPERATION_DELAY)
 
+        # Extract short endpoint label for timing logs
+        # e.g. ".../calls/headers/..." → "headers", ".../calls/details/..." → "details"
+        endpoint = "unknown"
+        for segment in ("headers", "details", "search", "logging"):
+            if segment in url:
+                endpoint = segment
+                break
+
+        t0 = time.monotonic()
         try:
-            return self.central_client.request(method, url, **kwargs)
+            response = self.central_client.request(method, url, **kwargs)
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            logger.info(
+                "ISPY_TIMING | method=%s endpoint=%s status=%d duration_ms=%.0f",
+                method,
+                endpoint,
+                response.status_code,
+                elapsed_ms,
+            )
+            return response
         except httpx.HTTPError as e:
-            logger.error(f"Central API request failed: {e}")
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            logger.error(
+                "ISPY_TIMING | method=%s endpoint=%s error=%s duration_ms=%.0f",
+                method,
+                endpoint,
+                e,
+                elapsed_ms,
+            )
             return None
 
     def get_people(
@@ -733,6 +797,10 @@ class ISpyFireClient:
         Returns:
             DispatchCall if found, None otherwise
         """
+        # Fixture mode: read from details/{call_id}.json
+        if self._fixture_dir:
+            return self._fixture_call_detail(call_id)
+
         if not self.ispyid:
             logger.error("ispyid not available - central API not initialized")
             return None
@@ -788,6 +856,10 @@ class ISpyFireClient:
         Returns:
             List of open DispatchCall objects
         """
+        # Fixture mode: read open_headers.json, then fetch detail for each
+        if self._fixture_dir:
+            return self._fixture_open_calls()
+
         if not self.leadispyid:
             logger.error("leadispyid not available - central API not initialized")
             return []
@@ -856,6 +928,9 @@ class ISpyFireClient:
         Returns:
             Raw list of call dicts from the API
         """
+        if self._fixture_dir:
+            return self._fixture_search_results()
+
         if not self.ispyid:
             logger.error("ispyid not available - central API not initialized")
             return []
@@ -882,4 +957,74 @@ class ISpyFireClient:
         logger.info("ISPY_RAW_SEARCH | count=%d after=%s before=%s", len(results), after, before)
         for i, entry in enumerate(results):
             logger.info("ISPY_RAW_SEARCH[%d] | %s", i, json.dumps(entry, default=str))
+        return results
+
+    # ------------------------------------------------------------------
+    # Fixture mode helpers
+    # ------------------------------------------------------------------
+
+    def _fixture_call_detail(self, call_id: str) -> DispatchCall | None:
+        """Read a call detail from fixture files.
+
+        Looks up ``details/{call_id}.json`` first (UUID lookup), then
+        falls back to scanning all detail files for a matching
+        LongTermCallID (dispatch ID lookup like "26-001678").
+        """
+        if self._fixture_dir is None:
+            return None
+
+        # Direct UUID lookup
+        path = self._fixture_dir / "details" / f"{call_id}.json"
+        if path.exists():
+            raw = json.loads(path.read_text())
+            return DispatchCall.from_api(raw)
+
+        # Dispatch ID lookup — scan all detail files
+        if re.match(r"\d{2}-\d+", call_id):
+            details_dir = self._fixture_dir / "details"
+            if details_dir.is_dir():
+                for p in details_dir.glob("*.json"):
+                    raw = json.loads(p.read_text())
+                    if raw.get("LongTermCallID") == call_id:
+                        return DispatchCall.from_api(raw)
+
+        logger.debug("Fixture: no detail for %s", call_id)
+        return None
+
+    def _fixture_open_calls(self) -> list[DispatchCall]:
+        """Read open call headers and fetch details for each."""
+        if self._fixture_dir is None:
+            return []
+
+        headers_path = self._fixture_dir / "open_headers.json"
+        if not headers_path.exists():
+            logger.warning("Fixture: open_headers.json not found")
+            return []
+
+        headers = json.loads(headers_path.read_text())
+        logger.info("Fixture: %d open headers loaded", len(headers))
+
+        calls: list[DispatchCall] = []
+        for header in headers:
+            call_id = header.get("_id")
+            if call_id:
+                detail = self._fixture_call_detail(call_id)
+                if detail:
+                    calls.append(detail)
+                else:
+                    logger.warning("ISPY_OPEN_NO_DETAIL | _id=%s (fixture)", call_id)
+        return calls
+
+    def _fixture_search_results(self) -> list[dict]:
+        """Read search results from fixture file."""
+        if self._fixture_dir is None:
+            return []
+
+        path = self._fixture_dir / "search_results.json"
+        if not path.exists():
+            logger.warning("Fixture: search_results.json not found")
+            return []
+
+        results = json.loads(path.read_text())
+        logger.info("Fixture: %d search results loaded", len(results))
         return results

@@ -1,0 +1,486 @@
+{
+  "AddressID": "26635",
+  "Agency": "SJF3",
+  "AgencyCode": "SJF3",
+  "CityInfo": {
+    "City": "FRIDAY HARBOR",
+    "StateAbbreviation": "WA",
+    "ZIPCode": "98250"
+  },
+  "ClearComments": [],
+  "JoinedComments": "vessel is filling up with smoke, possibly from the engine, boat with 2 people,\ncannot get husband off boat without help as he is on hospice.\nVessel is named Western Star 50 ft vessel.",
+  "JoinedResponders": "BN31 DIV37 E31 E33 EMS11 EMS13 L31 M12 SJEM SJF3",
+  "JoinedRespondersDetail": [
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Completed call call=3e",
+      "StatusDisplayCode": "CMPLT",
+      "TimeOfStatusChange": "08:57:51 02/17/2026",
+      "UnitNumber": "M12"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Returning to Quarters call=3f",
+      "StatusDisplayCode": "RTQ",
+      "TimeOfStatusChange": "08:57:07 02/17/2026",
+      "UnitNumber": "DIV37"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Returning to Quarters call=3f",
+      "StatusDisplayCode": "RTQ",
+      "TimeOfStatusChange": "08:57:06 02/17/2026",
+      "UnitNumber": "BN31"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Returning to Quarters call=3f",
+      "StatusDisplayCode": "RTQ",
+      "TimeOfStatusChange": "08:57:06 02/17/2026",
+      "UnitNumber": "L31"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Returning to Quarters call=3f",
+      "StatusDisplayCode": "RTQ",
+      "TimeOfStatusChange": "08:57:05 02/17/2026",
+      "UnitNumber": "E31"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Returning to Quarters call=3f",
+      "StatusDisplayCode": "RTQ",
+      "TimeOfStatusChange": "08:57:05 02/17/2026",
+      "UnitNumber": "E33"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Returning to Quarters disp:EXT oc:VEHF call=3f",
+      "StatusDisplayCode": "RTQ",
+      "TimeOfStatusChange": "08:57:04 02/17/2026",
+      "UnitNumber": "SJF3"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "turned over to owner, cmd term",
+      "StatusDisplayCode": "NOTE",
+      "TimeOfStatusChange": "08:56:43 02/17/2026",
+      "UnitNumber": "BN31"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "overhaul cmplt",
+      "StatusDisplayCode": "NOTE",
+      "TimeOfStatusChange": "08:44:46 02/17/2026",
+      "UnitNumber": "BN31"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Arrived at Hospital disp:AMB oc:CMPI call=3e",
+      "StatusDisplayCode": "ARVDH",
+      "TimeOfStatusChange": "08:19:40 02/17/2026",
+      "UnitNumber": "M12"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Enroute to Hospital call=3e",
+      "StatusDisplayCode": "ENRTH",
+      "TimeOfStatusChange": "08:14:37 02/17/2026",
+      "UnitNumber": "M12"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "elec fire, may have found source, moving ahead w/overhaul",
+      "StatusDisplayCode": "NOTE",
+      "TimeOfStatusChange": "07:49:24 02/17/2026",
+      "UnitNumber": "BN31"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Arrived on scene call=3f",
+      "StatusDisplayCode": "ARRVD",
+      "TimeOfStatusChange": "07:45:55 02/17/2026",
+      "UnitNumber": "L31"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Arrived on scene call=3f",
+      "StatusDisplayCode": "ARRVD",
+      "TimeOfStatusChange": "07:44:06 02/17/2026",
+      "UnitNumber": "E33"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0174 Arrived on scene call=3e",
+      "StatusDisplayCode": "ARRVD",
+      "TimeOfStatusChange": "07:43:54 02/17/2026",
+      "UnitNumber": "E33"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Reassigned to call 4e, completed call 3e",
+      "StatusDisplayCode": "CMPLT",
+      "TimeOfStatusChange": "07:43:39 02/17/2026",
+      "UnitNumber": "EMS13"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "has command",
+      "StatusDisplayCode": "NOTE",
+      "TimeOfStatusChange": "07:42:14 02/17/2026",
+      "UnitNumber": "BN31"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 with 2 call=3f",
+      "StatusDisplayCode": "ENRT",
+      "TimeOfStatusChange": "07:41:31 02/17/2026",
+      "UnitNumber": "L31"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Reassigned to call 4e, completed call 3e",
+      "StatusDisplayCode": "CMPLT",
+      "TimeOfStatusChange": "07:41:03 02/17/2026",
+      "UnitNumber": "EMS11"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 switching to A13 call=3e",
+      "StatusDisplayCode": "ARSTN",
+      "TimeOfStatusChange": "07:40:48 02/17/2026",
+      "UnitNumber": "EMS11"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Reassigned to call 4e, completed call 3e",
+      "StatusDisplayCode": "CMPLT",
+      "TimeOfStatusChange": "07:39:52 02/17/2026",
+      "UnitNumber": "SJEM"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Enroute to a call call=3f",
+      "StatusDisplayCode": "ENRT",
+      "TimeOfStatusChange": "07:38:37 02/17/2026",
+      "UnitNumber": "DIV37"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "cont priority, no source of smoke, pt on vessel",
+      "StatusDisplayCode": "NOTE",
+      "TimeOfStatusChange": "07:38:15 02/17/2026",
+      "UnitNumber": "BN31"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Enroute to Station call=3e",
+      "StatusDisplayCode": "ENRST",
+      "TimeOfStatusChange": "07:35:21 02/17/2026",
+      "UnitNumber": "EMS11"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Enroute to a call call=3e",
+      "StatusDisplayCode": "ENRT",
+      "TimeOfStatusChange": "07:34:59 02/17/2026",
+      "UnitNumber": "EMS11"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Arrived at Station call=3f",
+      "StatusDisplayCode": "ARSTN",
+      "TimeOfStatusChange": "07:33:35 02/17/2026",
+      "UnitNumber": "L31"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Arrived on scene call=3e",
+      "StatusDisplayCode": "ARRVD",
+      "TimeOfStatusChange": "07:32:54 02/17/2026",
+      "UnitNumber": "EMS13"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "smoke coming out, proceeding..",
+      "StatusDisplayCode": "NOTE",
+      "TimeOfStatusChange": "07:32:24 02/17/2026",
+      "UnitNumber": "BN31"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "Enroute to a call call=3e",
+      "StatusDisplayCode": "ENRT",
+      "TimeOfStatusChange": "07:31:19 02/17/2026",
+      "UnitNumber": "E33"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Enroute to a call call=3e",
+      "StatusDisplayCode": "ENRT",
+      "TimeOfStatusChange": "07:30:10 02/17/2026",
+      "UnitNumber": "EMS13"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Paged call=3e",
+      "StatusDisplayCode": "PAGED",
+      "TimeOfStatusChange": "07:29:14 02/17/2026",
+      "UnitNumber": "SJEM"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "all agency page",
+      "StatusDisplayCode": "NOTE",
+      "TimeOfStatusChange": "07:28:59 02/17/2026",
+      "UnitNumber": "M12"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "all agency page",
+      "StatusDisplayCode": "NOTE",
+      "TimeOfStatusChange": "07:28:56 02/17/2026",
+      "UnitNumber": "M12"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Arrived on scene call=3e",
+      "StatusDisplayCode": "ARRVD",
+      "TimeOfStatusChange": "07:28:12 02/17/2026",
+      "UnitNumber": "M12"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Arrived on scene call=3f",
+      "StatusDisplayCode": "ARRVD",
+      "TimeOfStatusChange": "07:27:26 02/17/2026",
+      "UnitNumber": "BN31"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 nothing showing, IC, investigating call=3f",
+      "StatusDisplayCode": "ARRVD",
+      "TimeOfStatusChange": "07:26:10 02/17/2026",
+      "UnitNumber": "E31"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Enroute to a call call=3e",
+      "StatusDisplayCode": "ENRT",
+      "TimeOfStatusChange": "07:24:35 02/17/2026",
+      "UnitNumber": "M12"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Enroute to a call call=3f",
+      "StatusDisplayCode": "ENRT",
+      "TimeOfStatusChange": "07:22:45 02/17/2026",
+      "UnitNumber": "E31"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Enroute to a call call=3f",
+      "StatusDisplayCode": "ENRT",
+      "TimeOfStatusChange": "07:22:06 02/17/2026",
+      "UnitNumber": "BN31"
+    },
+    {
+      "AgencyCode": "SJEM",
+      "RadioLog": "incid#=26-SJ0174 Paged call=3e",
+      "StatusDisplayCode": "PAGED",
+      "TimeOfStatusChange": "07:21:16 02/17/2026",
+      "UnitNumber": "SJEM"
+    },
+    {
+      "AgencyCode": "SJF3",
+      "RadioLog": "incid#=26-SJ0025 Paged call=3f",
+      "StatusDisplayCode": "PAGED",
+      "TimeOfStatusChange": "07:19:03 02/17/2026",
+      "UnitNumber": "SJF3"
+    }
+  ],
+  "LongTermCallID": "26-002358",
+  "MsgType": "incident",
+  "Nature": "Fire-Alarm",
+  "RespondToAddress": "204 FRONT ST N; PORT OF FRIDAY HARBOR; C35",
+  "TimeDateReported": "07:17:29 02/17/2026",
+  "Type": "f",
+  "ZoneCode": "SJF",
+  "_id": "5f7f3114-b299-70d8-a324-749a513c63eb",
+  "agencies": [
+    "sxaoagx",
+    "syaobgy",
+    "syjrwwy"
+  ],
+  "commentStatus": "comments",
+  "groups": [
+    "cxempzx",
+    "cxgnggy",
+    "cydqzkx"
+  ],
+  "iSpyAvailable": {},
+  "iSpyCadGeoLocation": "48.53651000,-123.01683100",
+  "iSpyCreatedTimestamp": 1771341518,
+  "iSpyFencesWithin": [
+    {
+      "iSpyType": "MGRS",
+      "name": "10UDU9875775934",
+      "type": "MGRS"
+    },
+    {
+      "iSpyType": "LATLNG",
+      "name": "48.53651000,-123.01683100",
+      "type": "LATLNG"
+    }
+  ],
+  "iSpyGeoJson": {
+    "coordinates": [
+      "-123.01683100",
+      "48.53651000"
+    ],
+    "type": "Point"
+  },
+  "iSpyGeoLocation": "48.53651000,-123.01683100",
+  "iSpyInterfaceType": "spillman",
+  "iSpyInterfaceVersion": "1.0.4",
+  "iSpyLead": "syaobgy",
+  "iSpyNarratives": [],
+  "iSpyNearestHydrants": [],
+  "iSpyPlansNear": [],
+  "iSpyPointsNear": [],
+  "iSpyResponders": {
+    "6357333b00055500019bc83c": {
+      "agency": "SJEM",
+      "apparatus": false,
+      "first": "Hannah",
+      "history": [
+        {
+          "location": "48.5358578191901,-123.030160895604",
+          "status": "ENRT",
+          "statusby": "07:25:53 02/17/2026 Hannah James-Slusher",
+          "statusts": 1771341953
+        }
+      ],
+      "last": "James-Slusher",
+      "location": "48.5358578191901,-123.030160895604",
+      "personid": "6357333b00055500019bc83c",
+      "status": "ENRT",
+      "statusby": "07:25:53 02/17/2026 Hannah James-Slusher",
+      "statusts": 1771341953,
+      "unit": ""
+    },
+    "6807e3310433c90001030d59": {
+      "agency": "SJEM",
+      "apparatus": false,
+      "first": "Janis",
+      "history": [
+        {
+          "location": "48.5360334,-123.0162691",
+          "status": "ARRIV",
+          "statusby": "07:39:41 02/17/2026 Janis Liles",
+          "statusts": 1771342781
+        },
+        {
+          "location": "48.5270317808588,-123.029710933124",
+          "status": "ENRT",
+          "statusby": "07:29:29 02/17/2026 Janis Liles",
+          "statusts": 1771342169
+        }
+      ],
+      "last": "Liles",
+      "location": "48.5360334,-123.0162691",
+      "personid": "6807e3310433c90001030d59",
+      "status": "ARRIV",
+      "statusby": "07:39:41 02/17/2026 Janis Liles",
+      "statusts": 1771342781,
+      "unit": ""
+    },
+    "6942fbf06b5f0a0001d6536d": {
+      "agency": "SJF3",
+      "apparatus": false,
+      "first": "Irene",
+      "history": [
+        {
+          "location": "48.5360270043366,-123.016242587749",
+          "status": "ARRIV",
+          "statusby": "07:45:10 02/17/2026 Irene Voskamp",
+          "statusts": 1771343110
+        },
+        {
+          "location": "48.5248454189064,-123.023145754745",
+          "status": "ENRT",
+          "statusby": "07:42:14 02/17/2026 Irene Voskamp",
+          "statusts": 1771342934
+        },
+        {
+          "location": "48.5231986044655,-123.022873151411",
+          "status": "ARRVD STN",
+          "statusby": "07:42:08 02/17/2026 Irene Voskamp",
+          "statusts": 1771342928
+        },
+        {
+          "location": "48.5444756137713,-123.025570376397",
+          "status": "ENRT STN",
+          "statusby": "07:26:25 02/17/2026 Irene Voskamp",
+          "statusts": 1771341985
+        }
+      ],
+      "last": "Voskamp",
+      "location": "48.5360270043366,-123.016242587749",
+      "personid": "6942fbf06b5f0a0001d6536d",
+      "status": "ARRIV",
+      "statusby": "07:45:10 02/17/2026 Irene Voskamp",
+      "statusts": 1771343110,
+      "unit": ""
+    }
+  },
+  "iSpyStatus": "Updated",
+  "iSpyTimestamp": 1771347513,
+  "memberNotificationSent": {
+    "sanjuan": true,
+    "sjf3": true,
+    "sjiems": true
+  },
+  "memberNotificationSentCount": {
+    "sanjuan": -1,
+    "sjf3": 1,
+    "sjiems": 2
+  },
+  "udm_results": {
+    "blockAllComments": false,
+    "blockNonLocalAll": false,
+    "blockNonLocalUser": false,
+    "blockRp": false,
+    "clearComments": false,
+    "foundGroup": true,
+    "hasEMS": true,
+    "hasFire": true,
+    "hasLaw": false,
+    "isLead": false,
+    "isLocal": true,
+    "isLocalAgencies": [
+      "syjrwwy"
+    ],
+    "maxEffectivePermission": "superuser",
+    "maxEffectivePermissionFrom": "agency",
+    "notLawComments": false,
+    "preferedTypes": {
+      "cxempzx": "fire,aid"
+    },
+    "userInfo": {
+      "Agencies": [
+        "syjrwwy"
+      ],
+      "CadGroups": [
+        "cxempzx"
+      ],
+      "AgenciesMaxPermission": {
+        "syjrwwy": "superuser"
+      },
+      "GroupsMaxPermission": {
+        "cxempzx": "superuser"
+      },
+      "AgencyMaxPermission": "superuser"
+    }
+  }
+}

@@ -239,9 +239,9 @@ async def dashboard_logout(request: Request) -> Response:
 @mcp.custom_route("/kiosk", methods=["GET"])
 async def kiosk_page(request: Request) -> Response:
     """Serve the kiosk display page (token-authenticated, no EasyAuth)."""
-    test_mode = request.query_params.get("test_mode", "").lower() == "true"
+    test_mode = request.query_params.get("test_mode", "").lower()
 
-    if not test_mode:
+    if test_mode not in ("true", "1", "2"):
         from sjifire.ops.kiosk.store import validate_token
 
         token = request.query_params.get("token", "")
@@ -254,13 +254,46 @@ async def kiosk_page(request: Request) -> Response:
 
 @mcp.custom_route("/kiosk/data", methods=["GET"])
 async def kiosk_data(request: Request) -> Response:
-    """Return kiosk data as JSON (token-authenticated)."""
-    test_mode = request.query_params.get("test_mode", "").lower() == "true"
+    """Return kiosk data as JSON (token-authenticated).
 
-    if test_mode:
+    test_mode=true or test_mode=1: Synthetic cycling scenario (test_data.py)
+    test_mode=2: Real pipeline with iSpyFire fixture data (from files)
+    """
+    test_mode = request.query_params.get("test_mode", "").lower()
+
+    if test_mode in ("true", "1"):
         from sjifire.ops.kiosk.test_data import get_test_kiosk_data
 
         data = get_test_kiosk_data()
+        # Overlay real crew data from today's schedule (fall back to test crew)
+        try:
+            schedule = await dashboard._fetch_schedule_for_kiosk()
+            raw_crew = schedule.get("crew", [])
+            crew, sections = dashboard._build_crew_list(raw_crew)
+            if crew:
+                data["crew"] = crew
+                data["sections"] = sections
+                data["platoon"] = schedule.get("platoon", "")
+                crew_date = schedule.get("date", "")
+                data["shift_end"] = dashboard._compute_shift_end(raw_crew, crew_date)
+                upcoming = schedule.get("upcoming")
+                if upcoming and isinstance(upcoming, dict):
+                    raw_up = upcoming.get("crew", [])
+                    up_crew, up_sec = dashboard._build_crew_list(raw_up)
+                    data["upcoming_crew"] = up_crew
+                    data["upcoming_sections"] = up_sec
+                    data["upcoming_platoon"] = upcoming.get("platoon", "")
+                    data["upcoming_shift_starts"] = dashboard._compute_shift_start(
+                        raw_up, upcoming.get("date", "")
+                    )
+        except Exception:
+            logger.debug("Could not overlay real crew in test mode", exc_info=True)
+        return JSONResponse(data)
+
+    if test_mode == "2":
+        from sjifire.ops.kiosk.replay_data import get_replay_kiosk_data
+
+        data = get_replay_kiosk_data()
         # Overlay real crew data from today's schedule (fall back to test crew)
         try:
             schedule = await dashboard._fetch_schedule_for_kiosk()

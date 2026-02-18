@@ -660,15 +660,15 @@
 // Read params from URL once
 const _params = new URLSearchParams(window.location.search);
 const KIOSK_TOKEN = _params.get('token') || '';
-const TEST_MODE = _params.get('test_mode') === 'true';
+const TEST_MODE = _params.get('test_mode') || '';
 const AZURE_MAPS_KEY = '{{ azure_maps_key }}';
-const POLL_INTERVAL = 2000; // Client polls at fixed 2s; server cache controls actual hit rate
+const POLL_INTERVAL = 2000;
 
 // Build fetch URL with correct params
 function kioskDataUrl() {
   const p = new URLSearchParams();
   if (KIOSK_TOKEN) p.set('token', KIOSK_TOKEN);
-  if (TEST_MODE) p.set('test_mode', 'true');
+  if (TEST_MODE) p.set('test_mode', TEST_MODE);
   return '/kiosk/data?' + p.toString();
 }
 
