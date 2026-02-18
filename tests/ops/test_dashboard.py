@@ -12,8 +12,12 @@ from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.dashboard import (
     _call_first_seen,
     _fetch_incidents,
+    _fetch_kiosk_data,
     _fetch_open_docs_cached,
     _fetch_recent_calls,
+    _find_previous_call,
+    _kiosk_archived_calls,
+    _kiosk_call_first_seen,
     _normalize_incident_number,
     _open_calls_ttl,
     get_dashboard,
@@ -1067,11 +1071,19 @@ def _reset_open_calls_cache():
     """Reset the shared open-calls cache between tests."""
     dashboard_mod._open_docs_cache = None
     dashboard_mod._open_docs_ts = 0
+    dashboard_mod._kiosk_cache = None
+    dashboard_mod._kiosk_cache_ts = 0
     _call_first_seen.clear()
+    _kiosk_call_first_seen.clear()
+    _kiosk_archived_calls.clear()
     yield
     dashboard_mod._open_docs_cache = None
     dashboard_mod._open_docs_ts = 0
+    dashboard_mod._kiosk_cache = None
+    dashboard_mod._kiosk_cache_ts = 0
     _call_first_seen.clear()
+    _kiosk_call_first_seen.clear()
+    _kiosk_archived_calls.clear()
 
 
 class TestOpenCallsTTL:
@@ -1251,3 +1263,183 @@ class TestGetOpenCallsCached:
 
         assert result["open_calls"] == 0
         assert result["calls"] == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: kiosk archived calls
+# ---------------------------------------------------------------------------
+
+
+def _make_enriched_call(dispatch_id: str, **overrides) -> dict:
+    """Build a minimal enriched call dict for kiosk tests."""
+    call = {
+        "dispatch_id": dispatch_id,
+        "nature": "Fire Alarm",
+        "address": "100 Guard St",
+        "severity": "high",
+    }
+    call.update(overrides)
+    return call
+
+
+class TestFindPreviousCall:
+    """Unit tests for _find_previous_call cache lookup."""
+
+    def test_returns_none_when_no_cache(self):
+        dashboard_mod._kiosk_cache = None
+        assert _find_previous_call("26-001234") is None
+
+    def test_finds_call_in_cache(self):
+        call = _make_enriched_call("26-001234")
+        dashboard_mod._kiosk_cache = {"calls": [call]}
+        result = _find_previous_call("26-001234")
+        assert result is not None
+        assert result["dispatch_id"] == "26-001234"
+
+    def test_returns_copy_not_reference(self):
+        call = _make_enriched_call("26-001234")
+        dashboard_mod._kiosk_cache = {"calls": [call]}
+        result = _find_previous_call("26-001234")
+        result["extra"] = "modified"
+        assert "extra" not in call
+
+    def test_skips_archived_calls(self):
+        call = _make_enriched_call("26-001234", archived=True)
+        dashboard_mod._kiosk_cache = {"calls": [call]}
+        assert _find_previous_call("26-001234") is None
+
+    def test_returns_none_for_missing_id(self):
+        call = _make_enriched_call("26-001234")
+        dashboard_mod._kiosk_cache = {"calls": [call]}
+        assert _find_previous_call("26-999999") is None
+
+
+class TestKioskArchivedCalls:
+    """Unit tests for kiosk call archival in _fetch_kiosk_data."""
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_call_disappearing_gets_archived(self, mock_open, mock_schedule):
+        """A call present in first fetch but absent in second gets archived."""
+        call = _make_enriched_call("26-001234")
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+
+        # First fetch: call is active
+        mock_open.return_value = [call]
+        result1 = await _fetch_kiosk_data()
+        assert len(result1["calls"]) == 1
+        assert "26-001234" in _kiosk_call_first_seen
+
+        # Simulate get_kiosk_data() caching the result (so _find_previous_call works)
+        dashboard_mod._kiosk_cache = result1
+
+        # Second fetch: call gone — should be archived
+        mock_open.return_value = []
+        result2 = await _fetch_kiosk_data()
+
+        assert "26-001234" not in _kiosk_call_first_seen
+        assert "26-001234" in _kiosk_archived_calls
+        # Archived call appears in response
+        archived = [c for c in result2["calls"] if c.get("archived")]
+        assert len(archived) == 1
+        assert archived[0]["dispatch_id"] == "26-001234"
+        assert "completed_at" in archived[0]
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_new_active_call_clears_archive(self, mock_open, mock_schedule):
+        """A new active call appearing clears all archived calls."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+
+        # Seed an archived call
+        _kiosk_archived_calls["26-OLD"] = {
+            "data": _make_enriched_call(
+                "26-OLD", archived=True, completed_at="2026-02-17T10:00:00"
+            ),
+            "completed_at": "2026-02-17T10:00:00",
+            "mono_ts": time.monotonic() - 60,
+        }
+
+        # New active call arrives
+        mock_open.return_value = [_make_enriched_call("26-NEW")]
+        result = await _fetch_kiosk_data()
+
+        # Archive cleared because an active call is present
+        assert len(_kiosk_archived_calls) == 0
+        # Only the active call in response
+        assert len(result["calls"]) == 1
+        assert result["calls"][0]["dispatch_id"] == "26-NEW"
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_archived_call_expires_after_window(self, mock_open, mock_schedule):
+        """Archived calls are removed after _KIOSK_ARCHIVE_HOURS."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+
+        # Seed an archived call that's older than the expiry window
+        expired_ts = time.monotonic() - (dashboard_mod._KIOSK_ARCHIVE_HOURS * 3600 + 1)
+        _kiosk_archived_calls["26-EXPIRED"] = {
+            "data": _make_enriched_call("26-EXPIRED", archived=True),
+            "completed_at": "2026-02-16T10:00:00",
+            "mono_ts": expired_ts,
+        }
+
+        mock_open.return_value = []
+        result = await _fetch_kiosk_data()
+
+        assert "26-EXPIRED" not in _kiosk_archived_calls
+        assert len(result["calls"]) == 0
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_archived_call_survives_within_window(self, mock_open, mock_schedule):
+        """Archived calls persist when within the expiry window and no active calls."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+
+        recent_ts = time.monotonic() - 300  # 5 minutes ago
+        _kiosk_archived_calls["26-RECENT"] = {
+            "data": _make_enriched_call(
+                "26-RECENT", archived=True, completed_at="2026-02-17T17:00:00"
+            ),
+            "completed_at": "2026-02-17T17:00:00",
+            "mono_ts": recent_ts,
+        }
+
+        mock_open.return_value = []
+        result = await _fetch_kiosk_data()
+
+        assert "26-RECENT" in _kiosk_archived_calls
+        archived = [c for c in result["calls"] if c.get("archived")]
+        assert len(archived) == 1
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_first_seen_tracks_new_calls(self, mock_open, mock_schedule):
+        """New calls get added to _kiosk_call_first_seen."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+        mock_open.return_value = [
+            _make_enriched_call("26-AAA"),
+            _make_enriched_call("26-BBB"),
+        ]
+
+        await _fetch_kiosk_data()
+
+        assert "26-AAA" in _kiosk_call_first_seen
+        assert "26-BBB" in _kiosk_call_first_seen
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_call_without_previous_cache_not_archived(self, mock_open, mock_schedule):
+        """A call that disappears but has no previous cache entry is not archived."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+
+        # Seed first_seen but no kiosk_cache (so _find_previous_call returns None)
+        _kiosk_call_first_seen["26-NOCACHE"] = time.monotonic()
+        dashboard_mod._kiosk_cache = None
+
+        mock_open.return_value = []
+        await _fetch_kiosk_data()
+
+        # Removed from first_seen but NOT added to archived (no previous data)
+        assert "26-NOCACHE" not in _kiosk_call_first_seen
+        assert "26-NOCACHE" not in _kiosk_archived_calls
