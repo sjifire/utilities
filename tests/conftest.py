@@ -1,9 +1,27 @@
 """Shared pytest fixtures."""
 
+import inspect as _inspect
 import os
+import typing
 from unittest.mock import MagicMock
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# Python 3.14 RC compatibility: pydantic 2.12.x passes `prefer_fwd_module`
+# to `typing._eval_type()`, but that keyword only exists in the final 3.14.0
+# release, not in 3.14.0rc2 and earlier. Patch it in so pydantic works.
+# Safe to remove once Python is upgraded past 3.14.0rc2.
+# ---------------------------------------------------------------------------
+
+_orig_eval_type = typing._eval_type  # type: ignore[attr-defined]
+if "prefer_fwd_module" not in _inspect.signature(_orig_eval_type).parameters:
+
+    def _patched_eval_type(*args: object, **kwargs: object) -> object:
+        kwargs.pop("prefer_fwd_module", None)
+        return _orig_eval_type(*args, **kwargs)
+
+    typing._eval_type = _patched_eval_type  # type: ignore[attr-defined]
 
 # ---------------------------------------------------------------------------
 # Credential isolation: strip ALL real service credentials before any test
