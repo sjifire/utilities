@@ -326,3 +326,149 @@ class TestChatImageAutoSave:
         assert saved_calls[0]["filename"] == "chat-photo-1.jpg"
         assert saved_calls[1]["filename"] == "chat-photo-2.png"
         assert saved_calls[2]["filename"] == "chat-photo-3.webp"
+
+    async def test_image_refs_passed_to_stream_chat(self):
+        """Successful auto-save should pass image_refs to stream_chat."""
+        from sjifire.ops.chat.routes import chat_stream
+
+        captured_kwargs = {}
+
+        async def mock_upload(**kwargs):
+            return {"id": "att-saved-1", "filename": kwargs["filename"]}
+
+        async def fake_stream(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            yield "event: done\ndata: {}\n\n"
+
+        req = _ChatRequest(
+            {
+                "message": "Check this photo",
+                "images": [{"data": "abc123", "media_type": "image/jpeg"}],
+            }
+        )
+
+        with (
+            patch("sjifire.ops.chat.routes.stream_chat", side_effect=fake_stream),
+            patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload),
+            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
+        ):
+            resp = await chat_stream(req)
+            async for _ in resp.body_iterator:
+                pass
+
+        assert captured_kwargs["image_refs"] == [
+            {"attachment_id": "att-saved-1", "content_type": "image/jpeg"}
+        ]
+
+    async def test_failed_upload_passes_no_image_refs(self):
+        """When auto-save fails, image_refs should be None."""
+        from sjifire.ops.chat.routes import chat_stream
+
+        captured_kwargs = {}
+
+        async def mock_upload_fail(**kwargs):
+            return {"error": "something went wrong"}
+
+        async def fake_stream(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            yield "event: done\ndata: {}\n\n"
+
+        req = _ChatRequest(
+            {
+                "message": "Photo here",
+                "images": [{"data": "abc", "media_type": "image/png"}],
+            }
+        )
+
+        with (
+            patch("sjifire.ops.chat.routes.stream_chat", side_effect=fake_stream),
+            patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload_fail),
+            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
+        ):
+            resp = await chat_stream(req)
+            async for _ in resp.body_iterator:
+                pass
+
+        assert captured_kwargs["image_refs"] is None
+
+
+# -- Conversation history with images -----------------------------------------
+
+
+class TestConversationHistoryImages:
+    """Test that conversation history includes image URLs."""
+
+    async def test_history_includes_image_urls(self):
+        from sjifire.ops.chat.models import ConversationDocument, ConversationMessage
+        from sjifire.ops.chat.routes import conversation_history
+
+        conv = ConversationDocument(
+            incident_id="inc-hist",
+            user_email="ff@sjifire.org",
+            messages=[
+                ConversationMessage(
+                    role="user",
+                    content="Check this photo",
+                    images=[{"attachment_id": "att-99", "content_type": "image/jpeg"}],
+                ),
+                ConversationMessage(role="assistant", content="I see the photo."),
+            ],
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_incident = AsyncMock(return_value=conv)
+        cls = MagicMock()
+        cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        req = _FakeRequest(path_params={"incident_id": "inc-hist"})
+
+        with (
+            patch("sjifire.ops.chat.routes.ConversationStore", cls),
+            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
+            patch("sjifire.ops.chat.routes.check_is_editor", return_value=True),
+        ):
+            resp = await conversation_history(req)
+
+        body = json.loads(resp.body)
+        msgs = body["messages"]
+        assert len(msgs) == 2
+
+        # User message should have image URLs
+        assert "images" in msgs[0]
+        assert msgs[0]["images"] == ["/reports/inc-hist/attachments/att-99"]
+
+        # Assistant message should not have images
+        assert "images" not in msgs[1]
+
+    async def test_history_without_images_has_no_images_key(self):
+        from sjifire.ops.chat.models import ConversationDocument, ConversationMessage
+        from sjifire.ops.chat.routes import conversation_history
+
+        conv = ConversationDocument(
+            incident_id="inc-no-img",
+            user_email="ff@sjifire.org",
+            messages=[
+                ConversationMessage(role="user", content="Hello"),
+                ConversationMessage(role="assistant", content="Hi there"),
+            ],
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_incident = AsyncMock(return_value=conv)
+        cls = MagicMock()
+        cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        req = _FakeRequest(path_params={"incident_id": "inc-no-img"})
+
+        with (
+            patch("sjifire.ops.chat.routes.ConversationStore", cls),
+            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
+            patch("sjifire.ops.chat.routes.check_is_editor", return_value=True),
+        ):
+            resp = await conversation_history(req)
+
+        body = json.loads(resp.body)
+        for msg in body["messages"]:
+            assert "images" not in msg

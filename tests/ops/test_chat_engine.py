@@ -848,8 +848,8 @@ class TestImageContentBlocks:
         assert "just text" in last_msg["content"]
         assert "CURRENT INCIDENT STATE" in last_msg["content"]
 
-    async def test_images_not_stored_in_conversation(self):
-        """Images should be one-shot — not persisted in conversation messages."""
+    async def test_image_base64_not_stored_in_conversation(self):
+        """Raw base64 image data should not be persisted in conversation messages."""
         from sjifire.ops.chat.budget import BudgetStatus
         from sjifire.ops.chat.engine import stream_chat
 
@@ -879,8 +879,70 @@ class TestImageContentBlocks:
         user_msgs = [m for m in saved_conv.messages if m.role == "user"]
         assert len(user_msgs) == 1
         assert user_msgs[0].content == "Look at this"
-        # Content is a plain string, no image data
+        # Raw base64 data should NOT be in the stored message
         assert "photo123" not in str(user_msgs[0].model_dump())
+
+    async def test_image_refs_stored_in_conversation(self):
+        """When image_refs are provided, they are stored on the conversation message."""
+        from sjifire.ops.chat.budget import BudgetStatus
+        from sjifire.ops.chat.engine import stream_chat
+
+        saved_conv = None
+
+        async def fake_stream_loop(client, system, api_messages, conv, user):
+            nonlocal saved_conv
+            saved_conv = conv
+            yield _sse("text", {"content": "Got it"})
+
+        image_refs = [{"attachment_id": "att-abc", "content_type": "image/jpeg"}]
+
+        with (
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=("{}", "{}", "[]", "[]", ""),
+            ),
+            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine.get_client"),
+        ):
+            images = [{"media_type": "image/jpeg", "data": "base64data"}]
+            _ = [
+                e
+                async for e in stream_chat(
+                    "inc-refs", "Photo", _TEST_USER, images=images, image_refs=image_refs
+                )
+            ]
+
+        assert saved_conv is not None
+        user_msgs = [m for m in saved_conv.messages if m.role == "user"]
+        assert len(user_msgs) == 1
+        assert user_msgs[0].images == image_refs
+
+    async def test_no_image_refs_stores_none(self):
+        """Without image_refs, images field should be None."""
+        from sjifire.ops.chat.budget import BudgetStatus
+        from sjifire.ops.chat.engine import stream_chat
+
+        saved_conv = None
+
+        async def fake_stream_loop(client, system, api_messages, conv, user):
+            nonlocal saved_conv
+            saved_conv = conv
+            yield _sse("text", {"content": "ok"})
+
+        with (
+            patch("sjifire.ops.chat.engine.check_budget", return_value=BudgetStatus(allowed=True)),
+            patch(
+                "sjifire.ops.chat.engine._fetch_context",
+                return_value=("{}", "{}", "[]", "[]", ""),
+            ),
+            patch("sjifire.ops.chat.engine._stream_loop", side_effect=fake_stream_loop),
+            patch("sjifire.ops.chat.engine.get_client"),
+        ):
+            _ = [e async for e in stream_chat("inc-noimgs", "just text", _TEST_USER)]
+
+        user_msgs = [m for m in saved_conv.messages if m.role == "user"]
+        assert user_msgs[0].images is None
 
     async def test_system_prompt_is_stable(self):
         """System prompt should not contain dynamic incident/dispatch data."""
