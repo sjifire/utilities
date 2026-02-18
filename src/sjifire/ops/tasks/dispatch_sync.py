@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 async def _prewarm_schedule(docs) -> None:
     """Pre-warm schedule cache for a batch of dispatch docs.
 
-    Collects all unique dates needed and fetches them in one Aladtec
-    call instead of per-call fetches during enrichment.
+    Collects all unique dates needed and fetches them in one batch
+    instead of per-call fetches during enrichment.
     """
     from sjifire.ops.schedule.store import ScheduleStore
     from sjifire.ops.schedule.tools import _ensure_cache

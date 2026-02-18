@@ -116,6 +116,11 @@ def main() -> int:
         help="Enable verbose logging",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Update all events even if content appears unchanged",
+    )
+    parser.add_argument(
         "--save-schedule",
         type=str,
         metavar="PATH",
@@ -244,7 +249,7 @@ def main() -> int:
     logger.info(f"Syncing to calendar: {args.mailbox}")
 
     calendar_sync = DutyCalendarSync(mailbox=args.mailbox)
-    result = calendar_sync.sync(schedules, dry_run=args.dry_run)
+    result = calendar_sync.sync(schedules, dry_run=args.dry_run, force=args.force)
 
     # Report results
     logger.info(f"Sync complete: {result}")

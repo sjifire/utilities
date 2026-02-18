@@ -23,7 +23,8 @@ def _import_tasks() -> None:
     """Import all task modules to trigger @register decorators."""
     import sjifire.ops.tasks.dispatch_sync
     import sjifire.ops.tasks.ispyfire_sync
-    import sjifire.ops.tasks.neris_sync  # noqa: F401
+    import sjifire.ops.tasks.neris_sync
+    import sjifire.ops.tasks.schedule_refresh  # noqa: F401
 
 
 def _build_parser() -> argparse.ArgumentParser:

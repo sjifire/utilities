@@ -205,6 +205,7 @@ uv run ops-tasks -h           # Help
 - `dispatch-enrich` — Retry AI enrichment on calls that failed previously
 - `ispyfire-sync` — Sync Entra ID users to iSpyFire
 - `neris-sync` — Fetch NERIS incident summaries to Cosmos DB cache
+- `schedule-refresh` — Refresh on-duty crew cache from Outlook group calendar
 
 **Manual tasks** (run only when explicitly requested):
 - `dispatch-reenrich` — Force re-enrich ALL stored calls (expensive, uses LLM for every call)

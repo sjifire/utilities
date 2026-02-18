@@ -122,20 +122,35 @@ def _detect_shift_change_hour_from_schedules(schedules: list[DaySchedule]) -> in
 MAX_CONCURRENT_REQUESTS = 10
 
 
-def normalize_html_for_comparison(html: str) -> str:
-    """Extract plain text from HTML for comparison.
+def _extract_crew_data_json(html: str) -> str | None:
+    """Extract the CREW_DATA JSON string from an HTML body, or None if absent."""
+    import re
 
-    Outlook/Graph API modifies HTML formatting (wraps in html/body tags,
-    adds tbody, changes CSS spacing). Comparing raw HTML is fragile.
-    Instead, extract just the text content and normalize whitespace.
+    from sjifire.calendar.models import CREW_DATA_MARKER
+
+    match = re.search(rf"<!--\s*{re.escape(CREW_DATA_MARKER)}(.*?)-->", html, re.DOTALL)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
+def normalize_html_for_comparison(html: str) -> str:
+    """Normalize event HTML for comparison.
+
+    If the HTML contains a CREW_DATA JSON comment, returns just the JSON
+    string — this is the canonical data and ignores cosmetic HTML changes.
+    Falls back to plain-text extraction for legacy events without JSON.
     """
+    json_str = _extract_crew_data_json(html)
+    if json_str is not None:
+        return json_str
+
+    # Legacy fallback: extract plain text and normalize whitespace
     from bs4 import BeautifulSoup
 
-    # Parse HTML and extract text content only
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(separator=" ")
 
-    # Normalize whitespace (collapse multiple spaces, strip)
     import re as regex
 
     normalized = regex.sub(r"\s+", " ", text)
@@ -787,6 +802,7 @@ class DutyCalendarSync:
         start_date: date,
         end_date: date,
         dry_run: bool = False,
+        force: bool = False,
     ) -> SyncResult:
         """Sync all-day events to calendar, updating/creating/deleting as needed."""
         result = SyncResult()
@@ -806,6 +822,11 @@ class DutyCalendarSync:
             if existing:
                 existing_id, existing_body = existing
                 new_event.event_id = existing_id
+
+                if force:
+                    # Force update regardless of content
+                    events_to_update.append(new_event)
+                    continue
 
                 # Compare normalized HTML to detect actual changes
                 new_body_normalized = normalize_html_for_comparison(new_event.body_html)
@@ -857,6 +878,7 @@ class DutyCalendarSync:
         self,
         schedules: list[DaySchedule],
         dry_run: bool = False,
+        force: bool = False,
     ) -> SyncResult:
         """Synchronous wrapper for sync_events."""
         if not schedules:
@@ -878,7 +900,7 @@ class DutyCalendarSync:
             start_date = min(e.event_date for e in events)
             end_date = max(e.event_date for e in events)
 
-            return await self.sync_events(events, start_date, end_date, dry_run)
+            return await self.sync_events(events, start_date, end_date, dry_run, force)
 
         return asyncio.run(_async_sync())
 

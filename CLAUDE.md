@@ -129,12 +129,13 @@ src/sjifire/
 │   ├── schedule/          # On-duty crew lookup with Cosmos cache
 │   │   ├── models.py      # DayScheduleCache (Pydantic)
 │   │   ├── store.py       # Cosmos DB cache with in-memory fallback
-│   │   └── tools.py       # MCP tool with auto-refresh from Aladtec
+│   │   └── tools.py       # MCP tool with Aladtec fallback refresh
 │   └── tasks/             # Background tasks (Container Apps Job, every 30 min)
 │       ├── registry.py    # TaskResult, @register(auto=True/False), run_task, run_all
 │       ├── dispatch_sync.py # Dispatch call sync + enrichment (3 tasks, 1 manual)
 │       ├── ispyfire_sync.py # iSpyFire user sync from Entra
 │       ├── neris_sync.py  # NERIS report sync
+│       ├── schedule_refresh.py # Crew cache refresh from Outlook calendar
 │       └── runner.py      # CLI: uv run ops-tasks (-h for help)
 └── scripts/               # CLI entry points
 ```
@@ -171,7 +172,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 
 **Infrastructure**: Container Apps (Consumption plan), Cosmos DB (Serverless NoSQL), ACR, Key Vault references for secrets. Custom domain with managed TLS.
 
-**Background tasks**: Container Apps Job (`sjifire-ops-tasks`) runs `uv run ops-tasks` every 30 minutes. Runs all `auto=True` tasks: dispatch-sync, dispatch-enrich, ispyfire-sync, neris-sync. Tasks registered with `auto=False` (e.g., dispatch-reenrich) only run when explicitly requested by name. New tasks are added via `@register("name")` in `ops/tasks/`.
+**Background tasks**: Container Apps Job (`sjifire-ops-tasks`) runs `uv run ops-tasks` every 30 minutes. Runs all `auto=True` tasks: dispatch-sync, dispatch-enrich, ispyfire-sync, neris-sync, schedule-refresh. Tasks registered with `auto=False` (e.g., dispatch-reenrich) only run when explicitly requested by name. New tasks are added via `@register("name")` in `ops/tasks/`.
 
 **Cosmos DB backup**: Continuous 30-day PITR (any-second point-in-time restore). For ad-hoc JSON exports beyond 30 days, use `uv run backup-cosmos`. Infrastructure provisioned via `./scripts/setup-azure-ops.sh --phase 2`.
 

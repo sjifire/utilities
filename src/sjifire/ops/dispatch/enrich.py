@@ -75,7 +75,7 @@ async def _get_on_duty_entries(
 ) -> list[ScheduleEntryCache]:
     """Fetch schedule entries for everyone on duty at the call time.
 
-    Ensures the schedule cache is populated (fetching from Aladtec if
+    Ensures the schedule cache is populated (fetching from Outlook if
     needed) before querying, so older calls get IC names resolved.
     """
     if doc.time_reported is None:
