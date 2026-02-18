@@ -41,8 +41,8 @@ CYCLE_SECONDS = 120
 _fixture_detail: dict | None = None
 _fixture_events: list[dict] | None = None
 
-# Fixture file UUID
-_FIXTURE_ID = "5f7f3114-b299-70d8-a324-749a513c63eb"
+# Fixture file — co-located so it ships inside the Docker image
+_FIXTURE_FILE = Path(__file__).resolve().parent / "fixtures" / "fire-alarm.json"
 
 
 def get_replay_kiosk_data() -> dict:
@@ -82,10 +82,7 @@ def _load_fixture_detail() -> dict:
     global _fixture_detail
     if _fixture_detail is not None:
         return _fixture_detail
-    fixture_path = (
-        Path(__file__).resolve().parents[4] / f"tests/fixtures/ispyfire/details/{_FIXTURE_ID}.json"
-    )
-    _fixture_detail = json.loads(fixture_path.read_text())
+    _fixture_detail = json.loads(_FIXTURE_FILE.read_text())
     return _fixture_detail
 
 
