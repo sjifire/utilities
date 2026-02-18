@@ -82,7 +82,8 @@ class ConversationStore:
                     return ConversationDocument.from_cosmos(data)
             return None
 
-        query = "SELECT * FROM c WHERE c.incident_id = @iid"
+        # Exclude turn-lock documents which share this container/partition
+        query = "SELECT * FROM c WHERE c.incident_id = @iid AND c.id != 'turn-lock'"
         parameters: list[dict] = [{"name": "@iid", "value": incident_id}]
 
         async for item in self._container.query_items(

@@ -106,7 +106,7 @@ properties:
           - name: CENTRIFUGO_CLIENT_ALLOWED_ORIGINS
             value: https://ops.sjifire.org
           - name: CENTRIFUGO_CHANNEL_NAMESPACES
-            value: '[{"name":"chat","history_size":100,"history_ttl":"5m","force_recovery":true,"subscribe_proxy_enabled":true}]'
+            value: '[{"name":"chat","history_size":100,"history_ttl":"5m","force_recovery":true,"subscribe_proxy_enabled":true,"presence":true,"join_leave":true,"force_push_join_leave":true}]'
         probes:
           - type: Liveness
             httpGet:
