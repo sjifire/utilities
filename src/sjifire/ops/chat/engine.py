@@ -27,6 +27,7 @@ from sjifire.ops.chat.tools import (
     execute_general_tool,
     execute_tool,
 )
+from sjifire.ops.chat.turn_lock import TurnLockStore
 
 logger = logging.getLogger(__name__)
 MAX_RESPONSE_TOKENS = 4096
@@ -47,6 +48,15 @@ _ERROR_MESSAGES = {
     "stream": "Something went wrong. Please try again.",
     "save": "Unable to save conversation. Your message was processed but may not appear on reload.",
 }
+
+
+async def _release_turn_lock(incident_id: str, email: str) -> None:
+    """Release the distributed turn lock, swallowing errors."""
+    try:
+        async with TurnLockStore() as store:
+            await store.release(incident_id, email)
+    except Exception:
+        logger.warning("Failed to release turn lock for %s", incident_id, exc_info=True)
 
 
 def _user_error(category: str, exc: Exception) -> str:
@@ -374,20 +384,30 @@ async def run_chat(
     """Run a chat turn, publishing events to a Centrifugo channel.
 
     Event types published:
+    - ``turn_start``: Turn begins (``{"user_email": "...", "user_name": "..."}``).
     - ``text``: Partial assistant text (``{"content": "..."}``).
     - ``tool_call``: Tool invocation (``{"name": "...", "input": {...}}``).
     - ``tool_result``: Tool result summary (``{"name": "...", "summary": "..."}``).
     - ``status_update``: Incident status change (``{"status": "...", ...}``).
-    - ``done``: Conversation turn complete (``{"input_tokens": N, "output_tokens": N}``).
+    - ``done``: Conversation turn complete (``{"input_tokens": N, ..., "user_email": "..."}``).
     - ``error``: Error message (``{"message": "..."}``).
     """
+    # Notify all subscribers that a turn is starting (multi-user awareness)
+    await publish(
+        channel,
+        "turn_start",
+        {"user_email": user.email, "user_name": user.name},
+    )
+
     # Budget check
     try:
         budget_status = await check_budget(user.email)
     except Exception as exc:
+        await _release_turn_lock(incident_id, user.email)
         await publish(channel, "error", {"message": _user_error("budget", exc)})
         return
     if not budget_status.allowed:
+        await _release_turn_lock(incident_id, user.email)
         await publish(channel, "error", {"message": budget_status.reason})
         return
 
@@ -474,6 +494,14 @@ async def run_chat(
     # Record user message (text only — images are one-shot, not stored)
     conversation.messages.append(ConversationMessage(role="user", content=user_message))
 
+    # Broadcast user message to other subscribers (multi-user awareness).
+    # The sender already has this message locally — clients filter by email.
+    await publish(
+        channel,
+        "user_message",
+        {"content": user_message, "user_email": user.email, "user_name": user.name},
+    )
+
     # Persist user message immediately so interrupted tasks don't lose it.
     try:
         async with ConversationStore() as store:
@@ -493,50 +521,65 @@ async def run_chat(
 
     stream_error = False
     try:
-        await _run_loop(client, system_prompt, api_messages, conversation, user, channel=channel)
+        try:
+            await _run_loop(
+                client, system_prompt, api_messages, conversation, user, channel=channel
+            )
 
-    except Exception as exc:
-        await publish(channel, "error", {"message": _user_error("stream", exc)})
-        stream_error = True
+        except Exception as exc:
+            await publish(channel, "error", {"message": _user_error("stream", exc)})
+            stream_error = True
 
-    # Calculate total tokens from this turn's messages
-    turn_messages = [
-        m
-        for m in conversation.messages
-        if m.role == "assistant" and (m.input_tokens > 0 or m.output_tokens > 0)
-    ]
-    for m in turn_messages[-5:]:  # last few are from this turn
-        total_input += m.input_tokens
-        total_output += m.output_tokens
+        # Calculate total tokens from this turn's messages
+        turn_messages = [
+            m
+            for m in conversation.messages
+            if m.role == "assistant" and (m.input_tokens > 0 or m.output_tokens > 0)
+        ]
+        for m in turn_messages[-5:]:  # last few are from this turn
+            total_input += m.input_tokens
+            total_output += m.output_tokens
 
-    # Persist full turn (assistant response + token counts).
-    # Runs even after stream errors so partial responses aren't lost.
-    conversation.turn_count += 1
-    conversation.total_input_tokens += total_input
-    conversation.total_output_tokens += total_output
-    conversation.updated_at = datetime.now(UTC)
+        # Persist full turn (assistant response + token counts).
+        # Runs even after stream errors so partial responses aren't lost.
+        conversation.turn_count += 1
+        conversation.total_input_tokens += total_input
+        conversation.total_output_tokens += total_output
+        conversation.updated_at = datetime.now(UTC)
 
-    try:
-        async with ConversationStore() as store:
-            if is_new:
-                await store.create(conversation)
-            else:
-                await store.update(conversation)
-    except Exception as exc:
-        await publish(channel, "error", {"message": _user_error("save", exc)})
-        return
+        try:
+            async with ConversationStore() as store:
+                if is_new:
+                    await store.create(conversation)
+                else:
+                    await store.update(conversation)
+        except Exception as exc:
+            await publish(channel, "error", {"message": _user_error("save", exc)})
+            return
 
-    if stream_error:
-        return
+        if stream_error:
+            return
 
-    # Record budget usage
-    try:
-        if total_input > 0 or total_output > 0:
-            await record_usage(user.email, total_input, total_output)
-    except Exception as exc:
-        logger.warning("Failed to record budget usage: %s", exc)
+        # Record budget usage
+        try:
+            if total_input > 0 or total_output > 0:
+                await record_usage(user.email, total_input, total_output)
+        except Exception as exc:
+            logger.warning("Failed to record budget usage: %s", exc)
 
-    await publish(channel, "done", {"input_tokens": total_input, "output_tokens": total_output})
+        await publish(
+            channel,
+            "done",
+            {
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "user_email": user.email,
+                "user_name": user.name,
+            },
+        )
+    finally:
+        # Always release the turn lock so other users can proceed
+        await _release_turn_lock(incident_id, user.email)
 
 
 async def _run_loop(

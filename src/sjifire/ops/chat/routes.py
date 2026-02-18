@@ -21,6 +21,7 @@ from sjifire.core.config import local_now
 from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user, set_current_user
 from sjifire.ops.chat.engine import run_chat, run_general_chat
 from sjifire.ops.chat.store import ConversationStore
+from sjifire.ops.chat.turn_lock import TurnLockStore
 from sjifire.ops.dashboard import get_dashboard_data
 from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.ops.incidents.store import IncidentStore
@@ -249,6 +250,8 @@ async def chat_page(request: Request) -> Response:
         completeness=doc.completeness() if not doc.neris_incident_id else None,
         dispatch=dispatch_context,
         show_reports=is_editor,
+        user_email=user.email if user else "",
+        user_name=user.name if user else "",
     )
     return Response(html, media_type="text/html")
 
@@ -364,6 +367,34 @@ async def chat_stream(request: Request) -> Response:
             if len(data) > 2_000_000:  # ~1.5MB decoded
                 return JSONResponse({"error": "Image too large (max ~1.5MB)"}, status_code=400)
             images.append({"media_type": media_type, "data": data})
+
+    # Acquire distributed turn lock — prevents concurrent Claude calls
+    # for the same incident across replicas.
+    try:
+        async with TurnLockStore() as lock_store:
+            lock = await lock_store.acquire(incident_id, user.email, user.name)
+    except Exception:
+        logger.warning("Turn lock check failed for %s", incident_id, exc_info=True)
+        lock = None  # Proceed without lock on infra failure (degrade gracefully)
+
+    if lock is None:
+        # Lock held by another user — return 409 with holder info
+        try:
+            async with TurnLockStore() as lock_store:
+                existing = await lock_store.get(incident_id)
+        except Exception:
+            existing = None
+        holder = existing.holder_name if existing else "another user"
+        holder_email = existing.holder_email if existing else ""
+        return JSONResponse(
+            {
+                "error": f"Claude is responding to {holder}. Please wait for their turn to finish.",
+                "holder_name": holder,
+                "holder_email": holder_email,
+                "retry_after": "done",
+            },
+            status_code=409,
+        )
 
     channel = f"chat:incident:{incident_id}"
     task = asyncio.create_task(run_chat(incident_id, message, user, channel=channel, images=images))

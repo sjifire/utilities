@@ -147,6 +147,8 @@ async def connect_proxy(request: Request) -> Response:
             "result": {
                 "user": user.email,
                 "data": {"name": user.name},
+                # conn_info is attached to presence data and join/leave events
+                "info": {"name": user.name, "email": user.email},
             }
         }
     )
