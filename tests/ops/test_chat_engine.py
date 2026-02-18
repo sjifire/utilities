@@ -1145,3 +1145,389 @@ class TestAttachmentToolDispatch:
 
         result = json.loads(result_str)
         assert result["deleted"] == "att-1"
+
+
+class TestFetchContextAttachmentEdgeCases:
+    """Verify _fetch_context attachment summary with edge cases."""
+
+    async def _create_incident(self, incident_id, attachments=None):
+        from sjifire.ops.incidents.models import IncidentDocument
+        from sjifire.ops.incidents.store import IncidentStore
+
+        incident = IncidentDocument(
+            id=incident_id,
+            incident_number="26-009100",
+            incident_datetime="2026-02-15T00:00:00+00:00",
+            created_by="ff@sjifire.org",
+            extras={"station": "S31"},
+            attachments=attachments or [],
+        )
+        async with IncidentStore() as store:
+            await store.create(incident)
+        return incident
+
+    async def test_empty_attachments_list_produces_no_summary(self):
+        """An incident with [] attachments should have empty summary."""
+        from sjifire.ops.chat.engine import _fetch_context
+
+        await self._create_incident("inc-empty-att", attachments=[])
+
+        with (
+            patch(
+                "sjifire.ops.schedule.tools.get_on_duty_crew",
+                return_value={"crew": [], "count": 0},
+            ),
+            patch("sjifire.ops.personnel.tools.get_operational_personnel", return_value=[]),
+        ):
+            _, _, _, _, att_summary = await _fetch_context("inc-empty-att", _TEST_USER)
+
+        assert att_summary == ""
+
+    async def test_multiple_attachments_all_listed(self):
+        """Multiple attachments should all appear in summary with IDs."""
+        from sjifire.ops.attachments.models import AttachmentMeta
+        from sjifire.ops.chat.engine import _fetch_context
+
+        metas = [
+            AttachmentMeta(
+                filename="scene1.jpg",
+                content_type="image/jpeg",
+                size_bytes=100_000,
+                uploaded_by="ff@sjifire.org",
+            ),
+            AttachmentMeta(
+                filename="scene2.png",
+                content_type="image/png",
+                size_bytes=200_000,
+                uploaded_by="ff@sjifire.org",
+            ),
+            AttachmentMeta(
+                filename="report.pdf",
+                content_type="application/pdf",
+                size_bytes=500_000,
+                uploaded_by="ff@sjifire.org",
+            ),
+        ]
+
+        await self._create_incident("inc-multi-att", attachments=metas)
+
+        with (
+            patch(
+                "sjifire.ops.schedule.tools.get_on_duty_crew",
+                return_value={"crew": [], "count": 0},
+            ),
+            patch("sjifire.ops.personnel.tools.get_operational_personnel", return_value=[]),
+        ):
+            _, _, _, _, att_summary = await _fetch_context("inc-multi-att", _TEST_USER)
+
+        # All three IDs should appear
+        for m in metas:
+            assert f"id: {m.id}" in att_summary
+        assert "scene1.jpg" in att_summary
+        assert "scene2.png" in att_summary
+        assert "report.pdf" in att_summary
+        # Size should be in KB
+        assert "97KB" in att_summary  # 100000 // 1024
+        assert "195KB" in att_summary  # 200000 // 1024
+        assert "488KB" in att_summary  # 500000 // 1024
+
+    async def test_attachment_with_title_uses_title_as_label(self):
+        """When an attachment has a title, use title instead of filename."""
+        from sjifire.ops.attachments.models import AttachmentMeta
+        from sjifire.ops.chat.engine import _fetch_context
+
+        meta = AttachmentMeta(
+            filename="IMG_20260215_1448.jpg",
+            title="Front of structure",
+            content_type="image/jpeg",
+            size_bytes=150_000,
+            uploaded_by="ff@sjifire.org",
+        )
+
+        await self._create_incident("inc-title-att", attachments=[meta])
+
+        with (
+            patch(
+                "sjifire.ops.schedule.tools.get_on_duty_crew",
+                return_value={"crew": [], "count": 0},
+            ),
+            patch("sjifire.ops.personnel.tools.get_operational_personnel", return_value=[]),
+        ):
+            _, _, _, _, att_summary = await _fetch_context("inc-title-att", _TEST_USER)
+
+        assert "Front of structure" in att_summary
+
+    async def test_attachment_with_description_appended(self):
+        """Attachment description should appear in summary."""
+        from sjifire.ops.attachments.models import AttachmentMeta
+        from sjifire.ops.chat.engine import _fetch_context
+
+        meta = AttachmentMeta(
+            filename="scene.jpg",
+            description="Alpha side showing smoke from eaves",
+            content_type="image/jpeg",
+            size_bytes=150_000,
+            uploaded_by="ff@sjifire.org",
+        )
+
+        await self._create_incident("inc-desc-att", attachments=[meta])
+
+        with (
+            patch(
+                "sjifire.ops.schedule.tools.get_on_duty_crew",
+                return_value={"crew": [], "count": 0},
+            ),
+            patch("sjifire.ops.personnel.tools.get_operational_personnel", return_value=[]),
+        ):
+            _, _, _, _, att_summary = await _fetch_context("inc-desc-att", _TEST_USER)
+
+        assert "Alpha side showing smoke from eaves" in att_summary
+
+
+class TestAttachmentToolSummaryEdgeCases:
+    """Verify _summarize_tool_result edge cases for attachment tools."""
+
+    def test_list_attachments_error(self):
+        result = _summarize_tool_result("list_attachments", {"error": "Incident not found"})
+        assert "Error" in result
+        assert "Incident not found" in result
+
+    def test_get_attachment_error(self):
+        result = _summarize_tool_result(
+            "get_attachment", {"error": "Attachment 'att-99' not found"}
+        )
+        assert "Error" in result
+
+    def test_delete_attachment_error(self):
+        result = _summarize_tool_result("delete_attachment", {"error": "You don't have permission"})
+        assert "Error" in result
+        assert "permission" in result
+
+
+class TestImageContentBlockEdgeCases:
+    """Verify _run_loop image content block logic handles edge cases."""
+
+    def _extract_tool_result_content(self, result_str: str) -> str | list[dict]:
+        """Apply the same image_data extraction logic used in _run_loop."""
+        tool_result_content: str | list[dict] = result_str
+        try:
+            result_parsed = json.loads(result_str)
+            image_info = result_parsed.get("image_data")
+            if image_info and isinstance(image_info, dict):
+                slim = {k: v for k, v in result_parsed.items() if k != "image_data"}
+                tool_result_content = [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": image_info["media_type"],
+                            "data": image_info["base64"],
+                        },
+                    },
+                    {"type": "text", "text": json.dumps(slim, default=str)},
+                ]
+        except (json.JSONDecodeError, KeyError):
+            pass
+        return tool_result_content
+
+    def test_image_data_as_none_stays_string(self):
+        """image_data=None should not produce image blocks."""
+        result_str = json.dumps({"id": "att-1", "image_data": None})
+        content = self._extract_tool_result_content(result_str)
+        assert isinstance(content, str)
+
+    def test_image_data_as_empty_dict_stays_string(self):
+        """image_data={} (falsy) should not produce image blocks."""
+        result_str = json.dumps({"id": "att-1", "image_data": {}})
+        content = self._extract_tool_result_content(result_str)
+        assert isinstance(content, str)
+
+    def test_image_data_as_string_stays_string(self):
+        """image_data='some string' should not produce image blocks (not a dict)."""
+        result_str = json.dumps({"id": "att-1", "image_data": "not-a-dict"})
+        content = self._extract_tool_result_content(result_str)
+        assert isinstance(content, str)
+
+    def test_non_json_result_stays_string(self):
+        """A non-JSON tool result should stay as a string."""
+        content = self._extract_tool_result_content("plain text result")
+        assert isinstance(content, str)
+        assert content == "plain text result"
+
+
+class TestRunLoopImageToolResults:
+    """Integration test: _run_loop builds image content blocks for get_attachment."""
+
+    async def test_get_attachment_image_in_run_loop(self):
+        """_run_loop builds image content blocks for get_attachment results."""
+        from sjifire.ops.chat.engine import _run_loop
+        from sjifire.ops.chat.models import ConversationDocument
+
+        conversation = ConversationDocument(
+            incident_id="inc-img-loop",
+            user_email="ff@sjifire.org",
+        )
+
+        # Track what messages get appended to api_messages
+        api_messages: list[dict] = [
+            {"role": "user", "content": "Show me the photo"},
+        ]
+
+        # Mock the streaming client to return a single tool_use for get_attachment,
+        # then on the second call return just text (no more tools).
+        call_count = 0
+
+        class FakeUsage:
+            input_tokens = 1000
+            output_tokens = 200
+            cache_read_input_tokens = 0
+            cache_creation_input_tokens = 0
+
+        class FakeMessage:
+            usage = FakeUsage()
+
+        class FakeDelta:
+            pass
+
+        class FakeStream:
+            """Simulates the Anthropic streaming response."""
+
+            def __init__(self, events):
+                self._events = events
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
+
+            async def __aiter__(self):
+                for e in self._events:
+                    yield e
+
+            async def get_final_message(self):
+                return FakeMessage()
+
+        class FakeContentBlock:
+            type = "tool_use"
+            id = "toolu_abc"
+            name = "get_attachment"
+
+        class FakeBlockStart:
+            type = "content_block_start"
+            content_block = FakeContentBlock()
+
+        class _InputDelta:
+            partial_json = '{"incident_id": "inc-1", "attachment_id": "att-1"}'
+
+        class FakeInputDelta:
+            type = "content_block_delta"
+            delta = _InputDelta()
+
+        class FakeBlockStop:
+            type = "content_block_stop"
+
+        class _TextDelta:
+            text = "Here is the photo from the scene."
+
+        class FakeTextDelta:
+            type = "content_block_delta"
+            delta = _TextDelta()
+
+        def make_stream(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call: Claude uses get_attachment tool
+                return FakeStream([FakeBlockStart(), FakeInputDelta(), FakeBlockStop()])
+            else:
+                # Second call: Claude responds with text
+                return FakeStream([FakeTextDelta()])
+
+        # Mock execute_tool to return image_data
+        image_result = {
+            "id": "att-1",
+            "filename": "scene.jpg",
+            "content_type": "image/jpeg",
+            "image_data": {
+                "base64": "FAKE_BASE64_IMAGE_DATA",
+                "media_type": "image/jpeg",
+            },
+        }
+
+        async def mock_execute(name, tool_input, user):
+            return json.dumps(image_result)
+
+        class FakeMessages:
+            stream = staticmethod(make_stream)
+
+        class FakeClient:
+            messages = FakeMessages()
+
+        published_events: list[tuple] = []
+
+        async def fake_publish(channel, event, data):
+            published_events.append((event, data))
+
+        with (
+            patch("sjifire.ops.chat.engine.execute_tool", side_effect=mock_execute),
+            patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
+        ):
+            await _run_loop(
+                FakeClient(),
+                "system prompt",
+                api_messages,
+                conversation,
+                _TEST_USER,
+                channel="test",
+            )
+
+        # The tool result message sent to the API should have image blocks
+        # api_messages: [user, assistant(tool_use), user(tool_results), assistant(text)]
+        tool_result_msg = api_messages[2]  # The tool result message
+        assert tool_result_msg["role"] == "user"
+        tool_result_block = tool_result_msg["content"][0]
+        assert tool_result_block["type"] == "tool_result"
+        content = tool_result_block["content"]
+        assert isinstance(content, list)
+        assert content[0]["type"] == "image"
+        assert content[0]["source"]["data"] == "FAKE_BASE64_IMAGE_DATA"
+        assert content[1]["type"] == "text"
+        # Text should NOT contain base64
+        assert "FAKE_BASE64_IMAGE_DATA" not in content[1]["text"]
+        # But should contain metadata
+        assert "scene.jpg" in content[1]["text"]
+
+        # The summary stored in conversation history should NOT have base64
+        tool_result_msg_history = conversation.messages[1]  # tool_results message
+        assert tool_result_msg_history.tool_results is not None
+        for tr in tool_result_msg_history.tool_results:
+            assert "FAKE_BASE64_IMAGE_DATA" not in str(tr)
+
+        # Published events should include tool_call and tool_result
+        tool_call_events = [e for e in published_events if e[0] == "tool_call"]
+        assert len(tool_call_events) == 1
+        assert tool_call_events[0][1]["name"] == "get_attachment"
+
+        tool_result_events = [e for e in published_events if e[0] == "tool_result"]
+        assert len(tool_result_events) == 1
+        assert "scene.jpg" in tool_result_events[0][1]["summary"]
+
+
+class TestExecuteToolGuardrails:
+    """Verify execute_tool rejects unknown tools and attachment tools are allowed."""
+
+    async def test_unknown_tool_rejected(self):
+        from sjifire.ops.chat.tools import execute_tool
+
+        result_str = await execute_tool("evil_tool", {}, _TEST_USER)
+        result = json.loads(result_str)
+        assert "error" in result
+        assert "not available" in result["error"]
+
+    def test_attachment_tools_in_allowed_set(self):
+        from sjifire.ops.chat.tools import _ALLOWED_TOOLS
+
+        assert "list_attachments" in _ALLOWED_TOOLS
+        assert "get_attachment" in _ALLOWED_TOOLS
+        assert "delete_attachment" in _ALLOWED_TOOLS
