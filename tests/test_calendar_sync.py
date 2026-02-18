@@ -6,9 +6,44 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sjifire.aladtec.schedule_scraper import DaySchedule, ScheduleEntry
-from sjifire.calendar.duty_sync import DutyCalendarSync
+from sjifire.calendar.duty_sync import DutyCalendarSync, normalize_html_for_comparison
 from sjifire.calendar.models import AllDayDutyEvent, CrewMember
 from sjifire.core.schedule import is_filled_entry, should_exclude_section
+
+
+class TestNormalizeHtmlForComparison:
+    """Tests for normalize_html_for_comparison."""
+
+    def test_uses_json_when_present(self):
+        """When CREW_DATA JSON is embedded, returns just the JSON string."""
+        json_payload = '{"version": 1, "shift_change_hour": 18}'
+        html = f"<h3>From 1800</h3><!-- CREW_DATA:{json_payload} --><p>Footer</p>"
+        assert normalize_html_for_comparison(html) == json_payload
+
+    def test_ignores_html_changes_when_json_matches(self):
+        """Cosmetic HTML changes are ignored when JSON is identical."""
+        json_payload = '{"version": 1, "from_platoon": "A"}'
+        html_v1 = f"<h3>On Duty</h3><!-- CREW_DATA:{json_payload} --><p>Footer v1</p>"
+        html_v2 = f'<div class="new"><h3>On Duty</h3></div><!-- CREW_DATA:{json_payload} --><p>Footer v2</p>'
+        assert normalize_html_for_comparison(html_v1) == normalize_html_for_comparison(html_v2)
+
+    def test_detects_json_data_change(self):
+        """Different JSON data produces different comparison values."""
+        html_a = '<h3>On Duty</h3><!-- CREW_DATA:{"version": 1, "from_platoon": "A"} -->'
+        html_b = '<h3>On Duty</h3><!-- CREW_DATA:{"version": 1, "from_platoon": "B"} -->'
+        assert normalize_html_for_comparison(html_a) != normalize_html_for_comparison(html_b)
+
+    def test_falls_back_to_text_for_legacy_html(self):
+        """Without JSON comment, falls back to text extraction."""
+        html = "<h3>On Duty</h3><p>  Some   crew  info  </p>"
+        result = normalize_html_for_comparison(html)
+        assert result == "On Duty Some crew info"
+
+    def test_legacy_ignores_whitespace_differences(self):
+        """Legacy fallback normalizes whitespace."""
+        html_a = "<p>Crew Alpha</p>"
+        html_b = "<p>Crew   Alpha</p>"
+        assert normalize_html_for_comparison(html_a) == normalize_html_for_comparison(html_b)
 
 
 class TestShouldExcludeSection:
