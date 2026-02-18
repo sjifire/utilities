@@ -787,6 +787,7 @@ class DutyCalendarSync:
         start_date: date,
         end_date: date,
         dry_run: bool = False,
+        force: bool = False,
     ) -> SyncResult:
         """Sync all-day events to calendar, updating/creating/deleting as needed."""
         result = SyncResult()
@@ -806,6 +807,11 @@ class DutyCalendarSync:
             if existing:
                 existing_id, existing_body = existing
                 new_event.event_id = existing_id
+
+                if force:
+                    # Force update regardless of content
+                    events_to_update.append(new_event)
+                    continue
 
                 # Compare normalized HTML to detect actual changes
                 new_body_normalized = normalize_html_for_comparison(new_event.body_html)
@@ -857,6 +863,7 @@ class DutyCalendarSync:
         self,
         schedules: list[DaySchedule],
         dry_run: bool = False,
+        force: bool = False,
     ) -> SyncResult:
         """Synchronous wrapper for sync_events."""
         if not schedules:
@@ -878,7 +885,7 @@ class DutyCalendarSync:
             start_date = min(e.event_date for e in events)
             end_date = max(e.event_date for e in events)
 
-            return await self.sync_events(events, start_date, end_date, dry_run)
+            return await self.sync_events(events, start_date, end_date, dry_run, force)
 
         return asyncio.run(_async_sync())
 
