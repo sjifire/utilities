@@ -698,7 +698,7 @@ async def _stream_loop(
                     if rd.get("description"):
                         evt["image_desc"] = rd["description"]
                 except (json.JSONDecodeError, KeyError):
-                    pass
+                    pass  # Title/desc are optional UI enhancements; skip if unparseable
             yield _sse("tool_result", evt)
 
             # After update_incident, emit live status update for the client
