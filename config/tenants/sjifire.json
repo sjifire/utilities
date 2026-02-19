@@ -1,9 +1,15 @@
 {
+  "tenant_id": "9e9140f0-64f8-43f9-91ee-771cef14bdc6",
+  "slug": "sjifire",
   "company_name": "San Juan Island Fire & Rescue",
   "domain": "sjifire.org",
   "service_email": "svc-automations@sjifire.org",
   "timezone": "America/Los_Angeles",
   "cosmos_database": "sjifire-incidents",
+  "default_city": "Friday Harbor",
+  "default_state": "WA",
+  "neris_entity_id": "FD53055879",
+  "editor_group_name": "Incident Report Editors",
   "rank_hierarchy": [
     "Chief",
     "Division Chief",
@@ -27,10 +33,6 @@
     "Marine: Pilot"
   ],
   "chief_unit_prefixes": ["BN", "CH", "OPS"],
-  "neris_entity_id": "FD53055879",
-  "default_city": "Friday Harbor",
-  "default_state": "WA",
-  "editor_group_name": "Incident Report Editors",
   "position_order": [
     "Chief",
     "Captain",

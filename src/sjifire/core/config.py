@@ -216,16 +216,30 @@ def load_dispatch_config(require_mailbox: bool = True) -> DispatchConfig:
 
 
 def load_org_config() -> OrgConfig:
-    """Load organization configuration from config file.
+    """Load organization configuration.
+
+    Checks ``config/tenants/{slug}.json`` first (new multi-tenant layout),
+    falls back to ``config/organization.json`` for backwards compatibility
+    (e.g. tests that create a temporary organization.json).
 
     Returns:
-        OrgConfig with company_name, domain, and service_email
+        OrgConfig (or TenantConfig subclass) with org fields populated
     """
     project_root = get_project_root()
+
+    # Try tenant config first
+    slug = os.getenv("DEFAULT_TENANT_SLUG", "sjifire")
+    tenant_path = project_root / "config" / "tenants" / f"{slug}.json"
+    if tenant_path.exists():
+        from sjifire.core.tenant import load_tenant_config
+
+        return load_tenant_config(slug)
+
+    # Fall back to legacy organization.json (tests, migration)
     config_path = project_root / "config" / "organization.json"
 
     if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+        raise FileNotFoundError(f"Config not found: checked {tenant_path} and {config_path}")
 
     with config_path.open() as f:
         config_data = json.load(f)
