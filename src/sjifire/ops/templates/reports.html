@@ -202,26 +202,6 @@
     }
     .chat-panel-messages::-webkit-scrollbar       { width: 5px; }
     .chat-panel-messages::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
-    .chat-history-hint {
-      text-align: center;
-      padding: 6px 0 2px;
-      flex-shrink: 0;
-    }
-    .chat-history-hint button {
-      background: none;
-      border: 1px solid var(--border-default);
-      color: var(--text-dim);
-      font-size: 11px;
-      padding: 3px 12px;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: background .15s, color .15s;
-    }
-    .chat-history-hint button:hover {
-      background: var(--border-subtle);
-      color: var(--text-secondary);
-    }
-
     .chat-msg {
       max-width: 90%;
       padding: 10px 14px;
@@ -571,14 +551,7 @@
       <div class="chat-panel-header">
         <span class="chat-panel-title">Operations Assistant</span>
       </div>
-      <div class="chat-panel-messages" x-ref="chatMessages"
-           @scroll="chatAtTop = $el.scrollTop < 20">
-        <!-- History hint: shown when scrolled to bottom and there's history above -->
-        <template x-if="chatMessages.length > 2 && !chatAtTop">
-          <div class="chat-history-hint">
-            <button @click="$refs.chatMessages.scrollTo({top:0, behavior:'smooth'})">&#8593; earlier messages</button>
-          </div>
-        </template>
+      <div class="chat-panel-messages" x-ref="chatMessages">
         <template x-for="(msg, i) in chatMessages" :key="i">
           <div>
             <template x-if="msg.type === 'message'">
@@ -708,7 +681,6 @@ function reportsApp() {
     chatInput: '',
     chatStreaming: false,
     chatCurrentText: '',
-    chatAtTop: false,
     _centrifuge: null,
     _chatSubscription: null,
     _userEmail: '{{ user_email }}',
@@ -798,32 +770,6 @@ function reportsApp() {
       this._chatSubscription.subscribe();
       this._centrifuge.connect();
 
-      await this.loadChatHistory();
-    },
-
-    async loadChatHistory() {
-      try {
-        const res = await authFetch('/chat/history');
-        if (res.ok) {
-          const data = await res.json();
-          for (const msg of data.messages || []) {
-            if (msg.content) {
-              this.chatMessages.push({type: 'message', role: msg.role, content: msg.content});
-            }
-            if (msg.tool_use) {
-              for (const tu of msg.tool_use) {
-                this.chatMessages.push({
-                  type: 'tool_result',
-                  summary: tu.name + ' completed',
-                });
-              }
-            }
-          }
-          this.chatScrollToBottom(true);
-        }
-      } catch (e) {
-        console.error('Failed to load chat history:', e);
-      }
     },
 
     chatAutoResize(e) {
