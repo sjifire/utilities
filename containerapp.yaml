@@ -18,7 +18,7 @@ properties:
     containers:
       # ── Primary: FastAPI ops server ──
       - name: ops-server
-        image: sjifiremcp.azurecr.io/sjifire-ops:__IMAGE_TAG__
+        image: sjifiremcp.azurecr.io/sjifire-mcp:__IMAGE_TAG__
         resources:
           cpu: 0.5
           memory: 1Gi

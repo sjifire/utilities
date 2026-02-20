@@ -27,8 +27,8 @@ set -euo pipefail
 
 RESOURCE_GROUP="rg-sjifire-mcp"
 ACR_NAME="sjifiremcp"
-CONTAINER_APP="sjifire-ops"
-IMAGE_NAME="sjifire-ops"
+CONTAINER_APP="sjifire-mcp"
+IMAGE_NAME="sjifire-mcp"
 CUSTOM_DOMAIN="ops.sjifire.org"
 KEY_VAULT="gh-website-utilities"
 
