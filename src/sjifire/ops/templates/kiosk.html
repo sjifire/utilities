@@ -366,11 +366,16 @@
   .crew-grid-cell {
     display: flex;
     align-items: baseline;
-    flex-wrap: wrap;
     gap: 2px 6px;
     padding: 2px 0;
     font-size: 13px;
     color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .crew-standby-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
   }
   .crew-grid-cell.chief {
     color: var(--color-amber);
@@ -598,7 +603,7 @@
         <template x-if="$store.kiosk.crew.filter(c => isStandbyCrew(c)).length > 0">
           <div>
             <div class="crew-standby-divider"></div>
-            <div class="crew-grid-names">
+            <div class="crew-standby-wrap">
               <template x-for="(c, i) in $store.kiosk.crew.filter(c => isStandbyCrew(c))" :key="c.name + '-sby-' + i">
                 <div class="crew-grid-cell standby">
                   <span x-text="c.name"></span>
@@ -632,7 +637,7 @@
         <template x-if="$store.kiosk.upcoming_crew.filter(c => isStandbyCrew(c)).length > 0">
           <div>
             <div class="crew-standby-divider"></div>
-            <div class="crew-grid-names">
+            <div class="crew-standby-wrap">
               <template x-for="(c, i) in $store.kiosk.upcoming_crew.filter(c => isStandbyCrew(c))" :key="c.name + '-sby-' + i">
                 <div class="crew-grid-cell standby">
                   <span x-text="c.name"></span>
