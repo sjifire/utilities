@@ -21,15 +21,6 @@
     .grid-3        { grid-template-columns: repeat(3, 1fr); }
     .grid-overview { grid-template-columns: 1fr 1.6fr; gap: 20px; }
 
-    /* ── Overview rows ── */
-    .overview-row {
-      padding: 12px 18px;
-      border-bottom: 1px solid var(--border-subtle);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .overview-row:last-child,
     .call-card:last-child { border-bottom: none; }
 
     /* ── Call cards ── */
@@ -191,27 +182,8 @@
     </div>
     <div class="grid-overview">
       <!-- Crew panel -->
-      <div class="panel">
-        <div class="panel-header">
-          <span style="font-size:14px;color:var(--text-primary)" class="font-semibold" x-text="'On Duty \u2014 ' + D.platoon"></span>
-          <span class="badge" x-show="D.shift_end" x-text="formatShiftEnd(D.shift_end)"></span>
-        </div>
-        <template x-if="D.crew.length">
-          <div>
-            <template x-for="c in D.crew" :key="c.name + c.shift">
-              <div class="overview-row" :style="c.section === 'Chief Officer' ? 'border-left:3px solid var(--color-amber-dark);background:rgba(245,158,11,.08)' : ''">
-                <div>
-                  <div style="font-size:14px;font-weight:600;color:var(--text-primary)" x-text="c.name"></div>
-                  <div style="font-size:12px;color:var(--text-muted);margin-top:2px" x-text="c.position"></div>
-                </div>
-                <span class="badge" x-text="c.section"></span>
-              </div>
-            </template>
-          </div>
-        </template>
-        <template x-if="!D.crew.length">
-          <div class="empty-state">No crew data available.</div>
-        </template>
+      <div class="panel" style="padding:14px 18px">
+        {{ crew_column("D.sections", "D.platoon", "On Duty", badge_expr="formatShiftEnd(D.shift_end)") }}
       </div>
       <!-- Recent calls panel -->
       <div class="panel">
