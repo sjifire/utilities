@@ -370,13 +370,7 @@
     padding: 2px 0;
     font-size: 13px;
     color: var(--text-secondary);
-    min-width: 0;
-  }
-  .crew-grid-cell > span:first-child {
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
   }
   .crew-grid-cell.chief {
     color: var(--color-amber);
@@ -706,7 +700,7 @@ function sectionTag(section) {
   const isStandby = section.includes('Standby');
   const station = section.replace(/ Standby company$/, '').trim();
   if (station.startsWith('FB')) {
-    return { label: station + (isStandby ? ' SBY' : ''), cls: 'fireboat' };
+    return { label: station, cls: 'fireboat' };
   }
   if (isStandby) {
     return { label: station + ' SBY', cls: 'standby' };
