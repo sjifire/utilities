@@ -414,28 +414,48 @@ async def run_chat(
         {"user_email": user.email, "user_name": user.name},
     )
 
-    # Budget check
-    try:
-        budget_status = await check_budget(user.email)
-    except Exception as exc:
+    # Run budget check, conversation load, and context fetch in parallel.
+    # These are independent Cosmos/API calls — no reason to be sequential.
+    async def _load_conversation():
+        async with ConversationStore() as store:
+            return await store.get_by_incident(incident_id)
+
+    budget_result, conv_result, ctx_result = await asyncio.gather(
+        check_budget(user.email),
+        _load_conversation(),
+        _fetch_context(incident_id, user),
+        return_exceptions=True,
+    )
+
+    # Check each result for errors (preserves specific error messages)
+    if isinstance(budget_result, Exception):
         await _release_turn_lock(incident_id, user.email)
-        await publish(channel, "error", {"message": _user_error("budget", exc)})
+        await publish(channel, "error", {"message": _user_error("budget", budget_result)})
         return
-    if not budget_status.allowed:
+    if not budget_result.allowed:
         await _release_turn_lock(incident_id, user.email)
-        await publish(channel, "error", {"message": budget_status.reason})
+        await publish(channel, "error", {"message": budget_result.reason})
         return
+    if isinstance(conv_result, Exception):
+        await _release_turn_lock(incident_id, user.email)
+        await publish(channel, "error", {"message": _user_error("conversation", conv_result)})
+        return
+    if isinstance(ctx_result, Exception):
+        await _release_turn_lock(incident_id, user.email)
+        await publish(channel, "error", {"message": _user_error("context", ctx_result)})
+        return
+
+    conversation = conv_result
+    (
+        incident_json,
+        dispatch_json,
+        crew_json,
+        personnel_json,
+        attachments_summary,
+    ) = ctx_result
 
     # Everything below must release the turn lock on exit
     try:
-        # Load or create conversation
-        try:
-            async with ConversationStore() as store:
-                conversation = await store.get_by_incident(incident_id)
-        except Exception as exc:
-            await publish(channel, "error", {"message": _user_error("conversation", exc)})
-            return
-
         is_new = conversation is None
         if is_new:
             conversation = ConversationDocument(
@@ -457,19 +477,6 @@ async def run_chat(
 
         # Build stable system prompt (static content only — cached by Anthropic)
         system_prompt = _build_system_prompt(user.name, user.email)
-
-        # Fetch dynamic context (incident, dispatch, crew, personnel, attachments)
-        try:
-            (
-                incident_json,
-                dispatch_json,
-                crew_json,
-                personnel_json,
-                attachments_summary,
-            ) = await _fetch_context(incident_id, user)
-        except Exception as exc:
-            await publish(channel, "error", {"message": _user_error("context", exc)})
-            return
         context_preamble = _build_context_message(
             incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
         )
@@ -525,16 +532,22 @@ async def run_chat(
             {"content": user_message, "user_email": user.email, "user_name": user.name},
         )
 
-        # Persist user message immediately so interrupted tasks don't lose it.
-        try:
-            async with ConversationStore() as store:
-                if is_new:
-                    await store.create(conversation)
-                    is_new = False  # Now exists in Cosmos — subsequent saves are updates
-                else:
-                    await store.update(conversation)
-        except Exception as exc:
-            logger.warning("Failed to persist user message: %s", exc)
+        # Persist user message in background — don't block Claude API call.
+        async def _persist_user_msg():
+            try:
+                async with ConversationStore() as s:
+                    if is_new:
+                        await s.create(conversation)
+                    else:
+                        await s.update(conversation)
+            except Exception as exc:
+                logger.warning("Failed to persist user message: %s", exc)
+
+        save_task = asyncio.create_task(_persist_user_msg())
+        if is_new:
+            # Must wait for create so subsequent saves are updates, not conflicts
+            await save_task
+            is_new = False
 
         # Streaming loop (handles tool calls)
         total_input = 0
@@ -955,19 +968,30 @@ async def run_general_chat(
     Like ``run_chat()`` but not scoped to a specific incident.
     Uses a ``general:{email}`` conversation key for persistence.
     """
-    try:
-        budget_status = await check_budget(user.email)
-    except Exception as exc:
-        await publish(channel, "error", {"message": _user_error("budget", exc)})
-        return
-    if not budget_status.allowed:
-        await publish(channel, "error", {"message": budget_status.reason})
-        return
-
     conversation_key = f"{_GENERAL_CONVERSATION_PREFIX}{user.email}"
 
-    async with ConversationStore() as store:
-        conversation = await store.get_by_incident(conversation_key)
+    # Run budget check and conversation load in parallel
+    async def _load_conv():
+        async with ConversationStore() as store:
+            return await store.get_by_incident(conversation_key)
+
+    budget_result, conv_result = await asyncio.gather(
+        check_budget(user.email),
+        _load_conv(),
+        return_exceptions=True,
+    )
+
+    if isinstance(budget_result, Exception):
+        await publish(channel, "error", {"message": _user_error("budget", budget_result)})
+        return
+    if not budget_result.allowed:
+        await publish(channel, "error", {"message": budget_result.reason})
+        return
+    if isinstance(conv_result, Exception):
+        await publish(channel, "error", {"message": _user_error("conversation", conv_result)})
+        return
+
+    conversation = conv_result
 
     is_new = conversation is None
     if is_new:
@@ -1009,16 +1033,21 @@ async def run_general_chat(
 
     conversation.messages.append(ConversationMessage(role="user", content=user_message))
 
-    # Persist user message immediately (same rationale as run_chat)
-    try:
-        async with ConversationStore() as store:
-            if is_new:
-                await store.create(conversation)
-                is_new = False
-            else:
-                await store.update(conversation)
-    except Exception as exc:
-        logger.warning("Failed to persist user message: %s", exc)
+    # Persist user message in background — don't block Claude API call.
+    async def _persist_user_msg():
+        try:
+            async with ConversationStore() as s:
+                if is_new:
+                    await s.create(conversation)
+                else:
+                    await s.update(conversation)
+        except Exception as exc:
+            logger.warning("Failed to persist user message: %s", exc)
+
+    save_task = asyncio.create_task(_persist_user_msg())
+    if is_new:
+        await save_task
+        is_new = False
 
     total_input = 0
     total_output = 0
