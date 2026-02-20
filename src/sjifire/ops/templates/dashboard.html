@@ -25,6 +25,7 @@
 
     /* Content wrapper */
     .content-wrap { max-width: 1200px; margin: 0 auto; }
+    .content-wrap.reports-active { max-width: none; }
 
     /* ── Grid layouts ── */
     .grid-4, .grid-3, .grid-overview { display: grid; gap: 16px; }
@@ -104,13 +105,12 @@
 
     /* ── Reports layout ── */
     .reports-layout {
-      max-width: 1400px;
-      margin: 0 auto;
+      max-width: none;
     }
     .reports-columns {
       display: grid;
       grid-template-columns: 1fr 380px;
-      gap: 20px;
+      gap: 16px;
     }
     @media (min-width: 1400px) {
       .reports-columns { grid-template-columns: 1fr 440px; }
@@ -525,7 +525,7 @@
 {% endblock %}
 
 {% block body %}
-<main class="content-wrap dashboard-main" style="padding:24px">
+<main class="content-wrap dashboard-main" :style="activeTab === 'reports' ? 'padding:12px 12px 24px' : 'padding:24px'" :class="{'reports-active': activeTab === 'reports'}">
 
   <!-- LOADING SKELETON -->
   <div x-show="loading">
