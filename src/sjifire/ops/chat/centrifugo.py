@@ -76,8 +76,22 @@ async def websocket_proxy(ws: WebSocket) -> None:
     centrifugo_port = os.getenv("CENTRIFUGO_PORT", "8001")
     centrifugo_url = f"ws://localhost:{centrifugo_port}/connection/websocket"
 
+    # Forward EasyAuth headers so Centrifugo's connect proxy can identify the user.
+    # Centrifugo forwards these via CENTRIFUGO_CLIENT_PROXY_CONNECT_HTTP_HEADERS.
+    proxy_headers = {}
+    forward = (
+        "cookie",
+        "x-ms-client-principal",
+        "x-ms-client-principal-id",
+        "x-ms-client-principal-name",
+    )
+    for hdr in forward:
+        val = ws.headers.get(hdr)
+        if val:
+            proxy_headers[hdr] = val
+
     try:
-        async with websockets.connect(centrifugo_url) as upstream:
+        async with websockets.connect(centrifugo_url, additional_headers=proxy_headers) as upstream:
             # Forward frames in both directions concurrently
             async def client_to_upstream() -> None:
                 try:
