@@ -9,6 +9,7 @@ from sjifire.core.config import (
 from sjifire.core.tenant import (
     TenantConfig,
     TenantCredentials,
+    generate_tenant_id,
     get_tenant_config,
     get_tenant_credentials,
     list_tenants,
@@ -17,6 +18,7 @@ from sjifire.core.tenant import (
 __all__ = [
     "TenantConfig",
     "TenantCredentials",
+    "generate_tenant_id",
     "get_domain",
     "get_graph_credentials",
     "get_org_config",

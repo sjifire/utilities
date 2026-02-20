@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
+import uuid_utils
+
 from sjifire.core.config import OrgConfig, get_project_root
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DEFAULT_TENANT_SLUG = "sjifire"
+
+
+def generate_tenant_id() -> str:
+    """Generate a UUIDv7 tenant identifier (RFC 9562).
+
+    UUIDv7 is time-ordered (48-bit ms timestamp) with 74 random bits,
+    giving sequential index inserts in B-tree databases (Postgres,
+    Firestore) while remaining non-guessable.
+    """
+    return str(uuid_utils.uuid7())
 
 
 @dataclass
