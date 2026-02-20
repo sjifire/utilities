@@ -950,6 +950,11 @@ function dashboard() {
           this.activeTab = 'overview';
         }
       });
+
+      // Direct navigation to #reports — watcher won't fire since value didn't change
+      if (this.activeTab === 'reports' && this.D.is_editor && !this.reportsLoaded) {
+        this.loadReports();
+      }
     },
 
     async refresh() {
