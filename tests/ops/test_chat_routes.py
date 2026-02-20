@@ -363,7 +363,7 @@ class TestCreateReport:
         resp = await create_report(req)
 
         assert resp.status_code == 303
-        assert resp.headers["location"] == "/reports"
+        assert resp.headers["location"] == "/dashboard#reports"
 
     async def test_post_with_dispatch_cad_comments(self):
         """POST /reports/new succeeds when dispatch has cad_comments string.

@@ -504,6 +504,8 @@ def _build_template_context(
         "updated_time": updated_time,
         "is_business_hours": is_business_hours,
         "user_name": user.get("name", ""),
+        "is_editor": user.get("is_editor", False),
+        "user_email": user.get("email", ""),
         "platoon": platoon,
         "crew": crew,
         "unique_crew_count": unique_crew_count,
@@ -634,10 +636,10 @@ async def refresh_dashboard() -> dict:
     }
 
 
-async def render_for_browser(*, show_reports: bool = False) -> str:
+async def render_for_browser() -> str:
     """Render dashboard HTML shell. Data loaded client-side via Alpine.js."""
     template = _jinja_env.get_template("dashboard.html")
-    return template.render(active_page="dashboard", show_reports=show_reports)
+    return template.render()
 
 
 async def render_kiosk() -> str:

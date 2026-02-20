@@ -1,7 +1,6 @@
 """HTTP route handlers for the chat-based incident reporting UI.
 
 Routes:
-- GET  /reports                            → Reports list page (HTML)
 - POST /reports/new                        → Create new report (redirect)
 - GET  /reports/{incident_id}              → Chat page (HTML)
 - GET  /reports/{incident_id}/conversation → Conversation history (JSON)
@@ -22,7 +21,6 @@ from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user, se
 from sjifire.ops.chat.engine import run_chat, run_general_chat
 from sjifire.ops.chat.store import ConversationStore
 from sjifire.ops.chat.turn_lock import TurnLockStore
-from sjifire.ops.dashboard import get_dashboard_data
 from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.ops.incidents.store import IncidentStore
 
@@ -38,7 +36,7 @@ _jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=Tru
 def _forbidden_page() -> Response:
     """Render a styled 403 page for non-editors."""
     template = _jinja_env.get_template("forbidden.html")
-    html = template.render(active_page="reports", show_reports=False)
+    html = template.render()
     return Response(html, status_code=403, media_type="text/html")
 
 
@@ -50,56 +48,10 @@ def _get_user(request: Request) -> UserContext | None:
     return user
 
 
-async def reports_list(request: Request) -> Response:
-    """Serve the reports list page — dispatch calls with report status."""
-    user = _get_user(request)
-
-    import os
-
-    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
-
-    if not user and not is_dev:
-        return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=/reports")
-
-    # In dev mode, user may be set by middleware
-    if not user:
-        from sjifire.ops.auth import _current_user
-
-        user = _current_user.get()
-
-    # Only editors (or dev mode) can access reports
-    is_editor = is_dev or (
-        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
-    )
-    if not is_editor:
-        return _forbidden_page()
-
-    # Reuse the dashboard data pipeline — dispatch calls cross-referenced
-    # with local incidents and NERIS records.  Fetch more calls than the
-    # dashboard overview (which only shows 15).
-    data = await get_dashboard_data(call_limit=100)
-
-    template = _jinja_env.get_template("reports.html")
-    html = template.render(
-        calls=data.get("recent_calls", []),
-        neris_count=data.get("neris_count", 0),
-        local_draft_count=data.get("local_draft_count", 0),
-        missing_reports=data.get("missing_reports", 0),
-        date_display=data.get("date_display", ""),
-        updated_time=data.get("updated_time", ""),
-        open_calls=data.get("open_calls", 0),
-        today=local_now().date().isoformat(),
-        active_page="reports",
-        show_reports=is_editor,
-        user_email=user.email if user else "",
-    )
-    return Response(html, media_type="text/html")
-
-
 async def create_report(request: Request) -> Response:
     """Create a new incident and redirect to the chat UI."""
     if request.method == "GET":
-        return RedirectResponse("/reports", status_code=303)
+        return RedirectResponse("/dashboard#reports", status_code=303)
 
     user = _get_user(request)
 
@@ -250,7 +202,6 @@ async def chat_page(request: Request) -> Response:
         incident_status=doc.status,
         completeness=doc.completeness() if not doc.neris_incident_id else None,
         dispatch=dispatch_context,
-        show_reports=is_editor,
         user_email=user.email if user else "",
         user_name=user.name if user else "",
     )
