@@ -246,6 +246,7 @@ async def chat_page(request: Request) -> Response:
     html = template.render(
         incident_id=incident_id,
         incident_number=doc.incident_number,
+        incident_date=doc.incident_date or "",
         incident_status=doc.status,
         completeness=doc.completeness() if not doc.neris_incident_id else None,
         dispatch=dispatch_context,
@@ -315,7 +316,7 @@ async def conversation_history(request: Request) -> Response:
 
 
 async def chat_stream(request: Request) -> Response:
-    """Handle a chat message and stream the response as SSE."""
+    """Handle a chat message, publishing events via Centrifugo."""
     user = _get_user(request)
 
     import os
@@ -457,7 +458,7 @@ async def chat_stream(request: Request) -> Response:
 
 
 async def general_chat_stream_endpoint(request: Request) -> Response:
-    """Handle a general chat message and stream the response as SSE."""
+    """Handle a general chat message, publishing events via Centrifugo."""
     user = _get_user(request)
 
     import os

@@ -755,6 +755,13 @@ function reportsApp() {
         const {event, ...data} = ctx.data;
         this.handleChatEvent(event, data);
       });
+      // On (re)subscribe: recover any missed messages
+      this._chatSubscription.on('subscribed', () => {
+        if (this.chatStreaming) {
+          console.log('Reconnected while streaming — recovering from server');
+          this._recoverChat();
+        }
+      });
       this._chatSubscription.subscribe();
       this._centrifuge.connect();
 
@@ -849,7 +856,7 @@ function reportsApp() {
         // 202 Accepted — events arrive via Centrifuge subscription.
         // Recovery timer polls conversation if no events arrive in 30s.
         this._clearChatRecoveryTimer();
-        this._chatRecoveryTimer = setTimeout(() => this._recoverChat(), 30000);
+        this._chatRecoveryTimer = setTimeout(() => this._recoverChat(), 2000);
       } catch (e) {
         console.error('Chat error:', e);
         this.chatMessages.push({type: 'error', content: 'Connection error. Please try again.'});
@@ -866,7 +873,7 @@ function reportsApp() {
 
     async _recoverChat() {
       if (!this.chatStreaming) return;
-      console.warn('No chat events in 30s — polling conversation for recovery');
+      console.warn('No chat events in 2s — polling conversation for recovery');
       try {
         const res = await authFetch('/chat/history');
         if (!res.ok) return;
@@ -885,7 +892,7 @@ function reportsApp() {
           this.$nextTick(() => { if (this.$refs.chatInput) this.$refs.chatInput.focus(); });
         } else if (!this.chatCurrentText) {
           // Still waiting — retry in 15s
-          this._chatRecoveryTimer = setTimeout(() => this._recoverChat(), 15000);
+          this._chatRecoveryTimer = setTimeout(() => this._recoverChat(), 2000);
         }
       } catch (e) {
         console.warn('Chat recovery poll failed:', e);

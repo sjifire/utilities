@@ -132,11 +132,13 @@ src/sjifire/
 │   ├── dashboard.py       # Operations dashboard (client-side rendered) + session bootstrap
 │   ├── prompts.py         # MCP prompts and resources (project instructions, NERIS values)
 │   ├── chat/
+│   │   ├── budget.py      # Per-user daily chat budget (Cosmos DB)
 │   │   ├── centrifugo.py  # WebSocket proxy, auth callbacks, publish helper
 │   │   ├── engine.py      # Claude chat engine (publishes events to Centrifugo)
 │   │   ├── models.py      # ConversationMessage, ConversationDocument (Pydantic)
 │   │   ├── routes.py      # HTTP route handlers for chat UI
 │   │   ├── store.py       # Conversation persistence (Cosmos DB)
+│   │   ├── turn_lock.py   # Distributed turn lock (Cosmos DB conditional writes)
 │   │   └── tools.py       # Chat tool schemas and execution
 │   ├── dispatch/          # iSpyFire dispatch call lookup + archival
 │   │   ├── models.py      # DispatchCallDocument (Pydantic)
@@ -205,13 +207,20 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 - Architecture: Browser → ACA ingress (port 8000) → FastAPI WS proxy `/connection/websocket` → Centrifugo (localhost:8001). FastAPI publishes events via Centrifugo internal API (localhost:9001).
 - Auth: Centrifugo proxy mode — calls back to FastAPI `/centrifugo/connect` and `/centrifugo/subscribe` to validate EasyAuth cookies. Connect proxy returns `conn_info` (name, email) for presence.
 - Presence: Enabled on `chat` namespace (`presence: true`, `join_leave: true`, `force_push_join_leave: true`). Clients query presence on subscribe and receive join/leave events for real-time user awareness.
-- Recovery: Centrifugo history buffer (100 msgs, 5min TTL) with `force_recovery` — clients auto-recover missed messages on reconnect.
+- Recovery: Centrifugo history buffer (100 msgs, 5min TTL) with `force_recovery` — clients auto-recover missed messages on reconnect. On re-subscribe (e.g., after container update), clients immediately poll Cosmos DB for missed messages (2s safety timer as fallback).
+- Session affinity: `stickySessions.affinity: sticky` ensures a browser session always routes to the same replica. Required because each sidecar Centrifugo instance is isolated — events published on one replica are invisible to clients on another.
 - Config: Pure env vars (`CENTRIFUGO_*`) on sidecar container, no config file. API key in Key Vault.
+
+**Multi-replica considerations**: Each ACA replica runs its own Centrifugo sidecar. Without a shared broker, Centrifugo instances are isolated — presence and events are per-replica. Session affinity solves this for single-user workflows (POST and WebSocket always hit the same replica). For true multi-user cross-replica broadcasting, a shared broker (Redis or NATS) would be needed. Current state:
+- **Turn lock**: Works across replicas (uses Cosmos DB, not Centrifugo).
+- **Presence**: Per-replica only. Users on different replicas don't see each other. Acceptable for current scale.
+- **Event broadcasting**: Per-replica. Multi-user editing works when users are on the same replica (session affinity helps, but not guaranteed across different browsers).
+- **When to add Redis**: If multi-user editing becomes a core workflow and users on different replicas need to see each other's events in real-time, add Redis as Centrifugo's broker (`CENTRIFUGO_BROKER=redis`, `CENTRIFUGO_REDIS_ADDRESS`). Redis can run as an Azure Cache for Redis instance (Basic C0 is ~$13/month). This gives cross-replica pub/sub, shared presence, and shared history recovery. NATS is a lighter alternative (pub/sub only, no shared history/presence) but still requires a shared instance.
 
 **Multi-user shared editing**: Multiple editors can view and contribute to the same incident report simultaneously.
 - **Presence awareness**: Centrifugo presence shows who else is viewing the same report (avatar bar in header). Join/leave events update in real-time.
-- **Distributed turn lock**: Prevents concurrent Claude API calls for the same incident. Uses Cosmos DB conditional writes (`conversations` container, `id="turn-lock"` with 120s TTL auto-expiry). Works across multiple replicas.
-- **Turn flow**: User sends message → route acquires lock → if locked by another user, returns 409 with holder info → client shows banner and auto-retries after `done` event → engine releases lock in `finally` block.
+- **Distributed turn lock**: Prevents concurrent Claude API calls for the same incident. Uses Cosmos DB conditional writes (`conversations` container, `id="turn-lock"` with 120s TTL auto-expiry). Works across multiple replicas. See `turn_lock.py`.
+- **Turn flow**: User sends message → route acquires lock → if locked by another user, returns 409 with holder info → client shows banner and auto-retries after `done` event → engine releases lock in `finally` block (all exit paths covered: turn limit, context fetch error, budget check, streaming errors).
 - **Event types for multi-user**: `turn_start` (who started), `user_message` (broadcast user messages to other subscribers), `done`/`error` include `user_email`/`user_name` for attribution.
 - **Client behavior**: Messages blocked by 409 are queued and auto-retried when the active turn completes. Other users see the conversation in real-time (all events broadcast to all subscribers).
 

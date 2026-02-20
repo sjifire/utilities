@@ -36,7 +36,7 @@ def _get_cent_client() -> CentClient:
     global _cent_client
     if _cent_client is None:
         api_key = os.getenv("CENTRIFUGO_API_KEY", "")
-        api_url = os.getenv("CENTRIFUGO_API_URL", "http://localhost:8001/api")
+        api_url = os.getenv("CENTRIFUGO_API_URL", "http://localhost:9001/api")
         _cent_client = CentClient(api_url, api_key=api_key)
     return _cent_client
 

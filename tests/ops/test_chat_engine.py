@@ -916,7 +916,12 @@ class TestImageContentBlocks:
         ):
             images = [{"media_type": "image/jpeg", "data": "base64data"}]
             await run_chat(
-                "inc-refs", "Photo", _TEST_USER, channel="test", images=images, image_refs=image_refs
+                "inc-refs",
+                "Photo",
+                _TEST_USER,
+                channel="test",
+                images=images,
+                image_refs=image_refs,
             )
 
         assert saved_conv is not None

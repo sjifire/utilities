@@ -761,10 +761,17 @@ function chatApp() {
       this._subscription.subscribe();
       this._centrifuge.connect();
 
-      // Query initial presence after subscription is ready
+      // On (re)subscribe: recover any missed messages and refresh presence
       this._subscription.on('subscribed', async () => {
+        // If we were streaming when the connection dropped, recover immediately
+        if (this.streaming) {
+          console.log('Reconnected while streaming — recovering from server');
+          this._recoverFromServer();
+        }
+        // Refresh presence
         try {
           const result = await this._subscription.presence();
+          this.presenceUsers = {};  // Clear stale presence
           for (const [, info] of Object.entries(result.clients || {})) {
             const email = info.user || '';
             const connInfo = info.conn_info || {};
@@ -1190,7 +1197,7 @@ function chatApp() {
 
     _startRecoveryTimer() {
       this._clearRecoveryTimer();
-      this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 30000);
+      this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 2000);
     },
 
     _clearRecoveryTimer() {
@@ -1202,7 +1209,7 @@ function chatApp() {
 
     async _recoverFromServer() {
       if (!this.streaming) return;  // Already resolved
-      console.warn('No events received in 30s — polling conversation for recovery');
+      console.warn('No events received in 2s — polling conversation for recovery');
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
         if (!res.ok) return;
@@ -1228,8 +1235,8 @@ function chatApp() {
           this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
         } else if (!this.currentText) {
           // No new messages and no streaming text — server may still be processing.
-          // Retry recovery in another 15s.
-          this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 15000);
+          // Retry recovery in another 5s.
+          this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 2000);
         }
       } catch (e) {
         console.warn('Recovery poll failed:', e);

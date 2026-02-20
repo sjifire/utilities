@@ -644,6 +644,7 @@ if should_run 4; then
         "ANTHROPIC-API-KEY"
         "AZURE-MAPS-KEY"
         "KIOSK-SIGNING-KEY"
+        "CENTRIFUGO-API-KEY"
     )
 
     ALL_OK=true

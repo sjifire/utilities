@@ -426,122 +426,123 @@ async def run_chat(
         await publish(channel, "error", {"message": budget_status.reason})
         return
 
-    # Load or create conversation
+    # Everything below must release the turn lock on exit
     try:
-        async with ConversationStore() as store:
-            conversation = await store.get_by_incident(incident_id)
-    except Exception as exc:
-        await publish(channel, "error", {"message": _user_error("conversation", exc)})
-        return
+        # Load or create conversation
+        try:
+            async with ConversationStore() as store:
+                conversation = await store.get_by_incident(incident_id)
+        except Exception as exc:
+            await publish(channel, "error", {"message": _user_error("conversation", exc)})
+            return
 
-    is_new = conversation is None
-    if is_new:
-        conversation = ConversationDocument(
-            incident_id=incident_id,
-            user_email=user.email,
+        is_new = conversation is None
+        if is_new:
+            conversation = ConversationDocument(
+                incident_id=incident_id,
+                user_email=user.email,
+            )
+
+        # Turn limit
+        if conversation.turn_count >= MAX_TURNS:
+            await publish(
+                channel,
+                "error",
+                {
+                    "message": "This conversation has reached its limit. "
+                    "Please start a new session to continue."
+                },
+            )
+            return
+
+        # Build stable system prompt (static content only — cached by Anthropic)
+        system_prompt = _build_system_prompt(user.name, user.email)
+
+        # Fetch dynamic context (incident, dispatch, crew, personnel, attachments)
+        try:
+            (
+                incident_json,
+                dispatch_json,
+                crew_json,
+                personnel_json,
+                attachments_summary,
+            ) = await _fetch_context(incident_id, user)
+        except Exception as exc:
+            await publish(channel, "error", {"message": _user_error("context", exc)})
+            return
+        context_preamble = _build_context_message(
+            incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
         )
 
-    # Turn limit
-    if conversation.turn_count >= MAX_TURNS:
+        # Build messages for Claude API
+        api_messages = []
+        for msg in conversation.messages:
+            entry: dict = {"role": msg.role, "content": []}
+            if msg.content:
+                entry["content"].append({"type": "text", "text": msg.content})
+            if msg.tool_use:
+                entry["content"].extend(msg.tool_use)
+            if msg.tool_results:
+                entry["role"] = "user"
+                entry["content"] = msg.tool_results
+            if not entry["content"]:
+                entry["content"] = msg.content or ""
+            api_messages.append(entry)
+
+        # Prepend fresh context to the user message so Claude always sees
+        # the latest incident state without polluting the stable system prompt.
+        prefixed_message = f"{context_preamble}\n\n---\n\n{user_message}"
+
+        # Add the new user message (with optional image content blocks)
+        if images:
+            content_blocks: list[dict] = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": img["media_type"],
+                        "data": img["data"],
+                    },
+                }
+                for img in images
+            ]
+            content_blocks.append({"type": "text", "text": prefixed_message})
+            api_messages.append({"role": "user", "content": content_blocks})
+        else:
+            api_messages.append({"role": "user", "content": prefixed_message})
+        api_messages = _trim_messages(api_messages)
+
+        # Record user message with image references (attachment IDs for blob-backed display)
+        conversation.messages.append(
+            ConversationMessage(role="user", content=user_message, images=image_refs)
+        )
+
+        # Broadcast user message to other subscribers (multi-user awareness).
+        # The sender already has this message locally — clients filter by email.
         await publish(
             channel,
-            "error",
-            {
-                "message": "This conversation has reached its limit. "
-                "Please start a new session to continue."
-            },
+            "user_message",
+            {"content": user_message, "user_email": user.email, "user_name": user.name},
         )
-        return
 
-    # Build stable system prompt (static content only — cached by Anthropic)
-    system_prompt = _build_system_prompt(user.name, user.email)
+        # Persist user message immediately so interrupted tasks don't lose it.
+        try:
+            async with ConversationStore() as store:
+                if is_new:
+                    await store.create(conversation)
+                    is_new = False  # Now exists in Cosmos — subsequent saves are updates
+                else:
+                    await store.update(conversation)
+        except Exception as exc:
+            logger.warning("Failed to persist user message: %s", exc)
 
-    # Fetch dynamic context (incident, dispatch, crew, personnel, attachments)
-    try:
-        (
-            incident_json,
-            dispatch_json,
-            crew_json,
-            personnel_json,
-            attachments_summary,
-        ) = await _fetch_context(incident_id, user)
-    except Exception as exc:
-        await publish(channel, "error", {"message": _user_error("context", exc)})
-        return
-    context_preamble = _build_context_message(
-        incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
-    )
+        # Streaming loop (handles tool calls)
+        total_input = 0
+        total_output = 0
 
-    # Build messages for Claude API
-    api_messages = []
-    for msg in conversation.messages:
-        entry: dict = {"role": msg.role, "content": []}
-        if msg.content:
-            entry["content"].append({"type": "text", "text": msg.content})
-        if msg.tool_use:
-            entry["content"].extend(msg.tool_use)
-        if msg.tool_results:
-            entry["role"] = "user"
-            entry["content"] = msg.tool_results
-        if not entry["content"]:
-            entry["content"] = msg.content or ""
-        api_messages.append(entry)
+        client = get_client()
 
-    # Prepend fresh context to the user message so Claude always sees
-    # the latest incident state without polluting the stable system prompt.
-    prefixed_message = f"{context_preamble}\n\n---\n\n{user_message}"
-
-    # Add the new user message (with optional image content blocks)
-    if images:
-        content_blocks: list[dict] = [
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": img["media_type"],
-                    "data": img["data"],
-                },
-            }
-            for img in images
-        ]
-        content_blocks.append({"type": "text", "text": prefixed_message})
-        api_messages.append({"role": "user", "content": content_blocks})
-    else:
-        api_messages.append({"role": "user", "content": prefixed_message})
-    api_messages = _trim_messages(api_messages)
-
-    # Record user message with image references (attachment IDs for blob-backed display)
-    conversation.messages.append(
-        ConversationMessage(role="user", content=user_message, images=image_refs)
-    )
-
-    # Broadcast user message to other subscribers (multi-user awareness).
-    # The sender already has this message locally — clients filter by email.
-    await publish(
-        channel,
-        "user_message",
-        {"content": user_message, "user_email": user.email, "user_name": user.name},
-    )
-
-    # Persist user message immediately so interrupted tasks don't lose it.
-    try:
-        async with ConversationStore() as store:
-            if is_new:
-                await store.create(conversation)
-                is_new = False  # Now exists in Cosmos — subsequent saves are updates
-            else:
-                await store.update(conversation)
-    except Exception as exc:
-        logger.warning("Failed to persist user message: %s", exc)
-
-    # Streaming loop (handles tool calls)
-    total_input = 0
-    total_output = 0
-
-    client = get_client()
-
-    stream_error = False
-    try:
+        stream_error = False
         try:
             await _run_loop(
                 client, system_prompt, api_messages, conversation, user, channel=channel
@@ -954,7 +955,11 @@ async def run_general_chat(
     Like ``run_chat()`` but not scoped to a specific incident.
     Uses a ``general:{email}`` conversation key for persistence.
     """
-    budget_status = await check_budget(user.email)
+    try:
+        budget_status = await check_budget(user.email)
+    except Exception as exc:
+        await publish(channel, "error", {"message": _user_error("budget", exc)})
+        return
     if not budget_status.allowed:
         await publish(channel, "error", {"message": budget_status.reason})
         return

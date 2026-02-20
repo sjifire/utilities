@@ -6,8 +6,8 @@
 #   1. ops-server (FastAPI) — primary, port 8000
 #   2. centrifugo (sidecar) — WebSocket real-time messaging, port 8001/9001
 #
-# deploy-ops.sh substitutes __IMAGE_TAG__ and __CENTRIFUGO_API_KEY__ before
-# applying with `az containerapp update --yaml`.
+# deploy-ops.sh substitutes __IMAGE_TAG__ and other __PLACEHOLDER__ values
+# before applying with `az containerapp update --yaml`.
 #
 # Env vars referencing secrets use the format: secretref:<secret-name>
 # Secrets are Key Vault references configured separately via `az containerapp
@@ -124,3 +124,5 @@ properties:
       targetPort: 8000
       transport: Auto
       external: true
+      stickySessions:
+        affinity: sticky
