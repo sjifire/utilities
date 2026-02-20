@@ -223,12 +223,7 @@ async def dashboard_data(request: Request) -> Response:
         set_current_user(user)
     elif provider is not None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    call_limit_str = request.query_params.get("call_limit", "15")
-    try:
-        call_limit = min(int(call_limit_str), 200)
-    except (ValueError, TypeError):
-        call_limit = 15
-    data = await dashboard.get_dashboard_data(call_limit=call_limit)
+    data = await dashboard.get_dashboard_data()
     return JSONResponse(data)
 
 

@@ -295,8 +295,8 @@
       border-radius: 8px;
       display: flex;
       flex-direction: column;
-      height: calc(100vh - 48px);
-      min-height: 400px;
+      height: calc(100vh - 180px);
+      min-height: 360px;
       position: sticky;
       top: 24px;
       overflow: hidden;
@@ -656,51 +656,48 @@
   </div>
 
   <!-- REPORTS TAB (editor-only, lazy-loaded) -->
-  <div x-show="!loading && !error && activeTab === 'reports' && D.is_editor" class="reports-layout">
-    <!-- Sub-filter pills -->
-    <div class="filter-pills">
-      <button class="filter-pill" :class="{'active': reportsFilter === 'all'}" @click="reportsFilter = 'all'; reportsPage = 1">
-        All <span style="opacity:.6" x-text="'(' + reportsCalls.length + ')'"></span>
-      </button>
-      <button class="filter-pill" :class="{'active': reportsFilter === 'missing'}" @click="reportsFilter = 'missing'; reportsPage = 1">
-        Missing <span style="opacity:.6" x-text="'(' + reportsCountByFilter('missing') + ')'"></span>
-      </button>
-      <button class="filter-pill" :class="{'active': reportsFilter === 'local'}" @click="reportsFilter = 'local'; reportsPage = 1">
-        In Progress <span style="opacity:.6" x-text="'(' + reportsCountByFilter('local') + ')'"></span>
-      </button>
-      <button class="filter-pill" :class="{'active': reportsFilter === 'neris'}" @click="reportsFilter = 'neris'; reportsPage = 1">
-        Submitted <span style="opacity:.6" x-text="'(' + reportsCountByFilter('neris') + ')'"></span>
-      </button>
-    </div>
-
-    <!-- Stats cards -->
-    <div class="reports-stats stats-compact">
-      <div class="stat-card accent-blue">
-        <div class="stat-label">In Progress</div>
-        <div class="stat-value" x-text="reportsCountByFilter('local')"></div>
-        <div class="stat-desc">Drafts &amp; reviews</div>
-      </div>
-      <div class="stat-card accent-amber">
-        <div class="stat-label">Missing Reports</div>
-        <div class="stat-value" x-text="reportsCountByFilter('missing')"></div>
-        <div class="stat-desc">No incident report yet</div>
-      </div>
-      <div class="stat-card accent-green">
-        <div class="stat-label">In NERIS</div>
-        <div class="stat-value" x-text="reportsCountByFilter('neris')"></div>
-        <div class="stat-desc">Submitted to NERIS</div>
-      </div>
-    </div>
-
-    <!-- Loading state -->
-    <div x-show="reportsLoading" class="empty-state" style="padding:40px">
-      Loading reports data&hellip;
-    </div>
-
-    <!-- Two-column layout: table + chat -->
-    <div class="reports-columns" x-show="reportsLoaded">
-      <!-- Left column: table -->
+  <div x-show="!loading && !error && activeTab === 'reports' && D.is_editor" class="reports-layout reports-columns">
+      <!-- Left column: filters, stats, table -->
       <div class="reports-table-col">
+        <!-- Sub-filter pills -->
+        <div class="filter-pills">
+          <button class="filter-pill" :class="{'active': reportsFilter === 'all'}" @click="reportsFilter = 'all'; reportsPage = 1">
+            All <span style="opacity:.6" x-text="'(' + reportsCalls.length + ')'"></span>
+          </button>
+          <button class="filter-pill" :class="{'active': reportsFilter === 'missing'}" @click="reportsFilter = 'missing'; reportsPage = 1">
+            Missing <span style="opacity:.6" x-text="'(' + reportsCountByFilter('missing') + ')'"></span>
+          </button>
+          <button class="filter-pill" :class="{'active': reportsFilter === 'local'}" @click="reportsFilter = 'local'; reportsPage = 1">
+            In Progress <span style="opacity:.6" x-text="'(' + reportsCountByFilter('local') + ')'"></span>
+          </button>
+          <button class="filter-pill" :class="{'active': reportsFilter === 'neris'}" @click="reportsFilter = 'neris'; reportsPage = 1">
+            Submitted <span style="opacity:.6" x-text="'(' + reportsCountByFilter('neris') + ')'"></span>
+          </button>
+        </div>
+
+        <!-- Stats cards -->
+        <div class="reports-stats stats-compact">
+          <div class="stat-card accent-blue">
+            <div class="stat-label">In Progress</div>
+            <div class="stat-value" x-text="reportsCountByFilter('local')"></div>
+            <div class="stat-desc">Drafts &amp; reviews</div>
+          </div>
+          <div class="stat-card accent-amber">
+            <div class="stat-label">Missing Reports</div>
+            <div class="stat-value" x-text="reportsCountByFilter('missing')"></div>
+            <div class="stat-desc">No incident report yet</div>
+          </div>
+          <div class="stat-card accent-green">
+            <div class="stat-label">In NERIS</div>
+            <div class="stat-value" x-text="reportsCountByFilter('neris')"></div>
+            <div class="stat-desc">Submitted to NERIS</div>
+          </div>
+        </div>
+
+        <!-- Loading state -->
+        <div x-show="reportsLoading" class="empty-state" style="padding:40px">
+          Loading reports data&hellip;
+        </div>
         <template x-if="reportsFiltered().length > 0">
           <div>
           <div class="panel data-table-wrap">
@@ -788,7 +785,7 @@
             <p>Try a different filter or check back later.</p>
           </div>
         </template>
-      </div>
+      </div><!-- /reports-table-col -->
 
       <!-- Right column: Chat panel -->
       <div class="chat-panel">
@@ -840,9 +837,8 @@
           ></textarea>
           <button class="chat-send-btn" :disabled="!chatInput.trim()" @click="sendChatMessage()">Send</button>
         </div>
-      </div>
-    </div>
-  </div>
+      </div><!-- /chat-panel -->
+  </div><!-- /reports-layout -->
 
 </main>
 
@@ -934,8 +930,6 @@ function dashboard() {
     reportsFilter: 'all',
     reportsPage: 1,
     reportsPerPage: 25,
-    _reportsInterval: null,
-
     // ── Modal state ──
     showModal: false,
     submitting: false,
@@ -989,6 +983,8 @@ function dashboard() {
           this.D = await r.json();
           this.loading = false;
           this.error = false;
+          // Keep reports tab in sync with dashboard data
+          if (this.reportsLoaded) this.reportsCalls = this.D.recent_calls || [];
         } else {
           this.error = true;
           this.loading = false;
@@ -1002,30 +998,12 @@ function dashboard() {
 
     // ── Reports methods ──
 
-    async loadReports() {
-      this.reportsLoading = true;
-      try {
-        const r = await authFetch('/dashboard/data?call_limit=100');
-        if (r.ok) {
-          const d = await r.json();
-          this.reportsCalls = d.recent_calls || [];
-          this.reportsLoaded = true;
-          this.initChat();
-          // Periodic refresh for reports data (60s)
-          this._reportsInterval = setInterval(() => this.refreshReports(), 60000);
-        }
-      } catch(e) { console.error('Reports load failed:', e); }
+    loadReports() {
+      // Reuse the already-loaded dashboard data — no extra API call
+      this.reportsCalls = this.D.recent_calls || [];
+      this.reportsLoaded = true;
       this.reportsLoading = false;
-    },
-
-    async refreshReports() {
-      try {
-        const r = await authFetch('/dashboard/data?call_limit=100');
-        if (r.ok) {
-          const d = await r.json();
-          this.reportsCalls = d.recent_calls || [];
-        }
-      } catch(e) { /* silent */ }
+      this.initChat();
     },
 
     reportsFiltered() {
