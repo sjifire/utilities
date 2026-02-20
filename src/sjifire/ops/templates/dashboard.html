@@ -121,12 +121,6 @@
     .reports-table-col {
       min-width: 0;
     }
-    .reports-stats {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      margin-bottom: 20px;
-    }
 
     /* Table hover */
     .data-table tbody tr { transition: background .15s; }
@@ -675,25 +669,6 @@
           </button>
         </div>
 
-        <!-- Stats cards -->
-        <div class="reports-stats stats-compact">
-          <div class="stat-card accent-blue">
-            <div class="stat-label">In Progress</div>
-            <div class="stat-value" x-text="reportsCountByFilter('local')"></div>
-            <div class="stat-desc">Drafts &amp; reviews</div>
-          </div>
-          <div class="stat-card accent-amber">
-            <div class="stat-label">Missing Reports</div>
-            <div class="stat-value" x-text="reportsCountByFilter('missing')"></div>
-            <div class="stat-desc">No incident report yet</div>
-          </div>
-          <div class="stat-card accent-green">
-            <div class="stat-label">In NERIS</div>
-            <div class="stat-value" x-text="reportsCountByFilter('neris')"></div>
-            <div class="stat-desc">Submitted to NERIS</div>
-          </div>
-        </div>
-
         <!-- Loading state -->
         <div x-show="reportsLoading" class="empty-state" style="padding:40px">
           Loading reports data&hellip;
@@ -958,6 +933,7 @@ function dashboard() {
     _chatSubscription: null,
     _chatRecoveryTimer: null,
     _chatQueuedMessage: null,
+    _chatHistoryOffset: 0,
 
     async init() {
       hashTab(['overview','calls','crew','reports'], 'overview').init.call(this);
@@ -1102,6 +1078,12 @@ function dashboard() {
 
     initChat() {
       if (this._centrifuge) return; // Already initialized
+
+      // Snapshot existing history length so recovery doesn't replay old messages
+      authFetch('/chat/history').then(r => r.ok ? r.json() : {messages:[]}).then(d => {
+        this._chatHistoryOffset = (d.messages || []).filter(m => m.content).length;
+      }).catch(() => {});
+
       const channel = `chat:general:${this.D.user_email}`;
       const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       this._centrifuge = new Centrifuge(`${wsProto}//${location.host}/connection/websocket`);
@@ -1205,9 +1187,10 @@ function dashboard() {
         const data = await res.json();
         const serverMsgs = (data.messages || []).filter(m => m.content);
         const localCount = this.chatMessages.filter(m => m.type === 'message').length;
-        if (serverMsgs.length > localCount) {
+        const totalExpected = localCount + this._chatHistoryOffset;
+        if (serverMsgs.length > totalExpected) {
           if (this.chatCurrentText) this.chatCurrentText = '';
-          for (let i = localCount; i < serverMsgs.length; i++) {
+          for (let i = totalExpected; i < serverMsgs.length; i++) {
             if (serverMsgs[i].content) {
               this.chatMessages.push({type: 'message', role: serverMsgs[i].role, content: serverMsgs[i].content});
             }
