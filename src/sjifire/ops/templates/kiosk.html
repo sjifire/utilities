@@ -95,8 +95,8 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding: 20px 28px;
-    gap: 16px;
+    padding: 16px 28px;
+    gap: 12px;
   }
 
   /* ── Call Indicator Strip ── */
@@ -322,7 +322,7 @@
     background: var(--bg-panel);
     border: 1px solid var(--border-default);
     border-radius: 8px;
-    padding: 10px 20px;
+    padding: 8px 20px;
     flex-shrink: 0;
   }
   .crew-strip-grid {
@@ -365,12 +365,12 @@
   }
   .crew-grid-cell {
     display: flex;
-    align-items: center;
-    gap: 6px;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 2px 6px;
     padding: 2px 0;
     font-size: 13px;
     color: var(--text-secondary);
-    white-space: nowrap;
   }
   .crew-grid-cell.chief {
     color: var(--color-amber);
