@@ -1,4 +1,4 @@
-"""Tests for organization config values (loaded from organization.json)."""
+"""Tests for organization config values (loaded from config/tenants/{slug}.json)."""
 
 from sjifire.core.config import get_org_config
 
