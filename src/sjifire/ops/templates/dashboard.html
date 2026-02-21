@@ -26,7 +26,7 @@
 
     /* Content wrapper */
     .content-wrap { max-width: 1200px; margin: 0 auto; }
-    .content-wrap.reports-active { max-width: none; }
+    /* (reports tab now uses same max-width as other tabs) */
 
     /* ── Grid layouts ── */
     .grid-4, .grid-3, .grid-overview { display: grid; gap: 16px; }
@@ -105,9 +105,7 @@
     .completeness-bar .bar-fill { display: block; height: 100%; background: var(--color-blue); border-radius: 3px; }
 
     /* ── Reports layout ── */
-    .reports-layout {
-      max-width: none;
-    }
+    .reports-layout {}
 
     /* Table hover */
     .data-table tbody tr { transition: background .15s; }
@@ -587,7 +585,7 @@
 {% endblock %}
 
 {% block body %}
-<main class="content-wrap dashboard-main" :style="activeTab === 'reports' ? 'padding:12px 12px 24px' : 'padding:24px'" :class="{'reports-active': activeTab === 'reports'}">
+<main class="content-wrap dashboard-main" style="padding:24px">
 
   <!-- LOADING SKELETON -->
   <div x-show="loading">
