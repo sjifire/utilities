@@ -29,6 +29,9 @@ from sjifire.ops.chat.tools import (
 )
 from sjifire.ops.chat.turn_lock import TurnLockStore
 
+# Set of fire-and-forget tasks — prevents GC from collecting running tasks.
+_background_tasks: set[asyncio.Task] = set()
+
 logger = logging.getLogger(__name__)
 MAX_RESPONSE_TOKENS = 4096
 MAX_CONTEXT_MESSAGES = 20  # Keep last N turns to stay under token limits
@@ -532,7 +535,8 @@ async def run_chat(
             {"content": user_message, "user_email": user.email, "user_name": user.name},
         )
 
-        # Persist user message in background — don't block Claude API call.
+        # Persist user message — must await create (so subsequent saves are
+        # updates, not conflicts), but updates can run in background.
         async def _persist_user_msg():
             try:
                 async with ConversationStore() as s:
@@ -543,11 +547,13 @@ async def run_chat(
             except Exception as exc:
                 logger.warning("Failed to persist user message: %s", exc)
 
-        save_task = asyncio.create_task(_persist_user_msg())
         if is_new:
-            # Must wait for create so subsequent saves are updates, not conflicts
-            await save_task
+            await _persist_user_msg()
             is_new = False
+        else:
+            task = asyncio.create_task(_persist_user_msg())
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
 
         # Streaming loop (handles tool calls)
         total_input = 0
@@ -1033,7 +1039,8 @@ async def run_general_chat(
 
     conversation.messages.append(ConversationMessage(role="user", content=user_message))
 
-    # Persist user message in background — don't block Claude API call.
+    # Persist user message — must await create (so subsequent saves are
+    # updates, not conflicts), but updates can run in background.
     async def _persist_user_msg():
         try:
             async with ConversationStore() as s:
@@ -1044,10 +1051,13 @@ async def run_general_chat(
         except Exception as exc:
             logger.warning("Failed to persist user message: %s", exc)
 
-    save_task = asyncio.create_task(_persist_user_msg())
     if is_new:
-        await save_task
+        await _persist_user_msg()
         is_new = False
+    else:
+        task = asyncio.create_task(_persist_user_msg())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     total_input = 0
     total_output = 0

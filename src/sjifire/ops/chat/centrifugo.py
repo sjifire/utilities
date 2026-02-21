@@ -99,7 +99,7 @@ async def websocket_proxy(ws: WebSocket) -> None:
                         data = await ws.receive_text()
                         await upstream.send(data)
                 except WebSocketDisconnect:
-                    pass
+                    pass  # Client disconnected — normal lifecycle
 
             async def upstream_to_client() -> None:
                 try:
@@ -107,7 +107,7 @@ async def websocket_proxy(ws: WebSocket) -> None:
                         text = message if isinstance(message, str) else message.decode()
                         await ws.send_text(text)
                 except websockets.exceptions.ConnectionClosed:
-                    pass
+                    pass  # Centrifugo upstream closed — normal lifecycle
 
             # Run both directions; when either finishes, cancel the other
             _done, pending = await asyncio.wait(
