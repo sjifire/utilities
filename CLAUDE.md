@@ -163,7 +163,7 @@ src/sjifire/
 │       ├── registry.py    # TaskResult, @register(auto=True/False), run_task, run_all
 │       ├── dispatch_sync.py # Dispatch call sync + enrichment (3 tasks, 1 manual)
 │       ├── ispyfire_sync.py # iSpyFire user sync from Entra
-│       ├── neris_sync.py  # NERIS report sync
+│       ├── neris_sync.py  # NERIS report sync (incremental via checkpoint)
 │       ├── schedule_refresh.py # Crew cache refresh from Outlook calendar
 │       └── runner.py      # CLI: uv run ops-tasks (-h for help)
 └── scripts/               # CLI entry points
@@ -180,11 +180,11 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 - Editor group (`Incident Report Editors`) gates: submit incidents, view all incidents. Membership is checked live via Graph API on every request (no cache — works across multiple container replicas)
 - All other tools (dispatch, schedule, personnel) are open to any authenticated user
 
-**MCP tools registered** (23 tools):
+**MCP tools registered** (25 tools):
 - `start_session` (text summary + browser dashboard URL + session bootstrap)
 - `refresh_dashboard` (refreshes data, returns updated summary + new URL)
 - `get_dashboard` (raw data: on-duty crew, recent calls, report status)
-- `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`, `reset_incident`
+- `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`, `reset_incident`, `import_from_neris`, `finalize_incident`
 - `upload_attachment`, `list_attachments`, `get_attachment`, `delete_attachment`
 - `list_neris_incidents`, `get_neris_incident` (NERIS federal reporting records)
 - `get_personnel`
@@ -224,7 +224,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 - **Event types for multi-user**: `turn_start` (who started), `user_message` (broadcast user messages to other subscribers), `done`/`error` include `user_email`/`user_name` for attribution.
 - **Client behavior**: Messages blocked by 409 are queued and auto-retried when the active turn completes. Other users see the conversation in real-time (all events broadcast to all subscribers).
 
-**Background tasks**: Container Apps Job (`sjifire-ops-tasks`) runs `uv run ops-tasks` every 30 minutes. Runs all `auto=True` tasks: dispatch-sync, dispatch-enrich, ispyfire-sync, neris-sync, schedule-refresh. Tasks registered with `auto=False` (e.g., dispatch-reenrich) only run when explicitly requested by name. New tasks are added via `@register("name")` in `ops/tasks/`.
+**Background tasks**: Container Apps Job (`sjifire-ops-tasks`) runs `uv run ops-tasks` every 30 minutes. Runs all `auto=True` tasks: dispatch-sync, dispatch-enrich, ispyfire-sync, neris-sync, schedule-refresh. Tasks registered with `auto=False` (e.g., dispatch-reenrich) only run when explicitly requested by name. New tasks are added via `@register("name")` in `ops/tasks/`. The neris-sync task uses a high-water mark checkpoint for incremental fetches and auto-transitions local submitted incidents to approved when NERIS approves them.
 
 **Cosmos DB backup**: Continuous 30-day PITR (any-second point-in-time restore). For ad-hoc JSON exports beyond 30 days, use `uv run backup-cosmos`. Infrastructure provisioned via `./scripts/setup-azure-ops.sh --phase 2`.
 
