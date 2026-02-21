@@ -82,7 +82,7 @@ class IncidentDocument(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     year: str = ""  # Partition key — set by validator from incident_datetime
-    status: Literal["draft", "in_progress", "ready_review", "submitted"] = "draft"
+    status: Literal["draft", "in_progress", "ready_review", "submitted", "approved"] = "draft"
 
     # Core incident info
     incident_number: str = Field(max_length=40)  # e.g., "26-000944"

@@ -27,6 +27,7 @@ from sjifire.ops.incidents.store import IncidentStore
 logger = logging.getLogger(__name__)
 
 _EDITABLE_STATUSES = {"draft", "in_progress", "ready_review"}
+_LOCKED_STATUSES = {"submitted", "approved"}
 _RESETTABLE_STATUSES = {"draft", "in_progress"}
 
 
@@ -860,8 +861,8 @@ async def update_incident(
         if not _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to edit this incident"}
 
-        if doc.status == "submitted":
-            return {"error": "Cannot modify a submitted incident"}
+        if doc.status in _LOCKED_STATUSES:
+            return {"error": f"Cannot modify a {doc.status} incident"}
 
         # Apply updates (only non-None values) and track changed fields
         fields_changed: list[str] = []
@@ -1206,6 +1207,9 @@ async def import_from_neris(
         return {"error": f"NERIS incident not found: {neris_id}. Verify the NERIS ID is correct."}
 
     neris_prefill = _parse_neris_record(neris_record, neris_id)
+    # Stash NERIS status for downstream hints (not persisted in the document)
+    neris_status_info = neris_record.get("incident_status") or {}
+    neris_prefill["_neris_status"] = neris_status_info.get("status", "")
 
     # ── 2. Derive dispatch number and date from NERIS record ──
     neris_dispatch = neris_record.get("dispatch") or {}
@@ -1222,8 +1226,8 @@ async def import_from_neris(
             return {"error": "Incident not found"}
         if not _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to edit this incident"}
-        if doc.status == "submitted":
-            return {"error": "Cannot modify a submitted incident"}
+        if doc.status in _LOCKED_STATUSES:
+            return {"error": f"Cannot modify a {doc.status} incident"}
 
         dispatch_number = doc.incident_number
     else:
@@ -1473,6 +1477,16 @@ async def _create_incident_from_neris(
     logger.info("User %s created incident %s from NERIS import", user.email, created.id)
     result = created.model_dump(mode="json")
     result["import_comparison"] = comparison
+
+    # Hint for the chat assistant when the NERIS record is already approved
+    neris_status = neris_prefill.get("_neris_status", "")
+    if neris_status == "APPROVED":
+        result["neris_approved"] = True
+        result["finalize_hint"] = (
+            "This NERIS record is already APPROVED. You can lock the local report "
+            "by calling finalize_incident to prevent further local edits."
+        )
+
     return result
 
 
@@ -1593,6 +1607,86 @@ def _get_neris_incident(neris_incident_id: str) -> dict | None:
 
     with NerisClient() as client:
         return client.get_incident(neris_incident_id)
+
+
+async def finalize_incident(incident_id: str) -> dict:
+    """Lock a locally-imported NERIS incident based on its current NERIS status.
+
+    Fetches the current NERIS record status and sets the local incident to
+    ``approved`` (if NERIS status is APPROVED) or ``submitted`` (otherwise).
+    The incident must have a ``neris_incident_id`` and be in an editable
+    status (not already locked).
+
+    Only editors can finalize incidents.
+
+    Args:
+        incident_id: The incident document ID
+
+    Returns:
+        The updated incident document, or an error
+    """
+    user = get_current_user()
+
+    if not user.is_editor:
+        group = get_org_config().editor_group_name
+        return {
+            "error": "You are not authorized to finalize incidents. "
+            f"Ask an administrator to add you to the {group} group in Entra ID."
+        }
+
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+        if doc is None:
+            return {"error": "Incident not found"}
+
+        if not doc.neris_incident_id:
+            return {
+                "error": "Cannot finalize — this incident has no NERIS ID. "
+                "Import from NERIS first using import_from_neris."
+            }
+
+        if doc.status in _LOCKED_STATUSES:
+            return {
+                "error": f"Incident is already {doc.status} and locked. "
+                "No further changes can be made locally."
+            }
+
+        # Fetch current NERIS status
+        try:
+            neris_record = await asyncio.to_thread(_get_neris_incident, doc.neris_incident_id)
+        except Exception:
+            logger.warning(
+                "Failed to fetch NERIS status for %s", doc.neris_incident_id, exc_info=True
+            )
+            return {"error": "Failed to fetch NERIS status. Try again later."}
+
+        if not neris_record:
+            return {"error": f"NERIS record not found: {doc.neris_incident_id}"}
+
+        neris_status = (neris_record.get("incident_status") or {}).get("status", "")
+        new_status = "approved" if neris_status == "APPROVED" else "submitted"
+
+        doc.status = new_status
+        doc.updated_at = datetime.now(UTC)
+        doc.edit_history.append(
+            EditEntry(
+                editor_email=user.email,
+                editor_name=user.name,
+                fields_changed=["finalized"],
+            )
+        )
+
+        updated = await store.update(doc)
+
+    logger.info(
+        "User %s finalized incident %s → %s (NERIS status: %s)",
+        user.email,
+        incident_id,
+        new_status,
+        neris_status,
+    )
+    return updated.model_dump(mode="json")
 
 
 def _submit_to_neris(payload: dict) -> dict:  # pragma: no cover

@@ -137,6 +137,7 @@
       border-radius: 2px;
       background: var(--color-blue);
     }
+    .report-status.locked { color: var(--text-dim); font-size: 12px; }
     .call-id { font-family: monospace; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
     .nature  { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
     .address { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
@@ -847,7 +848,12 @@
                       <div class="report-status neris" x-text="'\u2713 In NERIS'"></div>
                     </div>
                   </template>
-                  <template x-if="c.report_source === 'local'">
+                  <template x-if="c.report_source === 'local' && c.is_locked">
+                    <div>
+                      <div class="report-status locked" x-text="c.report_status === 'approved' ? '\uD83D\uDD12 Approved' : '\uD83D\uDD12 Submitted to NERIS'"></div>
+                    </div>
+                  </template>
+                  <template x-if="c.report_source === 'local' && !c.is_locked">
                     <div>
                       <div class="report-status local" x-text="c.report_status || 'draft'"></div>
                       <template x-if="c.completeness">
@@ -863,11 +869,14 @@
                   </template>
                 </td>
                 <td>
-                  <template x-if="c.report_source === 'local' && c.incident_id">
+                  <template x-if="c.report_source === 'local' && c.incident_id && !c.is_locked">
                     <a class="action-btn edit" :href="'/reports/' + c.incident_id" @click.stop>Edit Report</a>
                   </template>
+                  <template x-if="c.report_source === 'local' && c.incident_id && c.is_locked">
+                    <a class="action-btn view" :href="'/reports/' + c.incident_id" @click.stop>View Report</a>
+                  </template>
                   <template x-if="c.report_source === 'neris'">
-                    <button class="action-btn import" @click.stop="startReport(c)">Import from NERIS</button>
+                    <button class="action-btn import" @click.stop="startReport(c)" x-text="c.report_label"></button>
                   </template>
                   <template x-if="!c.has_report">
                     <button class="action-btn start" @click.stop="startReport(c)">Start Report</button>
@@ -1077,8 +1086,8 @@ function dashboard() {
     reportsFiltered() {
       if (this.reportsFilter === 'all') return this.reportsCalls;
       if (this.reportsFilter === 'missing') return this.reportsCalls.filter(c => !c.has_report);
-      if (this.reportsFilter === 'local') return this.reportsCalls.filter(c => c.report_source === 'local');
-      if (this.reportsFilter === 'neris') return this.reportsCalls.filter(c => c.report_source === 'neris');
+      if (this.reportsFilter === 'local') return this.reportsCalls.filter(c => c.report_source === 'local' && !c.is_locked);
+      if (this.reportsFilter === 'neris') return this.reportsCalls.filter(c => c.report_source === 'neris' || c.is_locked);
       return this.reportsCalls;
     },
 
@@ -1093,8 +1102,8 @@ function dashboard() {
 
     reportsCountByFilter(f) {
       if (f === 'missing') return this.reportsCalls.filter(c => !c.has_report).length;
-      if (f === 'local') return this.reportsCalls.filter(c => c.report_source === 'local').length;
-      if (f === 'neris') return this.reportsCalls.filter(c => c.report_source === 'neris').length;
+      if (f === 'local') return this.reportsCalls.filter(c => c.report_source === 'local' && !c.is_locked).length;
+      if (f === 'neris') return this.reportsCalls.filter(c => c.report_source === 'neris' || c.is_locked).length;
       return this.reportsCalls.length;
     },
 

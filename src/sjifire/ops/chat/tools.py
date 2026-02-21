@@ -217,6 +217,24 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
+        "name": "finalize_incident",
+        "description": (
+            "Lock an incident report after NERIS review. Fetches the current NERIS "
+            "status and sets the local report to 'approved' (if NERIS approved) or "
+            "'submitted'. The incident must have a NERIS ID and be in an editable status."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
         "name": "get_dispatch_call",
         "description": (
             "Get full details for a dispatch call including nature, address, "
@@ -489,6 +507,9 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
             tool_input["incident_id"],
             neris_id=tool_input.get("neris_id"),
         )
+
+    if name == "finalize_incident":
+        return await incident_tools.finalize_incident(tool_input["incident_id"])
 
     if name == "get_dispatch_call":
         return await dispatch_tools.get_dispatch_call(tool_input["call_id"])

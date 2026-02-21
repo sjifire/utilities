@@ -1,12 +1,16 @@
 """Tests for the NERIS report sync task."""
 
 import os
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from sjifire.ops.incidents.models import IncidentDocument
+from sjifire.ops.incidents.store import IncidentStore
 from sjifire.ops.neris.store import NerisReportStore
 from sjifire.ops.tasks.neris_sync import (
+    _sync_neris_to_local,
     fetch_neris_summaries,
     neris_sync,
     refresh_neris_report_cache,
@@ -19,6 +23,7 @@ def _env():
     with patch.dict(os.environ, {"COSMOS_ENDPOINT": "", "COSMOS_KEY": ""}, clear=False):
         yield
     NerisReportStore._memory.clear()
+    IncidentStore._memory.clear()
 
 
 # Sample NERIS API response matching the real shape
@@ -98,6 +103,34 @@ class TestFetchNerisSummaries:
         summaries = fetch_neris_summaries()
         assert summaries == []
 
+    @patch("sjifire.neris.client.NerisClient")
+    def test_passes_last_modified(self, mock_client_cls):
+        """last_modified kwarg is forwarded to get_all_incidents."""
+        mock_client = MagicMock()
+        mock_client.get_all_incidents.return_value = []
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        fetch_neris_summaries(last_modified="2026-02-15T00:00:00+00:00")
+
+        mock_client.get_all_incidents.assert_called_once_with(
+            last_modified="2026-02-15T00:00:00+00:00"
+        )
+
+    @patch("sjifire.neris.client.NerisClient")
+    def test_no_last_modified_omits_kwarg(self, mock_client_cls):
+        """Without last_modified, get_all_incidents is called with no kwargs."""
+        mock_client = MagicMock()
+        mock_client.get_all_incidents.return_value = []
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        fetch_neris_summaries()
+
+        mock_client.get_all_incidents.assert_called_once_with()
+
 
 class TestRefreshNerisReportCache:
     async def test_writes_to_store(self):
@@ -137,6 +170,158 @@ class TestRefreshNerisReportCache:
         assert count == 0
 
 
+class TestSyncNerisToLocal:
+    """Tests for _sync_neris_to_local status transitions."""
+
+    async def test_transitions_submitted_to_approved(self):
+        """Submitted + NERIS APPROVED → local approved."""
+        incident = IncidentDocument(
+            id="inc-1",
+            incident_number="26-001980",
+            incident_datetime=datetime(2026, 2, 9, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="submitted",
+            neris_incident_id="FD|26001980|123",
+            extras={"station": "S31"},
+        )
+        async with IncidentStore() as store:
+            await store.create(incident)
+
+        summaries = [
+            {
+                "neris_id": "FD|26001980|123",
+                "status": "APPROVED",
+                "incident_number": "26-001980",
+            }
+        ]
+        count = await _sync_neris_to_local(summaries)
+
+        assert count == 1
+        async with IncidentStore() as store:
+            updated = await store.get_by_id("inc-1")
+        assert updated.status == "approved"
+        assert updated.edit_history[-1].editor_email == "system@sjifire.org"
+        assert updated.edit_history[-1].editor_name == "NERIS Sync"
+        assert "status:approved" in updated.edit_history[-1].fields_changed
+
+    async def test_skips_draft_incidents(self):
+        """Draft incidents are not transitioned even if NERIS is APPROVED."""
+        incident = IncidentDocument(
+            id="inc-draft",
+            incident_number="26-002000",
+            incident_datetime=datetime(2026, 2, 10, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="draft",
+            neris_incident_id="FD|26002000|999",
+            extras={"station": "S31"},
+        )
+        async with IncidentStore() as store:
+            await store.create(incident)
+
+        summaries = [
+            {
+                "neris_id": "FD|26002000|999",
+                "status": "APPROVED",
+                "incident_number": "26-002000",
+            }
+        ]
+        count = await _sync_neris_to_local(summaries)
+
+        assert count == 0
+        async with IncidentStore() as store:
+            doc = await store.get_by_id("inc-draft")
+        assert doc.status == "draft"
+
+    async def test_skips_already_approved(self):
+        """Already-approved incidents are not re-transitioned."""
+        incident = IncidentDocument(
+            id="inc-appr",
+            incident_number="26-003000",
+            incident_datetime=datetime(2026, 2, 11, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="approved",
+            neris_incident_id="FD|26003000|111",
+            extras={"station": "S31"},
+        )
+        async with IncidentStore() as store:
+            await store.create(incident)
+
+        summaries = [
+            {
+                "neris_id": "FD|26003000|111",
+                "status": "APPROVED",
+                "incident_number": "26-003000",
+            }
+        ]
+        count = await _sync_neris_to_local(summaries)
+
+        assert count == 0
+
+    async def test_skips_pending_neris_status(self):
+        """Submitted + NERIS PENDING_APPROVAL → no change."""
+        incident = IncidentDocument(
+            id="inc-pending",
+            incident_number="26-004000",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="submitted",
+            neris_incident_id="FD|26004000|222",
+            extras={"station": "S31"},
+        )
+        async with IncidentStore() as store:
+            await store.create(incident)
+
+        summaries = [
+            {
+                "neris_id": "FD|26004000|222",
+                "status": "PENDING_APPROVAL",
+                "incident_number": "26-004000",
+            }
+        ]
+        count = await _sync_neris_to_local(summaries)
+
+        assert count == 0
+        async with IncidentStore() as store:
+            doc = await store.get_by_id("inc-pending")
+        assert doc.status == "submitted"
+
+    async def test_no_matching_local_incident(self):
+        """NERIS summary with no local match is silently skipped."""
+        summaries = [
+            {
+                "neris_id": "FD|26005000|333",
+                "status": "APPROVED",
+                "incident_number": "26-005000",
+            }
+        ]
+        count = await _sync_neris_to_local(summaries)
+        assert count == 0
+
+
+class TestCheckpoint:
+    """Tests for sync checkpoint (high-water mark)."""
+
+    async def test_get_checkpoint_returns_none_initially(self):
+        async with NerisReportStore() as store:
+            checkpoint = await store.get_sync_checkpoint()
+        assert checkpoint is None
+
+    async def test_set_and_get_checkpoint(self):
+        ts = "2026-02-15T10:30:00+00:00"
+        async with NerisReportStore() as store:
+            await store.set_sync_checkpoint(ts)
+        async with NerisReportStore() as store:
+            checkpoint = await store.get_sync_checkpoint()
+        assert checkpoint == ts
+
+    async def test_checkpoint_overwrite(self):
+        async with NerisReportStore() as store:
+            await store.set_sync_checkpoint("2026-02-14T00:00:00+00:00")
+            await store.set_sync_checkpoint("2026-02-15T00:00:00+00:00")
+            checkpoint = await store.get_sync_checkpoint()
+        assert checkpoint == "2026-02-15T00:00:00+00:00"
+
+
 class TestNerisSync:
     @patch("sjifire.ops.tasks.neris_sync.fetch_neris_summaries")
     async def test_orchestrates_fetch_and_sync(self, mock_fetch):
@@ -161,3 +346,72 @@ class TestNerisSync:
         async with NerisReportStore() as store:
             result = await store.list_as_lookup()
         assert len(result["reports"]) == 1
+
+    @patch("sjifire.ops.tasks.neris_sync.fetch_neris_summaries")
+    async def test_first_sync_no_checkpoint_full_fetch(self, mock_fetch):
+        """First sync passes last_modified=None for full fetch."""
+        mock_fetch.return_value = []
+
+        await neris_sync()
+
+        mock_fetch.assert_called_once_with(last_modified=None)
+
+    @patch("sjifire.ops.tasks.neris_sync.fetch_neris_summaries")
+    async def test_incremental_sync_passes_last_modified(self, mock_fetch):
+        """Subsequent sync passes stored checkpoint as last_modified."""
+        mock_fetch.return_value = []
+
+        # Set a checkpoint
+        async with NerisReportStore() as store:
+            await store.set_sync_checkpoint("2026-02-15T10:30:00+00:00")
+
+        await neris_sync()
+
+        mock_fetch.assert_called_once_with(last_modified="2026-02-15T10:30:00+00:00")
+
+    @patch("sjifire.ops.tasks.neris_sync.fetch_neris_summaries")
+    async def test_checkpoint_stored_after_sync(self, mock_fetch):
+        """A new checkpoint is stored after successful sync."""
+        mock_fetch.return_value = []
+
+        await neris_sync()
+
+        async with NerisReportStore() as store:
+            checkpoint = await store.get_sync_checkpoint()
+        assert checkpoint is not None
+        # Should be a recent ISO timestamp
+        parsed = datetime.fromisoformat(checkpoint)
+        assert parsed.tzinfo is not None
+
+    @patch("sjifire.ops.tasks.neris_sync.fetch_neris_summaries")
+    async def test_sync_transitions_submitted_to_approved(self, mock_fetch):
+        """neris_sync transitions local submitted incidents when NERIS is APPROVED."""
+        incident = IncidentDocument(
+            id="inc-sync",
+            incident_number="26-001980",
+            incident_datetime=datetime(2026, 2, 9, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="submitted",
+            neris_incident_id="FD|26001980|123",
+            extras={"station": "S31"},
+        )
+        async with IncidentStore() as store:
+            await store.create(incident)
+
+        mock_fetch.return_value = [
+            {
+                "source": "neris",
+                "neris_id": "FD|26001980|123",
+                "incident_number": "26-001980",
+                "determinant_code": "",
+                "status": "APPROVED",
+                "incident_type": "MEDICAL",
+                "call_create": "2026-02-09T06:07:17+00:00",
+            },
+        ]
+
+        await neris_sync()
+
+        async with IncidentStore() as store:
+            doc = await store.get_by_id("inc-sync")
+        assert doc.status == "approved"

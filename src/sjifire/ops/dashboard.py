@@ -385,15 +385,34 @@ def _build_template_context(
         dispatch_id = call.get("dispatch_id", "")
         neris_id = report.get("neris_id", "") if report else ""
 
-        # Report label and prompt depend on source
+        # Report label and prompt depend on source and status
+        local_status = report.get("status", "") if report else ""
+        is_locked = local_status in ("submitted", "approved")
+        # For NERIS-source reports, the status field IS the NERIS status
+        neris_status = local_status if report_source == "neris" else ""
+
         if report_source == "neris":
-            report_label = "View NERIS Record"
-            report_prompt = (
-                f"Show NERIS record {neris_id}" if neris_id else f"Show report for {dispatch_id}"
-            )
+            if neris_status == "APPROVED":
+                report_label = "Finalize from NERIS"
+                report_prompt = (
+                    f"Finalize NERIS record {neris_id}"
+                    if neris_id
+                    else f"Finalize report for {dispatch_id}"
+                )
+            else:
+                report_label = "Import from NERIS"
+                report_prompt = (
+                    f"Import NERIS record {neris_id}"
+                    if neris_id
+                    else f"Import report for {dispatch_id}"
+                )
         elif report_source == "local":
-            report_label = "View Draft"
-            report_prompt = f"Show incident {dispatch_id}"
+            if is_locked:
+                report_label = "View Report"
+                report_prompt = f"Show incident {dispatch_id}"
+            else:
+                report_label = "Edit Report"
+                report_prompt = f"Show incident {dispatch_id}"
         else:
             report_label = "Start Report"
             report_prompt = f"Start a report for {dispatch_id}"
@@ -426,8 +445,10 @@ def _build_template_context(
                 "has_report": report is not None,
                 "report_source": report_source,
                 "neris_id": neris_id,
+                "neris_status": neris_status,
                 "incident_id": report.get("incident_id", "") if report else "",
                 "completeness": completeness,
+                "is_locked": is_locked,
                 "report_label": report_label,
                 "report_prompt": report_prompt,
                 "report_status": report.get("status", "").replace("_", " ") if report else "",
@@ -1264,14 +1285,16 @@ async def _fetch_schedule():
 
 
 async def _fetch_incidents(user_email: str, is_editor: bool) -> dict[str, dict]:
-    """Fetch non-submitted incidents and build dispatch_id -> report info lookup."""
+    """Fetch all incidents and build dispatch_id -> report info lookup.
+
+    Includes submitted/approved incidents so the dashboard can show locked
+    reports with proper status badges and view-only buttons.
+    """
     async with IncidentStore() as store:
         if is_editor:
-            incidents = await store.list_by_status(exclude_status="submitted", max_items=50)
+            incidents = await store.list_by_status(max_items=50)
         else:
-            incidents = await store.list_for_user(
-                user_email, exclude_status="submitted", max_items=50
-            )
+            incidents = await store.list_for_user(user_email, max_items=50)
 
     lookup: dict[str, dict] = {}
     for doc in incidents:

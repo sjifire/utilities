@@ -130,11 +130,15 @@ class NerisReportStore:
             List of cached documents, ordered by call_create descending
         """
         if self._in_memory:
-            results = [NerisReportDocument.from_cosmos(data) for data in self._memory.values()]
+            results = [
+                NerisReportDocument.from_cosmos(data)
+                for data in self._memory.values()
+                if data.get("year") != "meta"  # Skip metadata docs (checkpoint)
+            ]
             results.sort(key=lambda d: d.call_create, reverse=True)
             return results[:max_items]
 
-        query = "SELECT TOP @limit * FROM c ORDER BY c.call_create DESC"
+        query = "SELECT TOP @limit * FROM c WHERE c.year != 'meta' ORDER BY c.call_create DESC"
         parameters: list[dict] = [{"name": "@limit", "value": max_items}]
 
         items = []
@@ -172,6 +176,40 @@ class NerisReportStore:
                     lookup[det_normalized] = summary
 
         return {"lookup": lookup, "reports": reports}
+
+    async def get_sync_checkpoint(self) -> str | None:
+        """Read the last sync timestamp (high-water mark).
+
+        Returns:
+            ISO timestamp string, or None if no previous sync.
+        """
+        if self._in_memory:
+            item = self._memory.get("sync-checkpoint")
+            return item.get("last_modified") if item else None
+
+        try:
+            item = await self._container.read_item(item="sync-checkpoint", partition_key="meta")
+            return item.get("last_modified")
+        except Exception:
+            return None
+
+    async def set_sync_checkpoint(self, last_modified: str) -> None:
+        """Store the sync timestamp (high-water mark).
+
+        Args:
+            last_modified: ISO timestamp of the last successful sync
+        """
+        body = {
+            "id": "sync-checkpoint",
+            "year": "meta",
+            "last_modified": last_modified,
+        }
+        if self._in_memory:
+            self._memory["sync-checkpoint"] = body
+            return
+
+        await self._container.upsert_item(body=body)
+        logger.info("Stored sync checkpoint: %s", last_modified)
 
 
 def _normalize_incident_number(number: str) -> str:

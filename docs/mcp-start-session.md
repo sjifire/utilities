@@ -4,6 +4,7 @@ After the summary, give a compact reminder of available actions:
 
 - **Start a report** for any dispatch call (e.g. "Start a report for 26-002134")
 - **Import a NERIS report** into the local system (e.g. "Import NERIS report FD53055879|26001927|1770500761") — cross-references dispatch + schedule data, shows discrepancies
+- **Finalize from NERIS** — lock a report after NERIS review (e.g. "Finalize report inc-uuid")
 - **Show a NERIS record** if the call has a NERIS ID (e.g. "Show NERIS record FD53055879|26001927|1770500761")
 - **Look up call details** (e.g. "Show me call 26-002134")
 - **Check crew** for any date (e.g. "Who was on duty Jan 15?")

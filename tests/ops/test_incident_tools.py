@@ -18,6 +18,7 @@ from sjifire.ops.incidents.tools import (
     _prefill_from_dispatch,
     _prefill_from_neris,
     create_incident,
+    finalize_incident,
     get_incident,
     get_neris_incident,
     import_from_neris,
@@ -1932,3 +1933,184 @@ class TestBuildImportComparison:
         unit_disc = [d for d in comp["discrepancies"] if d["field"] == "units"]
         assert len(unit_disc) == 1
         assert "NERIS" in unit_disc[0]["note"]
+
+
+# ── Locked status guards ──
+class TestLockedStatusGuards:
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_cannot_update_approved_incident(self, mock_store_cls, regular_user, sample_doc):
+        sample_doc.status = "approved"
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await update_incident("doc-123", address="Too late")
+        assert "error" in result
+        assert "approved" in result["error"].lower()
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_cannot_reset_approved_incident(self, mock_store_cls, regular_user, sample_doc):
+        sample_doc.status = "approved"
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await reset_incident("doc-123")
+        assert "error" in result
+        assert "approved" in result["error"]
+
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_cannot_import_into_approved_incident(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
+    ):
+        doc = IncidentDocument(
+            id="doc-approved-1",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="approved",
+        )
+
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {}
+        mock_crew.return_value = []
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await import_from_neris("FD53055879|26-000944|123", incident_id="doc-approved-1")
+        assert "error" in result
+        assert "approved" in result["error"].lower()
+
+
+# ── Finalize incident ──
+class TestFinalizeIncident:
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_finalize_sets_approved(self, mock_store_cls, mock_get_neris, officer_user):
+        doc = IncidentDocument(
+            id="doc-finalize-1",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            neris_incident_id="FD53055879|26-000944|123",
+            status="ready_review",
+        )
+
+        mock_get_neris.return_value = {
+            "incident_status": {"status": "APPROVED"},
+        }
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await finalize_incident("doc-finalize-1")
+
+        assert result["status"] == "approved"
+        assert result["edit_history"][-1]["fields_changed"] == ["finalized"]
+
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_finalize_sets_submitted_when_pending(
+        self, mock_store_cls, mock_get_neris, officer_user
+    ):
+        doc = IncidentDocument(
+            id="doc-finalize-2",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            neris_incident_id="FD53055879|26-000944|123",
+            status="ready_review",
+        )
+
+        mock_get_neris.return_value = {
+            "incident_status": {"status": "SUBMITTED"},
+        }
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await finalize_incident("doc-finalize-2")
+
+        assert result["status"] == "submitted"
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_finalize_requires_neris_id(self, mock_store_cls, officer_user):
+        doc = IncidentDocument(
+            id="doc-finalize-3",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            neris_incident_id=None,
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await finalize_incident("doc-finalize-3")
+
+        assert "error" in result
+        assert "no NERIS ID" in result["error"]
+
+    async def test_finalize_requires_editor(self, regular_user):
+        result = await finalize_incident("doc-123")
+
+        assert "error" in result
+        assert "not authorized" in result["error"].lower()
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_finalize_rejects_already_locked(self, mock_store_cls, officer_user):
+        doc = IncidentDocument(
+            id="doc-finalize-4",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            neris_incident_id="FD53055879|26-000944|123",
+            status="submitted",
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await finalize_incident("doc-finalize-4")
+
+        assert "error" in result
+        assert "already submitted" in result["error"].lower()
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_finalize_rejects_approved(self, mock_store_cls, officer_user):
+        doc = IncidentDocument(
+            id="doc-finalize-5",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            neris_incident_id="FD53055879|26-000944|123",
+            status="approved",
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await finalize_incident("doc-finalize-5")
+
+        assert "error" in result
+        assert "already approved" in result["error"].lower()
