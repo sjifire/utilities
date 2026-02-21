@@ -192,7 +192,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 - `list_dispatch_calls`, `get_dispatch_call`, `get_open_dispatch_calls`, `search_dispatch_calls`
 - `list_neris_value_sets`, `get_neris_values`
 
-**Dashboard**: `start_session` returns a markdown summary (fast text display) plus a link to `/dashboard` for the full visual dashboard. `refresh_dashboard` returns fresh data without the instructions payload. The browser dashboard at `/dashboard` is authenticated via Azure Container Apps EasyAuth (Entra ID SSO) and auto-refreshes every hour. The visual dashboard is rendered client-side from `docs/dashboard-template.html` with injected JSON data.
+**Dashboard**: `start_session` returns a markdown summary (fast text display) plus a link to `/dashboard` for the full visual dashboard. `refresh_dashboard` returns fresh data without the instructions payload. The browser dashboard at `/dashboard` is authenticated via Azure Container Apps EasyAuth (Entra ID SSO) and auto-refreshes every hour. The visual dashboard is rendered client-side from `src/sjifire/ops/templates/dashboard.html` via Alpine.js with data fetched from `/dashboard/data`.
 
 **MCP prompts**: `operations_dashboard`, `incident_reporting`, `shift_briefing` — selectable workflows in Claude.ai.
 
