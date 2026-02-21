@@ -165,13 +165,9 @@ async def get_open_calls_cached() -> dict:
     """
     docs = await _fetch_open_docs_cached()
 
-    ts = local_now()
-    hour = ts.hour % 12 or 12
-    updated_time = f"{hour}:{ts.strftime('%M')} {'AM' if ts.hour < 12 else 'PM'}"
-
     return {
         "open_calls": len(docs),
-        "updated_time": updated_time,
+        "updated_time": datetime.now(UTC).isoformat(),
         "calls": [
             {
                 "dispatch_id": d.long_term_call_id,
@@ -504,6 +500,8 @@ def _build_template_context(
         "updated_time": updated_time,
         "is_business_hours": is_business_hours,
         "user_name": user.get("name", ""),
+        "is_editor": user.get("is_editor", False),
+        "user_email": user.get("email", ""),
         "platoon": platoon,
         "crew": crew,
         "unique_crew_count": unique_crew_count,
@@ -634,10 +632,10 @@ async def refresh_dashboard() -> dict:
     }
 
 
-async def render_for_browser(*, show_reports: bool = False) -> str:
+async def render_for_browser() -> str:
     """Render dashboard HTML shell. Data loaded client-side via Alpine.js."""
     template = _jinja_env.get_template("dashboard.html")
-    return template.render(active_page="dashboard", show_reports=show_reports)
+    return template.render()
 
 
 async def render_kiosk() -> str:
@@ -911,7 +909,7 @@ async def _fetch_open_calls_enriched() -> list[dict]:
     return enriched
 
 
-async def get_dashboard_data(*, call_limit: int = 15) -> dict:
+async def get_dashboard_data(*, call_limit: int = 200) -> dict:
     """Fetch all data and return template context for client-side refresh.
 
     Uses cached NERIS data (Cosmos DB) instead of hitting the NERIS API,
@@ -1075,7 +1073,7 @@ async def get_dashboard() -> dict:
     return result
 
 
-async def _get_dashboard_cached(*, call_limit: int = 15) -> dict:
+async def _get_dashboard_cached(*, call_limit: int = 200) -> dict:
     """Like ``get_dashboard()`` but reads NERIS from cache (Cosmos only).
 
     Used by ``get_dashboard_data()`` (browser endpoint) to avoid the
@@ -1199,7 +1197,7 @@ async def _get_dashboard_cached(*, call_limit: int = 15) -> dict:
     return result
 
 
-async def _fetch_recent_calls(*, limit: int = 15):
+async def _fetch_recent_calls(*, limit: int = 200):
     """Fetch recent dispatch calls from Cosmos DB."""
     async with DispatchStore() as store:
         return await store.list_recent(limit=limit)

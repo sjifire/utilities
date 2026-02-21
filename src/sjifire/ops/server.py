@@ -24,7 +24,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
-from starlette.routing import Route
+from starlette.routing import Route, WebSocketRoute
 
 from sjifire.core.config import get_org_config
 from sjifire.ops import dashboard
@@ -35,7 +35,8 @@ from sjifire.ops.attachments.routes import (
     list_attachments_route,
     upload_attachment_route,
 )
-from sjifire.ops.auth import check_is_editor, get_easyauth_user, set_current_user
+from sjifire.ops.auth import get_easyauth_user, set_current_user
+from sjifire.ops.chat.centrifugo import connect_proxy, subscribe_proxy, websocket_proxy
 from sjifire.ops.chat.routes import (
     chat_page,
     chat_stream,
@@ -44,7 +45,6 @@ from sjifire.ops.chat.routes import (
     general_chat_history,
     general_chat_stream_endpoint,
     print_report,
-    reports_list,
 )
 from sjifire.ops.dispatch import tools as dispatch_tools
 from sjifire.ops.incidents import tools as incident_tools
@@ -211,11 +211,7 @@ async def dashboard_page(request: Request) -> Response:
     elif provider is not None:
         return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=/dashboard")
     # In dev mode, _DevAuthMiddleware already set the user
-    # Show reports nav: always in dev mode, only for editors in prod
-    show_reports = provider is None or (
-        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
-    )
-    html = await dashboard.render_for_browser(show_reports=show_reports)
+    html = await dashboard.render_for_browser()
     return Response(html, media_type="text/html")
 
 
@@ -348,7 +344,7 @@ async def health(request: Request) -> JSONResponse:
     return JSONResponse(
         {
             "status": "ok",
-            "service": "sjifire-mcp",
+            "service": "sjifire-ops",
             "version": os.getenv("BUILD_VERSION", "dev"),
         }
     )
@@ -368,7 +364,14 @@ app.routes.insert(0, Route("/reports/{incident_id}/conversation", conversation_h
 app.routes.insert(0, Route("/reports/{incident_id}/print", print_report))
 app.routes.insert(0, Route("/reports/{incident_id}", chat_page))
 app.routes.insert(0, Route("/reports/new", create_report, methods=["GET", "POST"]))
-app.routes.insert(0, Route("/reports", reports_list))
+
+
+async def _reports_redirect(request: Request) -> Response:
+    """Redirect /reports to dashboard reports tab."""
+    return RedirectResponse("/dashboard#reports")
+
+
+app.routes.insert(0, Route("/reports", _reports_redirect))
 
 # Attachment routes — exact paths before parameterized paths.
 app.routes.insert(
@@ -407,6 +410,11 @@ app.routes.insert(
 # General chat routes (not tied to an incident)
 app.routes.insert(0, Route("/chat/stream", general_chat_stream_endpoint, methods=["POST"]))
 app.routes.insert(0, Route("/chat/history", general_chat_history))
+
+# Centrifugo routes — WebSocket proxy + auth callbacks
+app.routes.insert(0, WebSocketRoute("/connection/websocket", websocket_proxy))
+app.routes.insert(0, Route("/centrifugo/connect", connect_proxy, methods=["POST"]))
+app.routes.insert(0, Route("/centrifugo/subscribe", subscribe_proxy, methods=["POST"]))
 
 # Dev mode: inject synthetic user context on every request
 if provider is None:

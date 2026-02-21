@@ -10,6 +10,7 @@ import pytest
 import sjifire.ops.dashboard as dashboard_mod
 from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.dashboard import (
+    _build_template_context,
     _call_first_seen,
     _fetch_incidents,
     _fetch_kiosk_data,
@@ -154,6 +155,56 @@ class TestNormalizeIncidentNumber:
 
     def test_empty_string(self):
         assert _normalize_incident_number("") == ""
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _build_template_context
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTemplateContext:
+    """Verify _build_template_context exposes is_editor and user_email."""
+
+    def test_editor_fields_present(self, schedule_result):
+        dashboard_data = {
+            "timestamp": datetime(2026, 2, 20, 12, 0, tzinfo=UTC).isoformat(),
+            "user": {"email": "chief@sjifire.org", "name": "Chief", "is_editor": True},
+            "on_duty": schedule_result,
+            "recent_calls": [],
+        }
+        ctx = _build_template_context(dashboard_data, {"incidents": []})
+
+        assert ctx["is_editor"] is True
+        assert ctx["user_email"] == "chief@sjifire.org"
+
+    def test_non_editor_fields(self, schedule_result):
+        dashboard_data = {
+            "timestamp": datetime(2026, 2, 20, 12, 0, tzinfo=UTC).isoformat(),
+            "user": {"email": "ff@sjifire.org", "name": "FF", "is_editor": False},
+            "on_duty": schedule_result,
+            "recent_calls": [],
+        }
+        ctx = _build_template_context(dashboard_data, {"incidents": []})
+
+        assert ctx["is_editor"] is False
+        assert ctx["user_email"] == "ff@sjifire.org"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: /reports redirect
+# ---------------------------------------------------------------------------
+
+
+class TestReportsRedirect:
+    """The /reports route should redirect to /dashboard#reports."""
+
+    async def test_redirects_to_dashboard_reports_tab(self):
+        from sjifire.ops.server import _reports_redirect
+
+        resp = await _reports_redirect(None)
+
+        assert resp.status_code == 307
+        assert resp.headers["location"] == "/dashboard#reports"
 
 
 # ---------------------------------------------------------------------------
@@ -1244,6 +1295,21 @@ class TestGetOpenCallsCached:
         assert result["calls"][0]["dispatch_id"] == "26-001678"
         assert result["calls"][0]["nature"] == "Medical Aid"
         assert result["calls"][0]["address"] == "200 Spring St"
+
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_updated_time_is_utc_iso(self, mock_store_cls):
+        """updated_time must be a UTC ISO 8601 timestamp, not display-formatted."""
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await get_open_calls_cached()
+
+        ts = result["updated_time"]
+        # Must parse as ISO 8601
+        parsed = datetime.fromisoformat(ts)
+        assert parsed.tzinfo is not None or "+" in ts or ts.endswith("Z")
 
     @patch("sjifire.ops.dashboard.DispatchStore")
     async def test_no_calls_returns_zero(self, mock_store_cls):

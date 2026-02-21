@@ -11,6 +11,7 @@ on:
       - 'uv.lock'
       - '.github/workflows/ops-deploy.yml'
       - 'scripts/deploy-ops.sh'
+      - 'containerapp.yaml'
   workflow_dispatch:
 
 permissions:

@@ -1,5 +1,6 @@
 """Tests for chat route handlers: image validation, print report."""
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -117,16 +118,11 @@ class TestImageValidation:
         body = json.loads(resp.body)
         assert "Invalid" in body["error"]
 
-    async def test_valid_images_passed_to_stream(self):
-        """Valid images should reach stream_chat with images kwarg."""
-        captured = {}
+    async def test_valid_images_passed_to_run_chat(self):
+        """Valid images should reach run_chat with images kwarg."""
+        mock_run_chat = AsyncMock()
 
-        async def fake_stream(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            yield "event: done\ndata: {}\n\n"
-
-        with patch("sjifire.ops.chat.routes.stream_chat", side_effect=fake_stream):
+        with patch("sjifire.ops.chat.routes.run_chat", mock_run_chat):
             req = _FakeRequest(
                 {
                     "message": "Check this photo",
@@ -137,11 +133,13 @@ class TestImageValidation:
                 }
             )
             resp = await chat_stream(req)
-            # Consume the streaming response to trigger the generator
-            async for _ in resp.body_iterator:
-                pass
+            # Let the background task run
+            await asyncio.sleep(0)
 
-        images = captured["kwargs"]["images"]
+        assert resp.status_code == 202
+        mock_run_chat.assert_called_once()
+        _, kwargs = mock_run_chat.call_args
+        images = kwargs["images"]
         assert images is not None
         assert len(images) == 2
         assert images[0]["media_type"] == "image/jpeg"
@@ -149,20 +147,17 @@ class TestImageValidation:
 
     async def test_no_images_passes_none(self):
         """When no images in request, images kwarg should be None."""
-        captured = {}
+        mock_run_chat = AsyncMock()
 
-        async def fake_stream(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            yield "event: done\ndata: {}\n\n"
-
-        with patch("sjifire.ops.chat.routes.stream_chat", side_effect=fake_stream):
+        with patch("sjifire.ops.chat.routes.run_chat", mock_run_chat):
             req = _FakeRequest({"message": "Just text"})
             resp = await chat_stream(req)
-            async for _ in resp.body_iterator:
-                pass
+            await asyncio.sleep(0)
 
-        assert captured["kwargs"]["images"] is None
+        assert resp.status_code == 202
+        mock_run_chat.assert_called_once()
+        _, kwargs = mock_run_chat.call_args
+        assert kwargs["images"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +363,7 @@ class TestCreateReport:
         resp = await create_report(req)
 
         assert resp.status_code == 303
-        assert resp.headers["location"] == "/reports"
+        assert resp.headers["location"] == "/dashboard#reports"
 
     async def test_post_with_dispatch_cad_comments(self):
         """POST /reports/new succeeds when dispatch has cad_comments string.

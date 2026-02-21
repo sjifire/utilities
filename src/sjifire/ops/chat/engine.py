@@ -1,15 +1,14 @@
 """Chat engine: Claude API streaming with tool-use loop.
 
-Core function: ``stream_chat()`` takes a user message and yields SSE events
-as an async generator. Handles tool calls, budget tracking, and conversation
-persistence in Cosmos DB.
+Core function: ``run_chat()`` takes a user message and publishes events
+to a Centrifugo channel. Handles tool calls, budget tracking, and
+conversation persistence in Cosmos DB.
 """
 
 import asyncio
 import json
 import logging
 import uuid
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,6 +18,7 @@ from sjifire.core.anthropic import MODEL, cached_system, get_client
 from sjifire.core.config import get_org_config, local_now
 from sjifire.ops.auth import UserContext
 from sjifire.ops.chat.budget import check_budget, record_usage
+from sjifire.ops.chat.centrifugo import publish
 from sjifire.ops.chat.models import MAX_TURNS, ConversationDocument, ConversationMessage
 from sjifire.ops.chat.store import ConversationStore
 from sjifire.ops.chat.tools import (
@@ -27,6 +27,10 @@ from sjifire.ops.chat.tools import (
     execute_general_tool,
     execute_tool,
 )
+from sjifire.ops.chat.turn_lock import TurnLockStore
+
+# Set of fire-and-forget tasks — prevents GC from collecting running tasks.
+_background_tasks: set[asyncio.Task] = set()
 
 logger = logging.getLogger(__name__)
 MAX_RESPONSE_TOKENS = 4096
@@ -47,6 +51,15 @@ _ERROR_MESSAGES = {
     "stream": "Something went wrong. Please try again.",
     "save": "Unable to save conversation. Your message was processed but may not appear on reload.",
 }
+
+
+async def _release_turn_lock(incident_id: str, email: str) -> None:
+    """Release the distributed turn lock, swallowing errors."""
+    try:
+        async with TurnLockStore() as store:
+            await store.release(incident_id, email)
+    except Exception:
+        logger.warning("Failed to release turn lock for %s", incident_id, exc_info=True)
 
 
 def _user_error(category: str, exc: Exception) -> str:
@@ -377,201 +390,248 @@ async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str,
     return incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
 
 
-async def stream_chat(
+async def run_chat(
     incident_id: str,
     user_message: str,
     user: UserContext,
     *,
+    channel: str,
     images: list[dict] | None = None,
     image_refs: list[dict] | None = None,
-) -> AsyncGenerator[str]:
-    r"""Stream a chat response as Server-Sent Events.
+) -> None:
+    """Run a chat turn, publishing events to a Centrifugo channel.
 
-    Yields SSE-formatted strings (``event: type\ndata: json\n\n``).
-
-    Event types:
+    Event types published:
+    - ``turn_start``: Turn begins (``{"user_email": "...", "user_name": "..."}``).
     - ``text``: Partial assistant text (``{"content": "..."}``).
     - ``tool_call``: Tool invocation (``{"name": "...", "input": {...}}``).
     - ``tool_result``: Tool result summary (``{"name": "...", "summary": "..."}``).
-    - ``done``: Conversation turn complete (``{"input_tokens": N, "output_tokens": N}``).
+    - ``status_update``: Incident status change (``{"status": "...", ...}``).
+    - ``done``: Conversation turn complete (``{"input_tokens": N, ..., "user_email": "..."}``).
     - ``error``: Error message (``{"message": "..."}``).
     """
-    # Budget check
-    try:
-        budget_status = await check_budget(user.email)
-    except Exception as exc:
-        yield _sse("error", {"message": _user_error("budget", exc)})
-        return
-    if not budget_status.allowed:
-        yield _sse("error", {"message": budget_status.reason})
-        return
+    # Notify all subscribers that a turn is starting (multi-user awareness)
+    await publish(
+        channel,
+        "turn_start",
+        {"user_email": user.email, "user_name": user.name},
+    )
 
-    # Load or create conversation
-    try:
+    # Run budget check, conversation load, and context fetch in parallel.
+    # These are independent Cosmos/API calls — no reason to be sequential.
+    async def _load_conversation():
         async with ConversationStore() as store:
-            conversation = await store.get_by_incident(incident_id)
-    except Exception as exc:
-        yield _sse("error", {"message": _user_error("conversation", exc)})
+            return await store.get_by_incident(incident_id)
+
+    budget_result, conv_result, ctx_result = await asyncio.gather(
+        check_budget(user.email),
+        _load_conversation(),
+        _fetch_context(incident_id, user),
+        return_exceptions=True,
+    )
+
+    # Check each result for errors (preserves specific error messages)
+    if isinstance(budget_result, Exception):
+        await _release_turn_lock(incident_id, user.email)
+        await publish(channel, "error", {"message": _user_error("budget", budget_result)})
+        return
+    if not budget_result.allowed:
+        await _release_turn_lock(incident_id, user.email)
+        await publish(channel, "error", {"message": budget_result.reason})
+        return
+    if isinstance(conv_result, Exception):
+        await _release_turn_lock(incident_id, user.email)
+        await publish(channel, "error", {"message": _user_error("conversation", conv_result)})
+        return
+    if isinstance(ctx_result, Exception):
+        await _release_turn_lock(incident_id, user.email)
+        await publish(channel, "error", {"message": _user_error("context", ctx_result)})
         return
 
-    is_new = conversation is None
-    if is_new:
-        conversation = ConversationDocument(
-            incident_id=incident_id,
-            user_email=user.email,
+    conversation = conv_result
+    (
+        incident_json,
+        dispatch_json,
+        crew_json,
+        personnel_json,
+        attachments_summary,
+    ) = ctx_result
+
+    # Everything below must release the turn lock on exit
+    try:
+        is_new = conversation is None
+        if is_new:
+            conversation = ConversationDocument(
+                incident_id=incident_id,
+                user_email=user.email,
+            )
+
+        # Turn limit
+        if conversation.turn_count >= MAX_TURNS:
+            await publish(
+                channel,
+                "error",
+                {
+                    "message": "This conversation has reached its limit. "
+                    "Please start a new session to continue."
+                },
+            )
+            return
+
+        # Build stable system prompt (static content only — cached by Anthropic)
+        system_prompt = _build_system_prompt(user.name, user.email)
+        context_preamble = _build_context_message(
+            incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
         )
 
-    # Turn limit
-    if conversation.turn_count >= MAX_TURNS:
-        yield _sse(
-            "error",
+        # Build messages for Claude API
+        api_messages = []
+        for msg in conversation.messages:
+            entry: dict = {"role": msg.role, "content": []}
+            if msg.content:
+                entry["content"].append({"type": "text", "text": msg.content})
+            if msg.tool_use:
+                entry["content"].extend(msg.tool_use)
+            if msg.tool_results:
+                entry["role"] = "user"
+                entry["content"] = msg.tool_results
+            if not entry["content"]:
+                entry["content"] = msg.content or ""
+            api_messages.append(entry)
+
+        # Prepend fresh context to the user message so Claude always sees
+        # the latest incident state without polluting the stable system prompt.
+        prefixed_message = f"{context_preamble}\n\n---\n\n{user_message}"
+
+        # Add the new user message (with optional image content blocks)
+        if images:
+            content_blocks: list[dict] = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": img["media_type"],
+                        "data": img["data"],
+                    },
+                }
+                for img in images
+            ]
+            content_blocks.append({"type": "text", "text": prefixed_message})
+            api_messages.append({"role": "user", "content": content_blocks})
+        else:
+            api_messages.append({"role": "user", "content": prefixed_message})
+        api_messages = _trim_messages(api_messages)
+
+        # Record user message with image references (attachment IDs for blob-backed display)
+        conversation.messages.append(
+            ConversationMessage(role="user", content=user_message, images=image_refs)
+        )
+
+        # Broadcast user message to other subscribers (multi-user awareness).
+        # The sender already has this message locally — clients filter by email.
+        await publish(
+            channel,
+            "user_message",
+            {"content": user_message, "user_email": user.email, "user_name": user.name},
+        )
+
+        # Persist user message — must await create (so subsequent saves are
+        # updates, not conflicts), but updates can run in background.
+        async def _persist_user_msg():
+            try:
+                async with ConversationStore() as s:
+                    if is_new:
+                        await s.create(conversation)
+                    else:
+                        await s.update(conversation)
+            except Exception as exc:
+                logger.warning("Failed to persist user message: %s", exc)
+
+        if is_new:
+            await _persist_user_msg()
+            is_new = False
+        else:
+            task = asyncio.create_task(_persist_user_msg())
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+
+        # Streaming loop (handles tool calls)
+        total_input = 0
+        total_output = 0
+
+        client = get_client()
+
+        stream_error = False
+        try:
+            await _run_loop(
+                client, system_prompt, api_messages, conversation, user, channel=channel
+            )
+
+        except Exception as exc:
+            await publish(channel, "error", {"message": _user_error("stream", exc)})
+            stream_error = True
+
+        # Calculate total tokens from this turn's messages
+        turn_messages = [
+            m
+            for m in conversation.messages
+            if m.role == "assistant" and (m.input_tokens > 0 or m.output_tokens > 0)
+        ]
+        for m in turn_messages[-5:]:  # last few are from this turn
+            total_input += m.input_tokens
+            total_output += m.output_tokens
+
+        # Persist full turn (assistant response + token counts).
+        # Runs even after stream errors so partial responses aren't lost.
+        conversation.turn_count += 1
+        conversation.total_input_tokens += total_input
+        conversation.total_output_tokens += total_output
+        conversation.updated_at = datetime.now(UTC)
+
+        try:
+            async with ConversationStore() as store:
+                if is_new:
+                    await store.create(conversation)
+                else:
+                    await store.update(conversation)
+        except Exception as exc:
+            await publish(channel, "error", {"message": _user_error("save", exc)})
+            return
+
+        if stream_error:
+            return
+
+        # Record budget usage
+        try:
+            if total_input > 0 or total_output > 0:
+                await record_usage(user.email, total_input, total_output)
+        except Exception as exc:
+            logger.warning("Failed to record budget usage: %s", exc)
+
+        await publish(
+            channel,
+            "done",
             {
-                "message": "This conversation has reached its limit. "
-                "Please start a new session to continue."
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "user_email": user.email,
+                "user_name": user.name,
             },
         )
-        return
-
-    # Build stable system prompt (static content only — cached by Anthropic)
-    system_prompt = _build_system_prompt(user.name, user.email)
-
-    # Fetch dynamic context (incident, dispatch, crew, personnel, attachments)
-    try:
-        (
-            incident_json,
-            dispatch_json,
-            crew_json,
-            personnel_json,
-            attachments_summary,
-        ) = await _fetch_context(incident_id, user)
-    except Exception as exc:
-        yield _sse("error", {"message": _user_error("context", exc)})
-        return
-    context_preamble = _build_context_message(
-        incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
-    )
-
-    # Build messages for Claude API
-    api_messages = []
-    for msg in conversation.messages:
-        entry: dict = {"role": msg.role, "content": []}
-        if msg.content:
-            entry["content"].append({"type": "text", "text": msg.content})
-        if msg.tool_use:
-            entry["content"].extend(msg.tool_use)
-        if msg.tool_results:
-            entry["role"] = "user"
-            entry["content"] = msg.tool_results
-        if not entry["content"]:
-            entry["content"] = msg.content or ""
-        api_messages.append(entry)
-
-    # Prepend fresh context to the user message so Claude always sees
-    # the latest incident state without polluting the stable system prompt.
-    prefixed_message = f"{context_preamble}\n\n---\n\n{user_message}"
-
-    # Add the new user message (with optional image content blocks)
-    if images:
-        content_blocks: list[dict] = [
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": img["media_type"],
-                    "data": img["data"],
-                },
-            }
-            for img in images
-        ]
-        content_blocks.append({"type": "text", "text": prefixed_message})
-        api_messages.append({"role": "user", "content": content_blocks})
-    else:
-        api_messages.append({"role": "user", "content": prefixed_message})
-    api_messages = _trim_messages(api_messages)
-
-    # Record user message with image references (attachment IDs for blob-backed display)
-    conversation.messages.append(
-        ConversationMessage(role="user", content=user_message, images=image_refs)
-    )
-
-    # Persist user message immediately so interrupted streams don't lose it.
-    # If the SSE connection drops mid-stream, the generator is cancelled and
-    # the final save never runs. This early save ensures the user's input
-    # (and all prior history) survives a disconnect.
-    try:
-        async with ConversationStore() as store:
-            if is_new:
-                await store.create(conversation)
-                is_new = False  # Now exists in Cosmos — subsequent saves are updates
-            else:
-                await store.update(conversation)
-    except Exception as exc:
-        logger.warning("Failed to persist user message: %s", exc)
-
-    # Streaming loop (handles tool calls)
-    total_input = 0
-    total_output = 0
-
-    client = get_client()
-
-    stream_error = False
-    try:
-        async for event_str in _stream_loop(
-            client, system_prompt, api_messages, conversation, user
-        ):
-            yield event_str
-
-    except Exception as exc:
-        yield _sse("error", {"message": _user_error("stream", exc)})
-        stream_error = True
-
-    # Calculate total tokens from this turn's messages
-    turn_messages = [
-        m
-        for m in conversation.messages
-        if m.role == "assistant" and (m.input_tokens > 0 or m.output_tokens > 0)
-    ]
-    for m in turn_messages[-5:]:  # last few are from this turn
-        total_input += m.input_tokens
-        total_output += m.output_tokens
-
-    # Persist full turn (assistant response + token counts).
-    # Runs even after stream errors so partial responses aren't lost.
-    conversation.turn_count += 1
-    conversation.total_input_tokens += total_input
-    conversation.total_output_tokens += total_output
-    conversation.updated_at = datetime.now(UTC)
-
-    try:
-        async with ConversationStore() as store:
-            if is_new:
-                await store.create(conversation)
-            else:
-                await store.update(conversation)
-    except Exception as exc:
-        yield _sse("error", {"message": _user_error("save", exc)})
-        return
-
-    if stream_error:
-        return
-
-    # Record budget usage
-    try:
-        if total_input > 0 or total_output > 0:
-            await record_usage(user.email, total_input, total_output)
-    except Exception as exc:
-        logger.warning("Failed to record budget usage: %s", exc)
-
-    yield _sse("done", {"input_tokens": total_input, "output_tokens": total_output})
+    finally:
+        # Always release the turn lock so other users can proceed
+        await _release_turn_lock(incident_id, user.email)
 
 
-async def _stream_loop(
+async def _run_loop(
     client: AsyncAnthropic,
     system_prompt: str,
     api_messages: list[dict],
     conversation: ConversationDocument,
     user: UserContext,
-) -> AsyncGenerator[str]:
+    *,
+    channel: str,
+) -> None:
     """Run the Claude streaming loop, handling tool calls recursively."""
     max_tool_rounds = 10  # Safety limit on tool call loops
 
@@ -609,7 +669,7 @@ async def _stream_loop(
                         elif event.type == "content_block_delta":
                             if hasattr(event.delta, "text"):
                                 assistant_text += event.delta.text
-                                yield _sse("text", {"content": event.delta.text})
+                                await publish(channel, "text", {"content": event.delta.text})
                             elif hasattr(event.delta, "partial_json") and tool_calls:
                                 tc = tool_calls[-1]
                                 tc.setdefault("_partial", "")
@@ -643,7 +703,7 @@ async def _stream_loop(
                         delay,
                     )
                     msg = f"\n\n*Rate limited — retrying in {delay}s...*\n\n"
-                    yield _sse("text", {"content": msg})
+                    await publish(channel, "text", {"content": msg})
                     await asyncio.sleep(delay)
                     # Reset state for retry
                     assistant_text = ""
@@ -668,7 +728,7 @@ async def _stream_loop(
 
         # Execute tool calls in parallel
         for tc in tool_calls:
-            yield _sse("tool_call", {"name": tc["name"], "input": tc["input"]})
+            await publish(channel, "tool_call", {"name": tc["name"], "input": tc["input"]})
 
         result_strs = await asyncio.gather(
             *(execute_tool(tc["name"], tc["input"], user) for tc in tool_calls)
@@ -699,7 +759,7 @@ async def _stream_loop(
                         evt["image_desc"] = rd["description"]
                 except (json.JSONDecodeError, KeyError):
                     pass  # Title/desc are optional UI enhancements; skip if unparseable
-            yield _sse("tool_result", evt)
+            await publish(channel, "tool_result", evt)
 
             # After update_incident, emit live status update for the client
             if tc["name"] == "update_incident":
@@ -709,7 +769,8 @@ async def _stream_loop(
                         from sjifire.ops.incidents.models import IncidentDocument
 
                         doc = IncidentDocument.from_cosmos(result_data_raw)
-                        yield _sse(
+                        await publish(
+                            channel,
                             "status_update",
                             {
                                 "status": doc.status,
@@ -782,7 +843,8 @@ async def _stream_loop(
 
     # If we exhausted tool rounds, notify the user
     logger.warning("Chat hit max tool rounds for incident %s", conversation.incident_id)
-    yield _sse(
+    await publish(
+        channel,
         "text",
         {"content": "\n\n*Tool call limit reached. Send another message to continue.*\n\n"},
     )
@@ -864,11 +926,6 @@ def _summarize_tool_result(name: str, data: dict) -> str:
     return json.dumps(data, default=str)[:200]
 
 
-def _sse(event: str, data: dict) -> str:
-    """Format a Server-Sent Event string."""
-    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
-
-
 # ---------------------------------------------------------------------------
 # General chat assistant (not tied to a specific incident)
 # ---------------------------------------------------------------------------
@@ -905,25 +962,42 @@ def _build_general_system_prompt(context: dict | None = None) -> str:
     return "\n".join(parts)
 
 
-async def stream_general_chat(
+async def run_general_chat(
     user_message: str,
     user: UserContext,
+    *,
+    channel: str,
     context: dict | None = None,
-) -> AsyncGenerator[str]:
-    r"""Stream a general chat response as Server-Sent Events.
+) -> None:
+    """Run a general chat turn, publishing events to a Centrifugo channel.
 
-    Like ``stream_chat()`` but not scoped to a specific incident.
+    Like ``run_chat()`` but not scoped to a specific incident.
     Uses a ``general:{email}`` conversation key for persistence.
     """
-    budget_status = await check_budget(user.email)
-    if not budget_status.allowed:
-        yield _sse("error", {"message": budget_status.reason})
-        return
-
     conversation_key = f"{_GENERAL_CONVERSATION_PREFIX}{user.email}"
 
-    async with ConversationStore() as store:
-        conversation = await store.get_by_incident(conversation_key)
+    # Run budget check and conversation load in parallel
+    async def _load_conv():
+        async with ConversationStore() as store:
+            return await store.get_by_incident(conversation_key)
+
+    budget_result, conv_result = await asyncio.gather(
+        check_budget(user.email),
+        _load_conv(),
+        return_exceptions=True,
+    )
+
+    if isinstance(budget_result, Exception):
+        await publish(channel, "error", {"message": _user_error("budget", budget_result)})
+        return
+    if not budget_result.allowed:
+        await publish(channel, "error", {"message": budget_result.reason})
+        return
+    if isinstance(conv_result, Exception):
+        await publish(channel, "error", {"message": _user_error("conversation", conv_result)})
+        return
+
+    conversation = conv_result
 
     is_new = conversation is None
     if is_new:
@@ -933,7 +1007,8 @@ async def stream_general_chat(
         )
 
     if conversation.turn_count >= MAX_TURNS:
-        yield _sse(
+        await publish(
+            channel,
             "error",
             {
                 "message": "This conversation has reached its limit. "
@@ -964,16 +1039,25 @@ async def stream_general_chat(
 
     conversation.messages.append(ConversationMessage(role="user", content=user_message))
 
-    # Persist user message immediately (same rationale as stream_chat)
-    try:
-        async with ConversationStore() as store:
-            if is_new:
-                await store.create(conversation)
-                is_new = False
-            else:
-                await store.update(conversation)
-    except Exception as exc:
-        logger.warning("Failed to persist user message: %s", exc)
+    # Persist user message — must await create (so subsequent saves are
+    # updates, not conflicts), but updates can run in background.
+    async def _persist_user_msg():
+        try:
+            async with ConversationStore() as s:
+                if is_new:
+                    await s.create(conversation)
+                else:
+                    await s.update(conversation)
+        except Exception as exc:
+            logger.warning("Failed to persist user message: %s", exc)
+
+    if is_new:
+        await _persist_user_msg()
+        is_new = False
+    else:
+        task = asyncio.create_task(_persist_user_msg())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     total_input = 0
     total_output = 0
@@ -982,13 +1066,12 @@ async def stream_general_chat(
 
     stream_error = False
     try:
-        async for event_str in _stream_general_loop(
-            client, system_prompt, api_messages, conversation, user
-        ):
-            yield event_str
+        await _run_general_loop(
+            client, system_prompt, api_messages, conversation, user, channel=channel
+        )
 
     except Exception as exc:
-        yield _sse("error", {"message": _user_error("stream", exc)})
+        await publish(channel, "error", {"message": _user_error("stream", exc)})
         stream_error = True
 
     turn_messages = [
@@ -1012,7 +1095,7 @@ async def stream_general_chat(
             else:
                 await store.update(conversation)
     except Exception as exc:
-        yield _sse("error", {"message": _user_error("save", exc)})
+        await publish(channel, "error", {"message": _user_error("save", exc)})
         return
 
     if stream_error:
@@ -1021,16 +1104,18 @@ async def stream_general_chat(
     if total_input > 0 or total_output > 0:
         await record_usage(user.email, total_input, total_output)
 
-    yield _sse("done", {"input_tokens": total_input, "output_tokens": total_output})
+    await publish(channel, "done", {"input_tokens": total_input, "output_tokens": total_output})
 
 
-async def _stream_general_loop(
+async def _run_general_loop(
     client: AsyncAnthropic,
     system_prompt: str,
     api_messages: list[dict],
     conversation: ConversationDocument,
     user: UserContext,
-) -> AsyncGenerator[str]:
+    *,
+    channel: str,
+) -> None:
     """Run the Claude streaming loop for general assistant, handling tool calls."""
     max_tool_rounds = 10
 
@@ -1068,7 +1153,7 @@ async def _stream_general_loop(
                         elif event.type == "content_block_delta":
                             if hasattr(event.delta, "text"):
                                 assistant_text += event.delta.text
-                                yield _sse("text", {"content": event.delta.text})
+                                await publish(channel, "text", {"content": event.delta.text})
                             elif hasattr(event.delta, "partial_json") and tool_calls:
                                 tc = tool_calls[-1]
                                 tc.setdefault("_partial", "")
@@ -1101,7 +1186,7 @@ async def _stream_general_loop(
                         delay,
                     )
                     msg = f"\n\n*Rate limited — retrying in {delay}s...*\n\n"
-                    yield _sse("text", {"content": msg})
+                    await publish(channel, "text", {"content": msg})
                     await asyncio.sleep(delay)
                     assistant_text = ""
                     tool_calls = []
@@ -1122,7 +1207,7 @@ async def _stream_general_loop(
             return
 
         for tc in tool_calls:
-            yield _sse("tool_call", {"name": tc["name"], "input": tc["input"]})
+            await publish(channel, "tool_call", {"name": tc["name"], "input": tc["input"]})
 
         result_strs = await asyncio.gather(
             *(execute_general_tool(tc["name"], tc["input"], user) for tc in tool_calls)
@@ -1139,7 +1224,7 @@ async def _stream_general_loop(
 
             is_error = summary.startswith("Error")
             evt = {"name": tc["name"], "summary": summary, "is_error": is_error}
-            yield _sse("tool_result", evt)
+            await publish(channel, "tool_result", evt)
 
             full_tool_results.append(
                 {
@@ -1177,7 +1262,8 @@ async def _stream_general_loop(
         api_messages.append({"role": "user", "content": full_tool_results})
 
     logger.warning("General chat hit max tool rounds for %s", user.email)
-    yield _sse(
+    await publish(
+        channel,
         "text",
         {"content": "\n\n*Tool call limit reached. Send another message to continue.*\n\n"},
     )

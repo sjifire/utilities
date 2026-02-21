@@ -20,8 +20,8 @@ import time
 
 RESOURCE_GROUP = "rg-sjifire-mcp"
 WORKSPACE_ID = "39281fbe-70d3-4327-a569-19369c652a3c"
-CONTAINER_APP = "sjifire-mcp"
-CONTAINER_NAME = "sjifire-mcp"
+CONTAINER_APP = "sjifire-ops"
+CONTAINER_NAME = "ops-server"
 
 
 def _run_query(kql: str) -> list[dict]:

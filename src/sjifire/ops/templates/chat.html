@@ -6,6 +6,7 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/centrifuge@5/dist/centrifuge.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.css">
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.js"></script>
 {% endblock %}
@@ -460,6 +461,52 @@
       text-align: center;
     }
 
+    /* ── Presence indicators ── */
+    .presence-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .presence-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+      border: 2px solid var(--bg-panel);
+      cursor: default;
+    }
+    .presence-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-left: 4px;
+      white-space: nowrap;
+    }
+
+    /* ── Turn lock banner ── */
+    .turn-lock-banner {
+      background: var(--amber-alpha);
+      border: 1px solid rgba(245, 158, 11, .3);
+      color: var(--color-amber);
+      padding: 8px 16px;
+      font-size: 13px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    /* ── Remote user message label ── */
+    .msg-attribution {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
     /* ── Chat responsive ── */
     @media (max-width: 640px) {
       .msg            { max-width: 95%; }
@@ -476,11 +523,18 @@
   <!-- Compact header -->
   <div class="chat-header">
     <div class="chat-header-left">
-      <a href="/reports" class="back-link">&larr; Reports</a>
+      <a href="/dashboard#reports" class="back-link">&larr; Reports</a>
       <h1>{{ incident_number }}</h1>
       <span class="status-badge {{ incident_status }}" x-text="status">{{ incident_status }}</span>
     </div>
     <div class="header-actions">
+      <!-- Presence: who else is viewing this report -->
+      <div class="presence-bar" x-show="Object.keys(presenceUsers).length > 0">
+        <template x-for="(u, email) in presenceUsers" :key="email">
+          <span class="presence-avatar" :style="'background:' + u.color" :title="u.name" x-text="u.initials"></span>
+        </template>
+        <span class="presence-label" x-text="presenceLabel"></span>
+      </div>
       <div class="export-wrap" x-data="{open: false}" @click.away="open = false">
         <button class="export-btn" @click="open = !open">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -513,6 +567,11 @@
   </div>
   {% endif %}
 
+  <!-- Turn lock banner (shown when another user's turn is active) -->
+  <div class="turn-lock-banner" x-show="turnHolder && turnHolder.email !== currentUserEmail" x-cloak>
+    Claude is responding to <strong x-text="turnHolder?.name || 'another user'"></strong> &mdash; you can watch and send when their turn finishes.
+  </div>
+
   <!-- Messages -->
   <div class="messages" x-ref="messages" @scroll="_onMessagesScroll()">
     <!-- Message list -->
@@ -521,6 +580,9 @@
         <!-- User or assistant message -->
         <template x-if="msg.type === 'message'">
           <div class="msg" :class="msg.role">
+            <template x-if="msg.role === 'user' && msg.sender_name && msg.sender_email !== currentUserEmail">
+              <div class="msg-attribution" x-text="msg.sender_name"></div>
+            </template>
             <div class="msg-images" x-show="msg.images && msg.images.length">
               <template x-for="(img, j) in (msg.images || [])" :key="j">
                 <img :src="img" @click="openLightbox(msg.images, j)">
@@ -614,6 +676,19 @@
 {% block body_scripts %}
 <script>
 function chatApp() {
+  // Stable color palette for presence avatars
+  const _avatarColors = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981','#06b6d4','#f97316','#6366f1'];
+  let _colorIdx = 0;
+  const _userColors = {};
+  function _colorFor(email) {
+    if (!_userColors[email]) _userColors[email] = _avatarColors[_colorIdx++ % _avatarColors.length];
+    return _userColors[email];
+  }
+  function _initials(name) {
+    const parts = (name || '?').split(/\s+/);
+    return parts.length > 1 ? (parts[0][0] + parts[parts.length-1][0]).toUpperCase() : name.slice(0,2).toUpperCase();
+  }
+
   return {
     messages: [],
     inputText: '',
@@ -626,8 +701,23 @@ function chatApp() {
     lightbox: { open: false, items: [], index: 0 },
     _userScrolledAway: false,
     _scrollRAF: null,
-    _reconnectAttempts: 0,
+    _centrifuge: null,
+    _subscription: null,
     _queuedMessage: null,
+    _recoveryTimer: null,
+    // Multi-user state
+    currentUserEmail: '{{ user_email }}',
+    currentUserName: '{{ user_name }}',
+    presenceUsers: {},   // {email: {name, initials, color}} — excludes self
+    turnHolder: null,    // {email, name} — who has the current turn
+    _blockedMessage: null, // Message blocked by 409, auto-retry after done
+
+    get presenceLabel() {
+      const names = Object.values(this.presenceUsers).map(u => u.name.split(' ')[0]);
+      if (names.length === 0) return '';
+      if (names.length === 1) return names[0] + ' is also here';
+      return names.join(', ') + ' are also here';
+    },
 
     async init() {
       // After a reset, skip stale history and start fresh
@@ -639,6 +729,64 @@ function chatApp() {
         const clean = params.toString();
         history.replaceState(null, '', location.pathname + (clean ? '?' + clean : ''));
       }
+
+      // Set up Centrifuge WebSocket connection
+      const channel = `chat:incident:${this.incidentId}`;
+      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this._centrifuge = new Centrifuge(`${wsProto}//${location.host}/connection/websocket`);
+      this._subscription = this._centrifuge.newSubscription(channel);
+      this._subscription.on('publication', (ctx) => {
+        const {event, ...data} = ctx.data;
+        this.handleEvent(event, data);
+      });
+
+      // Presence: join/leave events for multi-user awareness
+      this._subscription.on('join', (ctx) => {
+        const info = ctx.info || {};
+        const email = info.user || '';
+        const connInfo = info.conn_info || {};
+        if (email && email !== this.currentUserEmail) {
+          this.presenceUsers[email] = {
+            name: connInfo.name || email.split('@')[0],
+            initials: _initials(connInfo.name || email),
+            color: _colorFor(email),
+          };
+        }
+      });
+      this._subscription.on('leave', (ctx) => {
+        const email = (ctx.info || {}).user || '';
+        if (email) delete this.presenceUsers[email];
+      });
+
+      this._subscription.subscribe();
+      this._centrifuge.connect();
+
+      // On (re)subscribe: recover any missed messages and refresh presence
+      this._subscription.on('subscribed', async () => {
+        // If we were streaming when the connection dropped, recover immediately
+        if (this.streaming) {
+          console.log('Reconnected while streaming — recovering from server');
+          this._recoverFromServer();
+        }
+        // Refresh presence
+        try {
+          const result = await this._subscription.presence();
+          this.presenceUsers = {};  // Clear stale presence
+          for (const [, info] of Object.entries(result.clients || {})) {
+            const email = info.user || '';
+            const connInfo = info.conn_info || {};
+            if (email && email !== this.currentUserEmail) {
+              this.presenceUsers[email] = {
+                name: connInfo.name || email.split('@')[0],
+                initials: _initials(connInfo.name || email),
+                color: _colorFor(email),
+              };
+            }
+          }
+        } catch (e) {
+          console.debug('Presence query not available:', e);
+        }
+      });
 
       // Load conversation history
       if (!isReset) try {
@@ -694,7 +842,7 @@ function chatApp() {
         if (lastMsg && lastMsg.type === 'message' && lastMsg.role === 'user') {
           // Last saved message was from the user — agent never responded.
           // Retry silently (no new bubble) so it picks up where it left off.
-          this.$nextTick(() => this._streamRequest(lastMsg.content || 'Continue'));
+          this.$nextTick(() => this._postMessage(lastMsg.content || 'Continue'));
         }
       }
     },
@@ -1002,19 +1150,17 @@ function chatApp() {
       if (this.$refs.input) this.$refs.input.style.height = 'auto';
       this.scrollToBottom(true);
 
-      await this._streamRequest(displayText, images);
+      await this._postMessage(displayText, images);
     },
 
-    async _streamRequest(displayText, images) {
+    async _postMessage(displayText, images) {
       this.streaming = true;
       this.currentText = '';
 
       const reqBody = {message: displayText};
-      if (images.length) {
+      if (images && images.length) {
         reqBody.images = images.map(img => ({data: img.base64, media_type: img.mediaType}));
       }
-
-      let streamCompleted = false;
 
       try {
         const res = await authFetch(`/reports/${this.incidentId}/chat`, {
@@ -1023,145 +1169,110 @@ function chatApp() {
           body: JSON.stringify(reqBody)
         });
 
+        if (res.status === 409) {
+          // Turn lock conflict — another user's turn is active
+          const err = await res.json().catch(() => ({}));
+          this.turnHolder = {email: err.holder_email || '', name: err.holder_name || 'another user'};
+          // Queue for auto-retry after the done event
+          this._blockedMessage = {displayText, images};
+          this.streaming = false;
+          return;
+        }
+
         if (!res.ok) {
           const err = await res.json().catch(() => ({error: 'Request failed'}));
           this.messages.push({type: 'error', content: err.error || 'Request failed'});
           this.streaming = false;
           return;
         }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          let result;
-          try {
-            result = await reader.read();
-          } catch {
-            break;
-          }
-          if (result.done) break;
-
-          buffer += decoder.decode(result.value, {stream: true});
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          let eventType = '';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith('data: ') && eventType) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (eventType === 'done') streamCompleted = true;
-                this.handleEvent(eventType, data);
-              } catch {}
-              eventType = '';
-            }
-          }
-        }
+        // 202 Accepted — events arrive via Centrifuge subscription.
+        // Start a recovery timer in case events don't arrive (Centrifugo down, publish failure, etc.)
+        this._startRecoveryTimer();
       } catch (e) {
         console.error('Chat error:', e);
+        this.messages.push({type: 'error', content: 'Failed to send message. Please try again.'});
+        this.streaming = false;
       }
+    },
 
-      // Finalize any partial streaming message
-      if (this.currentText) {
-        this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
-        this.currentText = '';
+    _startRecoveryTimer() {
+      this._clearRecoveryTimer();
+      this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 2000);
+    },
+
+    _clearRecoveryTimer() {
+      if (this._recoveryTimer) {
+        clearTimeout(this._recoveryTimer);
+        this._recoveryTimer = null;
       }
-      this.streaming = false;
-      this.scrollToBottom(true);
-
-      // If stream ended without 'done', connection was lost — try to recover
-      if (!streamCompleted) {
-        const recovered = await this._recoverFromServer();
-        if (!recovered) {
-          this._reconnectAttempts++;
-          if (this._reconnectAttempts <= 3) {
-            const delay = this._reconnectAttempts * 2000;
-            console.warn(`Stream lost (attempt ${this._reconnectAttempts}/3) — retrying in ${delay}ms`);
-            // Retry silently (no new user bubble) with the original message
-            setTimeout(() => this._streamRequest(displayText), delay);
-          } else {
-            this._reconnectAttempts = 0;
-            this.messages.push({type: 'error', content: 'Connection lost. Please try again.'});
-          }
-        }
-        return;
-      }
-
-      this._reconnectAttempts = 0;
-
-      // Send queued message if user typed while we were streaming
-      if (this._queuedMessage) {
-        const queued = this._queuedMessage;
-        this._queuedMessage = null;
-        await this._streamRequest(queued.displayText, queued.images);
-        return;
-      }
-
-      this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
     },
 
     async _recoverFromServer() {
-      // Fetch server conversation and diff with local state.
-      // If the server has messages we missed, add them to the UI.
-      // Returns true if we recovered (no retry needed).
+      if (!this.streaming) return;  // Already resolved
+      console.warn('No events received in 2s — polling conversation for recovery');
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
-        if (!res.ok) return false;
+        if (!res.ok) return;
         const data = await res.json();
         const serverMsgs = (data.messages || []).filter(m => m.content);
-
-        // Count local content messages (user + assistant text, not tool/error)
         const localCount = this.messages.filter(m => m.type === 'message').length;
-        if (serverMsgs.length <= localCount) return false;
 
-        // Server has messages we don't — add the delta
-        console.log(`Recovering ${serverMsgs.length - localCount} messages from server`);
-        for (let i = localCount; i < serverMsgs.length; i++) {
-          const msg = serverMsgs[i];
-          if (msg.content) {
-            this.messages.push({type: 'message', role: msg.role, content: msg.content});
+        if (serverMsgs.length > localCount) {
+          // Server has messages we missed — add the delta
+          console.log(`Recovering ${serverMsgs.length - localCount} messages from server`);
+          if (this.currentText) {
+            this.currentText = '';
           }
-          if (msg.tool_use) {
-            // Collapse consecutive same-tool entries
-            const grouped = [];
-            for (const tu of msg.tool_use) {
-              const prev = grouped[grouped.length - 1];
-              if (prev && prev.name === tu.name) { prev.count++; }
-              else { grouped.push({name: tu.name, count: 1}); }
-            }
-            for (const g of grouped) {
-              this.messages.push({
-                type: 'tool',
-                label: '',
-                toolName: g.name,
-                pending: false,
-                pendingCount: 0,
-                totalCount: g.count,
-                summary: g.count > 1 ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups` : g.name + ' completed',
-                is_error: false
-              });
+          for (let i = localCount; i < serverMsgs.length; i++) {
+            const msg = serverMsgs[i];
+            if (msg.content) {
+              this.messages.push({type: 'message', role: msg.role, content: msg.content});
             }
           }
+          if (data.status) this.status = data.status;
+          this.streaming = false;
+          this.scrollToBottom(true);
+          this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+        } else if (!this.currentText) {
+          // No new messages and no streaming text — server may still be processing.
+          // Retry recovery in another 5s.
+          this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 2000);
         }
-
-        // Update status from server if available
-        if (data.status) this.status = data.status;
-
-        this._reconnectAttempts = 0;
-        this.scrollToBottom(true);
-        this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
-        return true;
       } catch (e) {
-        console.warn('Recovery fetch failed:', e);
-        return false;
+        console.warn('Recovery poll failed:', e);
       }
     },
 
     handleEvent(type, data) {
+      // Any event means Centrifugo is working — reset recovery timer
+      this._clearRecoveryTimer();
+
+      if (type === 'turn_start') {
+        // Another user started a turn — show indicator
+        this.turnHolder = {email: data.user_email, name: data.user_name};
+        // If it's someone else's turn, mark streaming so we show their progress
+        if (data.user_email !== this.currentUserEmail) {
+          this.streaming = true;
+          this.currentText = '';
+        }
+        return;
+      }
+
+      if (type === 'user_message') {
+        // Message from another user — add it to our local view
+        if (data.user_email !== this.currentUserEmail) {
+          this.messages.push({
+            type: 'message',
+            role: 'user',
+            content: data.content,
+            sender_email: data.user_email,
+            sender_name: data.user_name,
+          });
+          this.scrollToBottom();
+        }
+        return;
+      }
+
       if (type === 'text') {
         this.currentText += data.content || '';
         this.scrollToBottom();
@@ -1242,15 +1353,40 @@ function chatApp() {
           this.status = data.status;
         }
       } else if (type === 'done') {
-        // Token usage could be shown but keeping it minimal
+        // Finalize any partial streaming message
+        if (this.currentText) {
+          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+          this.currentText = '';
+        }
+        this.streaming = false;
+        this.turnHolder = null;  // Turn lock released
+        this.scrollToBottom(true);
+
+        // Send queued message if user typed while we were streaming
+        if (this._queuedMessage) {
+          const queued = this._queuedMessage;
+          this._queuedMessage = null;
+          this.$nextTick(() => this._postMessage(queued.displayText, queued.images));
+          return;
+        }
+        // Auto-retry message that was blocked by turn lock (409)
+        if (this._blockedMessage) {
+          const blocked = this._blockedMessage;
+          this._blockedMessage = null;
+          this.$nextTick(() => this._postMessage(blocked.displayText, blocked.images));
+          return;
+        }
+        this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
       } else if (type === 'error') {
-        console.error('Chat SSE error:', data);
+        console.error('Chat error:', data);
         if (this.currentText) {
           this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
           this.currentText = '';
         }
         this.messages.push({type: 'error', content: data.message});
-        this.scrollToBottom();
+        this.streaming = false;
+        this.turnHolder = null;  // Turn lock released on error too
+        this.scrollToBottom(true);
       }
     }
   };

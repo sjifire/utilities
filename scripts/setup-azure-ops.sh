@@ -344,9 +344,11 @@ if should_run 2; then
     info "Creating container 'oauth-tokens'..."
     create_container "oauth-tokens" "/token_type" --ttl -1
 
-    # Container: conversations (partition key: /incident_id, 90-day TTL)
+    # Container: conversations (partition key: /incident_id, per-document TTL only)
+    # No container-level default TTL — conversations persist indefinitely.
+    # Turn lock documents set their own ttl (120s) for auto-expiry.
     info "Creating container 'conversations'..."
-    create_container "conversations" "/incident_id" --ttl 7776000
+    create_container "conversations" "/incident_id" --ttl -1
 
     # Container: budgets (partition key: /month, 120-day TTL)
     info "Creating container 'budgets'..."
@@ -642,6 +644,7 @@ if should_run 4; then
         "ANTHROPIC-API-KEY"
         "AZURE-MAPS-KEY"
         "KIOSK-SIGNING-KEY"
+        "CENTRIFUGO-API-KEY"
     )
 
     ALL_OK=true

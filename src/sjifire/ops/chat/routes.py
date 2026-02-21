@@ -1,30 +1,33 @@
 """HTTP route handlers for the chat-based incident reporting UI.
 
 Routes:
-- GET  /reports                            → Reports list page (HTML)
 - POST /reports/new                        → Create new report (redirect)
 - GET  /reports/{incident_id}              → Chat page (HTML)
 - GET  /reports/{incident_id}/conversation → Conversation history (JSON)
-- POST /reports/{incident_id}/chat         → Streaming chat (SSE)
+- POST /reports/{incident_id}/chat         → Chat message (202 Accepted)
 """
 
+import asyncio
 import json
 import logging
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from sjifire.core.config import local_now
 from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user, set_current_user
-from sjifire.ops.chat.engine import stream_chat, stream_general_chat
+from sjifire.ops.chat.engine import run_chat, run_general_chat
 from sjifire.ops.chat.store import ConversationStore
-from sjifire.ops.dashboard import get_dashboard_data
+from sjifire.ops.chat.turn_lock import TurnLockStore
 from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.ops.incidents.store import IncidentStore
 
 logger = logging.getLogger(__name__)
+
+# Hold references to background chat tasks so they aren't garbage-collected.
+_background_tasks: set[asyncio.Task] = set()
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 _jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=True)
@@ -33,7 +36,7 @@ _jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=Tru
 def _forbidden_page() -> Response:
     """Render a styled 403 page for non-editors."""
     template = _jinja_env.get_template("forbidden.html")
-    html = template.render(active_page="reports", show_reports=False)
+    html = template.render()
     return Response(html, status_code=403, media_type="text/html")
 
 
@@ -45,55 +48,10 @@ def _get_user(request: Request) -> UserContext | None:
     return user
 
 
-async def reports_list(request: Request) -> Response:
-    """Serve the reports list page — dispatch calls with report status."""
-    user = _get_user(request)
-
-    import os
-
-    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
-
-    if not user and not is_dev:
-        return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=/reports")
-
-    # In dev mode, user may be set by middleware
-    if not user:
-        from sjifire.ops.auth import _current_user
-
-        user = _current_user.get()
-
-    # Only editors (or dev mode) can access reports
-    is_editor = is_dev or (
-        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
-    )
-    if not is_editor:
-        return _forbidden_page()
-
-    # Reuse the dashboard data pipeline — dispatch calls cross-referenced
-    # with local incidents and NERIS records.  Fetch more calls than the
-    # dashboard overview (which only shows 15).
-    data = await get_dashboard_data(call_limit=100)
-
-    template = _jinja_env.get_template("reports.html")
-    html = template.render(
-        calls=data.get("recent_calls", []),
-        neris_count=data.get("neris_count", 0),
-        local_draft_count=data.get("local_draft_count", 0),
-        missing_reports=data.get("missing_reports", 0),
-        date_display=data.get("date_display", ""),
-        updated_time=data.get("updated_time", ""),
-        open_calls=data.get("open_calls", 0),
-        today=local_now().date().isoformat(),
-        active_page="reports",
-        show_reports=is_editor,
-    )
-    return Response(html, media_type="text/html")
-
-
 async def create_report(request: Request) -> Response:
     """Create a new incident and redirect to the chat UI."""
     if request.method == "GET":
-        return RedirectResponse("/reports", status_code=303)
+        return RedirectResponse("/dashboard#reports", status_code=303)
 
     user = _get_user(request)
 
@@ -240,10 +198,12 @@ async def chat_page(request: Request) -> Response:
     html = template.render(
         incident_id=incident_id,
         incident_number=doc.incident_number,
+        incident_date=doc.incident_date or "",
         incident_status=doc.status,
         completeness=doc.completeness() if not doc.neris_incident_id else None,
         dispatch=dispatch_context,
-        show_reports=is_editor,
+        user_email=user.email if user else "",
+        user_name=user.name if user else "",
     )
     return Response(html, media_type="text/html")
 
@@ -307,7 +267,7 @@ async def conversation_history(request: Request) -> Response:
 
 
 async def chat_stream(request: Request) -> Response:
-    """Handle a chat message and stream the response as SSE."""
+    """Handle a chat message, publishing events via Centrifugo."""
     user = _get_user(request)
 
     import os
@@ -404,25 +364,52 @@ async def chat_stream(request: Request) -> Response:
             saved_image_refs,
         )
 
-    async def event_generator():
-        async for event in stream_chat(
-            incident_id, message, user, images=images, image_refs=saved_image_refs or None
-        ):
-            yield event
+    # Acquire distributed turn lock — prevents concurrent Claude calls
+    # for the same incident across replicas.
+    try:
+        async with TurnLockStore() as lock_store:
+            lock = await lock_store.acquire(incident_id, user.email, user.name)
+    except Exception:
+        logger.warning("Turn lock check failed for %s", incident_id, exc_info=True)
+        lock = None  # Proceed without lock on infra failure (degrade gracefully)
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+    if lock is None:
+        # Lock held by another user — return 409 with holder info
+        try:
+            async with TurnLockStore() as lock_store:
+                existing = await lock_store.get(incident_id)
+        except Exception:
+            existing = None
+        holder = existing.holder_name if existing else "another user"
+        holder_email = existing.holder_email if existing else ""
+        return JSONResponse(
+            {
+                "error": f"Claude is responding to {holder}. Please wait for their turn to finish.",
+                "holder_name": holder,
+                "holder_email": holder_email,
+                "retry_after": "done",
+            },
+            status_code=409,
+        )
+
+    channel = f"chat:incident:{incident_id}"
+    task = asyncio.create_task(
+        run_chat(
+            incident_id,
+            message,
+            user,
+            channel=channel,
+            images=images,
+            image_refs=saved_image_refs or None,
+        )
     )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return JSONResponse({"status": "accepted"}, status_code=202)
 
 
 async def general_chat_stream_endpoint(request: Request) -> Response:
-    """Handle a general chat message and stream the response as SSE."""
+    """Handle a general chat message, publishing events via Centrifugo."""
     user = _get_user(request)
 
     import os
@@ -453,19 +440,11 @@ async def general_chat_stream_endpoint(request: Request) -> Response:
 
     context = body.get("context")
 
-    async def event_generator():
-        async for event in stream_general_chat(message, user, context=context):
-            yield event
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    channel = f"chat:general:{user.email}"
+    task = asyncio.create_task(run_general_chat(message, user, channel=channel, context=context))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return JSONResponse({"status": "accepted"}, status_code=202)
 
 
 async def general_chat_history(request: Request) -> Response:
