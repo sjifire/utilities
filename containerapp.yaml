@@ -107,13 +107,9 @@ properties:
             value: https://ops.sjifire.org
           - name: CENTRIFUGO_CHANNEL_NAMESPACES
             value: '[{"name":"chat","history_size":100,"history_ttl":"5m","force_recovery":true,"subscribe_proxy_enabled":true,"presence":true,"join_leave":true,"force_push_join_leave":true}]'
-        probes:
-          - type: Liveness
-            httpGet:
-              path: /health
-              port: 8001
-            periodSeconds: 30
-            failureThreshold: 3
+        # No liveness probe — Container Apps probes on sidecar containers
+        # cause false-positive failures and restart a healthy Centrifugo.
+        # The main ops-server liveness probe covers overall replica health.
 
     scale:
       minReplicas: 1
