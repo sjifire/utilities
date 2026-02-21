@@ -475,6 +475,65 @@
     .chat-send-btn:hover:not(:disabled) { background: #4a94f0; }
     .chat-send-btn:disabled { opacity: .4; cursor: not-allowed; }
 
+    /* ── Chat empty state ── */
+    .chat-empty-state {
+      padding: 20px 16px;
+      text-align: center;
+    }
+    .chat-empty-state p {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+    .chat-empty-hints {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    /* ── Pagination ── */
+    .pagination-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 18px;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .pagination-bar .page-nav {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .pagination-bar .page-info {
+      min-width: 60px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .page-btn {
+      background: none;
+      border: 1px solid var(--border-default);
+      color: var(--text-muted);
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .page-btn:hover:not(:disabled) {
+      border-color: var(--color-blue);
+      color: var(--color-blue);
+    }
+    .page-btn:disabled {
+      opacity: .3;
+      cursor: not-allowed;
+    }
+
     /* ── Dashboard responsive ── */
     @media (max-width: 768px) {
       .grid-4             { grid-template-columns: repeat(2, 1fr); }
@@ -663,8 +722,8 @@
           <span x-text="chatOpen ? '\u25B2' : '\u25BC'" style="font-size:10px"></span>
         </button>
         <span class="chat-drawer-title">Assistant</span>
-        <!-- Hint chips (hidden when streaming or drawer open with messages) -->
-        <div class="chat-hints" x-show="!chatStreaming && chatMessages.length === 0" style="margin:0;padding:0">
+        <!-- Hint chips in bar (hidden when streaming, has messages, or drawer is open) -->
+        <div class="chat-hints" x-show="!chatStreaming && chatMessages.length === 0 && !chatOpen" style="margin:0;padding:0">
           <button class="chat-hint" @click="chatInput='Who is on duty today?';sendChatMessage()">Who's on duty?</button>
           <button class="chat-hint" @click="chatInput='Show recent calls';sendChatMessage()">Recent calls</button>
           <button class="chat-hint" @click="chatInput='Which reports are missing?';sendChatMessage()">Missing reports</button>
@@ -682,38 +741,55 @@
           <button class="chat-send-btn" :disabled="!chatInput.trim()" @click="sendChatMessage()">Send</button>
         </div>
       </div>
-      <!-- Messages area (collapsible) -->
-      <div x-show="chatOpen && chatMessages.length > 0" x-collapse>
-        <div class="chat-drawer-messages" x-ref="chatMessages">
-          <template x-for="(msg, i) in chatMessages" :key="i">
-            <div>
-              <template x-if="msg.type === 'message'">
-                <div class="chat-msg" :class="msg.role" x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content"></div>
-              </template>
-              <template x-if="msg.type === 'tool_call'">
-                <div class="chat-tool-indicator">
-                  <template x-if="msg.pending"><div class="spinner"></div></template>
-                  <span x-text="msg.label"></span>
-                </div>
-              </template>
-              <template x-if="msg.type === 'tool_result'">
-                <div class="chat-tool-result" x-text="'\u2713 ' + msg.summary"></div>
-              </template>
-              <template x-if="msg.type === 'error'">
-                <div class="chat-error" x-text="msg.content"></div>
-              </template>
+      <!-- Collapsible area -->
+      <div x-show="chatOpen" x-collapse>
+        <!-- Empty state (no messages yet) -->
+        <template x-if="chatMessages.length === 0 && !chatStreaming">
+          <div class="chat-empty-state">
+            <p>Ask the assistant about dispatch calls, crew schedules, NERIS codes, or incident reports.</p>
+            <div class="chat-empty-hints">
+              <button class="chat-hint" @click="chatInput='Who is on duty today?';sendChatMessage()">Who's on duty?</button>
+              <button class="chat-hint" @click="chatInput='Show recent calls';sendChatMessage()">Recent calls</button>
+              <button class="chat-hint" @click="chatInput='Which reports are missing?';sendChatMessage()">Missing reports</button>
+              <button class="chat-hint" @click="chatInput='Look up a NERIS code for structure fire';sendChatMessage()">NERIS codes</button>
+              <button class="chat-hint" @click="chatInput='Search calls from last week';sendChatMessage()">Search calls</button>
+              <button class="chat-hint" @click="chatInput='List incident reports';sendChatMessage()">List reports</button>
             </div>
-          </template>
-          <template x-if="chatStreaming && !chatCurrentText">
-            <div class="chat-typing">
-              <span></span><span></span><span></span>
-              <span x-show="chatThinking" x-transition style="width:auto;height:auto;background:none;animation:none;color:var(--text-dim);font-size:11px;margin-left:4px">Thinking&hellip;</span>
-            </div>
-          </template>
-          <template x-if="chatStreaming && chatCurrentText">
-            <div class="chat-msg assistant" x-html="renderMarkdown(chatCurrentText)"></div>
-          </template>
-        </div>
+          </div>
+        </template>
+        <!-- Messages area -->
+        <template x-if="chatMessages.length > 0 || chatStreaming">
+          <div class="chat-drawer-messages" x-ref="chatMessages">
+            <template x-for="(msg, i) in chatMessages" :key="i">
+              <div>
+                <template x-if="msg.type === 'message'">
+                  <div class="chat-msg" :class="msg.role" x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content"></div>
+                </template>
+                <template x-if="msg.type === 'tool_call'">
+                  <div class="chat-tool-indicator">
+                    <template x-if="msg.pending"><div class="spinner"></div></template>
+                    <span x-text="msg.label"></span>
+                  </div>
+                </template>
+                <template x-if="msg.type === 'tool_result'">
+                  <div class="chat-tool-result" x-text="'\u2713 ' + msg.summary"></div>
+                </template>
+                <template x-if="msg.type === 'error'">
+                  <div class="chat-error" x-text="msg.content"></div>
+                </template>
+              </div>
+            </template>
+            <template x-if="chatStreaming && !chatCurrentText">
+              <div class="chat-typing">
+                <span></span><span></span><span></span>
+                <span x-show="chatThinking" x-transition style="width:auto;height:auto;background:none;animation:none;color:var(--text-dim);font-size:11px;margin-left:4px">Thinking&hellip;</span>
+              </div>
+            </template>
+            <template x-if="chatStreaming && chatCurrentText">
+              <div class="chat-msg assistant" x-html="renderMarkdown(chatCurrentText)"></div>
+            </template>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -803,14 +879,14 @@
             </template>
           </tbody>
         </table>
-      </div>
-      <!-- Pagination -->
-      <div x-show="reportsTotalPages() > 1" style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;font-size:13px;color:var(--text-muted)">
-        <span x-text="'Showing ' + (((reportsPage - 1) * reportsPerPage) + 1) + '\u2013' + Math.min(reportsPage * reportsPerPage, reportsFiltered().length) + ' of ' + reportsFiltered().length"></span>
-        <div style="display:flex;gap:6px;align-items:center">
-          <button class="action-btn edit" :disabled="reportsPage <= 1" @click="reportsPage--" style="min-width:0;padding:5px 12px">&laquo; Prev</button>
-          <span x-text="reportsPage + ' / ' + reportsTotalPages()" style="min-width:60px;text-align:center"></span>
-          <button class="action-btn edit" :disabled="reportsPage >= reportsTotalPages()" @click="reportsPage++" style="min-width:0;padding:5px 12px">Next &raquo;</button>
+        <!-- Pagination -->
+        <div x-show="reportsTotalPages() > 1" class="pagination-bar">
+          <span x-text="'Showing ' + (((reportsPage - 1) * reportsPerPage) + 1) + '\u2013' + Math.min(reportsPage * reportsPerPage, reportsFiltered().length) + ' of ' + reportsFiltered().length"></span>
+          <div class="page-nav">
+            <button class="page-btn" :disabled="reportsPage <= 1" @click="reportsPage--">&lsaquo; Prev</button>
+            <span class="page-info" x-text="reportsPage + ' / ' + reportsTotalPages()"></span>
+            <button class="page-btn" :disabled="reportsPage >= reportsTotalPages()" @click="reportsPage++">Next &rsaquo;</button>
+          </div>
         </div>
       </div>
       </div>
