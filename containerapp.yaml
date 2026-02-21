@@ -111,7 +111,8 @@ properties:
           - type: Liveness
             httpGet:
               path: /health
-              port: 8001
+              port: 9001
+            initialDelaySeconds: 5
             periodSeconds: 30
             failureThreshold: 3
 
