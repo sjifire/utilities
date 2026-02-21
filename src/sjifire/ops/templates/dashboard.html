@@ -319,20 +319,20 @@
     .chat-drawer-messages::-webkit-scrollbar       { width: 5px; }
     .chat-drawer-messages::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
     .chat-msg {
-      max-width: 90%;
       padding: 10px 14px;
       border-radius: 10px;
       font-size: 13px;
       line-height: 1.5;
     }
     .chat-msg.user {
+      max-width: 70%;
       align-self: flex-end;
       background: var(--color-blue);
       color: #fff;
       border-bottom-right-radius: 4px;
     }
     .chat-msg.assistant {
-      align-self: flex-start;
+      align-self: stretch;
       background: var(--bg-page);
       border: 1px solid var(--border-default);
       border-bottom-left-radius: 4px;
@@ -344,6 +344,12 @@
     .chat-msg.assistant ul,
     .chat-msg.assistant ol            { margin: 4px 0 6px 16px; }
     .chat-msg.assistant li            { margin-bottom: 2px; }
+    .chat-msg.assistant table         { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8px 0; }
+    .chat-msg.assistant th,
+    .chat-msg.assistant td            { padding: 6px 10px; border: 1px solid var(--border-default); text-align: left; white-space: nowrap; }
+    .chat-msg.assistant th            { background: var(--bg-panel-alt); font-weight: 600; color: var(--text-primary); }
+    .chat-msg.assistant td            { color: var(--text-secondary); }
+    .chat-msg.assistant .table-wrap   { overflow-x: auto; }
 
     .chat-tool-indicator {
       align-self: flex-start;
@@ -699,7 +705,10 @@
             </div>
           </template>
           <template x-if="chatStreaming && !chatCurrentText">
-            <div class="chat-typing"><span></span><span></span><span></span></div>
+            <div class="chat-typing">
+              <span></span><span></span><span></span>
+              <span x-show="chatThinking" x-transition style="width:auto;height:auto;background:none;animation:none;color:var(--text-dim);font-size:11px;margin-left:4px">Thinking&hellip;</span>
+            </div>
           </template>
           <template x-if="chatStreaming && chatCurrentText">
             <div class="chat-msg assistant" x-html="renderMarkdown(chatCurrentText)"></div>
@@ -931,6 +940,8 @@ function dashboard() {
     chatInput: '',
     chatStreaming: false,
     chatCurrentText: '',
+    chatThinking: false,
+    _chatThinkingTimer: null,
     _centrifuge: null,
     _chatSubscription: null,
     _chatRecoveryTimer: null,
@@ -1142,6 +1153,8 @@ function dashboard() {
       this.chatInput = '';
       this.chatStreaming = true;
       this.chatCurrentText = '';
+      this.chatThinking = false;
+      this._chatThinkingTimer = setTimeout(() => { this.chatThinking = true; }, 4000);
       this.chatOpen = true;
       this.chatScrollToBottom(true);
 
@@ -1216,8 +1229,10 @@ function dashboard() {
     },
 
     handleChatEvent(type, data) {
-      // Any event means Centrifugo is working — cancel recovery timer
+      // Any event means Centrifugo is working — cancel timers
       this._clearChatRecoveryTimer();
+      if (this._chatThinkingTimer) { clearTimeout(this._chatThinkingTimer); this._chatThinkingTimer = null; }
+      this.chatThinking = false;
       if (type === 'text') {
         this.chatCurrentText += data.content || '';
         this.chatScrollToBottom();
