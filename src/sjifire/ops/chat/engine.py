@@ -761,6 +761,23 @@ async def _run_loop(
                     pass  # Title/desc are optional UI enhancements; skip if unparseable
             await publish(channel, "tool_result", evt)
 
+            # After reset_incident, clear pre-reset conversation history.
+            # The reset deletes the Cosmos document; when the engine saves
+            # via upsert it re-creates it.  By truncating here we ensure
+            # only the post-reset exchange is persisted, giving a clean
+            # slate on page reload while keeping current-turn context.
+            if tc["name"] == "reset_incident":
+                try:
+                    rd = json.loads(result_str)
+                    if isinstance(rd, dict) and "error" not in rd:
+                        conversation.messages.clear()
+                        conversation.turn_count = 0
+                        conversation.total_input_tokens = 0
+                        conversation.total_output_tokens = 0
+                        logger.info("Cleared conversation history after reset_incident")
+                except (json.JSONDecodeError, KeyError):
+                    pass
+
             # After update_incident, emit live status update for the client
             if tc["name"] == "update_incident":
                 try:

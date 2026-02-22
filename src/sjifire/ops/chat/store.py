@@ -112,31 +112,20 @@ class ConversationStore:
 
         return None
 
-    async def update(self, doc: ConversationDocument) -> ConversationDocument | None:
-        """Update an existing conversation document.
+    async def update(self, doc: ConversationDocument) -> ConversationDocument:
+        """Update (or re-create) a conversation document.
 
-        Returns the updated document, or ``None`` if the document was
-        deleted mid-turn (e.g. by ``reset_incident``).  Callers should
-        treat ``None`` as "conversation was intentionally discarded".
+        Uses ``upsert_item`` so that a mid-turn reset (which deletes the
+        document) doesn't cause the engine's final save to fail.
         """
         if self._in_memory:
-            if doc.id not in self._memory:
-                logger.info("Conversation %s deleted mid-turn, skip save", doc.id)
-                return None
             self._memory[doc.id] = doc.to_cosmos()
             logger.info("Updated conversation %s (in-memory)", doc.id)
             return doc
 
-        try:
-            result = await self._container.replace_item(item=doc.id, body=doc.to_cosmos())
-            logger.info("Updated conversation %s", doc.id)
-            return ConversationDocument.from_cosmos(result)
-        except Exception as exc:
-            # 404 = document deleted mid-turn (e.g. reset_incident)
-            if getattr(exc, "status_code", None) == 404:
-                logger.info("Conversation %s was deleted mid-turn, skipping save", doc.id)
-                return None
-            raise
+        result = await self._container.upsert_item(body=doc.to_cosmos())
+        logger.info("Updated conversation %s", doc.id)
+        return ConversationDocument.from_cosmos(result)
 
     async def delete_by_incident(self, incident_id: str) -> bool:
         """Delete the conversation for an incident. Returns True if deleted."""
