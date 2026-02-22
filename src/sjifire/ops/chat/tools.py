@@ -500,7 +500,17 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         return await incident_tools.update_incident(incident_id, **kwargs)
 
     if name == "reset_incident":
-        return await incident_tools.reset_incident(tool_input["incident_id"])
+        result = await incident_tools.reset_incident(tool_input["incident_id"])
+        # Auto-import from NERIS if the incident has a linked NERIS record
+        if isinstance(result, dict) and result.get("_reimport_available"):
+            neris_id = result.get("neris_incident_id")
+            if neris_id:
+                import_result = await incident_tools.import_from_neris(
+                    neris_id, incident_id=tool_input["incident_id"]
+                )
+                result["_neris_reimported"] = True
+                result["_import_result"] = import_result
+        return result
 
     if name == "import_from_neris":
         neris_id = tool_input.get("neris_id")

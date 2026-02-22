@@ -92,35 +92,23 @@ async def websocket_proxy(ws: WebSocket) -> None:
         if val:
             proxy_headers[hdr] = val
 
-    logger.info(
-        "WS proxy: forwarding headers to Centrifugo: %s",
-        {k: v[:40] for k, v in proxy_headers.items()},
-    )
-
     try:
         async with websockets.connect(centrifugo_url, additional_headers=proxy_headers) as upstream:
             logger.info("WS proxy: upstream connected to %s", centrifugo_url)
 
             # Forward frames in both directions concurrently
-            _frame_count = 0
-
             async def client_to_upstream() -> None:
                 try:
                     while True:
                         data = await ws.receive_text()
-                        logger.info("WS proxy C→U: %s", data[:300])
                         await upstream.send(data)
                 except WebSocketDisconnect:
                     logger.info("WS proxy: client disconnected")
 
             async def upstream_to_client() -> None:
-                nonlocal _frame_count
                 try:
                     async for message in upstream:
                         text = message if isinstance(message, str) else message.decode()
-                        _frame_count += 1
-                        if _frame_count <= 2:
-                            logger.info("WS proxy U→C [%d]: %s", _frame_count, text[:500])
                         await ws.send_text(text)
                 except websockets.exceptions.ConnectionClosed as e:
                     logger.warning(
