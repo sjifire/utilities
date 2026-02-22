@@ -198,7 +198,7 @@ async def chat_page(request: Request) -> Response:
     html = template.render(
         incident_id=incident_id,
         incident_number=doc.incident_number,
-        incident_date=doc.incident_date or "",
+        incident_date=doc.incident_datetime.strftime("%Y-%m-%d") if doc.incident_datetime else "",
         incident_status=doc.status,
         completeness=doc.completeness() if not doc.neris_incident_id else None,
         dispatch=dispatch_context,
