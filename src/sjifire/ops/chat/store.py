@@ -75,15 +75,31 @@ class ConversationStore:
             return None
 
     async def get_by_incident(self, incident_id: str) -> ConversationDocument | None:
-        """Get the conversation for an incident (at most one per incident)."""
-        if self._in_memory:
-            for data in self._memory.values():
-                if data.get("incident_id") == incident_id:
-                    return ConversationDocument.from_cosmos(data)
-            return None
+        """Get the conversation for an incident (at most one per incident).
 
-        # Exclude turn-lock documents which share this container/partition
-        query = "SELECT * FROM c WHERE c.incident_id = @iid AND c.id != 'turn-lock'"
+        When multiple conversations exist (e.g. from a race condition),
+        returns the most recently updated one so recovery polling finds
+        the conversation that the engine actually completed.
+        """
+        if self._in_memory:
+            candidates = [
+                data for data in self._memory.values() if data.get("incident_id") == incident_id
+            ]
+            if not candidates:
+                return None
+            # Return the most recently updated conversation
+            candidates.sort(
+                key=lambda d: d.get("updated_at") or d.get("created_at", ""),
+                reverse=True,
+            )
+            return ConversationDocument.from_cosmos(candidates[0])
+
+        # Exclude turn-lock documents which share this container/partition.
+        # ORDER BY _ts DESC ensures we get the most recently updated
+        # conversation when duplicates exist from race conditions.
+        query = (
+            "SELECT * FROM c WHERE c.incident_id = @iid AND c.id != 'turn-lock' ORDER BY c._ts DESC"
+        )
         parameters: list[dict] = [{"name": "@iid", "value": incident_id}]
 
         async for item in self._container.query_items(

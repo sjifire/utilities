@@ -114,20 +114,24 @@ class TestTurnLockInRoutes:
         assert body["holder_email"] == "alice@sjifire.org"
         assert body["retry_after"] == "done"
 
-    async def test_same_user_can_resend(self):
-        """Same user can send again (lock refresh, not conflict)."""
+    async def test_same_user_gets_409_when_turn_active(self):
+        """Same user gets 409 when their own turn is still active.
+
+        Prevents concurrent engine tasks. The client queues the message
+        and auto-retries after the current turn's ``done`` event.
+        """
         alice = _make_alice()
-        mock_run_chat = AsyncMock()
 
         async with TurnLockStore() as store:
             await store.acquire("inc-test", "alice@sjifire.org", "Alice Smith")
 
-        with _patch_user(alice), patch("sjifire.ops.chat.routes.run_chat", mock_run_chat):
+        with _patch_user(alice):
             req = _FakeRequest({"message": "Continue"})
             resp = await chat_stream(req)
-            await asyncio.sleep(0)
 
-        assert resp.status_code == 202
+        assert resp.status_code == 409
+        body = json.loads(resp.body)
+        assert body["holder_name"] == "Alice Smith"
 
     async def test_user_can_send_after_lock_released(self):
         """After lock is released, another user can send."""

@@ -705,6 +705,8 @@ function chatApp() {
     _subscription: null,
     _queuedMessage: null,
     _recoveryTimer: null,
+    _recoveryStartTime: null,
+    _lastPostTime: 0,
     // Multi-user state
     currentUserEmail: '{{ user_email }}',
     currentUserName: '{{ user_name }}',
@@ -1154,6 +1156,14 @@ function chatApp() {
     },
 
     async _postMessage(displayText, images) {
+      // Debounce: prevent duplicate POSTs within 500ms
+      const now = Date.now();
+      if (now - this._lastPostTime < 500) {
+        console.warn('Debounced duplicate POST');
+        return;
+      }
+      this._lastPostTime = now;
+
       this.streaming = true;
       this.currentText = '';
 
@@ -1170,7 +1180,7 @@ function chatApp() {
         });
 
         if (res.status === 409) {
-          // Turn lock conflict — another user's turn is active
+          // Turn lock conflict — current turn is still active
           const err = await res.json().catch(() => ({}));
           this.turnHolder = {email: err.holder_email || '', name: err.holder_name || 'another user'};
           // Queue for auto-retry after the done event
@@ -1197,6 +1207,7 @@ function chatApp() {
 
     _startRecoveryTimer() {
       this._clearRecoveryTimer();
+      this._recoveryStartTime = Date.now();
       this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 2000);
     },
 
@@ -1209,10 +1220,30 @@ function chatApp() {
 
     async _recoverFromServer() {
       if (!this.streaming) return;  // Already resolved
-      console.warn('No events received in 2s — polling conversation for recovery');
+
+      // Give up after 90 seconds — prevent infinite hang
+      const elapsed = Date.now() - (this._recoveryStartTime || 0);
+      if (elapsed > 90000) {
+        console.error('Recovery timeout — giving up after 90s');
+        if (this.currentText) {
+          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+          this.currentText = '';
+        }
+        this.messages.push({type: 'error', content: 'Response timed out. Reload the page to see any saved progress.'});
+        this.streaming = false;
+        this.turnHolder = null;
+        this.scrollToBottom(true);
+        return;
+      }
+
+      console.warn(`Recovery poll (${Math.round(elapsed/1000)}s elapsed)`);
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          // Retry on transient errors instead of silently giving up
+          this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 3000);
+          return;
+        }
         const data = await res.json();
         const serverMsgs = (data.messages || []).filter(m => m.content);
         const localCount = this.messages.filter(m => m.type === 'message').length;
@@ -1231,15 +1262,17 @@ function chatApp() {
           }
           if (data.status) this.status = data.status;
           this.streaming = false;
+          this.turnHolder = null;
           this.scrollToBottom(true);
           this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
         } else if (!this.currentText) {
           // No new messages and no streaming text — server may still be processing.
-          // Retry recovery in another 5s.
           this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 2000);
         }
       } catch (e) {
         console.warn('Recovery poll failed:', e);
+        // Retry on network errors
+        this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 3000);
       }
     },
 

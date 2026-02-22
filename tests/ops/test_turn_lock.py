@@ -35,13 +35,13 @@ class TestTurnLockAcquire:
             lock = await store.acquire("inc-1", "bob@sjifire.org", "Bob")
         assert lock is None
 
-    async def test_acquire_refreshes_for_same_user(self):
+    async def test_acquire_rejected_for_same_user(self):
+        """Same user cannot re-acquire — prevents concurrent engine tasks."""
         async with TurnLockStore() as store:
             lock1 = await store.acquire("inc-1", "alice@sjifire.org", "Alice")
             lock2 = await store.acquire("inc-1", "alice@sjifire.org", "Alice")
         assert lock1 is not None
-        assert lock2 is not None
-        assert lock2.holder_email == "alice@sjifire.org"
+        assert lock2 is None
 
     async def test_different_incidents_independent(self):
         async with TurnLockStore() as store:

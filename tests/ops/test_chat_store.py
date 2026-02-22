@@ -76,6 +76,28 @@ class TestConversationStore:
             result = await store.get(doc.id, "inc-B")
         assert result is None
 
+    async def test_get_by_incident_returns_latest_when_duplicates_exist(self):
+        """Return the most recently updated conversation when duplicates exist."""
+        from datetime import UTC, datetime
+
+        doc_old = _make_conversation(incident_id="inc-dup")
+        doc_old.updated_at = datetime(2026, 2, 1, tzinfo=UTC)
+        doc_old.messages.append(ConversationMessage(role="user", content="old"))
+
+        doc_new = _make_conversation(incident_id="inc-dup")
+        doc_new.updated_at = datetime(2026, 2, 2, tzinfo=UTC)
+        doc_new.messages.append(ConversationMessage(role="user", content="new"))
+        doc_new.messages.append(ConversationMessage(role="assistant", content="response"))
+
+        async with ConversationStore() as store:
+            await store.create(doc_old)
+            await store.create(doc_new)
+            fetched = await store.get_by_incident("inc-dup")
+
+        assert fetched is not None
+        assert fetched.id == doc_new.id
+        assert len(fetched.messages) == 2
+
 
 class TestBudgetStore:
     async def test_get_or_create_new(self):

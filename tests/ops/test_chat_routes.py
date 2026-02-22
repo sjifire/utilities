@@ -47,9 +47,14 @@ def _fake_get_user(_request):
 
 @pytest.fixture(autouse=True)
 def _patch_auth(monkeypatch):
-    """Bypass auth checks for route tests."""
+    """Bypass auth checks and reset turn lock for route tests."""
+    from sjifire.ops.chat.turn_lock import TurnLockStore
+
     monkeypatch.delenv("ENTRA_MCP_API_CLIENT_ID", raising=False)
     monkeypatch.setattr("sjifire.ops.chat.routes._get_user", _fake_get_user)
+    TurnLockStore._memory.clear()
+    yield
+    TurnLockStore._memory.clear()
 
 
 class TestImageValidation:
