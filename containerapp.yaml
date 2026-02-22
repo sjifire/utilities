@@ -98,7 +98,7 @@ properties:
           - name: CENTRIFUGO_CLIENT_PROXY_CONNECT_ENDPOINT
             value: http://localhost:8000/centrifugo/connect
           - name: CENTRIFUGO_CLIENT_PROXY_CONNECT_HTTP_HEADERS
-            value: '["Cookie","X-Ms-Client-Principal","X-Ms-Client-Principal-Id","X-Ms-Client-Principal-Name"]'
+            value: "Cookie X-Ms-Client-Principal X-Ms-Client-Principal-Id X-Ms-Client-Principal-Name"
           - name: CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_ENDPOINT
             value: http://localhost:8000/centrifugo/subscribe
           - name: CENTRIFUGO_HTTP_API_KEY
