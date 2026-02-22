@@ -14,7 +14,7 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 
-from sjifire.core.config import get_org_config
+from sjifire.core.config import get_org_config, get_timezone
 from sjifire.ops.auth import get_current_user
 from sjifire.ops.incidents.models import (
     EditEntry,
@@ -365,31 +365,64 @@ def _build_import_comparison(
     neris_ts = neris_prefill.get("timestamps", {})
     dispatch_ts = dispatch_prefill.get("timestamps", {})
 
-    # Compare timestamps between NERIS and dispatch
+    # Compare timestamps between NERIS and dispatch.
+    # Convert both to local time for display so discrepancies are obvious.
+    local_tz = get_timezone()
+
+    def _to_local(iso_str: str) -> tuple[datetime | None, str]:
+        """Parse ISO timestamp and return (aware datetime, local display string)."""
+        try:
+            dt = datetime.fromisoformat(iso_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            local_dt = dt.astimezone(local_tz)
+            return local_dt, local_dt.strftime("%H:%M:%S %Z")
+        except (ValueError, TypeError):
+            return None, iso_str
+
     for ts_key, label in [
-        ("psap_answer", "Call creation / PSAP answer"),
-        ("alarm_time", "Alarm time (agency paged)"),
+        ("psap_answer", "PSAP answer / call creation"),
+        ("alarm_time", "Alarm (agency paged)"),
         ("first_unit_enroute", "First unit enroute"),
-        ("first_unit_arrived", "First unit arrived on scene"),
+        ("first_unit_arrived", "First unit on scene"),
         ("incident_clear", "Incident clear"),
     ]:
         neris_val = neris_ts.get(ts_key)
         dispatch_val = dispatch_ts.get(ts_key)
 
-        if neris_val and dispatch_val and neris_val != dispatch_val:
-            discrepancies.append(
-                {
-                    "field": ts_key,
-                    "label": label,
-                    "neris": neris_val,
-                    "dispatch": dispatch_val,
-                    "used": "dispatch",
-                }
-            )
+        if neris_val and dispatch_val:
+            neris_dt, neris_disp = _to_local(neris_val)
+            dispatch_dt, dispatch_disp = _to_local(dispatch_val)
+            # Compare actual times (>60s difference = discrepancy)
+            if neris_dt and dispatch_dt:
+                diff_s = abs((neris_dt - dispatch_dt).total_seconds())
+                if diff_s > 60:
+                    discrepancies.append(
+                        {
+                            "field": ts_key,
+                            "label": label,
+                            "neris": neris_disp,
+                            "dispatch": dispatch_disp,
+                            "diff": f"{int(diff_s // 60)}m {int(diff_s % 60)}s",
+                            "used": "dispatch",
+                        }
+                    )
+            elif neris_val != dispatch_val:
+                discrepancies.append(
+                    {
+                        "field": ts_key,
+                        "label": label,
+                        "neris": neris_disp,
+                        "dispatch": dispatch_disp,
+                        "used": "dispatch",
+                    }
+                )
         elif dispatch_val and not neris_val:
-            gaps.append({"field": ts_key, "label": label, "source": "dispatch"})
+            _, disp = _to_local(dispatch_val)
+            gaps.append({"field": ts_key, "label": label, "source": "dispatch", "time": disp})
         elif neris_val and not dispatch_val:
-            gaps.append({"field": ts_key, "label": label, "source": "neris"})
+            _, disp = _to_local(neris_val)
+            gaps.append({"field": ts_key, "label": label, "source": "neris", "time": disp})
 
     # Compare addresses
     neris_addr = neris_prefill.get("address", "")

@@ -1507,8 +1507,8 @@ class TestImportFromNeris:
         mock_dispatch.return_value = {
             "address": "200 Spring St",
             "timestamps": {
-                "psap_answer": "2026-02-12T14:29:55",  # Different from NERIS
-                "alarm_time": "2026-02-12T14:30:30",  # Only in dispatch
+                "psap_answer": "2026-02-12T14:25:00+00:00",  # 5min before NERIS (14:30:15)
+                "alarm_time": "2026-02-12T14:30:30+00:00",  # Only in dispatch
             },
         }
         mock_crew.return_value = [
@@ -1859,7 +1859,7 @@ class TestParseNerisRecord:
 class TestBuildImportComparison:
     def test_detects_timestamp_discrepancy(self):
         neris = {"timestamps": {"psap_answer": "2026-02-12T14:30:15"}}
-        dispatch = {"timestamps": {"psap_answer": "2026-02-12T14:29:55"}}
+        dispatch = {"timestamps": {"psap_answer": "2026-02-12T14:25:00"}}
 
         comp = _build_import_comparison(neris, dispatch, [])
 
