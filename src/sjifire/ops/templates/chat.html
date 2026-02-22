@@ -1194,7 +1194,10 @@ function chatApp() {
           // state so typing dots show. Other-user lock: stop streaming,
           // the turn-lock banner provides the visual feedback instead.
           if (err.holder_email && err.holder_email === this.currentUserEmail) {
-            // streaming stays true — dots show until previous turn's done event
+            // streaming stays true — dots show until previous turn's done event.
+            // Start recovery timer as safety net in case done event never arrives
+            // (engine crashed, lock expires via TTL without publishing done).
+            this._startRecoveryTimer();
           } else {
             this.streaming = false;
           }
@@ -1441,6 +1444,7 @@ function chatApp() {
         if (this._queuedMessage) {
           const queued = this._queuedMessage;
           this._queuedMessage = null;
+          this._lastPostTime = 0;  // Clear debounce for auto-retry
           this.$nextTick(() => this._postMessage(queued.displayText, queued.images));
           return;
         }
@@ -1448,6 +1452,7 @@ function chatApp() {
         if (this._blockedMessage) {
           const blocked = this._blockedMessage;
           this._blockedMessage = null;
+          this._lastPostTime = 0;  // Clear debounce for auto-retry
           this.$nextTick(() => this._postMessage(blocked.displayText, blocked.images));
           return;
         }
