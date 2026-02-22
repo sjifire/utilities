@@ -706,6 +706,7 @@ function chatApp() {
     _queuedMessage: null,
     _recoveryTimer: null,
     _recoveryStartTime: null,
+    _turnCount: 0,
     _lastPostTime: 0,
     // Multi-user state
     currentUserEmail: '{{ user_email }}',
@@ -829,6 +830,7 @@ function chatApp() {
               }
             }
           }
+          this._turnCount = data.turn_count || 0;
           this.scrollToBottom(true);
         }
       } catch (e) {
@@ -1236,6 +1238,17 @@ function chatApp() {
         return;
       }
 
+      // Attempt WebSocket reconnection if disconnected
+      try {
+        const wsState = this._centrifuge.state;
+        if (wsState !== 'connected') {
+          console.log(`Recovery: WebSocket state "${wsState}", nudging reconnect`);
+          this._centrifuge.connect();
+        }
+      } catch (e) {
+        console.debug('WebSocket reconnect nudge failed:', e);
+      }
+
       console.warn(`Recovery poll (${Math.round(elapsed/1000)}s elapsed)`);
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
@@ -1245,12 +1258,13 @@ function chatApp() {
           return;
         }
         const data = await res.json();
-        const serverMsgs = (data.messages || []).filter(m => m.content);
-        const localCount = this.messages.filter(m => m.type === 'message').length;
+        const serverTurnCount = data.turn_count || 0;
 
-        if (serverMsgs.length > localCount) {
-          // Server has messages we missed — add the delta
-          console.log(`Recovering ${serverMsgs.length - localCount} messages from server`);
+        if (serverTurnCount > this._turnCount) {
+          // Server completed a turn we missed — recover messages
+          const serverMsgs = (data.messages || []).filter(m => m.content);
+          const localCount = this.messages.filter(m => m.type === 'message').length;
+          console.log(`Turn completed (${this._turnCount} → ${serverTurnCount}), recovering`);
           if (this.currentText) {
             this.currentText = '';
           }
@@ -1260,13 +1274,14 @@ function chatApp() {
               this.messages.push({type: 'message', role: msg.role, content: msg.content});
             }
           }
+          this._turnCount = serverTurnCount;
           if (data.status) this.status = data.status;
           this.streaming = false;
           this.turnHolder = null;
           this.scrollToBottom(true);
           this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
         } else if (!this.currentText) {
-          // No new messages and no streaming text — server may still be processing.
+          // Turn not yet complete — server still processing
           this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 2000);
         }
       } catch (e) {
@@ -1391,6 +1406,7 @@ function chatApp() {
           this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
           this.currentText = '';
         }
+        this._turnCount++;  // Track completed turn
         this.streaming = false;
         this.turnHolder = null;  // Turn lock released
         this.scrollToBottom(true);
@@ -1417,6 +1433,7 @@ function chatApp() {
           this.currentText = '';
         }
         this.messages.push({type: 'error', content: data.message});
+        this._turnCount++;  // Error turns also increment server-side
         this.streaming = false;
         this.turnHolder = null;  // Turn lock released on error too
         this.scrollToBottom(true);
