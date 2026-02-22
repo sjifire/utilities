@@ -366,20 +366,23 @@ async def chat_stream(request: Request) -> Response:
 
     # Acquire distributed turn lock — prevents concurrent Claude calls
     # for the same incident across replicas.
+    lock = None
+    lock_infra_failed = False
     try:
         async with TurnLockStore() as lock_store:
             lock = await lock_store.acquire(incident_id, user.email, user.name)
     except Exception:
         logger.warning("Turn lock check failed for %s", incident_id, exc_info=True)
-        lock = None  # Proceed without lock on infra failure (degrade gracefully)
+        lock_infra_failed = True  # Degrade gracefully — proceed without lock
 
-    if lock is None:
-        # Lock held by another user — return 409 with holder info
+    if lock is None and not lock_infra_failed:
+        # Lock held — check who holds it
+        existing = None
         try:
             async with TurnLockStore() as lock_store:
                 existing = await lock_store.get(incident_id)
         except Exception:
-            existing = None
+            logger.debug("Failed to fetch turn lock holder for %s", incident_id, exc_info=True)
         holder = existing.holder_name if existing else "another user"
         holder_email = existing.holder_email if existing else ""
         return JSONResponse(
