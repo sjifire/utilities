@@ -1190,7 +1190,14 @@ function chatApp() {
           this.turnHolder = {email: err.holder_email || '', name: err.holder_name || 'another user'};
           // Queue for auto-retry after the done event
           this._blockedMessage = {displayText, images};
-          this.streaming = false;
+          // Same-user lock: previous turn still finishing — keep streaming
+          // state so typing dots show. Other-user lock: stop streaming,
+          // the turn-lock banner provides the visual feedback instead.
+          if (err.holder_email && err.holder_email === this.currentUserEmail) {
+            // streaming stays true — dots show until previous turn's done event
+          } else {
+            this.streaming = false;
+          }
           return;
         }
 
