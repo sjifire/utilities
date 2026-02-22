@@ -105,6 +105,8 @@ properties:
             secretRef: centrifugo-api-key
           - name: CENTRIFUGO_CLIENT_ALLOWED_ORIGINS
             value: https://ops.sjifire.org
+          - name: CENTRIFUGO_HEALTH_ENABLED
+            value: "true"
           - name: CENTRIFUGO_CHANNEL_NAMESPACES
             value: '[{"name":"chat","history_size":100,"history_ttl":"5m","force_recovery":true,"subscribe_proxy_enabled":true,"presence":true,"join_leave":true,"force_push_join_leave":true}]'
         # No liveness probe — Container Apps probes on sidecar containers
