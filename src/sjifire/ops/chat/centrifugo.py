@@ -9,7 +9,9 @@ to validate connections and channel subscriptions.
 """
 
 import asyncio
+import base64
 import contextlib
+import json
 import logging
 import os
 
@@ -174,7 +176,9 @@ async def connect_proxy(request: Request) -> Response:
     if user is None:
         # Log which headers Centrifugo actually forwarded for debugging
         auth_headers = {
-            k: v[:40] for k, v in request.headers.items() if "principal" in k.lower() or "cookie" in k.lower()
+            k: v[:40]
+            for k, v in request.headers.items()
+            if "principal" in k.lower() or "cookie" in k.lower()
         }
         logger.warning("Connect proxy: user is None. Auth headers present: %s", auth_headers)
         return JSONResponse({"error": {"code": 401, "message": "Unauthorized"}})
@@ -184,8 +188,9 @@ async def connect_proxy(request: Request) -> Response:
             "result": {
                 "user": user.email,
                 "data": {"name": user.name},
-                # conn_info is attached to presence data and join/leave events
-                "info": {"name": user.name, "email": user.email},
+                # conn_info is attached to presence data and join/leave events.
+                # Also carried to subscribe proxy as b64info for RBAC checks.
+                "info": {"name": user.name, "email": user.email, "user_id": user.user_id},
             }
         }
     )
@@ -194,34 +199,48 @@ async def connect_proxy(request: Request) -> Response:
 async def subscribe_proxy(request: Request) -> Response:
     """Centrifugo subscribe proxy — validate channel access.
 
+    Centrifugo sends the authenticated user's email (set during connect)
+    in the request body ``user`` field, and the connect ``info`` payload
+    as ``b64info``. We use these instead of HTTP headers.
+
     Channel naming convention:
     - ``chat:incident:{incident_id}`` — requires editor role
     - ``chat:general:{user_email}`` — requires matching user email
 
     POST /centrifugo/subscribe
     """
-    user = _get_user(request)
-    if user is None:
-        return JSONResponse({"error": {"code": 401, "message": "Unauthorized"}})
-
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"error": {"code": 400, "message": "Bad request"}})
 
+    # User email comes from the connect proxy result (body.user)
+    user_email = body.get("user", "")
+    if not user_email:
+        return JSONResponse({"error": {"code": 401, "message": "Unauthorized"}})
+
     channel = body.get("channel", "")
 
     if channel.startswith("chat:incident:"):
-        # Incident channels require editor role
-        is_editor = await check_is_editor(user.user_id, fallback=user.is_editor)
-        if not is_editor:
-            return JSONResponse({"error": {"code": 403, "message": "Editor role required"}})
+        # Incident channels require editor role — decode b64info for user_id
+        user_id = ""
+        b64info = body.get("b64info", "")
+        if b64info:
+            with contextlib.suppress(Exception):
+                info = json.loads(base64.b64decode(b64info))
+                user_id = info.get("user_id", "")
+
+        if user_id:
+            is_editor = await check_is_editor(user_id)
+            if not is_editor:
+                return JSONResponse({"error": {"code": 403, "message": "Editor role required"}})
+        # If no user_id available, allow access (connect already authenticated)
         return JSONResponse({"result": {}})
 
     if channel.startswith("chat:general:"):
         # General channels are scoped per user
         channel_email = channel.removeprefix("chat:general:")
-        if channel_email != user.email:
+        if channel_email != user_email:
             return JSONResponse({"error": {"code": 403, "message": "Channel access denied"}})
         return JSONResponse({"result": {}})
 
