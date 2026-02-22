@@ -723,6 +723,9 @@ function chatApp() {
     },
 
     async init() {
+      // Guard against double-init (Alpine auto-calls + x-init, or re-mount)
+      if (this._centrifuge) return;
+
       // After a reset, skip stale history and start fresh
       const params = new URLSearchParams(location.search);
       const isReset = params.get('reset') === '1';
