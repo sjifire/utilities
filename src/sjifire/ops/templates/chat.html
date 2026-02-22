@@ -1261,17 +1261,33 @@ function chatApp() {
         const serverTurnCount = data.turn_count || 0;
 
         if (serverTurnCount > this._turnCount) {
-          // Server completed a turn we missed — recover messages
-          const serverMsgs = (data.messages || []).filter(m => m.content);
-          const localCount = this.messages.filter(m => m.type === 'message').length;
+          // Server completed a turn we missed — rebuild messages from server
           console.log(`Turn completed (${this._turnCount} → ${serverTurnCount}), recovering`);
-          if (this.currentText) {
-            this.currentText = '';
-          }
-          for (let i = localCount; i < serverMsgs.length; i++) {
-            const msg = serverMsgs[i];
+          this.currentText = '';
+          this.messages = [];
+          for (const msg of data.messages || []) {
             if (msg.content) {
-              this.messages.push({type: 'message', role: msg.role, content: msg.content});
+              const m = {type: 'message', role: msg.role, content: msg.content};
+              if (msg.images && msg.images.length) m.images = msg.images;
+              this.messages.push(m);
+            }
+            if (msg.tool_use) {
+              const grouped = [];
+              for (const tu of msg.tool_use) {
+                const prev = grouped[grouped.length - 1];
+                if (prev && prev.name === tu.name) prev.count++;
+                else grouped.push({name: tu.name, count: 1});
+              }
+              for (const g of grouped) {
+                const summary = g.count > 1
+                  ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups`
+                  : g.name + ' completed';
+                this.messages.push({
+                  type: 'tool', label: '', toolName: g.name,
+                  pending: false, pendingCount: 0, totalCount: g.count,
+                  summary, is_error: false
+                });
+              }
             }
           }
           this._turnCount = serverTurnCount;

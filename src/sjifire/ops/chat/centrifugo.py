@@ -92,22 +92,30 @@ async def websocket_proxy(ws: WebSocket) -> None:
 
     try:
         async with websockets.connect(centrifugo_url, additional_headers=proxy_headers) as upstream:
+            logger.info("WS proxy: upstream connected to %s", centrifugo_url)
+
             # Forward frames in both directions concurrently
             async def client_to_upstream() -> None:
                 try:
                     while True:
                         data = await ws.receive_text()
+                        logger.debug("WS proxy C→U: %s", data[:200])
                         await upstream.send(data)
                 except WebSocketDisconnect:
-                    pass  # Client disconnected — normal lifecycle
+                    logger.info("WS proxy: client disconnected")
 
             async def upstream_to_client() -> None:
                 try:
                     async for message in upstream:
                         text = message if isinstance(message, str) else message.decode()
+                        logger.debug("WS proxy U→C: %s", text[:200])
                         await ws.send_text(text)
-                except websockets.exceptions.ConnectionClosed:
-                    pass  # Centrifugo upstream closed — normal lifecycle
+                except websockets.exceptions.ConnectionClosed as e:
+                    logger.warning(
+                        "WS proxy: upstream closed (code=%s reason=%s)",
+                        e.code,
+                        e.reason,
+                    )
 
             # Run both directions; when either finishes, cancel the other
             _done, pending = await asyncio.wait(
@@ -121,7 +129,7 @@ async def websocket_proxy(ws: WebSocket) -> None:
                 task.cancel()
 
     except Exception:
-        logger.debug("WebSocket proxy connection closed", exc_info=True)
+        logger.warning("WS proxy: connection failed", exc_info=True)
     finally:
         with contextlib.suppress(Exception):
             await ws.close()
