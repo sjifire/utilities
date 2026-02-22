@@ -705,6 +705,17 @@ When a NERIS record has been approved and an editor wants to lock the local copy
 
 Use this when importing a NERIS record that's already been approved, or when manually locking a report after NERIS review.
 
+### After a Reset
+
+When `reset_incident` returns `_reimport_available: true`, the incident has a linked
+NERIS record. Offer to re-import:
+
+> This report was reset but it's linked to NERIS record {neris_incident_id}.
+> Would you like me to re-import the data from NERIS to pre-fill the report?
+
+If they agree, call `import_from_neris` with just `incident_id` — the NERIS ID
+will be resolved from the existing record automatically.
+
 ## Locked Reports
 
 Reports in `submitted` or `approved` status are **locked** — they cannot be edited locally. This is because NERIS is the source of truth once a report leaves local editing.

@@ -1153,7 +1153,15 @@ async def reset_incident(incident_id: str) -> dict:
         logger.warning("Failed to clear chat history for %s", incident_id, exc_info=True)
 
     logger.info("User %s reset incident %s", user.email, incident_id)
-    return updated.model_dump(mode="json")
+    result = updated.model_dump(mode="json")
+    if updated.neris_incident_id:
+        result["_reimport_available"] = True
+        result["_reimport_hint"] = (
+            f"This incident has a linked NERIS record ({updated.neris_incident_id}). "
+            "You can re-import data from NERIS using import_from_neris to "
+            "pre-fill the report again."
+        )
+    return result
 
 
 async def import_from_neris(
@@ -1197,6 +1205,9 @@ async def import_from_neris(
     # ── 1. Fetch the full NERIS record ──
     try:
         neris_record = await asyncio.to_thread(_get_neris_incident, neris_id)
+    except ValueError as e:
+        logger.warning("NERIS credentials not configured: %s", e)
+        return {"error": "NERIS API credentials are not configured. Contact an administrator."}
     except Exception:
         logger.warning("Failed to fetch NERIS incident %s", neris_id, exc_info=True)
         return {

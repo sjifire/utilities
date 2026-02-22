@@ -503,9 +503,21 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         return await incident_tools.reset_incident(tool_input["incident_id"])
 
     if name == "import_from_neris":
+        neris_id = tool_input.get("neris_id")
+        incident_id = tool_input["incident_id"]
+        if not neris_id:
+            # Resolve neris_id from the existing incident document
+            inc = await incident_tools.get_incident(incident_id)
+            if isinstance(inc, dict) and not inc.get("error"):
+                neris_id = inc.get("neris_incident_id")
+        if not neris_id:
+            return {
+                "error": "NERIS ID is required. Use the neris_id parameter "
+                "or link the incident to a NERIS record first."
+            }
         return await incident_tools.import_from_neris(
-            tool_input["incident_id"],
-            neris_id=tool_input.get("neris_id"),
+            neris_id,
+            incident_id=incident_id,
         )
 
     if name == "finalize_incident":
