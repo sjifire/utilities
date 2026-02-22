@@ -113,16 +113,17 @@ class ConversationStore:
         return None
 
     async def update(self, doc: ConversationDocument) -> ConversationDocument:
-        """Update an existing conversation document."""
+        """Update (or re-create) a conversation document.
+
+        Uses ``upsert_item`` so that a mid-turn reset (which deletes the
+        document) doesn't cause the engine's final save to fail.
+        """
         if self._in_memory:
             self._memory[doc.id] = doc.to_cosmos()
             logger.info("Updated conversation %s (in-memory)", doc.id)
             return doc
 
-        result = await self._container.replace_item(
-            item=doc.id,
-            body=doc.to_cosmos(),
-        )
+        result = await self._container.upsert_item(body=doc.to_cosmos())
         logger.info("Updated conversation %s", doc.id)
         return ConversationDocument.from_cosmos(result)
 
