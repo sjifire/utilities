@@ -69,7 +69,9 @@ async def create_report(request: Request) -> Response:
 
     # Only editors (or dev mode) can create reports
     is_editor = await check_is_editor(
-        user.user_id, fallback=user.is_editor, email=user.email,
+        user.user_id,
+        fallback=user.is_editor,
+        email=user.email,
     )
     if not is_dev and not is_editor:
         return JSONResponse({"error": "Forbidden"}, status_code=403)
@@ -120,7 +122,9 @@ async def print_report(request: Request) -> Response:
     is_editor = is_dev or (
         user is not None
         and await check_is_editor(
-            user.user_id, fallback=user.is_editor, email=user.email,
+            user.user_id,
+            fallback=user.is_editor,
+            email=user.email,
         )
     )
     if not is_editor:
@@ -159,7 +163,9 @@ async def chat_page(request: Request) -> Response:
     is_editor = is_dev or (
         user is not None
         and await check_is_editor(
-            user.user_id, fallback=user.is_editor, email=user.email,
+            user.user_id,
+            fallback=user.is_editor,
+            email=user.email,
         )
     )
     if not is_editor:
@@ -228,7 +234,9 @@ async def conversation_history(request: Request) -> Response:
     is_editor = is_dev or (
         user is not None
         and await check_is_editor(
-            user.user_id, fallback=user.is_editor, email=user.email,
+            user.user_id,
+            fallback=user.is_editor,
+            email=user.email,
         )
     )
     if not is_editor:
@@ -322,6 +330,78 @@ async def general_chat_history(request: Request) -> Response:
         {
             "messages": messages,
             "turn_count": conversation.turn_count,
+        }
+    )
+
+
+async def debug_context(request: Request) -> Response:
+    """Return the context that would be sent to Claude for an incident.
+
+    Shows the system prompt, context preamble, and individual components
+    with character counts. Useful for debugging token usage and bloat.
+    """
+    user = _get_user(request)
+
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    is_editor = is_dev or (
+        user is not None
+        and await check_is_editor(
+            user.user_id,
+            fallback=user.is_editor,
+            email=user.email,
+        )
+    )
+    if not is_editor:
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+    incident_id = request.path_params["incident_id"]
+
+    from sjifire.ops.chat.engine import _build_context_message, _build_system_prompt, _fetch_context
+
+    if not user:
+        from sjifire.ops.auth import _current_user
+
+        user = _current_user.get()
+
+    (
+        incident_json,
+        dispatch_json,
+        crew_json,
+        personnel_json,
+        attachments_summary,
+    ) = await _fetch_context(incident_id, user)
+    system_prompt = _build_system_prompt(user.name, user.email)
+    context_preamble = _build_context_message(
+        incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
+    )
+
+    return JSONResponse(
+        {
+            "sizes": {
+                "system_prompt": len(system_prompt),
+                "incident_json": len(incident_json),
+                "dispatch_json": len(dispatch_json),
+                "crew_json": len(crew_json),
+                "personnel_json": len(personnel_json),
+                "attachments_summary": len(attachments_summary),
+                "context_preamble": len(context_preamble),
+                "total": len(system_prompt) + len(context_preamble),
+            },
+            "system_prompt": system_prompt,
+            "context_preamble": context_preamble,
+            "components": {
+                "incident_json": json.loads(incident_json) if incident_json != "{}" else {},
+                "dispatch_json": json.loads(dispatch_json) if dispatch_json != "{}" else {},
+                "crew_json": json.loads(crew_json) if crew_json != "[]" else [],
+                "personnel_json": json.loads(personnel_json) if personnel_json != "[]" else [],
+                "attachments_summary": attachments_summary,
+            },
         }
     )
 

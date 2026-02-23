@@ -41,6 +41,7 @@ from sjifire.ops.chat.routes import (
     chat_page,
     conversation_history,
     create_report,
+    debug_context,
     general_chat_history,
     print_report,
 )
@@ -358,6 +359,7 @@ app = mcp.streamable_http_app()
 # Chat routes — Starlette Route directly because @mcp.custom_route
 # doesn't support path parameters like {incident_id}.
 # Order matters: exact paths before parameterized paths.
+app.routes.insert(0, Route("/reports/{incident_id}/debug-context", debug_context))
 app.routes.insert(0, Route("/reports/{incident_id}/conversation", conversation_history))
 app.routes.insert(0, Route("/reports/{incident_id}/print", print_report))
 app.routes.insert(0, Route("/reports/{incident_id}", chat_page))

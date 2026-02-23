@@ -580,6 +580,19 @@ async def run_chat(
             incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
         )
 
+        # Log context sizes for debugging token usage
+        logger.info(
+            "Context sizes (chars): system=%d incident=%d dispatch=%d crew=%d "
+            "personnel=%d attachments=%d preamble=%d",
+            len(system_prompt),
+            len(incident_json),
+            len(dispatch_json),
+            len(crew_json),
+            len(personnel_json),
+            len(attachments_summary),
+            len(context_preamble),
+        )
+
         # Build messages for Claude API
         api_messages = _conversation_to_api_messages(conversation.messages)
 
