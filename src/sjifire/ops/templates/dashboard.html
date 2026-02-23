@@ -588,8 +588,8 @@
 {% block body %}
 <main class="content-wrap dashboard-main" style="padding:24px">
 
-  <!-- LOADING SKELETON -->
-  <div x-show="loading">
+  <!-- LOADING SKELETON — Overview -->
+  <div x-show="loading && activeTab === 'overview'">
     <div class="grid-4" style="margin-bottom:24px">
       <div class="skeleton skeleton-stat"></div>
       <div class="skeleton skeleton-stat"></div>
@@ -610,6 +610,113 @@
         <div class="skeleton skeleton-row"></div>
         <div class="skeleton skeleton-row"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- LOADING SKELETON — Calls -->
+  <div x-show="loading && activeTab === 'calls'">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="skeleton skeleton-text" style="width:120px"></div>
+        <div class="skeleton skeleton-text" style="width:80px"></div>
+      </div>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:24px"></th>
+              <th style="width:90px"><div class="skeleton skeleton-text" style="width:20px"></div></th>
+              <th style="width:130px"><div class="skeleton skeleton-text" style="width:70px"></div></th>
+              <th style="width:140px"><div class="skeleton skeleton-text" style="width:50px"></div></th>
+              <th><div class="skeleton skeleton-text" style="width:60px"></div></th>
+              <th style="width:50px"><div class="skeleton skeleton-text" style="width:20px"></div></th>
+              <th><div class="skeleton skeleton-text" style="width:80px"></div></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="i in 8" :key="i">
+              <tr>
+                <td><div class="skeleton" style="width:8px;height:8px;border-radius:50%"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:75px"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:110px"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:120px"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:80%"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:40px"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:70%"></div></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOADING SKELETON — Crew -->
+  <div x-show="loading && activeTab === 'crew'">
+    <div class="crew-grid">
+      <template x-for="col in 2" :key="col">
+        <div class="panel" style="padding:14px 18px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+            <div class="skeleton skeleton-text" style="width:60px;height:14px"></div>
+            <div class="skeleton skeleton-text" style="width:100px;height:14px"></div>
+            <div class="skeleton" style="width:100px;height:20px;border-radius:10px"></div>
+          </div>
+          <template x-for="s in 3" :key="s">
+            <div>
+              <div class="skeleton skeleton-text" style="width:100px;height:12px;margin:12px 0 8px"></div>
+              <template x-for="r in (s === 1 ? 1 : 3)" :key="r">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-subtle)">
+                  <div class="skeleton skeleton-text" style="width:140px"></div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <div class="skeleton" style="width:70px;height:20px;border-radius:10px"></div>
+                    <div class="skeleton skeleton-text" style="width:80px"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- LOADING SKELETON — Reports -->
+  <div x-show="loading && activeTab === 'reports'">
+    <div style="display:flex;gap:6px;margin-bottom:16px">
+      <template x-for="i in 4" :key="i">
+        <div class="skeleton" style="width:90px;height:32px;border-radius:20px"></div>
+      </template>
+    </div>
+    <div class="panel data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width:24px"></th>
+            <th style="width:90px"><div class="skeleton skeleton-text" style="width:20px"></div></th>
+            <th style="width:100px"><div class="skeleton skeleton-text" style="width:70px"></div></th>
+            <th><div class="skeleton skeleton-text" style="width:50px"></div></th>
+            <th><div class="skeleton skeleton-text" style="width:60px"></div></th>
+            <th style="width:80px"><div class="skeleton skeleton-text" style="width:50px"></div></th>
+            <th style="width:100px"><div class="skeleton skeleton-text" style="width:50px"></div></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="i in 10" :key="i">
+            <tr>
+              <td><div class="skeleton" style="width:8px;height:8px;border-radius:50%"></div></td>
+              <td><div class="skeleton skeleton-text" style="width:75px"></div></td>
+              <td>
+                <div class="skeleton skeleton-text" style="width:70px;margin-bottom:4px"></div>
+                <div class="skeleton skeleton-text" style="width:50px;height:12px"></div>
+              </td>
+              <td><div class="skeleton skeleton-text" style="width:120px"></div></td>
+              <td><div class="skeleton skeleton-text" style="width:80%"></div></td>
+              <td><div class="skeleton skeleton-text" style="width:60px"></div></td>
+              <td><div class="skeleton" style="width:80px;height:28px;border-radius:4px"></div></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
     </div>
   </div>
 
@@ -1027,9 +1134,7 @@ function dashboard() {
     _chatThinkingTimer: null,
     _centrifuge: null,
     _chatSubscription: null,
-    _chatRecoveryTimer: null,
     _chatQueuedMessage: null,
-    _chatHistoryOffset: 0,
 
     async init() {
       hashTab(['overview','calls','crew','reports'], 'overview').init.call(this);
@@ -1180,11 +1285,6 @@ function dashboard() {
     initChat() {
       if (this._centrifuge) return; // Already initialized
 
-      // Snapshot existing history length so recovery doesn't replay old messages
-      authFetch('/chat/history').then(r => r.ok ? r.json() : {messages:[]}).then(d => {
-        this._chatHistoryOffset = (d.messages || []).filter(m => m.content).length;
-      }).catch(() => {});
-
       const channel = `chat:general:${this.D.user_email}`;
       const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       this._centrifuge = new Centrifuge(`${wsProto}//${location.host}/connection/websocket`);
@@ -1192,12 +1292,6 @@ function dashboard() {
       this._chatSubscription.on('publication', (ctx) => {
         const {event, ...data} = ctx.data;
         this.handleChatEvent(event, data);
-      });
-      this._chatSubscription.on('subscribed', () => {
-        if (this.chatStreaming) {
-          console.log('Reconnected while streaming — recovering from server');
-          this._recoverChat();
-        }
       });
       this._chatSubscription.subscribe();
       this._centrifuge.connect();
@@ -1244,76 +1338,25 @@ function dashboard() {
       if (this.$refs.chatInput) this.$refs.chatInput.style.height = 'auto';
 
       try {
-        const res = await authFetch('/chat/stream', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            message: text,
-            context: {
-              calls: this.reportsCalls.map(c => ({
-                id: c.id, nature: c.nature, address: c.address,
-                date: c.date, time: c.time, ic: c.ic,
-                report_source: c.report_source, report_status: c.report_status
-              }))
-            }
-          })
+        await this._centrifuge.namedRPC('send_general_message', {
+          message: text,
+          context: {
+            calls: this.reportsCalls.map(c => ({
+              id: c.id, nature: c.nature, address: c.address,
+              date: c.date, time: c.time, ic: c.ic,
+              report_source: c.report_source, report_status: c.report_status
+            }))
+          }
         });
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({error: 'Request failed'}));
-          this.chatMessages.push({type: 'error', content: err.error || 'Request failed'});
-          this.chatStreaming = false;
-          return;
-        }
-        // 202 Accepted — events arrive via Centrifugo subscription.
-        this._clearChatRecoveryTimer();
-        this._chatRecoveryTimer = setTimeout(() => this._recoverChat(), 2000);
+        // RPC succeeded — events arrive on same WS, in order
       } catch (e) {
-        console.error('Chat error:', e);
-        this.chatMessages.push({type: 'error', content: 'Connection error. Please try again.'});
+        console.error('Chat RPC error:', e);
+        this.chatMessages.push({type: 'error', content: e.message || 'Connection error. Please try again.'});
         this.chatStreaming = false;
       }
     },
 
-    _clearChatRecoveryTimer() {
-      if (this._chatRecoveryTimer) {
-        clearTimeout(this._chatRecoveryTimer);
-        this._chatRecoveryTimer = null;
-      }
-    },
-
-    async _recoverChat() {
-      if (!this.chatStreaming) return;
-      console.warn('No chat events in 2s — polling conversation for recovery');
-      try {
-        const res = await authFetch('/chat/history');
-        if (!res.ok) return;
-        const data = await res.json();
-        const serverMsgs = (data.messages || []).filter(m => m.content);
-        const localCount = this.chatMessages.filter(m => m.type === 'message').length;
-        const totalExpected = localCount + this._chatHistoryOffset;
-        if (serverMsgs.length > totalExpected) {
-          if (this.chatCurrentText) this.chatCurrentText = '';
-          for (let i = totalExpected; i < serverMsgs.length; i++) {
-            if (serverMsgs[i].content) {
-              this.chatMessages.push({type: 'message', role: serverMsgs[i].role, content: serverMsgs[i].content});
-            }
-          }
-          this.chatStreaming = false;
-          this.chatScrollToBottom(true);
-          this.$nextTick(() => { if (this.$refs.chatInput) this.$refs.chatInput.focus(); });
-        } else if (!this.chatCurrentText) {
-          // Still waiting — retry in 2s
-          this._chatRecoveryTimer = setTimeout(() => this._recoverChat(), 2000);
-        }
-      } catch (e) {
-        console.warn('Chat recovery poll failed:', e);
-      }
-    },
-
     handleChatEvent(type, data) {
-      // Any event means Centrifugo is working — cancel timers
-      this._clearChatRecoveryTimer();
       if (this._chatThinkingTimer) { clearTimeout(this._chatThinkingTimer); this._chatThinkingTimer = null; }
       this.chatThinking = false;
       if (type === 'text') {
