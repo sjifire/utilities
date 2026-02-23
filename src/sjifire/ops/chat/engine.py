@@ -218,6 +218,52 @@ def _format_unit_times_table(
     return "\n".join(lines)
 
 
+def _conversation_to_api_messages(
+    messages: list[ConversationMessage],
+) -> list[dict]:
+    """Convert stored conversation messages to Claude API format.
+
+    Validates tool_use/tool_result pairing: if a tool_result message references
+    tool_use IDs that don't exist in the preceding assistant message, it is
+    dropped. This repairs conversations corrupted by pre-fix reset bugs.
+    """
+    api_messages: list[dict] = []
+    for msg in messages:
+        entry: dict = {"role": msg.role, "content": []}
+        if msg.content:
+            entry["content"].append({"type": "text", "text": msg.content})
+        if msg.tool_use:
+            entry["content"].extend(msg.tool_use)
+        if msg.tool_results:
+            # Validate: preceding message must have matching tool_use blocks
+            prev_tool_ids: set[str] = set()
+            if api_messages:
+                prev = api_messages[-1]
+                if prev.get("role") == "assistant" and isinstance(prev.get("content"), list):
+                    prev_tool_ids = {
+                        b["id"]
+                        for b in prev["content"]
+                        if isinstance(b, dict) and b.get("type") == "tool_use"
+                    }
+            result_ids = {
+                r["tool_use_id"]
+                for r in msg.tool_results
+                if isinstance(r, dict) and "tool_use_id" in r
+            }
+            if result_ids and not result_ids.issubset(prev_tool_ids):
+                logger.warning(
+                    "Dropping orphaned tool_results (ids=%s)",
+                    result_ids - prev_tool_ids,
+                )
+                continue
+            entry["role"] = "user"
+            entry["content"] = msg.tool_results
+        if not entry["content"]:
+            entry["content"] = msg.content or ""
+        api_messages.append(entry)
+    return api_messages
+
+
 def _trim_messages(messages: list[dict]) -> list[dict]:
     """Keep only the last MAX_CONTEXT_MESSAGES turns to stay under token limits.
 
@@ -485,19 +531,7 @@ async def run_chat(
         )
 
         # Build messages for Claude API
-        api_messages = []
-        for msg in conversation.messages:
-            entry: dict = {"role": msg.role, "content": []}
-            if msg.content:
-                entry["content"].append({"type": "text", "text": msg.content})
-            if msg.tool_use:
-                entry["content"].extend(msg.tool_use)
-            if msg.tool_results:
-                entry["role"] = "user"
-                entry["content"] = msg.tool_results
-            if not entry["content"]:
-                entry["content"] = msg.content or ""
-            api_messages.append(entry)
+        api_messages = _conversation_to_api_messages(conversation.messages)
 
         # Prepend fresh context to the user message so Claude always sees
         # the latest incident state without polluting the stable system prompt.
@@ -773,7 +807,9 @@ async def _run_loop(
                     rd = json.loads(result_str)
                     if isinstance(rd, dict) and "error" not in rd:
                         # Snapshot the current assistant message before clearing
-                        current_assistant_msg = conversation.messages[-1] if conversation.messages else None
+                        current_assistant_msg = (
+                            conversation.messages[-1] if conversation.messages else None
+                        )
                         conversation.messages.clear()
                         conversation.turn_count = 0
                         conversation.total_input_tokens = 0
@@ -1044,19 +1080,7 @@ async def run_general_chat(
     system_prompt = _build_general_system_prompt(context)
 
     # Build messages for Claude API
-    api_messages = []
-    for msg in conversation.messages:
-        entry: dict = {"role": msg.role, "content": []}
-        if msg.content:
-            entry["content"].append({"type": "text", "text": msg.content})
-        if msg.tool_use:
-            entry["content"].extend(msg.tool_use)
-        if msg.tool_results:
-            entry["role"] = "user"
-            entry["content"] = msg.tool_results
-        if not entry["content"]:
-            entry["content"] = msg.content or ""
-        api_messages.append(entry)
+    api_messages = _conversation_to_api_messages(conversation.messages)
 
     api_messages.append({"role": "user", "content": user_message})
     api_messages = _trim_messages(api_messages)
