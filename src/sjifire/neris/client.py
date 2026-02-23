@@ -106,15 +106,27 @@ class NerisClient:
             page_size: Results per page (max 100)
             cursor: Pagination cursor
             **kwargs: Additional filters passed to the API
+
+        Returns:
+            Dict with "incidents", "next_cursor", "prev_cursor" keys.
+
+        Raises:
+            RuntimeError: If the API returns an error response.
         """
         neris_id = neris_id or self.entity_id
         logger.info(f"Listing incidents for {neris_id}")
-        return self.api.list_incidents(
+        result = self.api.list_incidents(
             neris_id_entity=neris_id,
             page_size=page_size,
             cursor=cursor,
             **kwargs,
         )
+        # The upstream library returns the raw Response on HTTP errors
+        # instead of raising. Detect and raise so callers get a clear error.
+        if not isinstance(result, dict):
+            status = getattr(result, "status_code", "unknown")
+            raise RuntimeError(f"NERIS API error (HTTP {status})")
+        return result
 
     def get_all_incidents(self, *, neris_id: str | None = None, **kwargs) -> list[dict]:
         """Fetch all incidents with automatic pagination.

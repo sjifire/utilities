@@ -104,23 +104,8 @@ class TestFetchNerisSummaries:
         assert summaries == []
 
     @patch("sjifire.neris.client.NerisClient")
-    def test_passes_last_modified(self, mock_client_cls):
-        """last_modified kwarg is forwarded to get_all_incidents."""
-        mock_client = MagicMock()
-        mock_client.get_all_incidents.return_value = []
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client_cls.return_value = mock_client
-
-        fetch_neris_summaries(last_modified="2026-02-15T00:00:00+00:00")
-
-        mock_client.get_all_incidents.assert_called_once_with(
-            last_modified="2026-02-15T00:00:00+00:00"
-        )
-
-    @patch("sjifire.neris.client.NerisClient")
-    def test_no_last_modified_omits_kwarg(self, mock_client_cls):
-        """Without last_modified, get_all_incidents is called with no kwargs."""
+    def test_full_fetch_without_since(self, mock_client_cls):
+        """Without since, calls get_all_incidents for full fetch."""
         mock_client = MagicMock()
         mock_client.get_all_incidents.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -130,6 +115,62 @@ class TestFetchNerisSummaries:
         fetch_neris_summaries()
 
         mock_client.get_all_incidents.assert_called_once_with()
+
+    @patch("sjifire.neris.client.NerisClient")
+    def test_incremental_fetch_with_since(self, mock_client_cls):
+        """With since, pages by last_modified descending and filters client-side."""
+        mock_client = MagicMock()
+        mock_client.list_incidents.return_value = {
+            "incidents": [
+                {**_SAMPLE_INCIDENTS[0], "last_modified": "2026-02-20T00:00:00+00:00"},
+                {**_SAMPLE_INCIDENTS[1], "last_modified": "2026-02-10T00:00:00+00:00"},
+            ],
+            "next_cursor": None,
+        }
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        # Only the first incident is newer than the cutoff
+        summaries = fetch_neris_summaries(since="2026-02-15T00:00:00+00:00")
+
+        assert len(summaries) == 1
+        assert summaries[0]["neris_id"] == "FD53055879|26001980|123"
+        mock_client.list_incidents.assert_called_once_with(
+            page_size=100,
+            cursor=None,
+            sort_by="last_modified",
+            sort_direction="DESCENDING",
+        )
+
+    @patch("sjifire.neris.client.NerisClient")
+    def test_incremental_stops_on_old_page(self, mock_client_cls):
+        """Stops paginating when an entire page is older than the checkpoint."""
+        mock_client = MagicMock()
+        mock_client.list_incidents.side_effect = [
+            {
+                "incidents": [
+                    {**_SAMPLE_INCIDENTS[0], "last_modified": "2026-02-20T00:00:00+00:00"},
+                ],
+                "next_cursor": "page2",
+            },
+            {
+                "incidents": [
+                    {**_SAMPLE_INCIDENTS[1], "last_modified": "2026-02-01T00:00:00+00:00"},
+                ],
+                "next_cursor": "page3",
+            },
+        ]
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        summaries = fetch_neris_summaries(since="2026-02-15T00:00:00+00:00")
+
+        # Got 1 from first page, stopped at second (all old)
+        assert len(summaries) == 1
+        # Should NOT have fetched page 3
+        assert mock_client.list_incidents.call_count == 2
 
 
 class TestRefreshNerisReportCache:
@@ -348,26 +389,25 @@ class TestNerisSync:
         assert len(result["reports"]) == 1
 
     @patch("sjifire.ops.tasks.neris_sync.fetch_neris_summaries")
-    async def test_first_sync_no_checkpoint_full_fetch(self, mock_fetch):
-        """First sync passes last_modified=None for full fetch."""
+    async def test_first_sync_full_fetch(self, mock_fetch):
+        """First sync (no checkpoint) passes since=None."""
         mock_fetch.return_value = []
 
         await neris_sync()
 
-        mock_fetch.assert_called_once_with(last_modified=None)
+        mock_fetch.assert_called_once_with(since=None)
 
     @patch("sjifire.ops.tasks.neris_sync.fetch_neris_summaries")
-    async def test_incremental_sync_passes_last_modified(self, mock_fetch):
-        """Subsequent sync passes stored checkpoint as last_modified."""
+    async def test_incremental_sync_passes_checkpoint(self, mock_fetch):
+        """Subsequent sync passes stored checkpoint as since."""
         mock_fetch.return_value = []
 
-        # Set a checkpoint
         async with NerisReportStore() as store:
             await store.set_sync_checkpoint("2026-02-15T10:30:00+00:00")
 
         await neris_sync()
 
-        mock_fetch.assert_called_once_with(last_modified="2026-02-15T10:30:00+00:00")
+        mock_fetch.assert_called_once_with(since="2026-02-15T10:30:00+00:00")
 
     @patch("sjifire.ops.tasks.neris_sync.fetch_neris_summaries")
     async def test_checkpoint_stored_after_sync(self, mock_fetch):
@@ -379,7 +419,6 @@ class TestNerisSync:
         async with NerisReportStore() as store:
             checkpoint = await store.get_sync_checkpoint()
         assert checkpoint is not None
-        # Should be a recent ISO timestamp
         parsed = datetime.fromisoformat(checkpoint)
         assert parsed.tzinfo is not None
 

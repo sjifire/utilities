@@ -14,18 +14,46 @@ from datetime import UTC, datetime
 
 from sjifire.ops.tasks.registry import register
 
+# The NERIS API's last_modified query *filter* is broken as of 2026-02
+# (rejects all formats with "Invalid relative datetime expression").
+# Workaround: sort by last_modified descending and stop paginating
+# once we see records older than our checkpoint.
+
 logger = logging.getLogger(__name__)
 
 
-def fetch_neris_summaries(*, last_modified: str | None = None) -> list[dict]:
-    """Fetch all NERIS incidents and extract summary dicts.
+def _extract_summary(inc: dict) -> dict:
+    """Extract a summary dict from a raw NERIS incident."""
+    dispatch = inc.get("dispatch", {})
+    types = inc.get("incident_types", [])
+    status_info = inc.get("incident_status", {})
+
+    return {
+        "source": "neris",
+        "neris_id": inc.get("neris_id", ""),
+        "incident_number": dispatch.get("incident_number", ""),
+        "determinant_code": str(dispatch.get("determinant_code") or ""),
+        "status": status_info.get("status", ""),
+        "incident_type": types[0].get("type", "") if types else "",
+        "call_create": dispatch.get("call_create", ""),
+    }
+
+
+def fetch_neris_summaries(*, since: str | None = None) -> list[dict]:
+    """Fetch NERIS incidents and extract summary dicts.
 
     This is a **blocking** call (uses ``NerisClient`` which is sync).
     Run via ``asyncio.to_thread()`` in async contexts.
 
+    When ``since`` is provided, fetches pages sorted by last_modified
+    descending and stops once all records on a page are older than
+    the cutoff. This avoids fetching the full history on every sync.
+
+    When ``since`` is None, fetches all incidents (first run).
+
     Args:
-        last_modified: Optional ISO timestamp to filter by last modification.
-            When set, only incidents modified after this time are returned.
+        since: ISO timestamp cutoff. Only incidents modified after
+            this time are returned.
 
     Returns:
         List of summary dicts with keys: neris_id, incident_number,
@@ -33,32 +61,45 @@ def fetch_neris_summaries(*, last_modified: str | None = None) -> list[dict]:
     """
     from sjifire.neris.client import NerisClient
 
-    kwargs: dict = {}
-    if last_modified:
-        kwargs["last_modified"] = last_modified
-
     with NerisClient() as client:
-        incidents = client.get_all_incidents(**kwargs)
+        if since is None:
+            # First run: fetch everything
+            incidents = client.get_all_incidents()
+            return [_extract_summary(inc) for inc in incidents]
 
-    summaries: list[dict] = []
-    for inc in incidents:
-        dispatch = inc.get("dispatch", {})
-        types = inc.get("incident_types", [])
-        status_info = inc.get("incident_status", {})
+        # Incremental: page through newest-first, stop when all
+        # records on a page are older than the checkpoint.
+        summaries: list[dict] = []
+        cursor = None
 
-        summaries.append(
-            {
-                "source": "neris",
-                "neris_id": inc.get("neris_id", ""),
-                "incident_number": dispatch.get("incident_number", ""),
-                "determinant_code": str(dispatch.get("determinant_code") or ""),
-                "status": status_info.get("status", ""),
-                "incident_type": types[0].get("type", "") if types else "",
-                "call_create": dispatch.get("call_create", ""),
-            }
-        )
+        while True:
+            result = client.list_incidents(
+                page_size=100,
+                cursor=cursor,
+                sort_by="last_modified",
+                sort_direction="DESCENDING",
+            )
+            incidents = result.get("incidents", [])
+            if not incidents:
+                break
 
-    return summaries
+            page_has_new = False
+            for inc in incidents:
+                modified = inc.get("last_modified", "")
+                if modified > since:
+                    summaries.append(_extract_summary(inc))
+                    page_has_new = True
+
+            # If no record on this page was newer than the checkpoint,
+            # everything beyond is older — stop paginating.
+            if not page_has_new:
+                break
+
+            cursor = result.get("next_cursor")
+            if not cursor:
+                break
+
+        return summaries
 
 
 async def refresh_neris_report_cache(summaries: list[dict]) -> int:
@@ -138,8 +179,9 @@ async def _sync_neris_to_local(summaries: list[dict]) -> int:
 async def neris_sync() -> int:
     """Fetch from NERIS API and write to Cosmos DB.
 
-    Uses a high-water mark checkpoint for incremental syncs.
-    On first run (no checkpoint), fetches all records.
+    Uses a checkpoint for incremental syncs: sorts by last_modified
+    descending and stops when records are older than the checkpoint.
+    First run (no checkpoint) fetches all records.
 
     Returns:
         Number of reports synced
@@ -151,11 +193,11 @@ async def neris_sync() -> int:
         checkpoint = await store.get_sync_checkpoint()
 
     if checkpoint:
-        logger.info("Incremental NERIS sync (last_modified=%s)", checkpoint)
+        logger.info("Incremental NERIS sync (since=%s)", checkpoint)
     else:
         logger.info("Full NERIS sync (no checkpoint)")
 
-    summaries = await asyncio.to_thread(fetch_neris_summaries, last_modified=checkpoint)
+    summaries = await asyncio.to_thread(fetch_neris_summaries, since=checkpoint)
     logger.info("Fetched %d NERIS summaries from API", len(summaries))
 
     count = await refresh_neris_report_cache(summaries)
