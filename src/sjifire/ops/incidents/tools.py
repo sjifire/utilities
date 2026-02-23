@@ -277,6 +277,154 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
     if timestamps:
         prefill["timestamps"] = timestamps
 
+    # --- Actions & tactics (top-level in NERIS response) ---
+    actions_tactics = record.get("actions_tactics") or {}
+    action_noaction = actions_tactics.get("action_noaction") or {}
+    action_type = action_noaction.get("type")  # "ACTION" or "NOACTION"
+    if action_type:
+        prefill["action_taken"] = action_type
+    if action_type == "NOACTION":
+        noaction_type = action_noaction.get("noaction_type")
+        if noaction_type:
+            prefill["noaction_reason"] = noaction_type
+    elif action_type == "ACTION":
+        actions = action_noaction.get("actions") or []
+        if actions:
+            prefill["action_codes"] = [a for a in actions if isinstance(a, str) and a]
+
+    # --- Additional incident types ---
+    if len(types) > 1:
+        prefill["additional_incident_types"] = [
+            t.get("type", "") for t in types[1:] if t.get("type")
+        ]
+
+    # --- Fire detail (top-level in NERIS response) ---
+    extras: dict = {}
+    fire_detail = record.get("fire_detail") or {}
+    if fire_detail:
+        location_detail = fire_detail.get("location_detail") or {}
+        arrival = location_detail.get("arrival_condition")
+        if arrival:
+            prefill["arrival_conditions"] = arrival
+        for fd_key, extras_key in (
+            ("damage_type", "fire_bldg_damage"),
+            ("room_of_origin_type", "room_of_origin"),
+            ("floor_of_origin", "floor_of_origin"),
+            ("cause", "fire_cause_in"),
+        ):
+            val = location_detail.get(fd_key)
+            if val is not None:
+                extras[extras_key] = val
+
+        # Outside fire: location_detail.type == "OUTSIDE"
+        if location_detail.get("type") == "OUTSIDE":
+            cause = location_detail.get("cause")
+            if cause:
+                prefill["outside_fire_cause"] = cause
+            acres = location_detail.get("acres_burned")
+            if acres is not None:
+                prefill["outside_fire_acres"] = acres
+
+        water_supply = fire_detail.get("water_supply")
+        if water_supply:
+            extras["water_supply"] = water_supply
+        investigation = fire_detail.get("investigation_needed")
+        if investigation:
+            extras["fire_investigation"] = investigation
+        inv_types = fire_detail.get("investigation_types")
+        if inv_types:
+            extras["fire_investigation_types"] = inv_types
+
+    # --- Alarms & suppression (top-level in NERIS response) ---
+    for alarm_section, extras_key in (
+        ("smoke_alarm", "smoke_alarm_presence"),
+        ("fire_alarm", "fire_alarm_presence"),
+        ("fire_suppression", "sprinkler_presence"),
+    ):
+        alarm = record.get(alarm_section) or {}
+        presence = alarm.get("presence") or {}
+        ptype = presence.get("type")
+        if ptype:
+            # Map NERIS presence types to our format
+            # NERIS uses: PRESENT, NOT_PRESENT, NOT_APPLICABLE
+            extras[extras_key] = ptype
+
+    # --- Hazards (top-level in NERIS response) ---
+    electric_hazards = record.get("electric_hazards") or []
+    if electric_hazards:
+        extras["electric_hazards"] = True
+    powergen = record.get("powergen_hazards") or []
+    for pg in powergen:
+        pg_type = pg.get("type") if isinstance(pg, dict) else None
+        if pg_type:
+            if "SOLAR" in pg_type.upper():
+                extras["solar_present"] = "YES"
+            elif "BATTERY" in pg_type.upper() or "ESS" in pg_type.upper():
+                extras["battery_ess_present"] = "YES"
+            elif "GENERATOR" in pg_type.upper():
+                extras["generator_present"] = "YES"
+    csst = record.get("csst_hazard") or {}
+    if csst:
+        extras["csst_present"] = "YES" if csst.get("lightning_suspected") else "UNKNOWN"
+
+    # --- People & occupancy (in base) ---
+    people_present = base.get("people_present")
+    if people_present is not None:
+        prefill["people_present"] = people_present
+    displaced = base.get("displacement_count")
+    if displaced is not None:
+        prefill["displaced_count"] = displaced
+
+    # --- Impediment narrative (in base) ---
+    impediment = base.get("impediment_narrative")
+    if impediment:
+        extras["impediment_narrative"] = impediment
+
+    # --- Medical details (top-level in NERIS response) ---
+    medical_details = record.get("medical_details") or []
+    if medical_details:
+        extras["patient_count"] = len(medical_details)
+        for i, med in enumerate(medical_details):
+            prefix = "" if len(medical_details) == 1 else f"patient_{i + 1}_"
+            care = med.get("patient_care_evaluation")
+            if care:
+                extras[f"{prefix}care_disposition"] = care
+            transport = med.get("transport_disposition")
+            if transport:
+                extras[f"{prefix}transport_disposition"] = transport
+            status = med.get("patient_status")
+            if status:
+                extras[f"{prefix}patient_status"] = status
+
+    # --- Tactic timestamps (top-level in NERIS response) ---
+    tactic_ts = record.get("tactic_timestamps") or {}
+    for ts_key in (
+        "command_established",
+        "water_on_fire",
+        "fire_under_control",
+        "fire_knocked_down",
+        "suppression_complete",
+        "primary_search_begin",
+        "primary_search_complete",
+        "extrication_complete",
+    ):
+        val = tactic_ts.get(ts_key)
+        if val:
+            timestamps[ts_key] = val if isinstance(val, str) else str(val)
+
+    # --- Casualty/rescue data (top-level in NERIS response) ---
+    casualty_rescues = record.get("casualty_rescues") or []
+    for cr in casualty_rescues:
+        rescue = cr.get("rescue") or {}
+        if rescue:
+            for rk in ("rescue_mode", "rescue_actions", "rescue_impediment", "rescue_elevation"):
+                val = rescue.get(rk)
+                if val is not None:
+                    extras[rk] = val
+
+    if extras:
+        prefill["extras"] = extras
+
     return prefill
 
 
@@ -1417,6 +1565,55 @@ async def _apply_neris_import_to_existing(
         doc.dispatch_comments = dispatch_prefill["dispatch_comments"]
         fields_changed.append("dispatch_comments")
 
+    # Actions & tactics from NERIS
+    if "action_taken" in neris_prefill and not doc.action_taken:
+        doc.action_taken = neris_prefill["action_taken"]
+        fields_changed.append("action_taken")
+    if "noaction_reason" in neris_prefill and not doc.noaction_reason:
+        doc.noaction_reason = neris_prefill["noaction_reason"]
+        fields_changed.append("noaction_reason")
+    if "action_codes" in neris_prefill and not doc.action_codes:
+        doc.action_codes = neris_prefill["action_codes"]
+        fields_changed.append("action_codes")
+
+    # Additional incident types
+    if "additional_incident_types" in neris_prefill and not doc.additional_incident_types:
+        doc.additional_incident_types = neris_prefill["additional_incident_types"]
+        fields_changed.append("additional_incident_types")
+
+    # Fire-specific first-class fields
+    if "arrival_conditions" in neris_prefill and not doc.arrival_conditions:
+        doc.arrival_conditions = neris_prefill["arrival_conditions"]
+        fields_changed.append("arrival_conditions")
+    if "outside_fire_cause" in neris_prefill and not doc.outside_fire_cause:
+        doc.outside_fire_cause = neris_prefill["outside_fire_cause"]
+        fields_changed.append("outside_fire_cause")
+    if "outside_fire_acres" in neris_prefill and doc.outside_fire_acres is None:
+        doc.outside_fire_acres = neris_prefill["outside_fire_acres"]
+        fields_changed.append("outside_fire_acres")
+
+    # People & occupancy
+    if "people_present" in neris_prefill and doc.people_present is None:
+        doc.people_present = neris_prefill["people_present"]
+        fields_changed.append("people_present")
+    if "displaced_count" in neris_prefill and doc.displaced_count is None:
+        doc.displaced_count = neris_prefill["displaced_count"]
+        fields_changed.append("displaced_count")
+    if "automatic_alarm" in neris_prefill and doc.automatic_alarm is None:
+        doc.automatic_alarm = neris_prefill["automatic_alarm"]
+        fields_changed.append("automatic_alarm")
+
+    # Extras (fire module details, alarms, hazards, medical, rescue)
+    neris_extras = neris_prefill.get("extras", {})
+    if neris_extras:
+        merged_extras = {**doc.extras}
+        for k, v in neris_extras.items():
+            if k not in merged_extras:
+                merged_extras[k] = v
+        if merged_extras != doc.extras:
+            doc.extras = merged_extras
+            fields_changed.append("extras")
+
     # Assign crew from schedule to units
     if crew and doc.units:
         _overlay_crew_from_schedule(doc.units, crew)
@@ -1487,8 +1684,14 @@ async def _create_incident_from_neris(
     # Merge: dispatch base, NERIS overlay
     # Start with dispatch data as the base
     merged: dict = {**dispatch_prefill}
-    # NERIS overwrites for fields it provides (incident_type, narrative, address)
-    for key in ("incident_type", "narrative", "address", "city", "state", "neris_incident_id", "location_use"):
+    # NERIS overwrites for fields it provides
+    for key in (
+        "incident_type", "narrative", "address", "city", "state",
+        "neris_incident_id", "location_use", "action_taken", "noaction_reason",
+        "action_codes", "additional_incident_types", "arrival_conditions",
+        "outside_fire_cause", "outside_fire_acres", "people_present",
+        "displaced_count", "automatic_alarm",
+    ):
         if key in neris_prefill:
             merged[key] = neris_prefill[key]
     # For coordinates, dispatch is the only source
@@ -1509,6 +1712,11 @@ async def _create_incident_from_neris(
     if crew and units:
         _overlay_crew_from_schedule(units, crew)
 
+    # Merge extras: station + any NERIS extras (fire module, alarms, hazards, etc.)
+    merged_extras = {"station": station}
+    neris_extras = neris_prefill.get("extras", {})
+    merged_extras.update(neris_extras)
+
     doc = IncidentDocument(
         incident_number=incident_number,
         incident_datetime=incident_dt,
@@ -1524,7 +1732,17 @@ async def _create_incident_from_neris(
         narrative=merged.get("narrative", ""),
         dispatch_comments=merged.get("dispatch_comments", ""),
         neris_incident_id=merged.get("neris_incident_id"),
-        extras={"station": station},
+        action_taken=merged.get("action_taken"),
+        noaction_reason=merged.get("noaction_reason"),
+        action_codes=merged.get("action_codes", []),
+        additional_incident_types=merged.get("additional_incident_types", []),
+        arrival_conditions=merged.get("arrival_conditions"),
+        outside_fire_cause=merged.get("outside_fire_cause"),
+        outside_fire_acres=merged.get("outside_fire_acres"),
+        people_present=merged.get("people_present"),
+        displaced_count=merged.get("displaced_count"),
+        automatic_alarm=merged.get("automatic_alarm"),
+        extras=merged_extras,
         created_by=user.email,
     )
 
