@@ -1338,7 +1338,7 @@ function dashboard() {
       if (this.$refs.chatInput) this.$refs.chatInput.style.height = 'auto';
 
       try {
-        await this._centrifuge.namedRPC('send_general_message', {
+        await this._centrifuge.rpc('send_general_message', {
           message: text,
           context: {
             calls: this.reportsCalls.map(c => ({

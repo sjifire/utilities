@@ -1170,7 +1170,7 @@ function chatApp() {
       }
 
       try {
-        await this._centrifuge.namedRPC('send_message', payload);
+        await this._centrifuge.rpc('send_message', payload);
         // RPC succeeded — events arrive on same WS, in order
       } catch (err) {
         if (err.code === 409) {
