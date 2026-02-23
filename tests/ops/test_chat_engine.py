@@ -77,32 +77,38 @@ class TestBuildSystemPrompt:
         assert "Jordan Pollack" in prompt
         assert "jpollack@sjifire.org" in prompt
 
-    def test_does_not_include_dynamic_data(self):
-        """System prompt should not contain incident/dispatch/crew section headers."""
-        prompt = _build_system_prompt("Test User", "test@sjifire.org")
+    def test_includes_stable_incident_data(self):
+        """System prompt should include dispatch/crew/personnel (cached per incident)."""
+        prompt = _build_system_prompt(
+            "Test User", "test@sjifire.org",
+            dispatch_json='{"nature":"FIRE"}', crew_json="[]", personnel_json="[]",
+        )
+        assert "DISPATCH DATA" in prompt
+        assert "CREW ON DUTY" in prompt
+        assert "PERSONNEL ROSTER" in prompt
+        assert "FIRE" in prompt
+        # Incident state is NOT in system prompt (changes between turns)
         assert "CURRENT INCIDENT STATE:\n" not in prompt
-        assert "DISPATCH DATA:\n" not in prompt
-        assert "CREW ON DUTY:\n" not in prompt
 
 
 class TestBuildContextMessage:
     def test_includes_incident_data(self):
-        msg = _build_context_message('{"incident_number": "26-001234"}', "{}", "[]", "[]")
+        msg = _build_context_message('{"incident_number": "26-001234"}')
         assert "26-001234" in msg
         assert "CURRENT INCIDENT STATE" in msg
 
-    def test_includes_all_sections(self):
-        msg = _build_context_message("{}", "{}", "[]", "[]")
+    def test_only_incident_and_attachments(self):
+        msg = _build_context_message("{}")
         assert "CURRENT INCIDENT STATE" in msg
-        assert "DISPATCH DATA" in msg
-        assert "CREW ON DUTY" in msg
-        assert "PERSONNEL ROSTER" in msg
+        # Stable data is in the system prompt now, not the context preamble
+        assert "DISPATCH DATA" not in msg
+        assert "CREW ON DUTY" not in msg
+        assert "PERSONNEL ROSTER" not in msg
 
-    def test_includes_personnel_roster(self):
-        roster = '[{"name": "Jane Doe", "email": "jdoe@sjifire.org"}]'
-        msg = _build_context_message("{}", "{}", "[]", roster)
-        assert "Jane Doe" in msg
-        assert "PERSONNEL ROSTER" in msg
+    def test_includes_attachments_when_present(self):
+        msg = _build_context_message("{}", attachments_summary="- photo.jpg (id: abc)")
+        assert "ATTACHMENTS ON FILE" in msg
+        assert "photo.jpg" in msg
 
 
 class TestTrimMessages:
@@ -987,13 +993,13 @@ class TestAttachmentsSummary:
 
     def test_context_message_includes_attachments_section(self):
         summary = "- Scene photo (id: att-123, image/jpeg, 150KB)"
-        msg = _build_context_message("{}", "{}", "[]", "[]", summary)
+        msg = _build_context_message("{}", attachments_summary=summary)
         assert "ATTACHMENTS ON FILE:" in msg
         assert "att-123" in msg
         assert "Scene photo" in msg
 
     def test_context_message_omits_attachments_when_empty(self):
-        msg = _build_context_message("{}", "{}", "[]", "[]", "")
+        msg = _build_context_message("{}", attachments_summary="")
         assert "ATTACHMENTS ON FILE" not in msg
 
     async def test_fetch_context_includes_attachment_ids(self):

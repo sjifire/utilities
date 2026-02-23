@@ -95,13 +95,20 @@ def _load_doc(name: str) -> str:
 def _build_system_prompt(
     user_name: str,
     user_email: str,
+    dispatch_json: str = "{}",
+    crew_json: str = "[]",
+    personnel_json: str = "[]",
 ) -> str:
-    """Build the stable system prompt for Claude.
+    """Build the system prompt for Claude.
 
-    Contains only static content (persona, instructions, NERIS codes) and
-    session-stable context (personnel, author). Dynamic data (incident,
-    dispatch, crew) goes in the messages array so this prompt stays
-    identical across turns and Anthropic's prompt cache hits every time.
+    Layout (order matters for Anthropic prefix caching):
+    1. Static content first (persona, instructions, NERIS codes, cheat sheet)
+       — cached across ALL conversations.
+    2. Per-incident stable data last (dispatch, crew, personnel)
+       — cached within one conversation after turn 1.
+
+    Incident state and attachments go in the messages array via
+    ``_build_context_message`` because they change after tool calls.
     """
     org = get_org_config()
     prompt = _load_doc("incident-chat-prompt.md").format(
@@ -113,35 +120,31 @@ def _build_system_prompt(
     cheat_sheet = _load_doc("neris/neris-cheat-sheet.md")
 
     sections = [
+        # --- Static (cached across all conversations) ---
         prompt,
         instructions,
         f"REPORT AUTHOR: {user_name} ({user_email})",
         _get_all_neris_incident_types(),
         cheat_sheet,
+        # --- Per-incident stable (cached within conversation after turn 1) ---
+        f"DISPATCH DATA:\n{dispatch_json}",
+        f"CREW ON DUTY:\n{crew_json}",
+        f"PERSONNEL ROSTER (use to match last names to full names + emails):\n{personnel_json}",
     ]
     return "\n\n".join(sections)
 
 
 def _build_context_message(
     incident_json: str,
-    dispatch_json: str,
-    crew_json: str,
-    personnel_json: str,
     attachments_summary: str = "",
 ) -> str:
-    """Build the context preamble injected into the first user message.
+    """Build the context preamble injected into the user message.
 
-    This data changes between turns (incident state updates after tool
-    calls), so it lives in the messages array rather than the system
-    prompt. Anthropic's prompt cache covers the stable system prompt;
-    this message is cheap (a few KB) and always fresh.
+    Only includes data that changes between turns (incident state after
+    tool calls, attachments after uploads). Stable data (dispatch, crew,
+    personnel) lives in the system prompt where Anthropic caches it.
     """
-    parts = [
-        f"CURRENT INCIDENT STATE:\n{incident_json}",
-        f"DISPATCH DATA:\n{dispatch_json}",
-        f"CREW ON DUTY:\n{crew_json}",
-        "PERSONNEL ROSTER (use to match last names to full names + emails):\n" + personnel_json,
-    ]
+    parts = [f"CURRENT INCIDENT STATE:\n{incident_json}"]
     if attachments_summary:
         parts.append(f"ATTACHMENTS ON FILE:\n{attachments_summary}")
     return "\n\n".join(parts)
@@ -374,7 +377,7 @@ async def _fetch_context(
     async with IncidentStore() as store:
         doc = await store.get_by_id(incident_id)
     if doc:
-        incident_json = json.dumps(doc.model_dump(mode="json"), indent=2, default=str)
+        incident_json = json.dumps(doc.model_dump(mode="json"), default=str)
 
     # Dispatch, crew, personnel — use snapshot if available
     if snapshot is not None:
@@ -419,7 +422,7 @@ async def _fetch_context(
                             slim["unit_times_table"] = _format_unit_times_table(
                                 unit_times, tr, alarm_time=at
                             )
-                    dispatch_json = json.dumps(slim, indent=2, default=str)
+                    dispatch_json = json.dumps(slim, default=str)
                     if dispatch.time_reported:
                         incident_hour = dispatch.time_reported.hour
             except Exception:
@@ -434,7 +437,7 @@ async def _fetch_context(
                     target_date=doc.incident_datetime.date().isoformat(),
                     target_hour=incident_hour,
                 )
-                crew_json = json.dumps(crew_data, indent=2, default=str)
+                crew_json = json.dumps(crew_data, default=str)
             except Exception:
                 logger.warning("Failed to fetch crew for %s", doc.incident_datetime, exc_info=True)
         else:
@@ -445,7 +448,7 @@ async def _fetch_context(
         personnel_json = "[]"
         try:
             personnel = await personnel_tools.get_operational_personnel()
-            personnel_json = json.dumps(personnel, indent=2, default=str)
+            personnel_json = json.dumps(personnel, default=str)
         except Exception:
             logger.warning("Failed to fetch personnel", exc_info=True)
 
@@ -574,23 +577,24 @@ async def run_chat(
             )
             return
 
-        # Build stable system prompt (static content only — cached by Anthropic)
-        system_prompt = _build_system_prompt(user.name, user.email)
-        context_preamble = _build_context_message(
-            incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
+        # System prompt: static + per-incident stable data (cached by Anthropic)
+        system_prompt = _build_system_prompt(
+            user.name, user.email, dispatch_json, crew_json, personnel_json
         )
+        # Context preamble: only data that changes between turns
+        context_preamble = _build_context_message(incident_json, attachments_summary)
 
         # Log context sizes for debugging token usage
         logger.info(
-            "Context sizes (chars): system=%d incident=%d dispatch=%d crew=%d "
-            "personnel=%d attachments=%d preamble=%d",
+            "Context sizes (chars): system=%d (dispatch=%d crew=%d personnel=%d) "
+            "preamble=%d (incident=%d attachments=%d)",
             len(system_prompt),
-            len(incident_json),
             len(dispatch_json),
             len(crew_json),
             len(personnel_json),
-            len(attachments_summary),
             len(context_preamble),
+            len(incident_json),
+            len(attachments_summary),
         )
 
         # Build messages for Claude API

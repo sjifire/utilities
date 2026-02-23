@@ -376,31 +376,30 @@ async def debug_context(request: Request) -> Response:
         personnel_json,
         attachments_summary,
     ) = await _fetch_context(incident_id, user)
-    system_prompt = _build_system_prompt(user.name, user.email)
-    context_preamble = _build_context_message(
-        incident_json, dispatch_json, crew_json, personnel_json, attachments_summary
+    system_prompt = _build_system_prompt(
+        user.name, user.email, dispatch_json, crew_json, personnel_json
     )
+    context_preamble = _build_context_message(incident_json, attachments_summary)
 
     return JSONResponse(
         {
             "sizes": {
                 "system_prompt": len(system_prompt),
-                "incident_json": len(incident_json),
-                "dispatch_json": len(dispatch_json),
-                "crew_json": len(crew_json),
-                "personnel_json": len(personnel_json),
-                "attachments_summary": len(attachments_summary),
                 "context_preamble": len(context_preamble),
                 "total": len(system_prompt) + len(context_preamble),
             },
             "system_prompt": system_prompt,
+            "system_prompt_components": {
+                "DISPATCH_DATA": json.loads(dispatch_json) if dispatch_json != "{}" else {},
+                "CREW_ON_DUTY": json.loads(crew_json) if crew_json != "[]" else [],
+                "PERSONNEL_ROSTER": (json.loads(personnel_json) if personnel_json != "[]" else []),
+            },
             "context_preamble": context_preamble,
-            "components": {
-                "incident_json": json.loads(incident_json) if incident_json != "{}" else {},
-                "dispatch_json": json.loads(dispatch_json) if dispatch_json != "{}" else {},
-                "crew_json": json.loads(crew_json) if crew_json != "[]" else [],
-                "personnel_json": json.loads(personnel_json) if personnel_json != "[]" else [],
-                "attachments_summary": attachments_summary,
+            "context_preamble_components": {
+                "CURRENT_INCIDENT_STATE": (
+                    json.loads(incident_json) if incident_json != "{}" else {}
+                ),
+                "ATTACHMENTS_ON_FILE": attachments_summary or None,
             },
         }
     )
