@@ -12,13 +12,14 @@ Chat message sending is handled via Centrifugo RPC proxy (see centrifugo.py).
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from sjifire.core.config import local_now
+from sjifire.core.config import get_timezone, local_now
 from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user, set_current_user
 from sjifire.ops.chat.store import ConversationStore
 from sjifire.ops.dispatch.store import DispatchStore
@@ -28,6 +29,36 @@ logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 _jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=True)
+
+
+def _fmt_datetime(value: object, fmt: str = "%b %d, %Y %H:%M") -> str:
+    """Format an ISO datetime string or datetime for display."""
+    if not value:
+        return "--"
+    if isinstance(value, str):
+        from datetime import datetime as dt
+
+        try:
+            value = dt.fromisoformat(value)
+        except ValueError:
+            return value  # Return as-is if unparseable
+    if isinstance(value, datetime):
+        tz = get_timezone()
+        if value.tzinfo is None:
+            from datetime import UTC
+
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(tz).strftime(fmt)
+    return str(value)
+
+
+def _fmt_time(value: object) -> str:
+    """Format to time-only (HH:MM)."""
+    return _fmt_datetime(value, fmt="%H:%M")
+
+
+_jinja_env.filters["fmt_dt"] = _fmt_datetime
+_jinja_env.filters["fmt_time"] = _fmt_time
 
 
 def _forbidden_page() -> Response:
@@ -381,12 +412,19 @@ async def debug_context(request: Request) -> Response:
     )
     context_preamble = _build_context_message(incident_json, attachments_summary)
 
+    total_chars = len(system_prompt) + len(context_preamble)
     return JSONResponse(
         {
-            "sizes": {
+            "sizes_chars": {
                 "system_prompt": len(system_prompt),
                 "context_preamble": len(context_preamble),
-                "total": len(system_prompt) + len(context_preamble),
+                "total": total_chars,
+            },
+            "sizes_tokens_approx": {
+                "system_prompt": len(system_prompt) // 4,
+                "context_preamble": len(context_preamble) // 4,
+                "total": total_chars // 4,
+                "_note": "~4 chars/token estimate; actual varies",
             },
             "system_prompt": system_prompt,
             "system_prompt_components": {

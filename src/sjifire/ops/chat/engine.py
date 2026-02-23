@@ -411,8 +411,10 @@ async def _fetch_context(
                     if dispatch.analysis:
                         analysis = dispatch.analysis
                         # Include analysis fields minus unit_times (formatted separately)
+                        # and on_duty_crew (already in CREW_ON_DUTY section)
                         analysis_dict = analysis.model_dump(mode="json")
                         unit_times = analysis_dict.pop("unit_times", [])
+                        analysis_dict.pop("on_duty_crew", None)
                         slim["analysis"] = analysis_dict
                         # Format unit_times as a readable table for easy review
                         if unit_times:
