@@ -654,7 +654,7 @@ async def create_incident(
                     dt_for_schedule = datetime.fromisoformat(psap)
                     break
                 except ValueError:
-                    pass
+                    pass  # Invalid ISO timestamp — try next source
         schedule_crew = await _get_crew_for_incident(dt_for_schedule)
 
         comparison = _build_import_comparison(

@@ -5,14 +5,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import sjifire.ops.auth
 from sjifire.ops.auth import UserContext, set_current_user
 
 
 @pytest.fixture(autouse=True)
 def _editor_group_env():
     """Set the editor group ID for all tests."""
-    import sjifire.ops.auth
-
     sjifire.ops.auth._EDITOR_GROUP_ID = None
     with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "officer-group"}):
         yield
