@@ -90,9 +90,10 @@ async def check_is_editor(user_id: str, *, fallback: bool = False) -> bool:
     try:
         result = await _check_member_groups(user_id, group_id)
         _editor_cache[user_id] = (result, time.monotonic() + _EDITOR_CACHE_TTL)
+        logger.info("Editor check for %s: %s (via Graph API)", user_id, result)
         return result
     except Exception:
-        logger.debug("Graph API group check failed for %s, using fallback", user_id, exc_info=True)
+        logger.warning("Graph API group check failed for %s, using fallback=%s", user_id, fallback, exc_info=True)
         return fallback
 
 
