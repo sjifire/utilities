@@ -37,9 +37,11 @@ def _editor_group_env():
     import sjifire.ops.auth
 
     sjifire.ops.auth._EDITOR_GROUP_ID = None
+    sjifire.ops.auth._editor_cache.clear()
     with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "officer-group"}):
         yield
     sjifire.ops.auth._EDITOR_GROUP_ID = None
+    sjifire.ops.auth._editor_cache.clear()
 
 
 @pytest.fixture
@@ -84,31 +86,31 @@ def sample_doc():
 
 # Access control tests
 class TestViewAccess:
-    def test_creator_can_view(self, sample_doc):
-        assert _check_view_access(sample_doc, "ff@sjifire.org", is_editor=False)
+    async def test_creator_can_view(self, sample_doc):
+        assert await _check_view_access(sample_doc, "ff@sjifire.org", is_editor=False)
 
-    def test_crew_can_view(self, sample_doc):
-        assert _check_view_access(sample_doc, "crew1@sjifire.org", is_editor=False)
+    async def test_crew_can_view(self, sample_doc):
+        assert await _check_view_access(sample_doc, "crew1@sjifire.org", is_editor=False)
 
-    def test_officer_can_view(self, sample_doc):
-        assert _check_view_access(sample_doc, "random@sjifire.org", is_editor=True)
+    async def test_officer_can_view(self, sample_doc):
+        assert await _check_view_access(sample_doc, "random@sjifire.org", is_editor=True)
 
-    def test_stranger_cannot_view(self, sample_doc):
-        assert not _check_view_access(sample_doc, "stranger@sjifire.org", is_editor=False)
+    async def test_stranger_cannot_view(self, sample_doc):
+        assert not await _check_view_access(sample_doc, "stranger@sjifire.org", is_editor=False)
 
 
 class TestEditAccess:
-    def test_creator_can_edit(self, sample_doc):
-        assert _check_edit_access(sample_doc, "ff@sjifire.org", is_editor=False)
+    async def test_creator_can_edit(self, sample_doc):
+        assert await _check_edit_access(sample_doc, "ff@sjifire.org", is_editor=False)
 
-    def test_officer_can_edit(self, sample_doc):
-        assert _check_edit_access(sample_doc, "random@sjifire.org", is_editor=True)
+    async def test_officer_can_edit(self, sample_doc):
+        assert await _check_edit_access(sample_doc, "random@sjifire.org", is_editor=True)
 
-    def test_crew_cannot_edit(self, sample_doc):
-        assert not _check_edit_access(sample_doc, "crew1@sjifire.org", is_editor=False)
+    async def test_crew_cannot_edit(self, sample_doc):
+        assert not await _check_edit_access(sample_doc, "crew1@sjifire.org", is_editor=False)
 
-    def test_stranger_cannot_edit(self, sample_doc):
-        assert not _check_edit_access(sample_doc, "stranger@sjifire.org", is_editor=False)
+    async def test_stranger_cannot_edit(self, sample_doc):
+        assert not await _check_edit_access(sample_doc, "stranger@sjifire.org", is_editor=False)
 
 
 # Tool tests with mocked store

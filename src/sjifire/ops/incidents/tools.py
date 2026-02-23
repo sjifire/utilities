@@ -15,7 +15,7 @@ import logging
 from datetime import UTC, datetime
 
 from sjifire.core.config import get_org_config, get_timezone
-from sjifire.ops.auth import get_current_user
+from sjifire.ops.auth import check_is_editor, get_current_user
 from sjifire.ops.incidents.models import (
     EditEntry,
     IncidentDocument,
@@ -678,14 +678,26 @@ def _build_import_comparison(
     return comparison
 
 
-def _check_view_access(doc: IncidentDocument, user_email: str, is_editor: bool) -> bool:
-    """Check if user can view this incident."""
-    return is_editor or doc.created_by == user_email or user_email in doc.personnel_emails()
+async def _check_view_access(doc: IncidentDocument, user_email: str, is_editor: bool) -> bool:
+    """Check if user can view this incident (live Graph API editor check)."""
+    if doc.created_by == user_email or user_email in doc.personnel_emails():
+        return True
+    try:
+        user = get_current_user()
+        return await check_is_editor(user.user_id, fallback=is_editor)
+    except RuntimeError:
+        return is_editor
 
 
-def _check_edit_access(doc: IncidentDocument, user_email: str, is_editor: bool) -> bool:
-    """Check if user can edit this incident."""
-    return is_editor or doc.created_by == user_email
+async def _check_edit_access(doc: IncidentDocument, user_email: str, is_editor: bool) -> bool:
+    """Check if user can edit this incident (live Graph API editor check)."""
+    if doc.created_by == user_email:
+        return True
+    try:
+        user = get_current_user()
+        return await check_is_editor(user.user_id, fallback=is_editor)
+    except RuntimeError:
+        return is_editor
 
 
 def _parse_units(raw: list[dict]) -> list[UnitAssignment]:
@@ -897,7 +909,7 @@ async def get_incident(incident_id: str) -> dict:
     if doc is None:
         return {"error": "Incident not found"}
 
-    if not _check_view_access(doc, user.email, user.is_editor):
+    if not await _check_view_access(doc, user.email, user.is_editor):
         return {"error": "You don't have access to this incident"}
 
     return doc.model_dump(mode="json")
@@ -1046,7 +1058,7 @@ async def update_incident(
         if doc is None:
             return {"error": "Incident not found"}
 
-        if not _check_edit_access(doc, user.email, user.is_editor):
+        if not await _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to edit this incident"}
 
         if doc.status in _LOCKED_STATUSES:
@@ -1224,7 +1236,7 @@ async def submit_incident(incident_id: str) -> dict:
     """
     user = get_current_user()
 
-    if not user.is_editor:
+    if not await check_is_editor(user.user_id, fallback=user.is_editor):
         group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to submit incidents to NERIS. "
@@ -1273,7 +1285,7 @@ async def reset_incident(incident_id: str) -> dict:
         if doc is None:
             return {"error": "Incident not found"}
 
-        if not _check_edit_access(doc, user.email, user.is_editor):
+        if not await _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to reset this incident"}
 
         if doc.status not in _RESETTABLE_STATUSES:
@@ -1423,7 +1435,7 @@ async def import_from_neris(
 
         if doc is None:
             return {"error": "Incident not found"}
-        if not _check_edit_access(doc, user.email, user.is_editor):
+        if not await _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to edit this incident"}
         if doc.status in _LOCKED_STATUSES:
             return {"error": f"Cannot modify a {doc.status} incident"}
@@ -1830,7 +1842,7 @@ async def list_neris_incidents() -> dict:
     """
     user = get_current_user()
 
-    if not user.is_editor:
+    if not await check_is_editor(user.user_id, fallback=user.is_editor):
         group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to view or edit NERIS reports. "
@@ -1869,7 +1881,7 @@ async def get_neris_incident(neris_incident_id: str) -> dict:
     """
     user = get_current_user()
 
-    if not user.is_editor:
+    if not await check_is_editor(user.user_id, fallback=user.is_editor):
         group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to view or edit NERIS reports. "
@@ -1914,7 +1926,7 @@ async def finalize_incident(incident_id: str) -> dict:
     """
     user = get_current_user()
 
-    if not user.is_editor:
+    if not await check_is_editor(user.user_id, fallback=user.is_editor):
         group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to finalize incidents. "

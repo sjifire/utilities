@@ -602,6 +602,102 @@ class TestGeneralChatTextResponse:
         assert len(conv.messages) == 2
 
 
+class TestTurnEventsIncludeUserAttribution:
+    """Events carry user_email/user_name so the client banner knows whose turn it is.
+
+    The chat UI shows "Claude is responding to X" when another user's turn is
+    active. If turn_start or done events lack user attribution, the banner
+    either never shows (unsafe) or can't distinguish self vs other (annoying).
+    """
+
+    async def test_turn_start_and_done_carry_user_identity(self):
+        from sjifire.ops.chat.engine import run_chat
+
+        await seed_incident("inc-attr-1")
+
+        fake_publish, events = make_event_capturer()
+        client = make_fake_client([FakeStream(text_events("All good."))])
+
+        with _integration_patches(client, fake_publish):
+            await run_chat("inc-attr-1", "Check the report", TEST_USER, channel="ch")
+
+        # turn_start must include user identity
+        turn_starts = [d for _, t, d in events if t == "turn_start"]
+        assert len(turn_starts) == 1
+        assert turn_starts[0]["user_email"] == TEST_USER.email
+        assert turn_starts[0]["user_name"] == TEST_USER.name
+
+        # done must include user identity (so other clients clear the banner)
+        dones = [d for _, t, d in events if t == "done"]
+        assert len(dones) == 1
+        assert dones[0]["user_email"] == TEST_USER.email
+        assert dones[0]["user_name"] == TEST_USER.name
+
+    async def test_user_message_broadcast_carries_attribution(self):
+        from sjifire.ops.chat.engine import run_chat
+
+        await seed_incident("inc-attr-2")
+
+        fake_publish, events = make_event_capturer()
+        client = make_fake_client([FakeStream(text_events("Got it."))])
+
+        with _integration_patches(client, fake_publish):
+            await run_chat("inc-attr-2", "Hello team", TEST_USER, channel="ch")
+
+        # user_message event broadcasts the sender's identity
+        user_msgs = [d for _, t, d in events if t == "user_message"]
+        assert len(user_msgs) == 1
+        assert user_msgs[0]["user_email"] == TEST_USER.email
+        assert user_msgs[0]["user_name"] == TEST_USER.name
+        assert user_msgs[0]["content"] == "Hello team"
+
+    async def test_409_includes_holder_identity_for_banner(self):
+        """Verify 409 error body includes holder name/email for the client banner."""
+        from starlette.requests import Request
+
+        from sjifire.ops.chat.centrifugo import rpc_proxy
+
+        await seed_incident("inc-attr-3")
+
+        # Lock held by user A
+        async with TurnLockStore() as lock_store:
+            await lock_store.acquire("inc-attr-3", TEST_USER.email, TEST_USER.name)
+
+        # User B tries to send
+        b64info = base64.b64encode(
+            json.dumps(
+                {"email": USER_B.email, "name": USER_B.name, "user_id": USER_B.user_id}
+            ).encode()
+        ).decode()
+
+        scope = {"type": "http", "method": "POST", "path": "/centrifugo/rpc", "headers": []}
+        body = json.dumps(
+            {
+                "method": "send_message",
+                "user": USER_B.email,
+                "b64info": b64info,
+                "data": {"incident_id": "inc-attr-3", "message": "My turn?"},
+            }
+        ).encode()
+
+        async def receive():
+            return {"type": "http.request", "body": body}
+
+        request = Request(scope, receive)
+
+        with patch("sjifire.ops.chat.centrifugo.check_is_editor", return_value=True):
+            response = await rpc_proxy(request)
+
+        data = json.loads(response.body.decode())
+        assert data["error"]["code"] == 409
+
+        holder_info = json.loads(data["error"]["message"])
+        assert holder_info["holder_name"] == TEST_USER.name
+        assert holder_info["holder_email"] == TEST_USER.email
+        # Client uses retry_after to know when to auto-retry
+        assert holder_info["retry_after"] == "done"
+
+
 class TestUpdateIncidentEmitsStatusUpdate:
     """update_incident tool triggers live status_update event."""
 

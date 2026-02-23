@@ -61,6 +61,7 @@
     /* ── Messages area ── */
     .messages {
       flex: 1;
+      min-height: 0;   /* Required: allows flex item to shrink below content height so overflow-y scrolls */
       overflow-y: auto;
       padding: 20px;
       display: flex;
@@ -89,6 +90,9 @@
       border: 1px solid var(--border-default);
       border-bottom-left-radius: 4px;
       overflow: hidden;  /* contain floated map */
+    }
+    .msg.assistant.streaming-msg {
+      overflow: visible;  /* Allow element to grow during streaming so scroll container tracks height */
     }
     .msg.assistant p             { margin-bottom: 8px; }
     .msg.assistant p:last-child  { margin-bottom: 0; }
@@ -562,13 +566,13 @@
       {% if dispatch.time_reported %}<span>{{ dispatch.time_reported }}</span>{% endif %}
       {% if dispatch.ic %}<span>IC: {{ dispatch.ic }}</span>{% endif %}
       {% if dispatch.responding_units %}<span>Units: {{ dispatch.responding_units }}</span>{% endif %}
-      <span class="completeness-bar" x-show="completeness">Report: <span x-text="completeness.filled + '/' + completeness.total"></span> <span class="bar"><span class="bar-fill" :style="'width:' + (completeness.total ? (completeness.filled / completeness.total * 100) : 0) + '%'"></span></span></span>
+      <span class="completeness-bar" x-show="completeness">Report: <span x-text="(completeness?.filled ?? 0) + '/' + (completeness?.total ?? 0)"></span> <span class="bar"><span class="bar-fill" :style="'width:' + (completeness?.total ? (completeness.filled / completeness.total * 100) : 0) + '%'"></span></span></span>
     </div>
   </div>
   {% endif %}
 
   <!-- Turn lock banner (shown when another user's turn is active) -->
-  <div class="turn-lock-banner" x-show="turnHolder && turnHolder.email !== currentUserEmail" x-cloak>
+  <div class="turn-lock-banner" x-show="turnHolder && turnHolder.email && turnHolder.email !== currentUserEmail" x-cloak>
     Claude is responding to <strong x-text="turnHolder?.name || 'another user'"></strong> &mdash; you can watch and send when their turn finishes.
   </div>
 
@@ -616,9 +620,10 @@
       <div class="typing"><span></span><span></span><span></span></div>
     </template>
 
-    <!-- Streaming assistant message -->
+    <!-- Streaming assistant message (overflow:visible so flex layout tracks growing height) -->
     <template x-if="streaming && currentText">
-      <div class="msg assistant" x-html="renderMarkdown(currentText, true)"></div>
+      <div class="msg assistant streaming-msg" x-ref="streamingMsg" x-html="renderMarkdown(currentText, true)"
+           x-effect="if (!_userScrolledAway) $el.scrollIntoView({block: 'end', behavior: 'instant'})"></div>
     </template>
   </div>
 
@@ -700,7 +705,6 @@ function chatApp() {
     pendingImages: [],
     lightbox: { open: false, items: [], index: 0 },
     _userScrolledAway: false,
-    _scrollRAF: null,
     _centrifuge: null,
     _subscription: null,
     _queuedMessage: null,
@@ -1107,20 +1111,18 @@ function chatApp() {
       } else if (this._userScrolledAway) {
         return;  // User scrolled up — don't fight them
       }
-      // Wait for Alpine DOM update, then scroll after paint
-      this.$nextTick(() => {
-        requestAnimationFrame(() => {
-          const el = this.$refs.messages;
-          if (el) el.scrollTop = el.scrollHeight;
-        });
+      const el = this.$refs.messages;
+      if (!el) return;
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
       });
     },
 
     _onMessagesScroll() {
       const el = this.$refs.messages;
       if (!el) return;
-      // "Near bottom" = within 120px of the end
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      // "Near bottom" = within 150px of the end
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
       this._userScrolledAway = !nearBottom;
     },
 
