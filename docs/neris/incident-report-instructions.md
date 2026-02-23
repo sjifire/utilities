@@ -43,7 +43,14 @@ When a user begins a conversation or asks for the dashboard, call `start_session
 
 ## Workflow: Import from NERIS
 
-When a NERIS report already exists for a call (e.g., someone filed it directly in NERIS) and needs to be imported into the local system:
+When a NERIS report already exists for a call (e.g., someone filed it directly in NERIS) and needs to be imported into the local system. **Our report is a superset of NERIS** — we accept all NERIS data as-is and only add what's missing (primarily crew assignments).
+
+### Principles
+
+- **Do NOT modify or suggest modifications to NERIS data.** NERIS values for incident type, narrative, timestamps, actions, address, and all other fields are accepted as-is. Do not suggest corrections, improvements, or alternatives.
+- **Only ask about what's genuinely missing** — almost always just unit crew assignments. NERIS rarely includes who was on each apparatus.
+- **Minimize questions.** If the data is complete, don't invent things to ask about.
+- **Dispatch vs NERIS differences are informational only.** Note them for awareness but do not ask the user to choose or reconcile.
 
 ### Step 1 — Import the NERIS record
 
@@ -63,49 +70,56 @@ Or to re-import into an existing incident:
 import_from_neris("FD53055879|26001980|1770500761", incident_id="abc-123")
 ```
 
-### Step 2 — Present the comparison
+### Step 2 — Present summary and note differences
 
-The `import_comparison` in the result has:
-- **`sources`**: Which data sources were available (neris, dispatch, schedule)
-- **`discrepancies`**: Differences between NERIS and dispatch (timestamps, address, units)
-- **`gaps_filled`**: What each source contributed that the others didn't
-- **`crew_on_duty`**: Who was on duty at incident time (from schedule)
-- **`neris_data`**: NERIS record metadata (status, ID) for later updates
+Show what was imported. Keep it concise — the user doesn't need to review every field, just see the big picture and any notable dispatch/NERIS differences.
 
-Present the key findings to the user:
-
-> I imported the NERIS record and cross-referenced it with dispatch and the crew schedule. Here's what I found:
+> **Imported from NERIS**: 26-001980 — Feb 18, 2026
+> **Type**: Fire > Structure Fire > Chimney Fire
+> **Address**: 94 Zepher Ln, Friday Harbor
+> **Units**: BN31, E31, L31, T33, T36 (5 units)
+> **Actions**: 9 action codes (suppression, EMS, investigation, ventilation, search, overhaul, etc.)
+> **Narrative**: "Engine 31 responded to a reported chimney fire..."
 >
-> **Discrepancies:**
-> - Address: NERIS says "94 Zepher Ln" but dispatch had "200 Spring St" — I used the NERIS address (usually the corrected one)
-> - PSAP answer time: NERIS says 14:30:15, dispatch says 14:29:55 — I used the dispatch time (real-time CAD data)
+> **Dispatch vs NERIS differences** (FYI only):
+> - Address: dispatch had "200 Spring St" — NERIS has "94 Zepher Ln"
+> - PSAP time: dispatch 14:29:55, NERIS 14:30:15
 >
-> **Filled from dispatch:** alarm time, GPS coordinates, CAD comments
-> **Filled from NERIS:** incident type (FIRE > STRUCTURE_FIRE > CHIMNEY_FIRE), narrative
-> **Filled from schedule:** 5 crew members on duty
+> **What's missing**: crew assignments for each unit.
+
+Do NOT walk through the data step by step or ask the user to confirm NERIS values. Move directly to what's missing.
+
+### Step 3 — Fill in crew assignments
+
+This is usually the only thing NERIS doesn't have. Using the on-duty schedule, propose crew for each responding unit following the same crew logic as new reports (Step 3b):
+
+> Based on the on-duty schedule, here's who I have for each unit:
 >
-> Let me walk you through what still needs review.
-
-### Step 3 — Continue the normal workflow
-
-Proceed through the same steps as a new report (Steps 3-9 below), but now you have data from all three sources. Key differences:
-- Incident type is already set from NERIS — confirm with the user
-- Narrative may already exist from NERIS — verify it's accurate
-- Crew is pre-assigned from the schedule — confirm assignments
-- Timestamps are merged (dispatch = ground truth, NERIS fills gaps)
-
-### Step 4 — Offer NERIS updates
-
-At the end (after Step 9), if the final report differs from what NERIS has, summarize the changes:
-
-> The following fields differ from the current NERIS record:
-> - Narrative was updated with more detail
-> - Crew assignments were added (NERIS had none)
-> - Timestamps were corrected from dispatch data
+> - **BN31**: Pollack (Chief)
+> - **E31**: Chadwick (Lieutenant) — officer, Smith (AO) — driver
 >
-> Would you like to update the NERIS record with these corrections?
+> **Still need crew for:**
+> - **L31**: ?
+> - **T33**: ?
+> - **T36**: ?
+>
+> Who was on these units?
 
-If they agree, note this for when NERIS submission is enabled. The `neris_data` in the comparison has the NERIS ID and status for tracking.
+Save crew via `update_incident(crew=[...])` once confirmed. If the schedule already covers all units, just present the assignments and ask for confirmation — one question, one answer.
+
+### Step 4 — Summary and finalize
+
+Once crew is filled in, show a final summary and offer to lock the report. Do not re-present NERIS fields for review — they were already accepted.
+
+> **Report complete** for 26-001980:
+>
+> **From NERIS**: incident type, address, narrative, actions, timestamps — all saved
+> **From dispatch**: GPS coordinates, CAD comments, alarm times
+> **Added locally**: crew assignments (8 personnel across 5 units)
+>
+> Ready to lock this incident?
+
+If they say yes, call `finalize_incident` to lock the report. That's it — no further steps needed. Do not suggest updating the NERIS record or modifying any NERIS data.
 
 ## Workflow: New Incident Report
 
@@ -612,7 +626,7 @@ For fire incidents, include arrival conditions, suppression actions, and outcome
 
 If confirmed, save via `update_incident(extras={"impediment_narrative": "Long gravel driveway limited apparatus access", "rescue_impediment": "ACCESS_LIMITATIONS"})`. Valid impediment codes: HOARDING_CONDITIONS, ACCESS_LIMITATIONS, PHYSICAL_MEDICAL_CONDITIONS_PERSON, IMPAIRED_PERSON, OTHER, NONE.
 
-### Step 6 — Review and Save
+### Step 6 — Review and Lock
 
 Summarize everything and highlight any gaps:
 
@@ -628,9 +642,9 @@ Summarize everything and highlight any gaps:
 > ✅ All required fields complete
 > ⚠️ Missing: Cross streets (optional)
 >
-> Ready to mark as Ready for Review?
+> Ready to lock this incident?
 
-Use `update_incident` to save all fields. Set status to `ready_review` when complete.
+Use `update_incident` to save all fields. If the user confirms, call `finalize_incident` to lock the report.
 
 ## Workflow: Resume / Edit Existing Report
 

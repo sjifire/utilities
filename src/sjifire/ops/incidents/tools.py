@@ -219,6 +219,12 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
     if base.get("outcome_narrative"):
         prefill["narrative"] = base["outcome_narrative"]
 
+    # Location use (e.g. "RESIDENTIAL||MANUFACTURED_MOBILE_HOME")
+    location_use_obj = base.get("location_use") or {}
+    use_type = location_use_obj.get("use_type") or ""
+    if use_type:
+        prefill["location_use"] = use_type
+
     # Location — prefer base.location (corrected), fall back to dispatch
     loc = base.get("location") or {}
     if not loc:
@@ -698,6 +704,7 @@ async def create_incident(
         incident_number=incident_number,
         incident_datetime=dt,
         incident_type=incident_type or prefill.get("incident_type"),
+        location_use=prefill.get("location_use"),
         address=address if address is not None else prefill.get("address"),
         city=prefill.get("city", ""),
         state=prefill.get("state", ""),
@@ -1337,6 +1344,11 @@ async def _apply_neris_import_to_existing(
         doc.incident_type = neris_prefill["incident_type"]
         fields_changed.append("incident_type")
 
+    # Location use from NERIS
+    if "location_use" in neris_prefill:
+        doc.location_use = neris_prefill["location_use"]
+        fields_changed.append("location_use")
+
     # Narrative from NERIS
     if "narrative" in neris_prefill:
         doc.narrative = neris_prefill["narrative"]
@@ -1476,7 +1488,7 @@ async def _create_incident_from_neris(
     # Start with dispatch data as the base
     merged: dict = {**dispatch_prefill}
     # NERIS overwrites for fields it provides (incident_type, narrative, address)
-    for key in ("incident_type", "narrative", "address", "city", "state", "neris_incident_id"):
+    for key in ("incident_type", "narrative", "address", "city", "state", "neris_incident_id", "location_use"):
         if key in neris_prefill:
             merged[key] = neris_prefill[key]
     # For coordinates, dispatch is the only source
@@ -1501,6 +1513,7 @@ async def _create_incident_from_neris(
         incident_number=incident_number,
         incident_datetime=incident_dt,
         incident_type=merged.get("incident_type"),
+        location_use=merged.get("location_use"),
         address=merged.get("address"),
         city=merged.get("city", ""),
         state=merged.get("state", ""),
