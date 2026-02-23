@@ -1107,12 +1107,12 @@ function chatApp() {
       } else if (this._userScrolledAway) {
         return;  // User scrolled up — don't fight them
       }
-      // Coalesce rapid calls (streaming text events) into one rAF
-      if (this._scrollRAF) return;
-      this._scrollRAF = requestAnimationFrame(() => {
-        this._scrollRAF = null;
-        const el = this.$refs.messages;
-        if (el) el.scrollTop = el.scrollHeight;
+      // Wait for Alpine DOM update, then scroll after paint
+      this.$nextTick(() => {
+        requestAnimationFrame(() => {
+          const el = this.$refs.messages;
+          if (el) el.scrollTop = el.scrollHeight;
+        });
       });
     },
 
