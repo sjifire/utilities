@@ -1338,6 +1338,10 @@ function dashboard() {
       if (this.$refs.chatInput) this.$refs.chatInput.style.height = 'auto';
 
       try {
+        // Wait for WebSocket connection before sending RPC
+        if (this._centrifuge.state !== 'connected') {
+          await new Promise(r => this._centrifuge.once('connected', r));
+        }
         await this._centrifuge.rpc('send_general_message', {
           message: text,
           context: {

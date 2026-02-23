@@ -1157,6 +1157,15 @@ function chatApp() {
       await this._sendViaRPC(displayText, images);
     },
 
+    _waitForConnect() {
+      // Return a promise that resolves when the centrifuge client is connected.
+      // If already connected, resolves immediately.
+      if (this._centrifuge.state === 'connected') return Promise.resolve();
+      return new Promise((resolve) => {
+        this._centrifuge.once('connected', resolve);
+      });
+    },
+
     async _sendViaRPC(displayText, images) {
       this.streaming = true;
       this.currentText = '';
@@ -1170,6 +1179,7 @@ function chatApp() {
       }
 
       try {
+        await this._waitForConnect();
         await this._centrifuge.rpc('send_message', payload);
         // RPC succeeded — events arrive on same WS, in order
       } catch (err) {
