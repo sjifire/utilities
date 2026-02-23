@@ -766,14 +766,21 @@ async def _run_loop(
             # via upsert it re-creates it.  By truncating here we ensure
             # only the post-reset exchange is persisted, giving a clean
             # slate on page reload while keeping current-turn context.
+            # Re-add the current assistant message so subsequent tool_result
+            # messages still have a matching tool_use block in the history.
             if tc["name"] == "reset_incident":
                 try:
                     rd = json.loads(result_str)
                     if isinstance(rd, dict) and "error" not in rd:
+                        # Snapshot the current assistant message before clearing
+                        current_assistant_msg = conversation.messages[-1] if conversation.messages else None
                         conversation.messages.clear()
                         conversation.turn_count = 0
                         conversation.total_input_tokens = 0
                         conversation.total_output_tokens = 0
+                        # Re-add so tool_results have a matching tool_use
+                        if current_assistant_msg and current_assistant_msg.role == "assistant":
+                            conversation.messages.append(current_assistant_msg)
                         logger.info("Cleared conversation history after reset_incident")
                 except (json.JSONDecodeError, KeyError):
                     pass
