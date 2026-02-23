@@ -19,7 +19,12 @@ from sjifire.core.config import get_org_config, local_now
 from sjifire.ops.auth import UserContext
 from sjifire.ops.chat.budget import check_budget, record_usage
 from sjifire.ops.chat.centrifugo import publish
-from sjifire.ops.chat.models import MAX_TURNS, ConversationDocument, ConversationMessage
+from sjifire.ops.chat.models import (
+    MAX_TURNS,
+    ContextSnapshot,
+    ConversationDocument,
+    ConversationMessage,
+)
 from sjifire.ops.chat.store import ConversationStore
 from sjifire.ops.chat.tools import (
     GENERAL_TOOL_SCHEMAS,
@@ -345,84 +350,106 @@ def _get_all_neris_incident_types() -> str:
     return _neris_incident_types_cache
 
 
-async def _fetch_context(incident_id: str, user: UserContext) -> tuple[str, str, str, str, str]:
-    """Fetch incident, dispatch, crew, and personnel for the system prompt."""
+async def _fetch_context(
+    incident_id: str,
+    user: UserContext,
+    *,
+    snapshot: ContextSnapshot | None = None,
+) -> tuple[str, str, str, str, str]:
+    """Fetch incident, dispatch, crew, and personnel for the system prompt.
+
+    When *snapshot* is provided, dispatch/crew/personnel are read from the
+    cached strings instead of making external API calls.  The incident and
+    attachments are always fetched fresh (they change when editors update).
+    """
     from sjifire.ops.auth import set_current_user
 
     set_current_user(user)
 
-    from sjifire.ops.dispatch.store import DispatchStore
     from sjifire.ops.incidents.store import IncidentStore
-    from sjifire.ops.personnel import tools as personnel_tools
-    from sjifire.ops.schedule import tools as schedule_tools
 
-    # Get incident (must be first — dispatch and crew depend on it)
+    # Get incident — ALWAYS fresh (changes after tool calls)
     incident_json = "{}"
+    doc = None
     async with IncidentStore() as store:
         doc = await store.get_by_id(incident_id)
     if doc:
         incident_json = json.dumps(doc.model_dump(mode="json"), indent=2, default=str)
 
-        # Fetch dispatch first (crew lookup needs the incident time)
-        dispatch_json = "{}"
-        incident_hour: int | None = None
-        try:
-            async with DispatchStore() as dstore:
-                dispatch = await dstore.get_by_dispatch_id(doc.incident_number)
-            if dispatch:
-                # Slim dispatch: drop raw radio log (~8K chars). The enriched
-                # analysis.key_events has the condensed narrative instead.
-                # The agent has get_dispatch_call if it needs full details.
-                slim: dict = {
-                    "id": dispatch.id,
-                    "nature": dispatch.nature,
-                    "address": dispatch.address,
-                    "time_reported": dispatch.time_reported,
-                    "geo_location": dispatch.geo_location,
-                    "cad_comments": dispatch.cad_comments,
-                }
-                if dispatch.analysis:
-                    analysis = dispatch.analysis
-                    # Include analysis fields minus unit_times (formatted separately)
-                    analysis_dict = analysis.model_dump(mode="json")
-                    unit_times = analysis_dict.pop("unit_times", [])
-                    slim["analysis"] = analysis_dict
-                    # Format unit_times as a readable table for easy review
-                    if unit_times:
-                        tr = dispatch.time_reported.isoformat() if dispatch.time_reported else ""
-                        at = analysis.alarm_time or ""
-                        slim["unit_times_table"] = _format_unit_times_table(
-                            unit_times, tr, alarm_time=at
-                        )
-                dispatch_json = json.dumps(slim, indent=2, default=str)
-                if dispatch.time_reported:
-                    incident_hour = dispatch.time_reported.hour
-        except Exception:
-            logger.warning("Failed to fetch dispatch for %s", doc.incident_number, exc_info=True)
-
-        # Fetch crew using the incident hour for shift-change awareness
-        crew_json = "[]"
-        try:
-            crew_data = await schedule_tools.get_on_duty_crew(
-                target_date=doc.incident_datetime.date().isoformat(),
-                target_hour=incident_hour,
-            )
-            crew_json = json.dumps(crew_data, indent=2, default=str)
-        except Exception:
-            logger.warning("Failed to fetch crew for %s", doc.incident_datetime, exc_info=True)
+    # Dispatch, crew, personnel — use snapshot if available
+    if snapshot is not None:
+        dispatch_json = snapshot.dispatch_json
+        crew_json = snapshot.crew_json
+        personnel_json = snapshot.personnel_json
     else:
-        dispatch_json = "{}"
-        crew_json = "[]"
+        from sjifire.ops.dispatch.store import DispatchStore
+        from sjifire.ops.personnel import tools as personnel_tools
+        from sjifire.ops.schedule import tools as schedule_tools
 
-    # Fetch operational personnel for name matching (last name → full name + email)
-    personnel_json = "[]"
-    try:
-        personnel = await personnel_tools.get_operational_personnel()
-        personnel_json = json.dumps(personnel, indent=2, default=str)
-    except Exception:
-        logger.warning("Failed to fetch personnel", exc_info=True)
+        if doc:
+            # Fetch dispatch first (crew lookup needs the incident time)
+            dispatch_json = "{}"
+            incident_hour: int | None = None
+            try:
+                async with DispatchStore() as dstore:
+                    dispatch = await dstore.get_by_dispatch_id(doc.incident_number)
+                if dispatch:
+                    # Slim dispatch: drop raw radio log (~8K chars). The enriched
+                    # analysis.key_events has the condensed narrative instead.
+                    # The agent has get_dispatch_call if it needs full details.
+                    slim: dict = {
+                        "id": dispatch.id,
+                        "nature": dispatch.nature,
+                        "address": dispatch.address,
+                        "time_reported": dispatch.time_reported,
+                        "geo_location": dispatch.geo_location,
+                        "cad_comments": dispatch.cad_comments,
+                    }
+                    if dispatch.analysis:
+                        analysis = dispatch.analysis
+                        # Include analysis fields minus unit_times (formatted separately)
+                        analysis_dict = analysis.model_dump(mode="json")
+                        unit_times = analysis_dict.pop("unit_times", [])
+                        slim["analysis"] = analysis_dict
+                        # Format unit_times as a readable table for easy review
+                        if unit_times:
+                            reported = dispatch.time_reported
+                            tr = reported.isoformat() if reported else ""
+                            at = analysis.alarm_time or ""
+                            slim["unit_times_table"] = _format_unit_times_table(
+                                unit_times, tr, alarm_time=at
+                            )
+                    dispatch_json = json.dumps(slim, indent=2, default=str)
+                    if dispatch.time_reported:
+                        incident_hour = dispatch.time_reported.hour
+            except Exception:
+                logger.warning(
+                    "Failed to fetch dispatch for %s", doc.incident_number, exc_info=True
+                )
 
-    # Build a concise summary of attachments on file
+            # Fetch crew using the incident hour for shift-change awareness
+            crew_json = "[]"
+            try:
+                crew_data = await schedule_tools.get_on_duty_crew(
+                    target_date=doc.incident_datetime.date().isoformat(),
+                    target_hour=incident_hour,
+                )
+                crew_json = json.dumps(crew_data, indent=2, default=str)
+            except Exception:
+                logger.warning("Failed to fetch crew for %s", doc.incident_datetime, exc_info=True)
+        else:
+            dispatch_json = "{}"
+            crew_json = "[]"
+
+        # Fetch operational personnel for name matching (last name → full name + email)
+        personnel_json = "[]"
+        try:
+            personnel = await personnel_tools.get_operational_personnel()
+            personnel_json = json.dumps(personnel, indent=2, default=str)
+        except Exception:
+            logger.warning("Failed to fetch personnel", exc_info=True)
+
+    # Build a concise summary of attachments on file — ALWAYS fresh
     attachments_summary = ""
     if doc and doc.attachments:
         lines = []
@@ -463,20 +490,18 @@ async def run_chat(
         {"user_email": user.email, "user_name": user.name},
     )
 
-    # Run budget check, conversation load, and context fetch in parallel.
-    # These are independent Cosmos/API calls — no reason to be sequential.
+    # Phase 1: budget + conversation (both fast Cosmos reads, ~50ms)
     async def _load_conversation():
         async with ConversationStore() as store:
             return await store.get_by_incident(incident_id)
 
-    budget_result, conv_result, ctx_result = await asyncio.gather(
+    budget_result, conv_result = await asyncio.gather(
         check_budget(user.email),
         _load_conversation(),
-        _fetch_context(incident_id, user),
         return_exceptions=True,
     )
 
-    # Check each result for errors (preserves specific error messages)
+    # Check phase-1 results for errors
     if isinstance(budget_result, Exception):
         await _release_turn_lock(incident_id, user.email)
         await publish(channel, "error", {"message": _user_error("budget", budget_result)})
@@ -489,12 +514,21 @@ async def run_chat(
         await _release_turn_lock(incident_id, user.email)
         await publish(channel, "error", {"message": _user_error("conversation", conv_result)})
         return
+
+    conversation = conv_result
+    snapshot = conversation.context_snapshot if conversation else None
+
+    # Phase 2: context (fast if snapshot exists, full fetch otherwise)
+    try:
+        ctx_result = await _fetch_context(incident_id, user, snapshot=snapshot)
+    except Exception as exc:
+        ctx_result = exc
+
     if isinstance(ctx_result, Exception):
         await _release_turn_lock(incident_id, user.email)
         await publish(channel, "error", {"message": _user_error("context", ctx_result)})
         return
 
-    conversation = conv_result
     (
         incident_json,
         dispatch_json,
@@ -502,6 +536,14 @@ async def run_chat(
         personnel_json,
         attachments_summary,
     ) = ctx_result
+
+    # Save snapshot after first full fetch (reused on subsequent turns)
+    if snapshot is None:
+        snapshot = ContextSnapshot(
+            dispatch_json=dispatch_json,
+            crew_json=crew_json,
+            personnel_json=personnel_json,
+        )
 
     # Everything below must release the turn lock on exit
     try:
@@ -511,6 +553,9 @@ async def run_chat(
                 incident_id=incident_id,
                 user_email=user.email,
             )
+
+        # Attach snapshot so it's persisted with the conversation
+        conversation.context_snapshot = snapshot
 
         # Turn limit
         if conversation.turn_count >= MAX_TURNS:
@@ -811,6 +856,7 @@ async def _run_loop(
                             conversation.messages[-1] if conversation.messages else None
                         )
                         conversation.messages.clear()
+                        conversation.context_snapshot = None
                         conversation.turn_count = 0
                         conversation.total_input_tokens = 0
                         conversation.total_output_tokens = 0

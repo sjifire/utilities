@@ -9,7 +9,7 @@ mock _run_loop entirely (e.g. orphaned tool_results, reset race conditions).
 import base64
 import json
 import logging
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -744,3 +744,144 @@ class TestUpdateIncidentEmitsStatusUpdate:
         assert doc is not None
         assert doc.status == "in_progress"
         assert doc.narrative == "Fire in single-story residential."
+
+
+class TestContextSnapshot:
+    """Context snapshot: cache dispatch/crew/personnel after first fetch."""
+
+    def _snapshot_patches(self, fake_client, fake_publish, crew_mock, personnel_mock):
+        """Like _integration_patches but with injectable mocks for call counting."""
+        from contextlib import contextmanager
+
+        @contextmanager
+        def patches():
+            with (
+                patch("sjifire.ops.chat.engine.get_client", return_value=fake_client),
+                patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
+                patch(
+                    "sjifire.ops.schedule.tools.get_on_duty_crew",
+                    side_effect=crew_mock,
+                ),
+                patch(
+                    "sjifire.ops.personnel.tools.get_operational_personnel",
+                    side_effect=personnel_mock,
+                ),
+                patch("sjifire.ops.chat.engine._get_all_neris_incident_types", return_value=""),
+                patch("sjifire.ops.auth.check_is_editor", return_value=True),
+            ):
+                yield
+
+        return patches()
+
+    async def test_snapshot_saved_on_first_turn(self):
+        from sjifire.ops.chat.engine import run_chat
+
+        await seed_incident("inc-snap-1")
+
+        fake_publish, events = make_event_capturer()
+        client = make_fake_client([FakeStream(text_events("Hello."))])
+        crew_mock = AsyncMock(return_value={"crew": [{"name": "Engine 31"}], "count": 1})
+        personnel_mock = AsyncMock(return_value=[{"name": "John Doe"}])
+
+        with self._snapshot_patches(client, fake_publish, crew_mock, personnel_mock):
+            await run_chat("inc-snap-1", "Hi", TEST_USER, channel="ch")
+
+        assert "error" not in [e[1] for e in events]
+
+        async with ConversationStore() as store:
+            conv = await store.get_by_incident("inc-snap-1")
+        assert conv is not None
+        assert conv.context_snapshot is not None
+        assert "Engine 31" in conv.context_snapshot.crew_json
+        assert "John Doe" in conv.context_snapshot.personnel_json
+
+    async def test_snapshot_skips_external_calls_on_second_turn(self):
+        from sjifire.ops.chat.engine import run_chat
+
+        await seed_incident("inc-snap-2")
+
+        fake_publish, events = make_event_capturer()
+        crew_mock = AsyncMock(return_value={"crew": [], "count": 0})
+        personnel_mock = AsyncMock(return_value=[])
+
+        # Turn 1
+        client1 = make_fake_client([FakeStream(text_events("First."))])
+        with self._snapshot_patches(client1, fake_publish, crew_mock, personnel_mock):
+            await run_chat("inc-snap-2", "Turn 1", TEST_USER, channel="ch")
+
+        assert crew_mock.call_count == 1
+        assert personnel_mock.call_count == 1
+
+        events.clear()
+
+        # Turn 2 — should reuse snapshot
+        client2 = make_fake_client([FakeStream(text_events("Second."))])
+        with self._snapshot_patches(client2, fake_publish, crew_mock, personnel_mock):
+            await run_chat("inc-snap-2", "Turn 2", TEST_USER, channel="ch")
+
+        assert "error" not in [e[1] for e in events]
+        # Crew and personnel should NOT have been called again
+        assert crew_mock.call_count == 1
+        assert personnel_mock.call_count == 1
+
+    async def test_reset_clears_snapshot_and_refetches(self):
+        from sjifire.ops.chat.engine import run_chat
+
+        inc = await seed_incident("inc-snap-3")
+
+        fake_publish, events = make_event_capturer()
+        crew_mock = AsyncMock(return_value={"crew": [], "count": 0})
+        personnel_mock = AsyncMock(return_value=[])
+
+        # Turn 1 — snapshot saved
+        client1 = make_fake_client([FakeStream(text_events("Got it."))])
+        with self._snapshot_patches(client1, fake_publish, crew_mock, personnel_mock):
+            await run_chat("inc-snap-3", "Start", TEST_USER, channel="ch")
+
+        assert crew_mock.call_count == 1
+
+        # Verify snapshot was saved
+        async with ConversationStore() as store:
+            conv = await store.get_by_incident("inc-snap-3")
+        assert conv is not None
+        assert conv.context_snapshot is not None
+
+        events.clear()
+
+        # Turn 2 — reset_incident clears snapshot
+        reset_result = inc.to_cosmos()
+        reset_result["_reimport_available"] = False
+
+        client2 = make_fake_client(
+            [
+                FakeStream(
+                    tool_use_events("toolu_r1", "reset_incident", {"incident_id": "inc-snap-3"})
+                ),
+                FakeStream(text_events("Fresh start.")),
+            ]
+        )
+        with (
+            self._snapshot_patches(client2, fake_publish, crew_mock, personnel_mock),
+            patch("sjifire.ops.incidents.tools.reset_incident", return_value=reset_result),
+        ):
+            await run_chat("inc-snap-3", "Reset", TEST_USER, channel="ch")
+
+        assert "error" not in [e[1] for e in events]
+
+        # Snapshot should be cleared after reset
+        async with ConversationStore() as store:
+            conv = await store.get_by_incident("inc-snap-3")
+        assert conv is not None
+        assert conv.context_snapshot is None
+
+        events.clear()
+
+        # Turn 3 — should refetch (snapshot was cleared)
+        client3 = make_fake_client([FakeStream(text_events("Refetched."))])
+        with self._snapshot_patches(client3, fake_publish, crew_mock, personnel_mock):
+            await run_chat("inc-snap-3", "Continue", TEST_USER, channel="ch")
+
+        assert "error" not in [e[1] for e in events]
+        # Crew mock was called on turn 1 and turn 3 (skipped turn 2 which used snapshot)
+        assert crew_mock.call_count == 2
+        assert personnel_mock.call_count == 2
