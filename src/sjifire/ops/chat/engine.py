@@ -814,9 +814,12 @@ async def _run_loop(
                         conversation.turn_count = 0
                         conversation.total_input_tokens = 0
                         conversation.total_output_tokens = 0
-                        # Re-add so tool_results have a matching tool_use
+                        # Re-add so tool_results have a matching tool_use.
+                        # Strip text content — it was already streamed to the
+                        # client and would appear twice on history reload.
                         if current_assistant_msg and current_assistant_msg.role == "assistant":
-                            conversation.messages.append(current_assistant_msg)
+                            stripped = current_assistant_msg.model_copy(update={"content": ""})
+                            conversation.messages.append(stripped)
                         logger.info("Cleared conversation history after reset_incident")
                 except (json.JSONDecodeError, KeyError):
                     pass

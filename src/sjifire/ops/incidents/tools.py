@@ -1686,11 +1686,23 @@ async def _create_incident_from_neris(
     merged: dict = {**dispatch_prefill}
     # NERIS overwrites for fields it provides
     for key in (
-        "incident_type", "narrative", "address", "city", "state",
-        "neris_incident_id", "location_use", "action_taken", "noaction_reason",
-        "action_codes", "additional_incident_types", "arrival_conditions",
-        "outside_fire_cause", "outside_fire_acres", "people_present",
-        "displaced_count", "automatic_alarm",
+        "incident_type",
+        "narrative",
+        "address",
+        "city",
+        "state",
+        "neris_incident_id",
+        "location_use",
+        "action_taken",
+        "noaction_reason",
+        "action_codes",
+        "additional_incident_types",
+        "arrival_conditions",
+        "outside_fire_cause",
+        "outside_fire_acres",
+        "people_present",
+        "displaced_count",
+        "automatic_alarm",
     ):
         if key in neris_prefill:
             merged[key] = neris_prefill[key]
