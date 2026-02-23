@@ -173,6 +173,8 @@ async def connect_proxy(request: Request) -> Response:
         logger.warning("Connect proxy: user is None. Auth headers present: %s", auth_headers)
         return JSONResponse({"error": {"code": 401, "message": "Unauthorized"}})
 
+    logger.info("Connect proxy: email=%s, user_id=%s", user.email, user.user_id or "(empty)")
+
     return JSONResponse(
         {
             "result": {
@@ -282,6 +284,8 @@ async def rpc_proxy(request: Request) -> Response:
 
     if not user_email:
         return JSONResponse({"error": {"code": 401, "message": "Unauthorized"}})
+
+    logger.info("RPC proxy user: email=%s, user_id=%s, method=%s", user_email, user_id or "(empty)", method)
 
     user = UserContext(
         email=user_email,
