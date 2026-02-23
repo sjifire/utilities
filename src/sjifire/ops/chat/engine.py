@@ -517,6 +517,11 @@ async def run_chat(
 
     conversation = conv_result
     snapshot = conversation.context_snapshot if conversation else None
+    logger.info(
+        "Context snapshot: %s (conversation=%s)",
+        "HIT" if snapshot else "MISS",
+        "existing" if conversation else "new",
+    )
 
     # Phase 2: context (fast if snapshot exists, full fetch otherwise)
     try:
