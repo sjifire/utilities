@@ -704,10 +704,7 @@ function chatApp() {
     _centrifuge: null,
     _subscription: null,
     _queuedMessage: null,
-    _recoveryTimer: null,
-    _recoveryStartTime: null,
     _turnCount: 0,
-    _lastPostTime: 0,
     // Multi-user state
     currentUserEmail: '{{ user_email }}',
     currentUserName: '{{ user_name }}',
@@ -769,10 +766,10 @@ function chatApp() {
 
       // On (re)subscribe: recover any missed messages and refresh presence
       this._subscription.on('subscribed', async () => {
-        // If we were streaming when the connection dropped, recover immediately
+        // If we were streaming when the connection dropped, poll server for missed turns
         if (this.streaming) {
-          console.log('Reconnected while streaming — recovering from server');
-          this._recoverFromServer();
+          console.log('Reconnected while streaming — polling server for recovery');
+          this._pollForRecovery();
         }
         // Refresh presence
         try {
@@ -849,7 +846,7 @@ function chatApp() {
         if (lastMsg && lastMsg.type === 'message' && lastMsg.role === 'user') {
           // Last saved message was from the user — agent never responded.
           // Retry silently (no new bubble) so it picks up where it left off.
-          this.$nextTick(() => this._postMessage(lastMsg.content || 'Continue'));
+          this.$nextTick(() => this._sendViaRPC(lastMsg.content || 'Continue'));
         }
       }
     },
@@ -1157,124 +1154,60 @@ function chatApp() {
       if (this.$refs.input) this.$refs.input.style.height = 'auto';
       this.scrollToBottom(true);
 
-      await this._postMessage(displayText, images);
+      await this._sendViaRPC(displayText, images);
     },
 
-    async _postMessage(displayText, images) {
-      // Debounce: prevent duplicate POSTs within 500ms
-      const now = Date.now();
-      if (now - this._lastPostTime < 500) {
-        console.warn('Debounced duplicate POST');
-        return;
-      }
-      this._lastPostTime = now;
-
+    async _sendViaRPC(displayText, images) {
       this.streaming = true;
       this.currentText = '';
 
-      const reqBody = {message: displayText};
+      const payload = {
+        incident_id: this.incidentId,
+        message: displayText,
+      };
       if (images && images.length) {
-        reqBody.images = images.map(img => ({data: img.base64, media_type: img.mediaType}));
+        payload.images = images.map(img => ({data: img.base64, media_type: img.mediaType}));
       }
 
       try {
-        const res = await authFetch(`/reports/${this.incidentId}/chat`, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(reqBody)
-        });
-
-        if (res.status === 409) {
-          // Turn lock conflict — current turn is still active
-          const err = await res.json().catch(() => ({}));
-          this.turnHolder = {email: err.holder_email || '', name: err.holder_name || 'another user'};
-          // Queue for auto-retry after the done event
+        await this._centrifuge.namedRPC('send_message', payload);
+        // RPC succeeded — events arrive on same WS, in order
+      } catch (err) {
+        if (err.code === 409) {
+          // Turn lock conflict — parse holder info from error message
+          let holder = 'another user', holderEmail = '';
+          try {
+            const info = JSON.parse(err.message);
+            holder = info.holder_name || holder;
+            holderEmail = info.holder_email || '';
+          } catch {}
+          this.turnHolder = {email: holderEmail, name: holder};
           this._blockedMessage = {displayText, images};
-          // Same-user lock: previous turn still finishing — keep streaming
-          // state so typing dots show. Other-user lock: stop streaming,
-          // the turn-lock banner provides the visual feedback instead.
-          if (err.holder_email && err.holder_email === this.currentUserEmail) {
-            // streaming stays true — dots show until previous turn's done event.
-            // Start recovery timer as safety net in case done event never arrives
-            // (engine crashed, lock expires via TTL without publishing done).
-            this._startRecoveryTimer();
+          // Same-user lock: keep streaming for typing dots
+          // Other-user lock: stop streaming, banner shows instead
+          if (holderEmail && holderEmail === this.currentUserEmail) {
+            // streaming stays true — dots show until previous turn's done event
           } else {
             this.streaming = false;
           }
           return;
         }
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({error: 'Request failed'}));
-          this.messages.push({type: 'error', content: err.error || 'Request failed'});
-          this.streaming = false;
-          return;
-        }
-        // 202 Accepted — events arrive via Centrifuge subscription.
-        // Start a recovery timer in case events don't arrive (Centrifugo down, publish failure, etc.)
-        this._startRecoveryTimer();
-      } catch (e) {
-        console.error('Chat error:', e);
-        this.messages.push({type: 'error', content: 'Failed to send message. Please try again.'});
+        console.error('Chat RPC error:', err);
+        this.messages.push({type: 'error', content: err.message || 'Failed to send message. Please try again.'});
         this.streaming = false;
       }
     },
 
-    _startRecoveryTimer() {
-      this._clearRecoveryTimer();
-      this._recoveryStartTime = Date.now();
-      this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 2000);
-    },
-
-    _clearRecoveryTimer() {
-      if (this._recoveryTimer) {
-        clearTimeout(this._recoveryTimer);
-        this._recoveryTimer = null;
-      }
-    },
-
-    async _recoverFromServer() {
-      if (!this.streaming) return;  // Already resolved
-
-      // Give up after 90 seconds — prevent infinite hang
-      const elapsed = Date.now() - (this._recoveryStartTime || 0);
-      if (elapsed > 90000) {
-        console.error('Recovery timeout — giving up after 90s');
-        if (this.currentText) {
-          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
-          this.currentText = '';
-        }
-        this.messages.push({type: 'error', content: 'Response timed out. Reload the page to see any saved progress.'});
-        this.streaming = false;
-        this.turnHolder = null;
-        this.scrollToBottom(true);
-        return;
-      }
-
-      // Attempt WebSocket reconnection if disconnected
-      try {
-        const wsState = this._centrifuge.state;
-        if (wsState !== 'connected') {
-          console.log(`Recovery: WebSocket state "${wsState}", nudging reconnect`);
-          this._centrifuge.connect();
-        }
-      } catch (e) {
-        console.debug('WebSocket reconnect nudge failed:', e);
-      }
-
-      console.warn(`Recovery poll (${Math.round(elapsed/1000)}s elapsed)`);
+    async _pollForRecovery() {
+      // Poll server to recover from missed events after reconnection
+      if (!this.streaming) return;
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
-        if (!res.ok) {
-          // Retry on transient errors instead of silently giving up
-          this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 3000);
-          return;
-        }
+        if (!res.ok) return;
         const data = await res.json();
         const serverTurnCount = data.turn_count || 0;
 
         if (serverTurnCount > this._turnCount) {
-          // Server completed a turn we missed — rebuild messages from server
           console.log(`Turn completed (${this._turnCount} → ${serverTurnCount}), recovering`);
           this.currentText = '';
           this.messages = [];
@@ -1309,21 +1242,13 @@ function chatApp() {
           this.turnHolder = null;
           this.scrollToBottom(true);
           this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
-        } else if (!this.currentText) {
-          // Turn not yet complete — server still processing
-          this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 2000);
         }
       } catch (e) {
         console.warn('Recovery poll failed:', e);
-        // Retry on network errors
-        this._recoveryTimer = setTimeout(() => this._recoverFromServer(), 3000);
       }
     },
 
     handleEvent(type, data) {
-      // Any event means Centrifugo is working — reset recovery timer
-      this._clearRecoveryTimer();
-
       if (type === 'turn_start') {
         // Another user started a turn — show indicator
         this.turnHolder = {email: data.user_email, name: data.user_name};
@@ -1444,16 +1369,14 @@ function chatApp() {
         if (this._queuedMessage) {
           const queued = this._queuedMessage;
           this._queuedMessage = null;
-          this._lastPostTime = 0;  // Clear debounce for auto-retry
-          this.$nextTick(() => this._postMessage(queued.displayText, queued.images));
+          this.$nextTick(() => this._sendViaRPC(queued.displayText, queued.images));
           return;
         }
         // Auto-retry message that was blocked by turn lock (409)
         if (this._blockedMessage) {
           const blocked = this._blockedMessage;
           this._blockedMessage = null;
-          this._lastPostTime = 0;  // Clear debounce for auto-retry
-          this.$nextTick(() => this._postMessage(blocked.displayText, blocked.images));
+          this.$nextTick(() => this._sendViaRPC(blocked.displayText, blocked.images));
           return;
         }
         this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });

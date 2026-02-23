@@ -4,10 +4,12 @@ Routes:
 - POST /reports/new                        → Create new report (redirect)
 - GET  /reports/{incident_id}              → Chat page (HTML)
 - GET  /reports/{incident_id}/conversation → Conversation history (JSON)
-- POST /reports/{incident_id}/chat         → Chat message (202 Accepted)
+- GET  /reports/{incident_id}/print        → Print report (HTML)
+- GET  /chat/history                       → Dashboard chat history (JSON)
+
+Chat message sending is handled via Centrifugo RPC proxy (see centrifugo.py).
 """
 
-import asyncio
 import json
 import logging
 from pathlib import Path
@@ -18,16 +20,11 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from sjifire.core.config import local_now
 from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user, set_current_user
-from sjifire.ops.chat.engine import run_chat, run_general_chat
 from sjifire.ops.chat.store import ConversationStore
-from sjifire.ops.chat.turn_lock import TurnLockStore
 from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.ops.incidents.store import IncidentStore
 
 logger = logging.getLogger(__name__)
-
-# Hold references to background chat tasks so they aren't garbage-collected.
-_background_tasks: set[asyncio.Task] = set()
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 _jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=True)
@@ -264,190 +261,6 @@ async def conversation_history(request: Request) -> Response:
             "total_output_tokens": conversation.total_output_tokens,
         }
     )
-
-
-async def chat_stream(request: Request) -> Response:
-    """Handle a chat message, publishing events via Centrifugo."""
-    user = _get_user(request)
-
-    import os
-
-    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
-
-    if not user and not is_dev:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    is_editor = is_dev or (
-        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
-    )
-    if not is_editor:
-        return JSONResponse({"error": "Forbidden"}, status_code=403)
-
-    # In dev mode, user may be set by middleware
-    if not user:
-        from sjifire.ops.auth import _current_user
-
-        user = _current_user.get()
-    if not user:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    incident_id = request.path_params["incident_id"]
-
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
-
-    message = body.get("message", "").strip()
-    if not message:
-        return JSONResponse({"error": "Message is required"}, status_code=400)
-
-    if len(message) > 5000:
-        return JSONResponse({"error": "Message too long (max 5000 chars)"}, status_code=400)
-
-    # Parse optional image attachments
-    images: list[dict] | None = None
-    raw_images = body.get("images")
-    if raw_images:
-        allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
-        if not isinstance(raw_images, list) or len(raw_images) > 3:
-            return JSONResponse({"error": "Maximum 3 images allowed"}, status_code=400)
-        images = []
-        for img in raw_images:
-            if not isinstance(img, dict):
-                return JSONResponse({"error": "Invalid image format"}, status_code=400)
-            media_type = img.get("media_type", "")
-            data = img.get("data", "")
-            if media_type not in allowed_types:
-                return JSONResponse(
-                    {"error": f"Unsupported image type: {media_type}"}, status_code=400
-                )
-            if len(data) > 2_000_000:  # ~1.5MB decoded
-                return JSONResponse({"error": "Image too large (max ~1.5MB)"}, status_code=400)
-            images.append({"media_type": media_type, "data": data})
-
-    # Auto-save uploaded images as incident attachments.
-    # Persists chat images to blob storage so they're linked to the
-    # report even if the chat session is lost. Title is intentionally
-    # minimal — the LLM will see the image and can update the title
-    # via the attachment tools if it identifies something specific.
-    # We capture the attachment metadata so the conversation message
-    # can reference the blob-backed images for display on reload.
-    saved_image_refs: list[dict] = []
-    if images:
-        from sjifire.ops.attachments.tools import upload_attachment
-
-        for idx, img in enumerate(images, 1):
-            suffix = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}.get(
-                img["media_type"], ".jpg"
-            )
-            try:
-                result = await upload_attachment(
-                    incident_id=incident_id,
-                    filename=f"chat-photo-{idx}{suffix}",
-                    data_base64=img["data"],
-                    content_type=img["media_type"],
-                )
-                if "error" not in result:
-                    saved_image_refs.append(
-                        {"attachment_id": result["id"], "content_type": img["media_type"]}
-                    )
-                else:
-                    logger.warning("Auto-save attachment returned error: %s", result["error"])
-            except Exception:
-                logger.warning("Failed to auto-save chat image", exc_info=True)
-
-    if saved_image_refs:
-        logger.info(
-            "Chat auto-saved %d image(s) as attachments: %s",
-            len(saved_image_refs),
-            saved_image_refs,
-        )
-
-    # Acquire distributed turn lock — prevents concurrent Claude calls
-    # for the same incident across replicas.
-    lock = None
-    lock_infra_failed = False
-    try:
-        async with TurnLockStore() as lock_store:
-            lock = await lock_store.acquire(incident_id, user.email, user.name)
-    except Exception:
-        logger.warning("Turn lock check failed for %s", incident_id, exc_info=True)
-        lock_infra_failed = True  # Degrade gracefully — proceed without lock
-
-    if lock is None and not lock_infra_failed:
-        # Lock held — check who holds it
-        existing = None
-        try:
-            async with TurnLockStore() as lock_store:
-                existing = await lock_store.get(incident_id)
-        except Exception:
-            logger.debug("Failed to fetch turn lock holder for %s", incident_id, exc_info=True)
-        holder = existing.holder_name if existing else "another user"
-        holder_email = existing.holder_email if existing else ""
-        return JSONResponse(
-            {
-                "error": f"Claude is responding to {holder}. Please wait for their turn to finish.",
-                "holder_name": holder,
-                "holder_email": holder_email,
-                "retry_after": "done",
-            },
-            status_code=409,
-        )
-
-    channel = f"chat:incident:{incident_id}"
-    task = asyncio.create_task(
-        run_chat(
-            incident_id,
-            message,
-            user,
-            channel=channel,
-            images=images,
-            image_refs=saved_image_refs or None,
-        )
-    )
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    return JSONResponse({"status": "accepted"}, status_code=202)
-
-
-async def general_chat_stream_endpoint(request: Request) -> Response:
-    """Handle a general chat message, publishing events via Centrifugo."""
-    user = _get_user(request)
-
-    import os
-
-    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
-
-    if not user and not is_dev:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    if not user:
-        from sjifire.ops.auth import _current_user
-
-        user = _current_user.get()
-    if not user:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
-
-    message = body.get("message", "").strip()
-    if not message:
-        return JSONResponse({"error": "Message is required"}, status_code=400)
-
-    if len(message) > 5000:
-        return JSONResponse({"error": "Message too long (max 5000 chars)"}, status_code=400)
-
-    context = body.get("context")
-
-    channel = f"chat:general:{user.email}"
-    task = asyncio.create_task(run_general_chat(message, user, channel=channel, context=context))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    return JSONResponse({"status": "accepted"}, status_code=202)
 
 
 async def general_chat_history(request: Request) -> Response:

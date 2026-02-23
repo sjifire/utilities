@@ -1,6 +1,7 @@
-"""Tests for chat route handlers: image validation, print report."""
+"""Tests for chat route handlers: RPC proxy image validation, print report."""
 
 import asyncio
+import base64
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -9,7 +10,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from sjifire.ops.auth import UserContext
-from sjifire.ops.chat.routes import chat_stream, create_report, print_report
+from sjifire.ops.chat.centrifugo import rpc_proxy
+from sjifire.ops.chat.routes import create_report, print_report
 from sjifire.ops.incidents.models import (
     EditEntry,
     IncidentDocument,
@@ -24,9 +26,15 @@ _TEST_USER = UserContext(
     groups=frozenset(),
 )
 
+_B64INFO = base64.b64encode(
+    json.dumps(
+        {"user_id": _TEST_USER.user_id, "name": _TEST_USER.name, "email": _TEST_USER.email}
+    ).encode()
+).decode()
+
 
 class _FakeRequest:
-    """Minimal Starlette Request stand-in for testing chat_stream."""
+    """Minimal Starlette Request stand-in for testing routes."""
 
     def __init__(self, body: dict, *, method: str = "POST"):
         self._body = body
@@ -35,6 +43,18 @@ class _FakeRequest:
 
     async def json(self):
         return self._body
+
+
+def _rpc_request(data: dict) -> _FakeRequest:
+    """Build a fake Centrifugo RPC proxy request for send_message."""
+    return _FakeRequest(
+        {
+            "method": "send_message",
+            "data": {"incident_id": "inc-test", **data},
+            "user": _TEST_USER.email,
+            "b64info": _B64INFO,
+        }
+    )
 
 
 def _fake_get_user(_request):
@@ -52,14 +72,18 @@ def _patch_auth(monkeypatch):
 
     monkeypatch.delenv("ENTRA_MCP_API_CLIENT_ID", raising=False)
     monkeypatch.setattr("sjifire.ops.chat.routes._get_user", _fake_get_user)
+    # Bypass editor check for RPC tests
+    monkeypatch.setattr("sjifire.ops.chat.centrifugo.check_is_editor", AsyncMock(return_value=True))
     TurnLockStore._memory.clear()
     yield
     TurnLockStore._memory.clear()
 
 
 class TestImageValidation:
+    """Test image validation in the RPC proxy send_message handler."""
+
     async def test_rejects_more_than_3_images(self):
-        req = _FakeRequest(
+        req = _rpc_request(
             {
                 "message": "test",
                 "images": [
@@ -70,65 +94,65 @@ class TestImageValidation:
                 ],
             }
         )
-        resp = await chat_stream(req)
-        assert resp.status_code == 400
+        resp = await rpc_proxy(req)
         body = json.loads(resp.body)
-        assert "3 images" in body["error"]
+        assert body["error"]["code"] == 400
+        assert "3 images" in body["error"]["message"]
 
     async def test_rejects_non_list_images(self):
-        req = _FakeRequest(
+        req = _rpc_request(
             {
                 "message": "test",
                 "images": "not-a-list",
             }
         )
-        resp = await chat_stream(req)
-        assert resp.status_code == 400
+        resp = await rpc_proxy(req)
         body = json.loads(resp.body)
-        assert "3 images" in body["error"]
+        assert body["error"]["code"] == 400
+        assert "3 images" in body["error"]["message"]
 
     async def test_rejects_unsupported_media_type(self):
-        req = _FakeRequest(
+        req = _rpc_request(
             {
                 "message": "test",
                 "images": [{"data": "abc", "media_type": "image/bmp"}],
             }
         )
-        resp = await chat_stream(req)
-        assert resp.status_code == 400
+        resp = await rpc_proxy(req)
         body = json.loads(resp.body)
-        assert "Unsupported" in body["error"]
+        assert body["error"]["code"] == 400
+        assert "Unsupported" in body["error"]["message"]
 
     async def test_rejects_oversized_image(self):
-        req = _FakeRequest(
+        req = _rpc_request(
             {
                 "message": "test",
                 "images": [{"data": "x" * 2_500_000, "media_type": "image/jpeg"}],
             }
         )
-        resp = await chat_stream(req)
-        assert resp.status_code == 400
+        resp = await rpc_proxy(req)
         body = json.loads(resp.body)
-        assert "too large" in body["error"]
+        assert body["error"]["code"] == 400
+        assert "too large" in body["error"]["message"]
 
     async def test_rejects_invalid_image_format(self):
-        req = _FakeRequest(
+        req = _rpc_request(
             {
                 "message": "test",
                 "images": ["not-a-dict"],
             }
         )
-        resp = await chat_stream(req)
-        assert resp.status_code == 400
+        resp = await rpc_proxy(req)
         body = json.loads(resp.body)
-        assert "Invalid" in body["error"]
+        assert body["error"]["code"] == 400
+        assert "Invalid" in body["error"]["message"]
 
     async def test_valid_images_passed_to_run_chat(self):
         """Valid images should reach run_chat with images kwarg."""
         mock_run_chat = AsyncMock()
 
-        with patch("sjifire.ops.chat.routes.run_chat", mock_run_chat):
-            req = _FakeRequest(
+        with patch("sjifire.ops.chat.engine.run_chat", mock_run_chat):
+            req = _rpc_request(
                 {
                     "message": "Check this photo",
                     "images": [
@@ -137,11 +161,12 @@ class TestImageValidation:
                     ],
                 }
             )
-            resp = await chat_stream(req)
+            resp = await rpc_proxy(req)
             # Let the background task run
             await asyncio.sleep(0)
 
-        assert resp.status_code == 202
+        body = json.loads(resp.body)
+        assert body["result"]["data"]["status"] == "accepted"
         mock_run_chat.assert_called_once()
         _, kwargs = mock_run_chat.call_args
         images = kwargs["images"]
@@ -154,12 +179,13 @@ class TestImageValidation:
         """When no images in request, images kwarg should be None."""
         mock_run_chat = AsyncMock()
 
-        with patch("sjifire.ops.chat.routes.run_chat", mock_run_chat):
-            req = _FakeRequest({"message": "Just text"})
-            resp = await chat_stream(req)
+        with patch("sjifire.ops.chat.engine.run_chat", mock_run_chat):
+            req = _rpc_request({"message": "Just text"})
+            resp = await rpc_proxy(req)
             await asyncio.sleep(0)
 
-        assert resp.status_code == 202
+        body = json.loads(resp.body)
+        assert body["result"]["data"]["status"] == "accepted"
         mock_run_chat.assert_called_once()
         _, kwargs = mock_run_chat.call_args
         assert kwargs["images"] is None

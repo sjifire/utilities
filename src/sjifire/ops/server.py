@@ -36,14 +36,12 @@ from sjifire.ops.attachments.routes import (
     upload_attachment_route,
 )
 from sjifire.ops.auth import get_easyauth_user, set_current_user
-from sjifire.ops.chat.centrifugo import connect_proxy, subscribe_proxy, websocket_proxy
+from sjifire.ops.chat.centrifugo import connect_proxy, rpc_proxy, subscribe_proxy, websocket_proxy
 from sjifire.ops.chat.routes import (
     chat_page,
-    chat_stream,
     conversation_history,
     create_report,
     general_chat_history,
-    general_chat_stream_endpoint,
     print_report,
 )
 from sjifire.ops.dispatch import tools as dispatch_tools
@@ -360,7 +358,6 @@ app = mcp.streamable_http_app()
 # Chat routes — Starlette Route directly because @mcp.custom_route
 # doesn't support path parameters like {incident_id}.
 # Order matters: exact paths before parameterized paths.
-app.routes.insert(0, Route("/reports/{incident_id}/chat", chat_stream, methods=["POST"]))
 app.routes.insert(0, Route("/reports/{incident_id}/conversation", conversation_history))
 app.routes.insert(0, Route("/reports/{incident_id}/print", print_report))
 app.routes.insert(0, Route("/reports/{incident_id}", chat_page))
@@ -409,11 +406,11 @@ app.routes.insert(
 )
 
 # General chat routes (not tied to an incident)
-app.routes.insert(0, Route("/chat/stream", general_chat_stream_endpoint, methods=["POST"]))
 app.routes.insert(0, Route("/chat/history", general_chat_history))
 
-# Centrifugo routes — WebSocket proxy + auth callbacks
+# Centrifugo routes — WebSocket proxy + auth callbacks + RPC proxy
 app.routes.insert(0, WebSocketRoute("/connection/websocket", websocket_proxy))
+app.routes.insert(0, Route("/centrifugo/rpc", rpc_proxy, methods=["POST"]))
 app.routes.insert(0, Route("/centrifugo/connect", connect_proxy, methods=["POST"]))
 app.routes.insert(0, Route("/centrifugo/subscribe", subscribe_proxy, methods=["POST"]))
 
