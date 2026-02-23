@@ -107,10 +107,10 @@ properties:
             value: https://ops.sjifire.org
           - name: CENTRIFUGO_HEALTH_ENABLED
             value: "true"
-          - name: CENTRIFUGO_RPC_PROXY_ENABLED
-            value: "true"
           - name: CENTRIFUGO_RPC_PROXY_ENDPOINT
             value: http://localhost:8000/centrifugo/rpc
+          - name: CENTRIFUGO_RPC_WITHOUT_NAMESPACE_PROXY_ENABLED
+            value: "true"
           - name: CENTRIFUGO_CLIENT_MESSAGE_SIZE_LIMIT
             value: "5242880"
           - name: CENTRIFUGO_CHANNEL_NAMESPACES
