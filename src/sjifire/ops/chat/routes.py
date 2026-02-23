@@ -68,7 +68,10 @@ async def create_report(request: Request) -> Response:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     # Only editors (or dev mode) can create reports
-    if not is_dev and not await check_is_editor(user.user_id, fallback=user.is_editor):
+    is_editor = await check_is_editor(
+        user.user_id, fallback=user.is_editor, email=user.email,
+    )
+    if not is_dev and not is_editor:
         return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     try:
@@ -115,7 +118,10 @@ async def print_report(request: Request) -> Response:
         return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=" + str(request.url.path))
 
     is_editor = is_dev or (
-        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+        user is not None
+        and await check_is_editor(
+            user.user_id, fallback=user.is_editor, email=user.email,
+        )
     )
     if not is_editor:
         return _forbidden_page()
@@ -151,7 +157,10 @@ async def chat_page(request: Request) -> Response:
 
     # Only editors (or dev mode) can access reports
     is_editor = is_dev or (
-        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+        user is not None
+        and await check_is_editor(
+            user.user_id, fallback=user.is_editor, email=user.email,
+        )
     )
     if not is_editor:
         return _forbidden_page()
@@ -217,7 +226,10 @@ async def conversation_history(request: Request) -> Response:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     is_editor = is_dev or (
-        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+        user is not None
+        and await check_is_editor(
+            user.user_id, fallback=user.is_editor, email=user.email,
+        )
     )
     if not is_editor:
         return JSONResponse({"error": "Forbidden"}, status_code=403)

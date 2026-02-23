@@ -38,10 +38,12 @@ def _editor_group_env():
 
     sjifire.ops.auth._EDITOR_GROUP_ID = None
     sjifire.ops.auth._editor_cache.clear()
+    sjifire.ops.auth._user_id_cache.clear()
     with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "officer-group"}):
         yield
     sjifire.ops.auth._EDITOR_GROUP_ID = None
     sjifire.ops.auth._editor_cache.clear()
+    sjifire.ops.auth._user_id_cache.clear()
 
 
 @pytest.fixture

@@ -684,7 +684,7 @@ async def _check_view_access(doc: IncidentDocument, user_email: str, is_editor: 
         return True
     try:
         user = get_current_user()
-        return await check_is_editor(user.user_id, fallback=is_editor)
+        return await check_is_editor(user.user_id, fallback=is_editor, email=user.email)
     except RuntimeError:
         return is_editor
 
@@ -695,7 +695,7 @@ async def _check_edit_access(doc: IncidentDocument, user_email: str, is_editor: 
         return True
     try:
         user = get_current_user()
-        return await check_is_editor(user.user_id, fallback=is_editor)
+        return await check_is_editor(user.user_id, fallback=is_editor, email=user.email)
     except RuntimeError:
         return is_editor
 
@@ -1236,7 +1236,7 @@ async def submit_incident(incident_id: str) -> dict:
     """
     user = get_current_user()
 
-    if not await check_is_editor(user.user_id, fallback=user.is_editor):
+    if not await check_is_editor(user.user_id, fallback=user.is_editor, email=user.email):
         group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to submit incidents to NERIS. "
@@ -1842,7 +1842,7 @@ async def list_neris_incidents() -> dict:
     """
     user = get_current_user()
 
-    if not await check_is_editor(user.user_id, fallback=user.is_editor):
+    if not await check_is_editor(user.user_id, fallback=user.is_editor, email=user.email):
         group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to view or edit NERIS reports. "
@@ -1881,7 +1881,7 @@ async def get_neris_incident(neris_incident_id: str) -> dict:
     """
     user = get_current_user()
 
-    if not await check_is_editor(user.user_id, fallback=user.is_editor):
+    if not await check_is_editor(user.user_id, fallback=user.is_editor, email=user.email):
         group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to view or edit NERIS reports. "
@@ -1926,7 +1926,7 @@ async def finalize_incident(incident_id: str) -> dict:
     """
     user = get_current_user()
 
-    if not await check_is_editor(user.user_id, fallback=user.is_editor):
+    if not await check_is_editor(user.user_id, fallback=user.is_editor, email=user.email):
         group = get_org_config().editor_group_name
         return {
             "error": "You are not authorized to finalize incidents. "

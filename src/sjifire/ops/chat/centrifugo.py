@@ -222,11 +222,9 @@ async def subscribe_proxy(request: Request) -> Response:
                 info = json.loads(base64.b64decode(b64info))
                 user_id = info.get("user_id", "")
 
-        if user_id:
-            is_editor = await check_is_editor(user_id)
-            if not is_editor:
-                return JSONResponse({"error": {"code": 403, "message": "Editor role required"}})
-        # If no user_id available, allow access (connect already authenticated)
+        is_editor = await check_is_editor(user_id, email=user_email)
+        if not is_editor:
+            return JSONResponse({"error": {"code": 403, "message": "Editor role required"}})
         return JSONResponse({"result": {}})
 
     if channel.startswith("chat:general:"):
@@ -285,7 +283,10 @@ async def rpc_proxy(request: Request) -> Response:
     if not user_email:
         return JSONResponse({"error": {"code": 401, "message": "Unauthorized"}})
 
-    logger.info("RPC proxy user: email=%s, user_id=%s, method=%s", user_email, user_id or "(empty)", method)
+    logger.info(
+        "RPC proxy user: email=%s, user_id=%s, method=%s",
+        user_email, user_id or "(empty)", method,
+    )
 
     user = UserContext(
         email=user_email,
@@ -320,7 +321,7 @@ async def _handle_send_message(data: dict, user: UserContext) -> Response:
         )
 
     # Editor check
-    is_editor = await check_is_editor(user.user_id) if user.user_id else True
+    is_editor = await check_is_editor(user.user_id, email=user.email)
     if not is_editor:
         return JSONResponse({"error": {"code": 403, "message": "Editor role required"}})
 
