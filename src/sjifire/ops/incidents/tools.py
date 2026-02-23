@@ -243,11 +243,11 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
         for u in neris_units:
             unit = UnitAssignment(
                 unit_id=u.get("reported_unit_id") or u.get("unit_neris_id", ""),
-                response_mode=u.get("response_mode", ""),
-                dispatch=u.get("dispatch", ""),
-                enroute=u.get("enroute_to_scene", ""),
-                on_scene=u.get("on_scene", ""),
-                cleared=u.get("unit_clear", ""),
+                response_mode=u.get("response_mode") or "",
+                dispatch=u.get("dispatch") or "",
+                enroute=u.get("enroute_to_scene") or "",
+                on_scene=u.get("on_scene") or "",
+                cleared=u.get("unit_clear") or "",
             )
             units.append(unit)
         prefill["units"] = units
