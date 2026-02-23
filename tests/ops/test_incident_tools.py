@@ -709,6 +709,9 @@ _SAMPLE_NERIS_RECORD = {
     "neris_id": "FD53055879|26-000039|1767316361",
     "base": {
         "outcome_narrative": "Campfire extinguished at 94 Zepher.",
+        "people_present": True,
+        "displacement_count": 0,
+        "impediment_narrative": "Narrow driveway limited access.",
         "location": {
             "complete_number": "94",
             "street": "Zepher",
@@ -717,10 +720,47 @@ _SAMPLE_NERIS_RECORD = {
             "incorporated_municipality": "Friday Harbor",
             "state": "WA",
         },
+        "location_use": {"use_type": "OUTDOOR||WATERFRONT"},
     },
     "incident_types": [
         {"primary": True, "type": "FIRE||OUTSIDE_FIRE||CONSTRUCTION_WASTE"},
         {"primary": False, "type": "PUBSERV||ALARMS_NONMED"},
+    ],
+    "actions_tactics": {
+        "action_noaction": {
+            "type": "ACTION",
+            "actions": [
+                "FIRE_SUPPRESSION||EXTINGUISHMENT",
+                "INVESTIGATION||CAUSE_DETERMINATION",
+            ],
+        },
+    },
+    "fire_detail": {
+        "location_detail": {
+            "type": "STRUCTURE",
+            "arrival_condition": "SMOKE_SHOWING",
+            "damage_type": "MINOR_DAMAGE",
+            "room_of_origin_type": "LIVING_SPACE",
+            "floor_of_origin": 1,
+            "cause": "ELECTRICAL",
+        },
+        "water_supply": "HYDRANT_LESS_500",
+        "investigation_needed": "NO_CAUSE_OBVIOUS",
+        "investigation_types": [],
+    },
+    "smoke_alarm": {"presence": {"type": "PRESENT"}},
+    "fire_alarm": {"presence": {"type": "NOT_APPLICABLE"}},
+    "fire_suppression": {"presence": {"type": "NOT_PRESENT"}},
+    "tactic_timestamps": {
+        "water_on_fire": "2026-01-02T01:42:00+00:00",
+        "fire_under_control": "2026-01-02T01:55:00+00:00",
+    },
+    "medical_details": [
+        {
+            "patient_care_evaluation": "PATIENT_EVALUATED_NO_CARE_REQUIRED",
+            "transport_disposition": "NO_TRANSPORT",
+            "patient_status": "UNCHANGED",
+        },
     ],
     "dispatch": {
         "incident_number": "26-000039",
@@ -769,10 +809,21 @@ class TestPrefillFromNeris:
         assert result["address"] == "94 Zepher"
         assert result["city"] == "Friday Harbor"
         assert result["state"] == "WA"
+        assert result["location_use"] == "OUTDOOR||WATERFRONT"
         assert len(result["units"]) == 2
         assert result["units"][0].unit_id == "FD53055879S001U005"
         assert result["timestamps"]["psap_answer"] == "2026-01-02T01:12:41+00:00"
         assert result["timestamps"]["incident_clear"] == "2026-01-02T02:16:31+00:00"
+        # New fields from expanded extraction
+        assert result["action_taken"] == "ACTION"
+        assert len(result["action_codes"]) == 2
+        assert result["arrival_conditions"] == "SMOKE_SHOWING"
+        assert result["people_present"] is True
+        assert result["displaced_count"] == 0
+        assert result["additional_incident_types"] == ["PUBSERV||ALARMS_NONMED"]
+        assert result["extras"]["water_supply"] == "HYDRANT_LESS_500"
+        assert result["extras"]["patient_count"] == 1
+        assert result["timestamps"]["water_on_fire"] == "2026-01-02T01:42:00+00:00"
 
     @patch("sjifire.ops.incidents.tools._get_neris_incident")
     async def test_picks_earliest_unit_timestamps(self, mock_get):
@@ -1823,7 +1874,7 @@ class TestImportFromNeris:
 
 # ── parse_neris_record (the pure-parsing half) ──
 class TestParseNerisRecord:
-    def test_extracts_all_fields(self):
+    def test_extracts_core_fields(self):
         result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD53055879|26-000039|1767316361")
 
         assert result["neris_incident_id"] == "FD53055879|26-000039|1767316361"
@@ -1832,9 +1883,104 @@ class TestParseNerisRecord:
         assert result["address"] == "94 Zepher"
         assert result["city"] == "Friday Harbor"
         assert result["state"] == "WA"
+        assert result["location_use"] == "OUTDOOR||WATERFRONT"
         assert len(result["units"]) == 2
         assert result["timestamps"]["psap_answer"] == "2026-01-02T01:12:41+00:00"
         assert result["timestamps"]["incident_clear"] == "2026-01-02T02:16:31+00:00"
+
+    def test_extracts_actions(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        assert result["action_taken"] == "ACTION"
+        assert "FIRE_SUPPRESSION||EXTINGUISHMENT" in result["action_codes"]
+        assert "INVESTIGATION||CAUSE_DETERMINATION" in result["action_codes"]
+
+    def test_extracts_noaction(self):
+        record = {
+            "base": {},
+            "incident_types": [{"type": "NOEMERG||CANCELLED"}],
+            "actions_tactics": {
+                "action_noaction": {"type": "NOACTION", "noaction_type": "CANCELLED"},
+            },
+        }
+        result = _parse_neris_record(record, "FD|X|Y")
+
+        assert result["action_taken"] == "NOACTION"
+        assert result["noaction_reason"] == "CANCELLED"
+        assert "action_codes" not in result
+
+    def test_extracts_additional_incident_types(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        assert result["additional_incident_types"] == ["PUBSERV||ALARMS_NONMED"]
+
+    def test_extracts_fire_detail(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        assert result["arrival_conditions"] == "SMOKE_SHOWING"
+        extras = result["extras"]
+        assert extras["fire_bldg_damage"] == "MINOR_DAMAGE"
+        assert extras["room_of_origin"] == "LIVING_SPACE"
+        assert extras["floor_of_origin"] == 1
+        assert extras["fire_cause_in"] == "ELECTRICAL"
+        assert extras["water_supply"] == "HYDRANT_LESS_500"
+        assert extras["fire_investigation"] == "NO_CAUSE_OBVIOUS"
+
+    def test_extracts_alarms(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        extras = result["extras"]
+        assert extras["smoke_alarm_presence"] == "PRESENT"
+        assert extras["fire_alarm_presence"] == "NOT_APPLICABLE"
+        assert extras["sprinkler_presence"] == "NOT_PRESENT"
+
+    def test_extracts_tactic_timestamps(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        assert result["timestamps"]["water_on_fire"] == "2026-01-02T01:42:00+00:00"
+        assert result["timestamps"]["fire_under_control"] == "2026-01-02T01:55:00+00:00"
+
+    def test_extracts_medical_details(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        extras = result["extras"]
+        assert extras["patient_count"] == 1
+        assert extras["care_disposition"] == "PATIENT_EVALUATED_NO_CARE_REQUIRED"
+        assert extras["transport_disposition"] == "NO_TRANSPORT"
+        assert extras["patient_status"] == "UNCHANGED"
+
+    def test_extracts_medical_multiple_patients(self):
+        record = {
+            "base": {},
+            "incident_types": [{"type": "MEDICAL||ILLNESS"}],
+            "medical_details": [
+                {
+                    "patient_care_evaluation": "PATIENT_EVALUATED_CARE_PROVIDED",
+                    "transport_disposition": "TRANSPORT_BY_EMS_UNIT",
+                    "patient_status": "IMPROVED",
+                },
+                {
+                    "patient_care_evaluation": "PATIENT_EVALUATED_REFUSED_CARE",
+                    "transport_disposition": "NO_TRANSPORT",
+                    "patient_status": "UNCHANGED",
+                },
+            ],
+        }
+        result = _parse_neris_record(record, "FD|X|Y")
+
+        extras = result["extras"]
+        assert extras["patient_count"] == 2
+        assert extras["patient_1_care_disposition"] == "PATIENT_EVALUATED_CARE_PROVIDED"
+        assert extras["patient_1_transport_disposition"] == "TRANSPORT_BY_EMS_UNIT"
+        assert extras["patient_2_care_disposition"] == "PATIENT_EVALUATED_REFUSED_CARE"
+        assert extras["patient_2_transport_disposition"] == "NO_TRANSPORT"
+
+    def test_extracts_people_and_impediment(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        assert result["people_present"] is True
+        assert result["displaced_count"] == 0
+        assert result["extras"]["impediment_narrative"] == "Narrow driveway limited access."
 
     def test_handles_empty_record(self):
         result = _parse_neris_record(
@@ -1844,6 +1990,8 @@ class TestParseNerisRecord:
         assert result["neris_incident_id"] == "FD|X|Y"
         assert "incident_type" not in result
         assert "narrative" not in result
+        assert "action_taken" not in result
+        assert "extras" not in result
 
     def test_handles_missing_dispatch(self):
         result = _parse_neris_record(
@@ -1853,6 +2001,19 @@ class TestParseNerisRecord:
         assert result["incident_type"] == "MEDICAL"
         assert result["narrative"] == "Test"
         assert "units" not in result
+
+    def test_handles_null_fire_detail(self):
+        record = {
+            "base": {},
+            "incident_types": [{"type": "MEDICAL||ILLNESS"}],
+            "fire_detail": None,
+            "smoke_alarm": None,
+            "actions_tactics": None,
+            "tactic_timestamps": None,
+        }
+        result = _parse_neris_record(record, "FD|X|Y")
+        assert "arrival_conditions" not in result
+        assert "action_taken" not in result
 
 
 # ── build_import_comparison ──
