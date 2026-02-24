@@ -532,15 +532,16 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         if isinstance(result, dict) and "error" not in result:
             # Return a concise summary instead of the full document dump
             comparison = result.get("import_comparison", {})
+            units = result.get("units", [])
             summary: dict = {
                 "status": "success",
                 "incident_number": result.get("incident_number"),
                 "neris_incident_id": result.get("neris_incident_id"),
                 "incident_type": result.get("incident_type"),
                 "address": result.get("address"),
-                "units": [u.get("unit_id") for u in result.get("units", [])],
+                "units": [u.get("unit_id") for u in units],
                 "personnel_count": sum(
-                    len(u.get("personnel", [])) for u in result.get("units", [])
+                    len(u.get("personnel", [])) for u in units
                 ),
                 "narrative_length": len(result.get("narrative") or ""),
                 "extras_keys": list(result.get("extras", {}).keys()),
@@ -549,6 +550,16 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
                 summary["discrepancies"] = comparison["discrepancies"]
             if comparison.get("gaps_filled"):
                 summary["gaps_filled"] = comparison["gaps_filled"]
+            if comparison.get("sources"):
+                summary["data_sources"] = comparison["sources"]
+            if comparison.get("crew_on_duty"):
+                summary["crew_on_duty"] = comparison["crew_on_duty"]
+            summary["next_step"] = (
+                "This report was imported from NERIS (already reviewed there). "
+                "Present a summary of what was imported and highlight any "
+                "discrepancies between NERIS, dispatch, and crew data. "
+                "Then ask if the user wants to lock the report."
+            )
             return summary
         return result
 
