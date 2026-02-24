@@ -77,11 +77,22 @@ class TestBuildSystemPrompt:
         assert "Jordan Pollack" in prompt
         assert "jpollack@sjifire.org" in prompt
 
+    def test_includes_department_knowledge(self):
+        """System prompt should include department-specific knowledge."""
+        prompt = _build_system_prompt("Test User", "test@sjifire.org")
+        assert "DEPARTMENT-SPECIFIC" in prompt
+        assert "chimney" in prompt.lower()
+        assert "propane" in prompt.lower()
+        assert "PeaceHealth" in prompt
+
     def test_includes_stable_incident_data(self):
         """System prompt should include dispatch/crew/personnel (cached per incident)."""
         prompt = _build_system_prompt(
-            "Test User", "test@sjifire.org",
-            dispatch_json='{"nature":"FIRE"}', crew_json="[]", personnel_json="[]",
+            "Test User",
+            "test@sjifire.org",
+            dispatch_json='{"nature":"FIRE"}',
+            crew_json="[]",
+            personnel_json="[]",
         )
         assert "DISPATCH DATA" in prompt
         assert "CREW ON DUTY" in prompt

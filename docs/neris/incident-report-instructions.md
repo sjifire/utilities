@@ -178,11 +178,7 @@ If you're unsure, present the top-level categories and drill down:
 
 You can select up to 3 incident types (1 primary + 2 additional).
 
-**SJI-specific incident type guidance:**
-- **Chimney fires** are by far the most common structure fire on San Juan Island (woodstoves, fireplaces). If CAD mentions "chimney", "flue", "woodstove", "fireplace", "creosote", or "chimney fire", use `FIRE||STRUCTURE_FIRE||CHIMNEY_FIRE`. Do NOT default to `CONFINED_COOKING_APPLIANCE_FIRE` unless the CAD specifically mentions a cooking appliance (stove, oven, microwave, range, grease fire).
-- **Vegetation/grass fires** are more common than wildland fires unless CAD indicates a large or spreading wildland fire.
-- **Lift assists** are very common — `PUBSERV||CITIZEN_ASSIST||LIFT_ASSIST`.
-- **Gas leaks** are usually propane (not natural gas) — the island uses propane tanks, not municipal gas lines.
+See the DEPARTMENT-SPECIFIC section in the system prompt for common incident type patterns in this district.
 
 ### Step 2 — Location Details
 
@@ -255,9 +251,7 @@ For fire incidents, also ask about: water on fire, fire under control, fire knoc
 
 **3b — Crew Per Unit**
 
-**SJI crew-to-apparatus mapping**: The on-duty S31 **career crew** (Captain, Lieutenant, AO) rides the primary `*31` apparatus together — usually **E31** (engine), sometimes R31 or B31 depending on the call. If E31 responded, assign the career crew to it by default and ask the user to confirm. **Support and standby positions rarely ride first-due rigs** — do NOT auto-assign them to E31, M31, or other primary apparatus. Leave them unassigned and ask the user where they were.
-
-For tenders (T33, T36), ladder (L31), and other apparatus, these are typically staffed by volunteers, off-duty personnel, or sometimes standby crew — ask the user for those.
+See the DEPARTMENT-SPECIFIC section in the system prompt for crew-to-apparatus mapping. If E31 responded, assign the career crew to it by default and ask the user to confirm.
 
 Using the on-duty schedule, assign personnel to each responding unit. Present grouped by unit. **List every responding unit** — if you don't know who was on a unit, show it as needing assignment.
 
@@ -544,8 +538,8 @@ update_incident(extras={
 })
 ```
 
-**Gas leaks** (`HAZSIT||HAZARDOUS_MATERIALS||GAS_LEAK_ODOR`) — common on SJI. Ask about:
-- Gas company (OPALCO/Propane vendor) notified?
+**Gas leaks** (`HAZSIT||HAZARDOUS_MATERIALS||GAS_LEAK_ODOR`) — Ask about:
+- Gas company notified?
 - Gas shut off at meter/tank?
 - Ventilation performed?
 - Meter readings (LEL levels)?
@@ -773,12 +767,8 @@ The incident model has strict, typed fields for data that appears on every call 
 ## Tips
 
 - **Incident numbers** follow the pattern `YY-NNNNNN` (e.g., `26-001678`)
-- **Station**: Usually `S31` but check dispatch data for the correct station
-- **Default city**: Friday Harbor, WA 98250
 - **Common positions**: Captain, Lieutenant, Firefighter, EMT, Paramedic
-- **Shifts**: A, B, C platoons
-- **Nicknames**: "Dutch" = Joran Bouwman, "Micky" = Michelangelo von Dassow
-- **Mutual aid**: Primarily from neighboring island departments and county resources
+- See the DEPARTMENT-SPECIFIC section for station, city, nicknames, shifts, and mutual aid details
 - If the user seems unsure about a NERIS classification, offer to look up values: "Want me to show you all the options for [field]?"
 - Keep narratives factual, professional, and concise — avoid subjective language
 - Don't over-ask — if dispatch data answers a question, just confirm rather than re-asking

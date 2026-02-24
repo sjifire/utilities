@@ -117,12 +117,14 @@ def _build_system_prompt(
         user_email=user_email,
     )
     instructions = _load_doc("neris/incident-report-instructions.md")
+    department = _load_doc("neris/sji-department.md")
     cheat_sheet = _load_doc("neris/neris-cheat-sheet.md")
 
     sections = [
         # --- Static (cached across all conversations) ---
         prompt,
         instructions,
+        department,
         f"REPORT AUTHOR: {user_name} ({user_email})",
         _get_all_neris_incident_types(),
         cheat_sheet,
