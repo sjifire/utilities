@@ -25,6 +25,7 @@ from sjifire.ops.incidents.tools import (
     import_from_neris,
     list_incidents,
     list_neris_incidents,
+    reopen_incident,
     reset_incident,
     submit_incident,
     update_incident,
@@ -2379,6 +2380,72 @@ class TestLockedStatusGuards:
         result = await import_from_neris("FD53055879|26-000944|123", incident_id="doc-approved-1")
         assert "error" in result
         assert "approved" in result["error"].lower()
+
+
+# ── Reopen incident ──
+class TestReopenIncident:
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_reopen_submitted_incident(self, mock_store_cls, officer_user):
+        doc = IncidentDocument(
+            id="doc-reopen-1",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="submitted",
+        )
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await reopen_incident("doc-reopen-1")
+        assert result["status"] == "draft"
+        assert result["previous_status"] == "submitted"
+        assert doc.edit_history[-1].fields_changed == ["reopened (was submitted)"]
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_reopen_approved_incident(self, mock_store_cls, officer_user):
+        doc = IncidentDocument(
+            id="doc-reopen-2",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="approved",
+        )
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await reopen_incident("doc-reopen-2")
+        assert result["status"] == "draft"
+        assert result["previous_status"] == "approved"
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_reopen_rejects_draft(self, mock_store_cls, officer_user):
+        doc = IncidentDocument(
+            id="doc-reopen-3",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="draft",
+        )
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await reopen_incident("doc-reopen-3")
+        assert "error" in result
+
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_reopen_requires_editor(self, mock_store_cls, regular_user, sample_doc):
+        sample_doc.status = "submitted"
+        result = await reopen_incident("doc-123")
+        assert "error" in result
+        assert "editor" in result["error"].lower()
 
 
 # ── Finalize incident ──

@@ -525,10 +525,32 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
                 "error": "NERIS ID is required. Use the neris_id parameter "
                 "or link the incident to a NERIS record first."
             }
-        return await incident_tools.import_from_neris(
+        result = await incident_tools.import_from_neris(
             neris_id,
             incident_id=incident_id,
         )
+        if isinstance(result, dict) and "error" not in result:
+            # Return a concise summary instead of the full document dump
+            comparison = result.get("import_comparison", {})
+            summary: dict = {
+                "status": "success",
+                "incident_number": result.get("incident_number"),
+                "neris_incident_id": result.get("neris_incident_id"),
+                "incident_type": result.get("incident_type"),
+                "address": result.get("address"),
+                "units": [u.get("unit_id") for u in result.get("units", [])],
+                "personnel_count": sum(
+                    len(u.get("personnel", [])) for u in result.get("units", [])
+                ),
+                "narrative_length": len(result.get("narrative") or ""),
+                "extras_keys": list(result.get("extras", {}).keys()),
+            }
+            if comparison.get("discrepancies"):
+                summary["discrepancies"] = comparison["discrepancies"]
+            if comparison.get("gaps_filled"):
+                summary["gaps_filled"] = comparison["gaps_filled"]
+            return summary
+        return result
 
     if name == "finalize_incident":
         return await incident_tools.finalize_incident(tool_input["incident_id"])

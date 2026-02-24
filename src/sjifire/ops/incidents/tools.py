@@ -63,6 +63,8 @@ def _resolve_neris_unit_id(neris_unit_id: str) -> str:
         return neris_unit_id
 
     return _neris_unit_map.get(neris_unit_id, neris_unit_id)
+
+
 _RESETTABLE_STATUSES = {"draft", "in_progress"}
 
 
@@ -313,9 +315,7 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
     if neris_units:
         units = []
         for u in neris_units:
-            raw_id = u.get("reported_unit_id") or _resolve_neris_unit_id(
-                u.get("unit_neris_id", "")
-            )
+            raw_id = u.get("reported_unit_id") or _resolve_neris_unit_id(u.get("unit_neris_id", ""))
             unit = UnitAssignment(
                 unit_id=raw_id,
                 response_mode=u.get("response_mode") or "",
@@ -1524,6 +1524,73 @@ async def reset_incident(incident_id: str) -> dict:
             "pre-fill the report again."
         )
     return result
+
+
+async def reopen_incident(incident_id: str) -> dict:
+    """Reopen a submitted or approved incident, returning it to draft status.
+
+    This does NOT clear content — it only changes the status so the report
+    can be edited again.  Use ``reset_incident`` afterward if you also want
+    to clear all fields and start from scratch.
+
+    Guards:
+    - Editors only (officers)
+    - Only submitted or approved incidents can be reopened
+
+    Args:
+        incident_id: The incident document ID
+
+    Returns:
+        Confirmation with the updated status, or an error
+    """
+    user = get_current_user()
+
+    if not await check_is_editor(user.user_id, fallback=user.is_editor, email=user.email):
+        group = get_org_config().editor_group_name
+        return {
+            "error": "Only editors can reopen incidents. "
+            f"Ask an administrator to add you to the {group} group."
+        }
+
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+        if doc is None:
+            return {"error": "Incident not found"}
+
+        if doc.status not in _LOCKED_STATUSES:
+            return {
+                "error": f"Incident is in '{doc.status}' status — only submitted "
+                "or approved incidents can be reopened."
+            }
+
+        previous_status = doc.status
+        doc.status = "draft"
+        doc.updated_at = datetime.now(UTC)
+
+        doc.edit_history.append(
+            EditEntry(
+                editor_email=user.email,
+                editor_name=user.name,
+                fields_changed=[f"reopened (was {previous_status})"],
+            )
+        )
+
+        updated = await store.update(doc)
+
+    logger.info(
+        "User %s reopened incident %s (%s → draft)",
+        user.email,
+        incident_id,
+        previous_status,
+    )
+    return {
+        "id": updated.id,
+        "incident_number": updated.incident_number,
+        "status": updated.status,
+        "previous_status": previous_status,
+        "message": f"Incident reopened (was {previous_status}). You can now edit it or reset it.",
+    }
 
 
 async def import_from_neris(
