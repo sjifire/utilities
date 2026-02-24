@@ -868,11 +868,11 @@ def _parse_units(raw: list[dict]) -> list[UnitAssignment]:
     for u in raw:
         personnel = [
             PersonnelAssignment(
-                name=p["name"],
-                email=p.get("email"),
-                rank=p.get("rank", ""),
-                position=p.get("position", ""),
-                role=p.get("role", ""),
+                name=p["name"] if isinstance(p, dict) else p,
+                email=p.get("email") if isinstance(p, dict) else None,
+                rank=p.get("rank", "") if isinstance(p, dict) else "",
+                position=p.get("position", "") if isinstance(p, dict) else "",
+                role=p.get("role", "") if isinstance(p, dict) else "",
             )
             for p in u.get("personnel", [])
         ]
