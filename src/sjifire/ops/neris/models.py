@@ -51,8 +51,7 @@ class NerisSnapshotDocument(BaseModel):
     """Snapshot of a NERIS record taken before a patch update.
 
     Written once as a safety net before pushing corrections to NERIS.
-    The ``ttl`` field tells Cosmos DB to auto-expire the document after
-    30 days, keeping snapshot storage self-cleaning.
+    Cosmos DB container-level TTL (30 days) handles auto-expiry.
 
     Partition key: ``/year`` (derived from incident datetime).
     """
@@ -66,7 +65,6 @@ class NerisSnapshotDocument(BaseModel):
     patches_applied: dict  # The patch properties dict that was sent
     patched_by: str  # User email
     patched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    ttl: int = 2_592_000  # 30-day TTL (Cosmos auto-deletes)
 
     def to_cosmos(self) -> dict:
         """Serialize for Cosmos DB storage."""
