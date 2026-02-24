@@ -166,6 +166,10 @@ class IncidentDocument(BaseModel):
         # Strip None values from timestamps — the LLM may have stored nulls
         if "timestamps" in data and isinstance(data["timestamps"], dict):
             data["timestamps"] = {k: v for k, v in data["timestamps"].items() if v is not None}
+        # Coerce null strings to empty — Cosmos may store None for str fields
+        for key in ("city", "state", "zip_code", "county"):
+            if key in data and data[key] is None:
+                data[key] = ""
         return cls.model_validate(data)
 
     def all_personnel(self) -> list[PersonnelAssignment]:

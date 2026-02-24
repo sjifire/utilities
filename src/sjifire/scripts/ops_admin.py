@@ -2,10 +2,12 @@
 """Ops admin CLI for local incident management.
 
 Commands:
+    reopen-incident - Unlock a submitted/approved incident back to draft
     reset-incident  - Reset a draft incident (bypasses cooldown)
     re-enrich       - Re-run LLM enrichment on a dispatch call
 
 Usage:
+    uv run ops-admin reopen-incident <incident-id>
     uv run ops-admin reset-incident <incident-id>
     uv run ops-admin reset-incident <incident-id> --email user@sjifire.org
     uv run ops-admin re-enrich <dispatch-id>
@@ -46,6 +48,39 @@ def _setup_officer_context(email: str, name: str) -> None:
     )
 
 
+async def _reopen_incident(incident_id: str, email: str | None) -> int:
+    """Reopen a submitted/approved incident back to draft."""
+    from sjifire.ops.incidents.store import IncidentStore
+
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+    if doc is None:
+        print(f"Error: Incident {incident_id} not found")
+        return 1
+
+    user_email = email or doc.created_by
+    user_name = next(
+        (e.editor_name for e in doc.edit_history if e.editor_email == user_email),
+        user_email.split("@")[0].title(),
+    )
+
+    _setup_officer_context(user_email, user_name)
+
+    from sjifire.ops.incidents.tools import reopen_incident
+
+    result = await reopen_incident(incident_id)
+
+    if "error" in result:
+        print(f"Error: {result['error']}")
+        return 1
+
+    print(f"Reopened incident {result.get('incident_number', incident_id)}")
+    print(f"  Status: {result['previous_status']} → {result['status']}")
+    print(f"  {result.get('message', '')}")
+    return 0
+
+
 async def _reset_incident(incident_id: str, email: str | None) -> int:
     """Reset a draft incident, bypassing the 24hr cooldown."""
     from sjifire.ops.incidents.store import IncidentStore
@@ -67,6 +102,16 @@ async def _reset_incident(incident_id: str, email: str | None) -> int:
     )
 
     _setup_officer_context(user_email, user_name)
+
+    # If locked, reopen first
+    if doc.status in ("submitted", "approved"):
+        from sjifire.ops.incidents.tools import reopen_incident
+
+        reopen_result = await reopen_incident(incident_id)
+        if "error" in reopen_result:
+            print(f"Error reopening: {reopen_result['error']}")
+            return 1
+        print(f"Reopened ({doc.status} → draft)")
 
     from sjifire.ops.auth import get_current_user
     from sjifire.ops.token_store import get_token_store
@@ -117,6 +162,11 @@ async def _re_enrich(dispatch_id: str) -> int:
     return 0
 
 
+def cmd_reopen_incident(args: argparse.Namespace) -> int:
+    """Reopen a submitted/approved incident."""
+    return asyncio.run(_reopen_incident(args.incident_id, getattr(args, "email", None)))
+
+
 def cmd_reset_incident(args: argparse.Namespace) -> int:
     """Reset a draft incident."""
     return asyncio.run(_reset_incident(args.incident_id, args.email))
@@ -131,6 +181,10 @@ def main() -> None:
     """CLI entry point for ops admin commands."""
     parser = argparse.ArgumentParser(description="Ops admin CLI")
     sub = parser.add_subparsers(dest="command")
+
+    reopen_p = sub.add_parser("reopen-incident", help="Unlock submitted/approved → draft")
+    reopen_p.add_argument("incident_id", help="Incident document ID")
+    reopen_p.add_argument("--email", help="Override user email (default: incident creator)")
 
     reset_p = sub.add_parser("reset-incident", help="Reset a draft incident")
     reset_p.add_argument("incident_id", help="Incident document ID")
@@ -148,6 +202,7 @@ def main() -> None:
         sys.exit(1)
 
     commands = {
+        "reopen-incident": cmd_reopen_incident,
         "reset-incident": cmd_reset_incident,
         "re-enrich": cmd_re_enrich,
     }
