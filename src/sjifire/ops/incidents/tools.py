@@ -2460,18 +2460,16 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
         if uid:
             neris_unit_map[uid] = nu
 
+    field_map = {
+        "dispatch": "dispatch",
+        "enroute": "enroute_to_scene",
+        "staged": "staging",
+        "on_scene": "on_scene",
+        "cleared": "unit_clear",
+        "canceled": "canceled_enroute",
+    }
     for unit in doc.units:
-        neris_unit = neris_unit_map.get(unit.unit_id)
-        if not neris_unit:
-            continue
-        field_map = {
-            "dispatch": "dispatch",
-            "enroute": "enroute_to_scene",
-            "staged": "staging",
-            "on_scene": "on_scene",
-            "cleared": "unit_clear",
-            "canceled": "canceled_enroute",
-        }
+        neris_unit = neris_unit_map.get(unit.unit_id, {})
         for local_field, neris_field in field_map.items():
             local_val = getattr(unit, local_field, "")
             neris_val = neris_unit.get(neris_field) or ""

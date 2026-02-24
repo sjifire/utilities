@@ -253,6 +253,27 @@ class TestTimestampsEqual:
         diff = _build_neris_diff(doc, neris_record)
         assert "units" not in diff
 
+    def test_unit_not_in_neris_still_detected(self, neris_record):
+        """Units that exist locally but not in NERIS should still appear in the diff."""
+        doc = IncidentDocument(
+            id="extra-unit-test",
+            incident_number="26-002358",
+            incident_datetime=datetime(2026, 2, 20, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26SJ0020|1770457554",
+            units=[
+                UnitAssignment(
+                    unit_id="E33",
+                    staged="2026-02-20T10:43:54Z",
+                    on_scene="2026-02-20T10:50:00Z",
+                ),
+            ],
+        )
+        diff = _build_neris_diff(doc, neris_record)
+        assert "units" in diff
+        assert "E33.staged" in diff["units"]["local"]
+        assert "E33.on_scene" in diff["units"]["local"]
+
 
 class TestBuildNerisPatch:
     """Tests for _build_neris_patch."""

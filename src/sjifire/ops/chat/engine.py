@@ -1058,6 +1058,18 @@ def _summarize_tool_result(name: str, data: dict) -> str:
         fname = data.get("filename", "")
         return f"Deleted: {fname}"
 
+    if name == "update_neris_incident":
+        status = data.get("status", "")
+        n = len(data.get("diff", {}) or {})
+        if status == "dry_run":
+            return f"Pre-lock check: {n} field(s) differ" if n else "No differences"
+        neris_id = data.get("neris_id", "")
+        return f"Updated NERIS {neris_id}" if neris_id else "NERIS updated"
+
+    if name == "import_from_neris":
+        neris_id = data.get("neris_incident_id", "")
+        return f"Imported from NERIS {neris_id}" if neris_id else "Imported from NERIS"
+
     return json.dumps(data, default=str)[:200]
 
 
