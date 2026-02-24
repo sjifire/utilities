@@ -5,12 +5,14 @@ Commands:
     reopen-incident - Unlock a submitted/approved incident back to draft
     reset-incident  - Reset a draft incident (bypasses cooldown)
     re-enrich       - Re-run LLM enrichment on a dispatch call
+    update-neris    - Push local corrections to a NERIS record
 
 Usage:
     uv run ops-admin reopen-incident <incident-id>
     uv run ops-admin reset-incident <incident-id>
     uv run ops-admin reset-incident <incident-id> --email user@sjifire.org
     uv run ops-admin re-enrich <dispatch-id>
+    uv run ops-admin update-neris <incident-id> [--fields narrative timestamps]
 """
 
 import argparse
@@ -172,9 +174,53 @@ def cmd_reset_incident(args: argparse.Namespace) -> int:
     return asyncio.run(_reset_incident(args.incident_id, args.email))
 
 
+async def _update_neris(incident_id: str, email: str | None, fields: list[str] | None) -> int:
+    """Push local corrections to a NERIS record."""
+    from sjifire.ops.incidents.store import IncidentStore
+
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+    if doc is None:
+        print(f"Error: Incident {incident_id} not found")
+        return 1
+
+    user_email = email or doc.created_by
+    user_name = next(
+        (e.editor_name for e in doc.edit_history if e.editor_email == user_email),
+        user_email.split("@")[0].title(),
+    )
+
+    _setup_officer_context(user_email, user_name)
+
+    from sjifire.ops.incidents.tools import update_neris_incident
+
+    result = await update_neris_incident(incident_id, fields=fields)
+
+    if "error" in result:
+        print(f"Error: {result['error']}")
+        return 1
+
+    status = result.get("status", "")
+    if status == "no_changes":
+        print(result.get("message", "No changes needed."))
+        return 0
+
+    print(f"Updated NERIS record: {result.get('neris_id')}")
+    print(f"  Fields: {', '.join(result.get('fields_updated', []))}")
+    print(f"  Snapshot: {result.get('snapshot_id')}")
+    return 0
+
+
 def cmd_re_enrich(args: argparse.Namespace) -> int:
     """Re-run enrichment on a dispatch call."""
     return asyncio.run(_re_enrich(args.dispatch_id))
+
+
+def cmd_update_neris(args: argparse.Namespace) -> int:
+    """Push local corrections to NERIS."""
+    fields = args.fields if args.fields else None
+    return asyncio.run(_update_neris(args.incident_id, getattr(args, "email", None), fields))
 
 
 def main() -> None:
@@ -196,6 +242,15 @@ def main() -> None:
     enrich_p = sub.add_parser("re-enrich", help="Re-run enrichment on a dispatch call")
     enrich_p.add_argument("dispatch_id", help="Dispatch ID (e.g. 26-002210)")
 
+    neris_p = sub.add_parser("update-neris", help="Push local corrections to NERIS")
+    neris_p.add_argument("incident_id", help="Incident document ID")
+    neris_p.add_argument("--email", help="Override user email (default: incident creator)")
+    neris_p.add_argument(
+        "--fields",
+        nargs="+",
+        help="Specific fields to update (e.g. narrative timestamps units)",
+    )
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -205,5 +260,6 @@ def main() -> None:
         "reopen-incident": cmd_reopen_incident,
         "reset-incident": cmd_reset_incident,
         "re-enrich": cmd_re_enrich,
+        "update-neris": cmd_update_neris,
     }
     sys.exit(commands[args.command](args))

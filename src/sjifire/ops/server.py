@@ -149,6 +149,7 @@ mcp.tool()(incident_tools.reset_incident)
 mcp.tool()(incident_tools.reopen_incident)
 mcp.tool()(incident_tools.import_from_neris)
 mcp.tool()(incident_tools.finalize_incident)
+mcp.tool()(incident_tools.update_neris_incident)
 mcp.tool()(incident_tools.list_neris_incidents)
 mcp.tool()(incident_tools.get_neris_incident)
 

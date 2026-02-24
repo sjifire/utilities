@@ -2222,6 +2222,350 @@ async def finalize_incident(incident_id: str) -> dict:
     return updated.model_dump(mode="json")
 
 
+async def update_neris_incident(
+    incident_id: str,
+    fields: list[str] | None = None,
+) -> dict:
+    """Push corrections from the local incident report to the NERIS record.
+
+    Compares local data against the current NERIS record, takes a snapshot
+    of the NERIS state before any changes (stored for 30 days), then patches
+    only the fields that differ. Editors only.
+
+    Args:
+        incident_id: Local incident document ID
+        fields: Optional list of field names to update (e.g. ["narrative",
+            "timestamps"]). If omitted, updates all differing fields.
+
+    Returns:
+        Summary of what was updated, or an error
+    """
+    user = get_current_user()
+
+    if not await check_is_editor(user.user_id, fallback=user.is_editor, email=user.email):
+        group = get_org_config().editor_group_name
+        return {
+            "error": "You are not authorized to update NERIS records. "
+            f"Ask an administrator to add you to the {group} group in Entra ID."
+        }
+
+    # 1. Load local incident
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+    if doc is None:
+        return {"error": "Incident not found"}
+
+    if not doc.neris_incident_id:
+        return {
+            "error": "This incident has no linked NERIS record. "
+            "Import from NERIS first using import_from_neris."
+        }
+
+    # 2. Fetch current NERIS record
+    try:
+        neris_record = await asyncio.to_thread(_get_neris_incident, doc.neris_incident_id)
+    except Exception:
+        logger.warning("Failed to fetch NERIS record %s", doc.neris_incident_id, exc_info=True)
+        return {"error": "Failed to fetch NERIS record. Try again later."}
+
+    if not neris_record:
+        return {"error": f"NERIS record not found: {doc.neris_incident_id}"}
+
+    # 3. Check NERIS status — reject if APPROVED (locked)
+    neris_status = (neris_record.get("incident_status") or {}).get("status", "")
+    if neris_status == "APPROVED":
+        return {
+            "error": "NERIS record is APPROVED and locked. "
+            "It cannot be modified. Contact NERIS support to reopen it."
+        }
+
+    # 4. Build diff between local and NERIS
+    diff = _build_neris_diff(doc, neris_record)
+
+    # Filter to requested fields if specified
+    if fields:
+        diff = {k: v for k, v in diff.items() if k in fields}
+
+    if not diff:
+        return {
+            "status": "no_changes",
+            "message": "Local data matches the NERIS record — nothing to update.",
+            "neris_id": doc.neris_incident_id,
+        }
+
+    # 5. Build NERIS patch properties
+    properties = _build_neris_patch(diff)
+
+    if not properties:
+        return {
+            "status": "no_changes",
+            "message": "No patchable differences found.",
+            "neris_id": doc.neris_incident_id,
+        }
+
+    # 6. Take snapshot before patching
+    from sjifire.ops.neris.models import NerisSnapshotDocument
+    from sjifire.ops.neris.store import NerisSnapshotStore
+
+    snapshot_doc = NerisSnapshotDocument(
+        year=doc.year,
+        neris_id=doc.neris_incident_id,
+        incident_id=doc.id,
+        incident_number=doc.incident_number,
+        snapshot=neris_record,
+        patches_applied=properties,
+        patched_by=user.email,
+    )
+
+    async with NerisSnapshotStore() as snap_store:
+        await snap_store.create(snapshot_doc)
+
+    logger.info(
+        "Created NERIS snapshot %s before patching %s",
+        snapshot_doc.id,
+        doc.neris_incident_id,
+    )
+
+    # 7. Apply patch to NERIS
+    try:
+        patch_result = await asyncio.to_thread(
+            _patch_neris_incident, doc.neris_incident_id, properties
+        )
+    except Exception:
+        logger.exception("Failed to patch NERIS incident %s", doc.neris_incident_id)
+        return {
+            "error": "Failed to update NERIS record. The snapshot was saved — "
+            "no data was lost. Try again later.",
+            "snapshot_id": snapshot_doc.id,
+        }
+
+    logger.info(
+        "User %s patched NERIS %s: fields=%s",
+        user.email,
+        doc.neris_incident_id,
+        list(diff.keys()),
+    )
+
+    return {
+        "status": "updated",
+        "neris_id": doc.neris_incident_id,
+        "fields_updated": list(diff.keys()),
+        "snapshot_id": snapshot_doc.id,
+        "patch_result": patch_result,
+    }
+
+
+def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
+    """Compare local incident fields against the NERIS record.
+
+    Returns a dict of field_name → {"local": ..., "neris": ...} for
+    fields that differ.
+    """
+    diff: dict = {}
+    base = neris_record.get("base") or {}
+    dispatch = neris_record.get("dispatch") or {}
+
+    # Narrative
+    neris_narrative = base.get("outcome_narrative") or ""
+    if doc.narrative and doc.narrative != neris_narrative:
+        diff["narrative"] = {"local": doc.narrative, "neris": neris_narrative}
+
+    # Address
+    loc = base.get("location") or {}
+    neris_addr = _address_from_neris_location(loc)
+    if doc.address and doc.address != neris_addr:
+        diff["address"] = {"local": doc.address, "neris": neris_addr}
+
+    # City
+    neris_city = loc.get("incorporated_municipality") or ""
+    if doc.city and doc.city != neris_city:
+        diff["city"] = {"local": doc.city, "neris": neris_city}
+
+    # State
+    neris_state = loc.get("state") or ""
+    if doc.state and doc.state != neris_state:
+        diff["state"] = {"local": doc.state, "neris": neris_state}
+
+    # Zip
+    neris_zip = loc.get("postal_code") or ""
+    if doc.zip_code and doc.zip_code != neris_zip:
+        diff["zip_code"] = {"local": doc.zip_code, "neris": neris_zip}
+
+    # Dispatch-level timestamps
+    ts_map = {
+        "psap_answer": ("call_create", dispatch),
+        "incident_clear": ("incident_clear", dispatch),
+    }
+    for local_key, (neris_key, section) in ts_map.items():
+        local_val = doc.timestamps.get(local_key, "")
+        neris_val = section.get(neris_key) or ""
+        if local_val and local_val != neris_val:
+            diff.setdefault("timestamps", {"local": {}, "neris": {}})
+            diff["timestamps"]["local"][local_key] = local_val
+            diff["timestamps"]["neris"][neris_key] = neris_val
+
+    # Unit-level timestamps
+    neris_units = dispatch.get("unit_responses") or []
+    neris_unit_map: dict[str, dict] = {}
+    for nu in neris_units:
+        uid = nu.get("reported_unit_id") or _resolve_neris_unit_id(nu.get("unit_neris_id", ""))
+        if uid:
+            neris_unit_map[uid] = nu
+
+    for unit in doc.units:
+        neris_unit = neris_unit_map.get(unit.unit_id)
+        if not neris_unit:
+            continue
+        field_map = {
+            "dispatch": "dispatch",
+            "enroute": "enroute_to_scene",
+            "on_scene": "on_scene",
+            "cleared": "unit_clear",
+            "canceled": "canceled_enroute",
+        }
+        for local_field, neris_field in field_map.items():
+            local_val = getattr(unit, local_field, "")
+            neris_val = neris_unit.get(neris_field) or ""
+            if local_val and local_val != neris_val:
+                diff.setdefault("units", {"local": {}, "neris": {}})
+                key = f"{unit.unit_id}.{local_field}"
+                diff["units"]["local"][key] = local_val
+                diff["units"]["neris"][key] = neris_val
+
+    # Incident type
+    types = neris_record.get("incident_types") or []
+    neris_type = types[0].get("type", "") if types else ""
+    if doc.incident_type and doc.incident_type != neris_type:
+        diff["incident_type"] = {"local": doc.incident_type, "neris": neris_type}
+
+    # People present
+    neris_people = base.get("people_present")
+    if doc.people_present is not None and doc.people_present != neris_people:
+        diff["people_present"] = {"local": doc.people_present, "neris": neris_people}
+
+    # Displaced count
+    neris_displaced = base.get("displacement_count")
+    if doc.displaced_count is not None and doc.displaced_count != neris_displaced:
+        diff["displaced_count"] = {"local": doc.displaced_count, "neris": neris_displaced}
+
+    return diff
+
+
+def _build_neris_patch(diff: dict) -> dict:
+    """Convert a diff dict into NERIS patch properties format.
+
+    Each field uses ``{"action": "set", "value": ...}`` format.
+    """
+    properties: dict = {}
+
+    if "narrative" in diff:
+        properties.setdefault("base", {})
+        properties["base"]["outcome_narrative"] = {
+            "action": "set",
+            "value": diff["narrative"]["local"],
+        }
+
+    if "address" in diff:
+        properties.setdefault("base", {}).setdefault("location", {})
+        properties["base"]["location"]["street_address"] = {
+            "action": "set",
+            "value": diff["address"]["local"],
+        }
+
+    if "city" in diff:
+        properties.setdefault("base", {}).setdefault("location", {})
+        properties["base"]["location"]["incorporated_municipality"] = {
+            "action": "set",
+            "value": diff["city"]["local"],
+        }
+
+    if "state" in diff:
+        properties.setdefault("base", {}).setdefault("location", {})
+        properties["base"]["location"]["state"] = {
+            "action": "set",
+            "value": diff["state"]["local"],
+        }
+
+    if "zip_code" in diff:
+        properties.setdefault("base", {}).setdefault("location", {})
+        properties["base"]["location"]["postal_code"] = {
+            "action": "set",
+            "value": diff["zip_code"]["local"],
+        }
+
+    if "people_present" in diff:
+        properties.setdefault("base", {})
+        properties["base"]["people_present"] = {
+            "action": "set",
+            "value": diff["people_present"]["local"],
+        }
+
+    if "displaced_count" in diff:
+        properties.setdefault("base", {})
+        properties["base"]["displacement_count"] = {
+            "action": "set",
+            "value": diff["displaced_count"]["local"],
+        }
+
+    if "timestamps" in diff:
+        ts_local = diff["timestamps"]["local"]
+        if "psap_answer" in ts_local:
+            properties.setdefault("dispatch", {})
+            properties["dispatch"]["call_create"] = {
+                "action": "set",
+                "value": ts_local["psap_answer"],
+            }
+        if "incident_clear" in ts_local:
+            properties.setdefault("dispatch", {})
+            properties["dispatch"]["incident_clear"] = {
+                "action": "set",
+                "value": ts_local["incident_clear"],
+            }
+
+    if "units" in diff:
+        # Unit timestamps need to be patched via dispatch.unit_responses
+        # Build per-unit patch entries
+        unit_patches: dict[str, dict] = {}
+        for key, val in diff["units"]["local"].items():
+            uid, field = key.rsplit(".", 1)
+            neris_field_map = {
+                "dispatch": "dispatch",
+                "enroute": "enroute_to_scene",
+                "on_scene": "on_scene",
+                "cleared": "unit_clear",
+                "canceled": "canceled_enroute",
+            }
+            neris_field = neris_field_map.get(field, field)
+            unit_patches.setdefault(uid, {})[neris_field] = {
+                "action": "set",
+                "value": val,
+            }
+
+        if unit_patches:
+            properties.setdefault("dispatch", {})
+            properties["dispatch"]["unit_responses"] = {
+                "action": "set",
+                "value": unit_patches,
+            }
+
+    if "incident_type" in diff:
+        properties["incident_types"] = {
+            "action": "set",
+            "value": [{"type": diff["incident_type"]["local"]}],
+        }
+
+    return properties
+
+
+def _patch_neris_incident(neris_id: str, properties: dict) -> dict:
+    """Patch a NERIS incident record (blocking, for thread pool)."""
+    from sjifire.neris.client import NerisClient
+
+    with NerisClient() as client:
+        return client.patch_incident(neris_id, properties)
+
+
 def _submit_to_neris(payload: dict) -> dict:  # pragma: no cover
     """Submit incident payload to NERIS (blocking, for thread pool).
 

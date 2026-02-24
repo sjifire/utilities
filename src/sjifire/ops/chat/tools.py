@@ -235,6 +235,33 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
+        "name": "update_neris_incident",
+        "description": (
+            "Push corrections from the local incident report to NERIS. Takes a snapshot "
+            "of the NERIS record first. Only updates fields where local data differs "
+            "from NERIS. Editors only."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "Local incident document ID",
+                },
+                "fields": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional: specific fields to update "
+                        "(e.g. ['narrative', 'timestamps']). "
+                        "If omitted, updates all differing fields."
+                    ),
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
         "name": "get_dispatch_call",
         "description": (
             "Get full details for a dispatch call including nature, address, "
@@ -540,9 +567,7 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
                 "incident_type": result.get("incident_type"),
                 "address": result.get("address"),
                 "units": [u.get("unit_id") for u in units],
-                "personnel_count": sum(
-                    len(u.get("personnel", [])) for u in units
-                ),
+                "personnel_count": sum(len(u.get("personnel", [])) for u in units),
                 "narrative_length": len(result.get("narrative") or ""),
                 "extras_keys": list(result.get("extras", {}).keys()),
             }
@@ -565,6 +590,12 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
 
     if name == "finalize_incident":
         return await incident_tools.finalize_incident(tool_input["incident_id"])
+
+    if name == "update_neris_incident":
+        return await incident_tools.update_neris_incident(
+            tool_input["incident_id"],
+            fields=tool_input.get("fields"),
+        )
 
     if name == "get_dispatch_call":
         return await dispatch_tools.get_dispatch_call(tool_input["call_id"])
