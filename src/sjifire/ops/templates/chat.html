@@ -1596,15 +1596,11 @@ function chatApp() {
         // Existing conversation — check if the agent's response was lost
         const lastMsg = this.messages[this.messages.length - 1];
         if (lastMsg && lastMsg.type === 'message' && lastMsg.role === 'user') {
-          if (this._isTurnActive()) {
-            // Turn still in progress (page reloaded mid-turn, e.g. EasyAuth 401).
-            // Show typing indicator; _pollForRecovery will pick up when turn finishes.
-            this.streaming = true;
-          } else {
-            // Last saved message was from the user — agent never responded.
-            // Retry silently (no new bubble) so it picks up where it left off.
-            this.$nextTick(() => this._sendViaRPC(lastMsg.content || 'Continue'));
-          }
+          // Last saved message was from the user — response may be in-flight
+          // or lost. Show typing indicator and let _pollForRecovery handle it
+          // (fires on next WS subscribe). Avoids duplicate sends.
+          this.streaming = true;
+          this._pollForRecovery();
         }
       }
     },
@@ -2041,8 +2037,16 @@ function chatApp() {
           this._turnCount = serverTurnCount;
           if (data.status) this.status = data.status;
           this.streaming = false;
+          this._setTurnActive(false);
           this.turnHolder = null;
           this.scrollToBottom(true);
+          this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+        } else if (this.streaming && !this._isTurnActive()) {
+          // Server has no new turn and no turn in progress — response was lost.
+          // Stop the typing indicator so the user can resend.
+          console.log('No server turn in progress — stopping recovery poll');
+          this.streaming = false;
+          this._setTurnActive(false);
           this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
         }
       } catch (e) {
