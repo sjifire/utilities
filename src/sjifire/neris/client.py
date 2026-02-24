@@ -206,7 +206,8 @@ class NerisClient:
         if len(parts) >= 2:
             incident_num = parts[1]
             incidents = self.get_all_incidents(
-                neris_id=neris_id, incident_number=incident_num,
+                neris_id=neris_id,
+                incident_number=incident_num,
             )
             for inc in incidents:
                 if inc.get("neris_id") == neris_id_incident:
@@ -232,7 +233,8 @@ class NerisClient:
         stripped = number.replace("-", "")
         for variant in (number, stripped):
             incidents = self.get_all_incidents(
-                neris_id=neris_id, incident_number=variant,
+                neris_id=neris_id,
+                incident_number=variant,
             )
             if incidents:
                 if len(incidents) == 1:
@@ -243,14 +245,16 @@ class NerisClient:
         # Try dispatch_incident_number filter
         for variant in (number, stripped):
             incidents = self.get_all_incidents(
-                neris_id=neris_id, dispatch_incident_number=variant,
+                neris_id=neris_id,
+                dispatch_incident_number=variant,
             )
             if incidents:
                 if len(incidents) == 1:
                     return incidents[0]
                 logger.info(
                     "dispatch_incident_number=%s returned %d results",
-                    variant, len(incidents),
+                    variant,
+                    len(incidents),
                 )
                 return incidents[0]
 

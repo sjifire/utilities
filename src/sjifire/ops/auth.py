@@ -109,7 +109,9 @@ async def check_is_editor(user_id: str, *, fallback: bool = False, email: str = 
     except Exception:
         logger.warning(
             "Graph API group check failed for %s, using fallback=%s",
-            user_id, fallback, exc_info=True,
+            user_id,
+            fallback,
+            exc_info=True,
         )
         return fallback
 

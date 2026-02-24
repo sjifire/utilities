@@ -285,7 +285,9 @@ async def rpc_proxy(request: Request) -> Response:
 
     logger.info(
         "RPC proxy user: email=%s, user_id=%s, method=%s",
-        user_email, user_id or "(empty)", method,
+        user_email,
+        user_id or "(empty)",
+        method,
     )
 
     user = UserContext(
