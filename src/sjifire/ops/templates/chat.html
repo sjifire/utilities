@@ -1941,12 +1941,18 @@ function chatApp() {
       try { return sessionStorage.getItem('turnActive:' + this.incidentId) === '1'; } catch { return false; }
     },
 
-    _waitForConnect() {
+    _waitForConnect(timeoutMs = 10000) {
       // Return a promise that resolves when the centrifuge client is connected.
-      // If already connected, resolves immediately.
+      // If already connected, resolves immediately. Times out to avoid hanging.
       if (this._centrifuge.state === 'connected') return Promise.resolve();
-      return new Promise((resolve) => {
-        this._centrifuge.once('connected', resolve);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error('WebSocket connection timeout — please refresh the page.'));
+        }, timeoutMs);
+        this._centrifuge.once('connected', () => {
+          clearTimeout(timer);
+          resolve();
+        });
       });
     },
 
@@ -1990,6 +1996,7 @@ function chatApp() {
         console.error('Chat RPC error:', err);
         this.messages.push({type: 'error', content: err.message || 'Failed to send message. Please try again.'});
         this.streaming = false;
+        this._setTurnActive(false);
       }
     },
 
