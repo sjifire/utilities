@@ -1203,7 +1203,7 @@
   </div>
 
   <!-- Messages -->
-  <div class="messages" x-ref="messages" @scroll="_onMessagesScroll()">
+  <div class="messages" x-ref="messages" @scroll="_onMessagesScroll()" @wheel="_onUserScroll()" @touchmove="_onUserScroll()">
     <!-- Message list -->
     <template x-for="(msg, i) in messages" :key="i">
       <div>
@@ -1249,7 +1249,7 @@
     <!-- Streaming assistant message (overflow:visible so flex layout tracks growing height) -->
     <template x-if="streaming && currentText">
       <div class="msg assistant streaming-msg" x-ref="streamingMsg" x-html="renderMarkdown(currentText, true)"
-           x-effect="if (!_userScrolledAway) $el.scrollIntoView({block: 'end', behavior: 'instant'})"></div>
+           x-effect="if (!_userScrolledAway) { _programmaticScroll = true; $el.scrollIntoView({block: 'end', behavior: 'instant'}); requestAnimationFrame(() => { _programmaticScroll = false; }); }"></div>
     </template>
   </div>
 
@@ -1447,6 +1447,7 @@ function chatApp() {
     pendingImages: [],
     lightbox: { open: false, items: [], index: 0 },
     _userScrolledAway: false,
+    _programmaticScroll: false,
     _centrifuge: null,
     _subscription: null,
     _queuedMessage: null,
@@ -1866,17 +1867,33 @@ function chatApp() {
       }
       const el = this.$refs.messages;
       if (!el) return;
+      this._programmaticScroll = true;
       requestAnimationFrame(() => {
         el.scrollTop = el.scrollHeight;
+        // Clear flag after the scroll event fires
+        requestAnimationFrame(() => { this._programmaticScroll = false; });
       });
     },
 
     _onMessagesScroll() {
+      // Ignore scroll events caused by our own scrollToBottom / scrollIntoView
+      if (this._programmaticScroll) return;
       const el = this.$refs.messages;
       if (!el) return;
       // "Near bottom" = within 150px of the end
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
       this._userScrolledAway = !nearBottom;
+    },
+
+    _onUserScroll() {
+      // Wheel/touch events are always user-initiated — check position
+      const el = this.$refs.messages;
+      if (!el) return;
+      // Defer to after the scroll actually moves the element
+      requestAnimationFrame(() => {
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+        this._userScrolledAway = !nearBottom;
+      });
     },
 
     async sendMessage(overrideText) {
