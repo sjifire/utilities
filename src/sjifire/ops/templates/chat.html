@@ -1595,9 +1595,15 @@ function chatApp() {
         // Existing conversation — check if the agent's response was lost
         const lastMsg = this.messages[this.messages.length - 1];
         if (lastMsg && lastMsg.type === 'message' && lastMsg.role === 'user') {
-          // Last saved message was from the user — agent never responded.
-          // Retry silently (no new bubble) so it picks up where it left off.
-          this.$nextTick(() => this._sendViaRPC(lastMsg.content || 'Continue'));
+          if (this._isTurnActive()) {
+            // Turn still in progress (page reloaded mid-turn, e.g. EasyAuth 401).
+            // Show typing indicator; _pollForRecovery will pick up when turn finishes.
+            this.streaming = true;
+          } else {
+            // Last saved message was from the user — agent never responded.
+            // Retry silently (no new bubble) so it picks up where it left off.
+            this.$nextTick(() => this._sendViaRPC(lastMsg.content || 'Continue'));
+          }
         }
       }
     },
@@ -1906,6 +1912,18 @@ function chatApp() {
       await this._sendViaRPC(displayText, images);
     },
 
+    _setTurnActive(active) {
+      // Persist turn state across page reloads (EasyAuth 401 → reload)
+      try {
+        const key = 'turnActive:' + this.incidentId;
+        if (active) sessionStorage.setItem(key, '1');
+        else sessionStorage.removeItem(key);
+      } catch {}
+    },
+    _isTurnActive() {
+      try { return sessionStorage.getItem('turnActive:' + this.incidentId) === '1'; } catch { return false; }
+    },
+
     _waitForConnect() {
       // Return a promise that resolves when the centrifuge client is connected.
       // If already connected, resolves immediately.
@@ -1918,6 +1936,7 @@ function chatApp() {
     async _sendViaRPC(displayText, images) {
       this.streaming = true;
       this.currentText = '';
+      this._setTurnActive(true);
 
       const payload = {
         incident_id: this.incidentId,
@@ -2122,6 +2141,7 @@ function chatApp() {
         }
         this._turnCount++;  // Track completed turn
         this.streaming = false;
+        this._setTurnActive(false);
         this.turnHolder = null;  // Turn lock released
         this.scrollToBottom(true);
 
@@ -2149,6 +2169,7 @@ function chatApp() {
         this.messages.push({type: 'error', content: data.message});
         this._turnCount++;  // Error turns also increment server-side
         this.streaming = false;
+        this._setTurnActive(false);
         this.turnHolder = null;  // Turn lock released on error too
         this.scrollToBottom(true);
       }

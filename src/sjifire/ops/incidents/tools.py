@@ -2368,6 +2368,40 @@ async def update_neris_incident(
     }
 
 
+def _parse_timestamp(val: str) -> datetime | None:
+    """Parse an ISO timestamp string to a timezone-aware datetime.
+
+    Handles both naive (assumed UTC) and aware timestamps so that
+    local-time strings (from iSpyFire) and UTC strings (from NERIS)
+    can be compared correctly.
+    """
+    try:
+        dt = datetime.fromisoformat(val)
+        if dt.tzinfo is None:
+            # Naive timestamps from our dispatch data are stored in the
+            # org's local timezone; NERIS sends UTC with 'Z' suffix which
+            # fromisoformat already parses as aware.  Assume naive = local.
+            dt = dt.replace(tzinfo=get_timezone())
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def _timestamps_equal(a: str, b: str) -> bool:
+    """Compare two ISO timestamp strings as timezone-aware datetimes.
+
+    Returns True when both strings represent the same instant, regardless
+    of timezone or trailing-Z formatting differences.
+    """
+    if a == b:
+        return True
+    dt_a = _parse_timestamp(a)
+    dt_b = _parse_timestamp(b)
+    if dt_a is None or dt_b is None:
+        return False
+    return dt_a == dt_b
+
+
 def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     """Compare local incident fields against the NERIS record.
 
@@ -2413,7 +2447,7 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     for local_key, (neris_key, section) in ts_map.items():
         local_val = doc.timestamps.get(local_key, "")
         neris_val = section.get(neris_key) or ""
-        if local_val and local_val != neris_val:
+        if local_val and not _timestamps_equal(local_val, neris_val):
             diff.setdefault("timestamps", {"local": {}, "neris": {}})
             diff["timestamps"]["local"][local_key] = local_val
             diff["timestamps"]["neris"][neris_key] = neris_val
@@ -2441,7 +2475,7 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
         for local_field, neris_field in field_map.items():
             local_val = getattr(unit, local_field, "")
             neris_val = neris_unit.get(neris_field) or ""
-            if local_val and local_val != neris_val:
+            if local_val and not _timestamps_equal(local_val, neris_val):
                 diff.setdefault("units", {"local": {}, "neris": {}})
                 key = f"{unit.unit_id}.{local_field}"
                 diff["units"]["local"][key] = local_val

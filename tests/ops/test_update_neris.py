@@ -11,6 +11,7 @@ from sjifire.ops.incidents.models import IncidentDocument, UnitAssignment
 from sjifire.ops.incidents.tools import (
     _build_neris_diff,
     _build_neris_patch,
+    _timestamps_equal,
     update_neris_incident,
 )
 
@@ -186,6 +187,71 @@ class TestBuildNerisDiff:
         assert "E31.staged" in diff["units"]["local"]
         assert diff["units"]["local"]["E31.staged"] == "2026-02-20T10:35:00Z"
         assert diff["units"]["neris"]["E31.staged"] == "2026-02-20T10:34:00Z"
+
+
+class TestTimestampsEqual:
+    """Tests for timezone-aware timestamp comparison."""
+
+    def test_identical_strings(self):
+        assert _timestamps_equal("2026-02-20T10:30:00Z", "2026-02-20T10:30:00Z")
+
+    def test_utc_matches_local_pacific(self):
+        """A naive local time (Pacific) and UTC string representing the same instant match."""
+        # Feb 20 = PST (UTC-8), so 02:30 local = 10:30 UTC
+        assert _timestamps_equal("2026-02-20T02:30:00", "2026-02-20T10:30:00Z")
+
+    def test_utc_does_not_match_different_local(self):
+        """Different instants should not match."""
+        assert not _timestamps_equal("2026-02-20T10:30:00", "2026-02-20T10:30:00Z")
+
+    def test_empty_strings(self):
+        assert not _timestamps_equal("", "2026-02-20T10:30:00Z")
+        assert not _timestamps_equal("2026-02-20T10:30:00Z", "")
+
+    def test_invalid_strings(self):
+        assert not _timestamps_equal("not-a-date", "2026-02-20T10:30:00Z")
+
+    def test_dispatch_level_no_false_diff(self, neris_record):
+        """Local timestamps in Pacific should NOT produce a diff when they match NERIS UTC."""
+        # Set local timestamps as naive Pacific time matching the NERIS UTC values
+        # NERIS has call_create=2026-02-20T10:29:00Z, incident_clear=2026-02-20T11:14:00Z
+        # Pacific (PST = UTC-8): 02:29 and 03:14
+        doc = IncidentDocument(
+            id="tz-test",
+            incident_number="26-002358",
+            incident_datetime=datetime(2026, 2, 20, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26SJ0020|1770457554",
+            timestamps={
+                "psap_answer": "2026-02-20T02:29:00",
+                "incident_clear": "2026-02-20T03:14:00",
+            },
+        )
+        diff = _build_neris_diff(doc, neris_record)
+        assert "timestamps" not in diff
+
+    def test_unit_level_no_false_diff(self, neris_record):
+        """Local unit timestamps in Pacific should NOT produce a diff when they match NERIS UTC."""
+        # NERIS E31 dispatch=10:30Z, enroute=10:32Z, on_scene=10:40Z, clear=11:10Z
+        # PST (UTC-8): 02:30, 02:32, 02:40, 03:10
+        doc = IncidentDocument(
+            id="tz-unit-test",
+            incident_number="26-002358",
+            incident_datetime=datetime(2026, 2, 20, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26SJ0020|1770457554",
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    dispatch="2026-02-20T02:30:00",
+                    enroute="2026-02-20T02:32:00",
+                    on_scene="2026-02-20T02:40:00",
+                    cleared="2026-02-20T03:10:00",
+                ),
+            ],
+        )
+        diff = _build_neris_diff(doc, neris_record)
+        assert "units" not in diff
 
 
 class TestBuildNerisPatch:
