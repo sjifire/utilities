@@ -2001,7 +2001,12 @@ function chatApp() {
       if (!this.streaming) return;
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          // Fetch failed (non-401) — stop spinner so user isn't stuck
+          this.streaming = false;
+          this._setTurnActive(false);
+          return;
+        }
         const data = await res.json();
         const serverTurnCount = data.turn_count || 0;
 
@@ -2041,16 +2046,18 @@ function chatApp() {
           this.turnHolder = null;
           this.scrollToBottom(true);
           this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
-        } else if (this.streaming && !this._isTurnActive()) {
-          // Server has no new turn and no turn in progress — response was lost.
-          // Stop the typing indicator so the user can resend.
-          console.log('No server turn in progress — stopping recovery poll');
+        } else {
+          // Server has no new turn — stop the spinner. If a turn IS
+          // running, WS events (turn_start/text/done) will restart it.
+          console.log('No new server turn — stopping recovery spinner');
           this.streaming = false;
           this._setTurnActive(false);
           this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
         }
       } catch (e) {
         console.warn('Recovery poll failed:', e);
+        this.streaming = false;
+        this._setTurnActive(false);
       }
     },
 
