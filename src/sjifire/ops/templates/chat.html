@@ -1537,8 +1537,9 @@ function chatApp() {
         }
       });
 
-      // Load conversation history
-      if (!isReset) try {
+      // Load conversation history (always, even after reset — the engine
+      // clears stale messages server-side, so whatever comes back is current)
+      try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
         if (res.ok) {
           const data = await res.json();
@@ -1583,10 +1584,14 @@ function chatApp() {
         console.error('Failed to load history:', e);
       }
 
-      if (this.messages.length === 0) {
-        // No conversation — auto-start
+      if (this.messages.length === 0 && !isReset) {
+        // Truly fresh conversation (no reset in progress) — auto-start
         this.$nextTick(() => this.sendMessage('Begin report'));
-      } else {
+      } else if (this.messages.length === 0 && isReset) {
+        // Reset just happened — the server turn is still running.
+        // Show typing indicator and wait for events to arrive via WS.
+        this.streaming = true;
+      } else if (!isReset) {
         // Existing conversation — check if the agent's response was lost
         const lastMsg = this.messages[this.messages.length - 1];
         if (lastMsg && lastMsg.type === 'message' && lastMsg.role === 'user') {
@@ -2094,13 +2099,14 @@ function chatApp() {
           }
         }
         this.scrollToBottom();
-        // After a successful reset, reload with ?reset flag to skip stale history
+        // After a successful reset, clear local UI state but stay connected.
+        // The server turn is still running (import_from_neris, then Claude
+        // iteration), so we must NOT reload the page or re-send — just clear
+        // the stale messages and let the in-flight events arrive naturally.
         if (data.name === 'reset_incident' && !(data.summary || '').startsWith('Error')) {
-          setTimeout(() => {
-            const url = new URL(location.href);
-            url.searchParams.set('reset', '1');
-            location.href = url.toString();
-          }, 800);
+          this.messages = [];
+          this.currentText = '';
+          this._turnCount = 0;
           return;
         }
       } else if (type === 'status_update') {
