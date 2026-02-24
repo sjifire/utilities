@@ -428,13 +428,9 @@
         </div>
         {% if doc.action_taken == "ACTION" and doc.action_codes %}
         {% for category, subs in doc.action_codes | group_action_codes %}
-        <div style="margin-top:6px;">
-          <span style="font-weight:600; font-size:12px; color:#374151;">{{ category }}</span>
-          {% if subs %}
-          <ul style="margin:2px 0 0 18px; padding:0; list-style:disc; font-size:12px; color:#1a1a1a;">
-            {% for sub in subs %}<li>{{ sub }}</li>{% endfor %}
-          </ul>
-          {% endif %}
+        <div class="kv-row">
+          <span class="kv-label">{{ category }}</span>
+          <span class="kv-value">{{ subs | join(", ") if subs else "--" }}</span>
         </div>
         {% endfor %}
         {% endif %}
