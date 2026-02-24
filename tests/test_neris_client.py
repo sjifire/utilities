@@ -357,15 +357,13 @@ class TestGetPendingIncidents:
 SAMPLE_NERIS_ID = f"{ENTITY_ID}|26SJ0020|1770457554"
 
 
-class TestGetIncident:
-    """Tests for get_incident — scans all incidents and matches by neris_id."""
+class TestGetIncidentByNerisId:
+    """Tests for get_incident with compound NERIS ID (contains '|')."""
 
-    def test_get_incident_found(self, mock_credentials, mock_api):
+    def test_found_via_targeted_filter(self, mock_credentials, mock_api):
+        """Targeted incident_number filter finds the incident on first try."""
         mock_api.list_incidents.return_value = {
-            "incidents": [
-                {"neris_id": "FD53055879|OTHER|9999"},
-                {"neris_id": SAMPLE_NERIS_ID},
-            ],
+            "incidents": [{"neris_id": SAMPLE_NERIS_ID}],
         }
 
         with NerisClient() as client:
@@ -373,18 +371,32 @@ class TestGetIncident:
 
         assert result is not None
         assert result["neris_id"] == SAMPLE_NERIS_ID
+        # Should use incident_number filter (middle segment "26SJ0020")
+        mock_api.list_incidents.assert_called_once_with(
+            neris_id_entity=ENTITY_ID,
+            page_size=100,
+            cursor=None,
+            incident_number="26SJ0020",
+        )
 
-    def test_get_incident_not_found(self, mock_credentials, mock_api):
-        mock_api.list_incidents.return_value = {
-            "incidents": [{"neris_id": "FD53055879|OTHER|9999"}],
-        }
+    def test_falls_back_to_full_scan(self, mock_credentials, mock_api):
+        """Falls back to full scan when targeted filter misses."""
+        mock_api.list_incidents.side_effect = [
+            # First call: targeted filter returns no match
+            {"incidents": []},
+            # Second call: full scan finds it
+            {"incidents": [{"neris_id": SAMPLE_NERIS_ID}]},
+        ]
 
         with NerisClient() as client:
             result = client.get_incident(SAMPLE_NERIS_ID)
 
-        assert result is None
+        assert result is not None
+        assert result["neris_id"] == SAMPLE_NERIS_ID
+        assert mock_api.list_incidents.call_count == 2
 
-    def test_get_incident_empty_results(self, mock_credentials, mock_api):
+    def test_not_found(self, mock_credentials, mock_api):
+        """Returns None when incident doesn't exist."""
         mock_api.list_incidents.return_value = {"incidents": []}
 
         with NerisClient() as client:
@@ -392,7 +404,7 @@ class TestGetIncident:
 
         assert result is None
 
-    def test_get_incident_custom_entity(self, mock_credentials, mock_api):
+    def test_custom_entity(self, mock_credentials, mock_api):
         custom_id = "FD99999999|INC001|1234567890"
         mock_api.list_incidents.return_value = {
             "incidents": [{"neris_id": custom_id}],
@@ -406,7 +418,70 @@ class TestGetIncident:
             neris_id_entity="FD99999999",
             page_size=100,
             cursor=None,
+            incident_number="INC001",
         )
+
+
+class TestGetIncidentByNumber:
+    """Tests for get_incident with a local CAD number (no '|')."""
+
+    def test_found_by_incident_number(self, mock_credentials, mock_api):
+        """Exact incident_number match works."""
+        mock_api.list_incidents.return_value = {
+            "incidents": [{"neris_id": SAMPLE_NERIS_ID, "incident_number": "26-002358"}],
+        }
+
+        with NerisClient() as client:
+            result = client.get_incident("26-002358")
+
+        assert result is not None
+        mock_api.list_incidents.assert_called_once_with(
+            neris_id_entity=ENTITY_ID,
+            page_size=100,
+            cursor=None,
+            incident_number="26-002358",
+        )
+
+    def test_found_by_stripped_number(self, mock_credentials, mock_api):
+        """Tries with dashes removed when exact match fails."""
+        mock_api.list_incidents.side_effect = [
+            # First: exact "26-002358" → no results
+            {"incidents": []},
+            # Second: stripped "26002358" → found
+            {"incidents": [{"neris_id": SAMPLE_NERIS_ID}]},
+        ]
+
+        with NerisClient() as client:
+            result = client.get_incident("26-002358")
+
+        assert result is not None
+        assert mock_api.list_incidents.call_count == 2
+
+    def test_found_by_dispatch_incident_number(self, mock_credentials, mock_api):
+        """Falls through to dispatch_incident_number filter."""
+        mock_api.list_incidents.side_effect = [
+            # incident_number exact → miss
+            {"incidents": []},
+            # incident_number stripped → miss
+            {"incidents": []},
+            # dispatch_incident_number exact → found
+            {"incidents": [{"neris_id": SAMPLE_NERIS_ID}]},
+        ]
+
+        with NerisClient() as client:
+            result = client.get_incident("26-002358")
+
+        assert result is not None
+        assert mock_api.list_incidents.call_count == 3
+
+    def test_not_found(self, mock_credentials, mock_api):
+        """Returns None when no filter matches."""
+        mock_api.list_incidents.return_value = {"incidents": []}
+
+        with NerisClient() as client:
+            result = client.get_incident("99-999999")
+
+        assert result is None
 
 
 class TestPatchIncident:
