@@ -424,13 +424,19 @@
       <div class="section-body">
         <div class="kv-row">
           <span class="kv-label">Action Taken</span>
-          <span class="kv-value">{{ "Action Taken" if doc.action_taken == "ACTION" else "No Action Taken" }}</span>
+          <span class="kv-value">{{ "Yes" if doc.action_taken == "ACTION" else "No Action Taken" }}</span>
         </div>
         {% if doc.action_taken == "ACTION" and doc.action_codes %}
-        <div class="kv-row">
-          <span class="kv-label">Action Codes</span>
-          <span class="kv-value">{% for code in doc.action_codes %}{{ code | replace("_", " ") | title }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+        {% for category, subs in doc.action_codes | group_action_codes %}
+        <div style="margin-top:6px;">
+          <span style="font-weight:600; font-size:12px; color:#374151;">{{ category }}</span>
+          {% if subs %}
+          <ul style="margin:2px 0 0 18px; padding:0; list-style:disc; font-size:12px; color:#1a1a1a;">
+            {% for sub in subs %}<li>{{ sub }}</li>{% endfor %}
+          </ul>
+          {% endif %}
         </div>
+        {% endfor %}
         {% endif %}
         {% if doc.action_taken == "NOACTION" and doc.noaction_reason %}
         <div class="kv-row">

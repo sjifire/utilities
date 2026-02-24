@@ -63,8 +63,26 @@ def _fmt_time(value: object) -> str:
     return _fmt_datetime(value, fmt="%H:%M")
 
 
+def _group_action_codes(codes: list[str]) -> list[tuple[str, list[str]]]:
+    """Group ``CATEGORY||sub||detail`` action codes by primary category."""
+    groups: dict[str, list[str]] = {}
+    order: list[str] = []
+    for code in codes:
+        parts = code.split("||")
+        category = parts[0].replace("_", " ").title()
+        if category not in groups:
+            groups[category] = []
+            order.append(category)
+        if len(parts) > 1:
+            sub = " > ".join(p.replace("_", " ").title() for p in parts[1:])
+            if sub not in groups[category]:
+                groups[category].append(sub)
+    return [(cat, groups[cat]) for cat in order]
+
+
 _jinja_env.filters["fmt_dt"] = _fmt_datetime
 _jinja_env.filters["fmt_time"] = _fmt_time
+_jinja_env.filters["group_action_codes"] = _group_action_codes
 
 
 def _forbidden_page() -> Response:
