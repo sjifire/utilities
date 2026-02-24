@@ -102,6 +102,7 @@ def neris_record():
             "incident_clear": "2026-02-20T11:14:00Z",
             "unit_responses": [
                 {
+                    "neris_uid": 101,
                     "reported_unit_id": "E31",
                     "dispatch": "2026-02-20T10:30:00Z",
                     "enroute_to_scene": "2026-02-20T10:32:00Z",
@@ -132,6 +133,8 @@ class TestBuildNerisDiff:
         diff = _build_neris_diff(sample_doc, neris_record)
         assert "units" in diff
         assert "E31.dispatch" in diff["units"]["local"]
+        # neris_uid should be captured for patching
+        assert diff["units"]["neris_uids"]["E31"] == 101
 
     def test_no_diff_when_matching(self, neris_record):
         """When local matches NERIS, diff should be empty for those fields."""
@@ -273,6 +276,8 @@ class TestTimestampsEqual:
         assert "units" in diff
         assert "E33.staged" in diff["units"]["local"]
         assert "E33.on_scene" in diff["units"]["local"]
+        # E33 has no neris_uid — not in neris_uids map
+        assert "E33" not in diff["units"]["neris_uids"]
 
 
 class TestBuildNerisPatch:
@@ -304,16 +309,26 @@ class TestBuildNerisPatch:
             "value": "94 Zepher Ln",
         }
 
-    def test_unit_timestamps_patch(self):
+    def test_unit_timestamps_patch_with_neris_uid(self):
+        """Existing units (with neris_uid) produce a patch action."""
         diff = {
             "units": {
                 "local": {"E31.dispatch": "2026-02-20T10:31:00Z"},
                 "neris": {"E31.dispatch": "2026-02-20T10:30:00Z"},
+                "neris_uids": {"E31": 42},
             }
         }
         patch = _build_neris_patch(diff)
         assert "dispatch" in patch
-        assert "unit_responses" in patch["dispatch"]
+        actions = patch["dispatch"]["unit_responses"]
+        assert isinstance(actions, list)
+        assert len(actions) == 1
+        assert actions[0]["neris_uid"] == 42
+        assert actions[0]["action"] == "patch"
+        assert actions[0]["properties"]["dispatch"] == {
+            "action": "set",
+            "value": "2026-02-20T10:31:00Z",
+        }
 
     def test_first_unit_dispatched_patch(self):
         diff = {
@@ -337,19 +352,72 @@ class TestBuildNerisPatch:
         }
 
     def test_unit_staged_patch(self):
+        """Staged field maps to NERIS 'staging' in the patch action."""
         diff = {
             "units": {
                 "local": {"E31.staged": "2026-02-20T10:35:00Z"},
                 "neris": {"E31.staged": "2026-02-20T10:34:00Z"},
+                "neris_uids": {"E31": 99},
             }
         }
         result = _build_neris_patch(diff)
-        unit_responses = result["dispatch"]["unit_responses"]
-        assert unit_responses["action"] == "set"
-        assert unit_responses["value"]["E31"]["staging"] == {
+        actions = result["dispatch"]["unit_responses"]
+        assert isinstance(actions, list)
+        assert actions[0]["neris_uid"] == 99
+        assert actions[0]["properties"]["staging"] == {
             "action": "set",
             "value": "2026-02-20T10:35:00Z",
         }
+
+    def test_unit_append_when_no_neris_uid(self):
+        """Units not in NERIS (no neris_uid) produce an append action."""
+        diff = {
+            "units": {
+                "local": {
+                    "E33.staged": "2026-02-20T10:43:54Z",
+                    "E33.on_scene": "2026-02-20T10:50:00Z",
+                },
+                "neris": {
+                    "E33.staged": "",
+                    "E33.on_scene": "",
+                },
+                "neris_uids": {},
+            }
+        }
+        result = _build_neris_patch(diff)
+        actions = result["dispatch"]["unit_responses"]
+        assert isinstance(actions, list)
+        assert len(actions) == 1
+        assert actions[0]["action"] == "append"
+        payload = actions[0]["value"]
+        assert payload["reported_unit_id"] == "E33"
+        assert payload["staging"] == "2026-02-20T10:43:54Z"
+        assert payload["on_scene"] == "2026-02-20T10:50:00Z"
+
+    def test_unit_mixed_patch_and_append(self):
+        """Mix of existing (patch) and new (append) units in one diff."""
+        diff = {
+            "units": {
+                "local": {
+                    "E31.dispatch": "2026-02-20T10:31:00Z",
+                    "E33.on_scene": "2026-02-20T10:50:00Z",
+                },
+                "neris": {
+                    "E31.dispatch": "2026-02-20T10:30:00Z",
+                    "E33.on_scene": "",
+                },
+                "neris_uids": {"E31": 42},
+            }
+        }
+        result = _build_neris_patch(diff)
+        actions = result["dispatch"]["unit_responses"]
+        assert len(actions) == 2
+        # E31 should be a patch action (has neris_uid)
+        e31_action = next(a for a in actions if a.get("neris_uid") == 42)
+        assert e31_action["action"] == "patch"
+        # E33 should be an append action (no neris_uid)
+        e33_action = next(a for a in actions if a.get("action") == "append")
+        assert e33_action["value"]["reported_unit_id"] == "E33"
 
     def test_empty_diff_returns_empty_patch(self):
         patch = _build_neris_patch({})
@@ -613,6 +681,76 @@ class TestUpdateNerisIncident:
         result = await update_neris_incident("doc-neris-1")
         assert "error" in result
         assert "snapshot_id" in result
+
+    @patch("sjifire.ops.incidents.tools._patch_neris_incident")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch(
+        "sjifire.ops.neris.store.get_cosmos_container", new_callable=AsyncMock, return_value=None
+    )
+    async def test_http_422_error_surfaces(
+        self,
+        mock_cosmos,
+        mock_store_cls,
+        mock_get_neris,
+        mock_patch_neris,
+        officer_user,
+        sample_doc,
+        neris_record,
+    ):
+        """When NERIS returns an HTTP error (e.g. 422), it should be caught and reported."""
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        mock_get_neris.return_value = neris_record
+        mock_patch_neris.side_effect = RuntimeError(
+            'NERIS API error (HTTP 422): {"detail":"Validation error"}'
+        )
+
+        result = await update_neris_incident("doc-neris-1")
+        assert "error" in result
+        assert "snapshot_id" in result
+
+
+class TestPatchNerisIncident:
+    """Tests for _patch_neris_incident error detection."""
+
+    def test_raises_on_non_dict_response(self):
+        """When NERIS client returns a Response object (HTTP error), raise RuntimeError."""
+        from unittest.mock import MagicMock
+
+        from sjifire.ops.incidents.tools import _patch_neris_incident
+
+        # Simulate the NERIS client returning a Response object on 422
+        mock_response = MagicMock()
+        mock_response.status_code = 422
+        mock_response.text = '{"detail":"Validation error"}'
+
+        with patch("sjifire.neris.client.NerisClient") as mock_cls:
+            mock_client = MagicMock()
+            mock_client.patch_incident.return_value = mock_response
+            mock_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+            mock_cls.return_value.__exit__ = MagicMock(return_value=None)
+
+            with pytest.raises(RuntimeError, match=r"NERIS API error.*422"):
+                _patch_neris_incident("FD53055879|26SJ0020|1770457554", {"base": {}})
+
+    def test_returns_dict_on_success(self):
+        """When NERIS client returns a dict, pass through normally."""
+        from unittest.mock import MagicMock
+
+        from sjifire.ops.incidents.tools import _patch_neris_incident
+
+        with patch("sjifire.neris.client.NerisClient") as mock_cls:
+            mock_client = MagicMock()
+            mock_client.patch_incident.return_value = {"status": "ok"}
+            mock_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+            mock_cls.return_value.__exit__ = MagicMock(return_value=None)
+
+            result = _patch_neris_incident("FD53055879|26SJ0020|1770457554", {"base": {}})
+            assert result == {"status": "ok"}
 
 
 class TestNerisSnapshotStore:

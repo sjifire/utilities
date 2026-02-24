@@ -2470,14 +2470,17 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     }
     for unit in doc.units:
         neris_unit = neris_unit_map.get(unit.unit_id, {})
+        neris_uid = neris_unit.get("neris_uid")  # NERIS internal ID for patching
         for local_field, neris_field in field_map.items():
             local_val = getattr(unit, local_field, "")
             neris_val = neris_unit.get(neris_field) or ""
             if local_val and not _timestamps_equal(local_val, neris_val):
-                diff.setdefault("units", {"local": {}, "neris": {}})
+                diff.setdefault("units", {"local": {}, "neris": {}, "neris_uids": {}})
                 key = f"{unit.unit_id}.{local_field}"
                 diff["units"]["local"][key] = local_val
                 diff["units"]["neris"][key] = neris_val
+                if neris_uid is not None:
+                    diff["units"]["neris_uids"][unit.unit_id] = neris_uid
 
     # Incident type
     types = neris_record.get("incident_types") or []
@@ -2588,9 +2591,13 @@ def _build_neris_patch(diff: dict) -> dict:
         }
 
     if "units" in diff:
-        # Unit timestamps need to be patched via dispatch.unit_responses
-        # Build per-unit patch entries
-        unit_patches: dict[str, dict] = {}
+        # Unit timestamps are patched via dispatch.unit_responses as a list
+        # of PatchDispatchUnitResponseAction (existing units with neris_uid)
+        # or AppendDispatchUnitResponseAction (new units not yet in NERIS).
+        neris_uids = diff["units"].get("neris_uids", {})
+
+        # Group local diffs by unit_id
+        per_unit: dict[str, dict] = {}
         for key, val in diff["units"]["local"].items():
             uid, field = key.rsplit(".", 1)
             neris_field_map = {
@@ -2602,17 +2609,32 @@ def _build_neris_patch(diff: dict) -> dict:
                 "canceled": "canceled_enroute",
             }
             neris_field = neris_field_map.get(field, field)
-            unit_patches.setdefault(uid, {})[neris_field] = {
-                "action": "set",
-                "value": val,
-            }
+            per_unit.setdefault(uid, {})[neris_field] = val
 
-        if unit_patches:
+        unit_actions: list[dict] = []
+        for unit_id, fields in per_unit.items():
+            neris_uid = neris_uids.get(unit_id)
+            if neris_uid is not None:
+                # Existing unit — patch its timestamp fields
+                unit_props = {}
+                for field_name, field_val in fields.items():
+                    unit_props[field_name] = {"action": "set", "value": field_val}
+                unit_actions.append({
+                    "neris_uid": neris_uid,
+                    "action": "patch",
+                    "properties": unit_props,
+                })
+            else:
+                # New unit not in NERIS — append with full payload
+                payload = {"reported_unit_id": unit_id, **fields}
+                unit_actions.append({
+                    "action": "append",
+                    "value": payload,
+                })
+
+        if unit_actions:
             properties.setdefault("dispatch", {})
-            properties["dispatch"]["unit_responses"] = {
-                "action": "set",
-                "value": unit_patches,
-            }
+            properties["dispatch"]["unit_responses"] = unit_actions
 
     if "incident_type" in diff:
         properties["incident_types"] = {
@@ -2624,11 +2646,28 @@ def _build_neris_patch(diff: dict) -> dict:
 
 
 def _patch_neris_incident(neris_id: str, properties: dict) -> dict:
-    """Patch a NERIS incident record (blocking, for thread pool)."""
+    """Patch a NERIS incident record (blocking, for thread pool).
+
+    Raises ``RuntimeError`` when the NERIS API returns an HTTP error.
+    The upstream ``neris_api_client`` catches ``HTTPError`` and returns
+    the raw ``requests.Response`` object instead of raising, so we
+    detect that here and surface the error properly.
+    """
     from sjifire.neris.client import NerisClient
 
     with NerisClient() as client:
-        return client.patch_incident(neris_id, properties)
+        result = client.patch_incident(neris_id, properties)
+
+    # The upstream client returns a requests.Response on HTTP errors
+    # instead of raising.  Detect and raise so callers get a clear error.
+    if not isinstance(result, dict):
+        status = getattr(result, "status_code", "unknown")
+        body = ""
+        with contextlib.suppress(Exception):
+            body = result.text[:500] if hasattr(result, "text") else str(result)
+        raise RuntimeError(f"NERIS API error (HTTP {status}): {body}")
+
+    return result
 
 
 def _submit_to_neris(payload: dict) -> dict:  # pragma: no cover
