@@ -268,8 +268,8 @@
       </div>
       <div class="report-meta">
         <span><span class="meta-label">Incident #:</span> <span class="meta-value">{{ doc.incident_number }}</span></span>
-        <span><span class="meta-label">Date:</span> <span class="meta-value">{{ doc.incident_datetime | fmt_dt }}</span></span>
-        <span><span class="meta-label">Station:</span> <span class="meta-value">{{ doc.extras.station or "--" }}</span></span>
+        {% set best_date = doc.timestamps.get("psap_answer") or doc.timestamps.get("psap_answer_time") or doc.incident_datetime %}
+        <span><span class="meta-label">Incident Date:</span> <span class="meta-value">{{ best_date | fmt_dt }}</span></span>
         <span><span class="meta-label">Status:</span> <span class="meta-value" style="text-transform:capitalize">{{ doc.status | replace("_", " ") }}</span></span>
         {% if doc.neris_incident_id %}
         <span><span class="meta-label">NERIS ID:</span> <span class="meta-value" style="font-size:11px">{{ doc.neris_incident_id | replace("|", " | ") }}</span></span>
