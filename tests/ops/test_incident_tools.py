@@ -716,6 +716,8 @@ _SAMPLE_NERIS_RECORD = {
         "outcome_narrative": "Campfire extinguished at 94 Zepher.",
         "people_present": True,
         "displacement_count": 0,
+        "displacement_causes": ["FIRE", "SMOKE"],
+        "animals_rescued": 1,
         "impediment_narrative": "Narrow driveway limited access.",
         "location": {
             "complete_number": "94",
@@ -724,6 +726,8 @@ _SAMPLE_NERIS_RECORD = {
             "street_postfix": None,
             "incorporated_municipality": "Friday Harbor",
             "state": "WA",
+            "postal_code": "98250",
+            "county": "San Juan County",
         },
         "location_use": {"use_type": "OUTDOOR||WATERFRONT"},
     },
@@ -743,6 +747,7 @@ _SAMPLE_NERIS_RECORD = {
     "fire_detail": {
         "location_detail": {
             "type": "STRUCTURE",
+            "progression_evident": True,
             "arrival_condition": "SMOKE_SHOWING",
             "damage_type": "MINOR_DAMAGE",
             "room_of_origin_type": "LIVING_SPACE",
@@ -752,11 +757,64 @@ _SAMPLE_NERIS_RECORD = {
         "water_supply": "HYDRANT_LESS_500",
         "investigation_needed": "NO_CAUSE_OBVIOUS",
         "investigation_types": [],
+        "suppression_appliances": ["FIRE_EXTINGUISHER"],
     },
-    "smoke_alarm": {"presence": {"type": "PRESENT"}},
+    "smoke_alarm": {
+        "presence": {
+            "type": "PRESENT",
+            "alarm_types": ["UNKNOWN"],
+            "operation": {
+                "alerted_failed_other": {
+                    "type": "OPERATED_ALERTED_OCCUPANT",
+                    "occupant_action": "ATTEMPTED_TO_RESCUE_ANIMALS",
+                },
+            },
+        },
+    },
     "fire_alarm": {"presence": {"type": "NOT_APPLICABLE"}},
     "fire_suppression": {"presence": {"type": "NOT_PRESENT"}},
+    "electric_hazards": [
+        {"type": "ENERGY_STORAGE_SYSTEM||BATTERY"},
+    ],
+    "powergen_hazards": [
+        {"pv_other": {"type": "NOT_APPLICABLE"}},
+    ],
+    "csst_hazard": {
+        "ignition_source": False,
+        "lightning_suspected": "UNKNOWN",
+        "grounded": None,
+    },
+    "nonfd_aids": [{"type": "EMS"}],
+    "casualty_rescues": [
+        {
+            "type": "NONFF",
+            "gender": "MALE",
+            "casualty": {
+                "injury_or_noninjury": {
+                    "type": "INJURED_NONFATAL",
+                    "cause": "EXPOSURE",
+                },
+            },
+            "rescue": {
+                "ffrescue_or_nonffrescue": {
+                    "type": "RESCUED_BY_FIREFIGHTER",
+                    "actions": ["NONE"],
+                    "impediments": ["ACCESS_LIMITATIONS"],
+                    "removal_or_nonremoval": {
+                        "type": "REMOVAL_FROM_STRUCTURE",
+                        "room_type": "BALCONY_PORCH_DECK",
+                        "elevation_type": "ON_FURNITURE",
+                        "rescue_path_type": "REMOVAL_ALONG_PRIMARY_PATH",
+                    },
+                },
+                "presence_known": {
+                    "presence_known_type": "KNOWN_DISPATCH",
+                },
+            },
+        },
+    ],
     "tactic_timestamps": {
+        "completed_sizeup": "2026-01-02T01:32:00+00:00",
         "water_on_fire": "2026-01-02T01:42:00+00:00",
         "fire_under_control": "2026-01-02T01:55:00+00:00",
     },
@@ -771,6 +829,7 @@ _SAMPLE_NERIS_RECORD = {
         "incident_number": "26-000039",
         "call_create": "2026-01-02T01:12:41+00:00",
         "incident_clear": "2026-01-02T02:16:31+00:00",
+        "automatic_alarm": True,
         "location": {
             "complete_number": "1632",
             "street": "San Juan",
@@ -784,7 +843,9 @@ _SAMPLE_NERIS_RECORD = {
                 "dispatch": "2026-01-02T01:12:41+00:00",
                 "enroute_to_scene": "2026-01-02T01:15:52+00:00",
                 "on_scene": "2026-01-02T01:38:49+00:00",
+                "staging": "2026-01-02T01:35:00+00:00",
                 "unit_clear": "2026-01-02T02:16:31+00:00",
+                "canceled_enroute": None,
                 "response_mode": "NON_EMERGENT",
             },
             {
@@ -1693,6 +1754,39 @@ class TestImportFromNeris:
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
     @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_force_bypasses_locked_status(
+        self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
+    ):
+        doc = IncidentDocument(
+            id="doc-import-force",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="submitted",
+            extras={"csst_present": "YES"},  # Old buggy value
+        )
+
+        mock_get_neris.return_value = _IMPORT_NERIS_RECORD
+        mock_dispatch.return_value = {}
+        mock_crew.return_value = []
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await import_from_neris(
+            "FD53055879|26-000944|123", incident_id="doc-import-force", force=True
+        )
+
+        assert "error" not in result
+        mock_store.update.assert_called_once()
+
+    @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
+    @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_access_denied_non_creator_non_officer(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew
     ):
@@ -1924,7 +2018,10 @@ class TestParseNerisRecord:
         assert result["address"] == "94 Zepher"
         assert result["city"] == "Friday Harbor"
         assert result["state"] == "WA"
+        assert result["zip_code"] == "98250"
+        assert result["county"] == "San Juan County"
         assert result["location_use"] == "OUTDOOR||WATERFRONT"
+        assert result["automatic_alarm"] is True
         assert len(result["units"]) == 2
         assert result["timestamps"]["psap_answer"] == "2026-01-02T01:12:41+00:00"
         assert result["timestamps"]["incident_clear"] == "2026-01-02T02:16:31+00:00"
@@ -1964,8 +2061,10 @@ class TestParseNerisRecord:
         assert extras["room_of_origin"] == "LIVING_SPACE"
         assert extras["floor_of_origin"] == 1
         assert extras["fire_cause_in"] == "ELECTRICAL"
+        assert extras["fire_progression_evident"] is True
         assert extras["water_supply"] == "HYDRANT_LESS_500"
         assert extras["fire_investigation"] == "NO_CAUSE_OBVIOUS"
+        assert extras["suppression_appliances"] == ["FIRE_EXTINGUISHER"]
 
     def test_extracts_alarms(self):
         result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
@@ -1978,6 +2077,7 @@ class TestParseNerisRecord:
     def test_extracts_tactic_timestamps(self):
         result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
 
+        assert result["timestamps"]["completed_sizeup"] == "2026-01-02T01:32:00+00:00"
         assert result["timestamps"]["water_on_fire"] == "2026-01-02T01:42:00+00:00"
         assert result["timestamps"]["fire_under_control"] == "2026-01-02T01:55:00+00:00"
 
@@ -2021,7 +2121,10 @@ class TestParseNerisRecord:
 
         assert result["people_present"] is True
         assert result["displaced_count"] == 0
-        assert result["extras"]["impediment_narrative"] == "Narrow driveway limited access."
+        extras = result["extras"]
+        assert extras["impediment_narrative"] == "Narrow driveway limited access."
+        assert extras["displacement_causes"] == ["FIRE", "SMOKE"]
+        assert extras["animals_rescued"] == 1
 
     def test_handles_empty_record(self):
         result = _parse_neris_record(
@@ -2055,6 +2158,92 @@ class TestParseNerisRecord:
         result = _parse_neris_record(record, "FD|X|Y")
         assert "arrival_conditions" not in result
         assert "action_taken" not in result
+
+    def test_extracts_unit_staged_and_canceled(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        # First unit has staging time
+        assert result["units"][0].staged == "2026-01-02T01:35:00+00:00"
+        # Second unit has no staging
+        assert result["units"][1].staged == ""
+        # Staffing in comments
+        assert "Staffing: 1" in result["units"][0].comment
+        assert "Staffing: 4" in result["units"][1].comment
+
+    def test_extracts_electric_hazard_types(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        extras = result["extras"]
+        assert extras["electric_hazards"] == ["ENERGY_STORAGE_SYSTEM||BATTERY"]
+
+    def test_extracts_powergen_not_applicable(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        extras = result["extras"]
+        # NOT_APPLICABLE should not create any powergen entry
+        assert "solar_present" not in extras
+        assert "battery_ess_present" not in extras
+        assert "generator_present" not in extras
+
+    def test_extracts_powergen_solar(self):
+        record = {
+            "base": {},
+            "incident_types": [],
+            "powergen_hazards": [
+                {"pv_other": {"type": "PV_SOLAR_PANELS"}},
+            ],
+        }
+        result = _parse_neris_record(record, "FD|X|Y")
+        assert result["extras"]["solar_present"] == "YES"
+
+    def test_csst_ignition_false_means_no(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        extras = result["extras"]
+        assert extras["csst_present"] == "NO"
+
+    def test_csst_ignition_true_means_yes(self):
+        record = {
+            "base": {},
+            "incident_types": [],
+            "csst_hazard": {"ignition_source": True, "lightning_suspected": "YES"},
+        }
+        result = _parse_neris_record(record, "FD|X|Y")
+        extras = result["extras"]
+        assert extras["csst_present"] == "YES"
+        assert extras["csst_lightning_suspected"] == "YES"
+
+    def test_extracts_casualty_rescue_data(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        extras = result["extras"]
+        cr_list = extras["casualty_rescues"]
+        assert len(cr_list) == 1
+        cr = cr_list[0]
+        assert cr["type"] == "NONFF"
+        assert cr["gender"] == "MALE"
+        assert cr["injury_type"] == "INJURED_NONFATAL"
+        assert cr["injury_cause"] == "EXPOSURE"
+        assert cr["rescue_type"] == "RESCUED_BY_FIREFIGHTER"
+        assert cr["removal_type"] == "REMOVAL_FROM_STRUCTURE"
+        assert cr["removal_room"] == "BALCONY_PORCH_DECK"
+        assert cr["rescue_impediments"] == ["ACCESS_LIMITATIONS"]
+        assert cr["presence_known"] == "KNOWN_DISPATCH"
+
+    def test_extracts_nonfd_aids(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        extras = result["extras"]
+        assert extras["nonfd_aids"] == ["EMS"]
+
+    def test_extracts_smoke_alarm_details(self):
+        result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
+
+        extras = result["extras"]
+        assert extras["smoke_alarm_presence"] == "PRESENT"
+        assert extras["smoke_alarm_types"] == ["UNKNOWN"]
+        assert extras["smoke_alarm_operation"] == "OPERATED_ALERTED_OCCUPANT"
+        assert extras["smoke_alarm_occupant_action"] == "ATTEMPTED_TO_RESCUE_ANIMALS"
 
 
 # ── build_import_comparison ──

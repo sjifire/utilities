@@ -283,6 +283,8 @@ async def chat_page(request: Request) -> Response:
     except Exception:
         logger.debug("Failed to load dispatch data for %s", doc.incident_number, exc_info=True)
 
+    is_locked = doc.status in ("submitted", "approved")
+
     template = _jinja_env.get_template("chat.html")
     html = template.render(
         incident_id=incident_id,
@@ -293,6 +295,8 @@ async def chat_page(request: Request) -> Response:
         dispatch=dispatch_context,
         user_email=user.email if user else "",
         user_name=user.name if user else "",
+        is_locked=is_locked,
+        doc=doc.model_dump(mode="json") if is_locked else None,
     )
     return Response(html, media_type="text/html")
 

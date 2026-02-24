@@ -28,6 +28,41 @@ logger = logging.getLogger(__name__)
 
 _EDITABLE_STATUSES = {"draft", "in_progress", "ready_review"}
 _LOCKED_STATUSES = {"submitted", "approved"}
+
+# Ephemeral cache: NERIS unit ID → local CAD designation (e.g. FD53055879S001U000 → E31).
+# Rebuilt from NERIS entity API on first use; lost on restart (acceptable).
+_neris_unit_map: dict[str, str] = {}
+
+
+def _resolve_neris_unit_id(neris_unit_id: str) -> str:
+    """Map a NERIS unit ID to local CAD designation, fetching entity data if needed.
+
+    Falls back to the raw NERIS ID if the mapping isn't available
+    (e.g. credentials not set, API unreachable).
+    """
+    if not neris_unit_id:
+        return neris_unit_id
+    if _neris_unit_map:
+        return _neris_unit_map.get(neris_unit_id, neris_unit_id)
+
+    # Try to populate the map from the NERIS entity API
+    try:
+        from sjifire.neris.client import NerisClient
+
+        with NerisClient() as client:
+            entity = client.get_entity()
+        for station in entity.get("stations", []):
+            for unit in station.get("units", []):
+                uid = unit.get("neris_id", "")
+                cad = unit.get("cad_designation_1", "")
+                if uid and cad:
+                    _neris_unit_map[uid] = cad
+        logger.info("Loaded %d NERIS unit mappings", len(_neris_unit_map))
+    except Exception:
+        logger.debug("Could not load NERIS unit mappings", exc_info=True)
+        return neris_unit_id
+
+    return _neris_unit_map.get(neris_unit_id, neris_unit_id)
 _RESETTABLE_STATUSES = {"draft", "in_progress"}
 
 
@@ -265,6 +300,12 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
         state = loc.get("state") or ""
         if state:
             prefill["state"] = state
+        zip_code = loc.get("postal_code") or ""
+        if zip_code:
+            prefill["zip_code"] = zip_code
+        county = loc.get("county") or ""
+        if county:
+            prefill["county"] = county
 
     # Unit responses from dispatch
     dispatch = record.get("dispatch") or {}
@@ -272,16 +313,30 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
     if neris_units:
         units = []
         for u in neris_units:
+            raw_id = u.get("reported_unit_id") or _resolve_neris_unit_id(
+                u.get("unit_neris_id", "")
+            )
             unit = UnitAssignment(
-                unit_id=u.get("reported_unit_id") or u.get("unit_neris_id", ""),
+                unit_id=raw_id,
                 response_mode=u.get("response_mode") or "",
                 dispatch=u.get("dispatch") or "",
                 enroute=u.get("enroute_to_scene") or "",
+                staged=u.get("staging") or "",
                 on_scene=u.get("on_scene") or "",
                 cleared=u.get("unit_clear") or "",
+                canceled=u.get("canceled_enroute") or "",
             )
+            # Staffing count into unit comment if available
+            staffing = u.get("staffing")
+            if staffing is not None:
+                unit.comment = f"Staffing: {staffing}"
             units.append(unit)
         prefill["units"] = units
+
+    # Automatic alarm from dispatch
+    auto_alarm = dispatch.get("automatic_alarm")
+    if auto_alarm is not None:
+        prefill["automatic_alarm"] = auto_alarm
 
     # Timestamps — from dispatch-level fields and earliest unit times
     timestamps: dict[str, str] = {}
@@ -350,6 +405,10 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
             if acres is not None:
                 prefill["outside_fire_acres"] = acres
 
+        progression = location_detail.get("progression_evident")
+        if progression is not None:
+            extras["fire_progression_evident"] = progression
+
         water_supply = fire_detail.get("water_supply")
         if water_supply:
             extras["water_supply"] = water_supply
@@ -359,6 +418,9 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
         inv_types = fire_detail.get("investigation_types")
         if inv_types:
             extras["fire_investigation_types"] = inv_types
+        supp_appliances = fire_detail.get("suppression_appliances")
+        if supp_appliances:
+            extras["suppression_appliances"] = supp_appliances
 
     # --- Alarms & suppression (top-level in NERIS response) ---
     for alarm_section, extras_key in (
@@ -370,27 +432,62 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
         presence = alarm.get("presence") or {}
         ptype = presence.get("type")
         if ptype:
-            # Map NERIS presence types to our format
-            # NERIS uses: PRESENT, NOT_PRESENT, NOT_APPLICABLE
             extras[extras_key] = ptype
+
+    # Smoke alarm details when present
+    smoke_alarm = record.get("smoke_alarm") or {}
+    smoke_presence = smoke_alarm.get("presence") or {}
+    if smoke_presence.get("type") == "PRESENT":
+        alarm_types = smoke_presence.get("alarm_types")
+        if alarm_types:
+            extras["smoke_alarm_types"] = alarm_types
+        operation = smoke_presence.get("operation") or {}
+        alerted = operation.get("alerted_failed_other") or {}
+        op_type = alerted.get("type")
+        if op_type:
+            extras["smoke_alarm_operation"] = op_type
+        occ_action = alerted.get("occupant_action")
+        if occ_action:
+            extras["smoke_alarm_occupant_action"] = occ_action
 
     # --- Hazards (top-level in NERIS response) ---
     electric_hazards = record.get("electric_hazards") or []
     if electric_hazards:
-        extras["electric_hazards"] = True
+        eh_types = [eh.get("type") for eh in electric_hazards if eh.get("type")]
+        extras["electric_hazards"] = eh_types if eh_types else True
     powergen = record.get("powergen_hazards") or []
     for pg in powergen:
-        pg_type = pg.get("type") if isinstance(pg, dict) else None
-        if pg_type:
-            if "SOLAR" in pg_type.upper():
-                extras["solar_present"] = "YES"
-            elif "BATTERY" in pg_type.upper() or "ESS" in pg_type.upper():
-                extras["battery_ess_present"] = "YES"
-            elif "GENERATOR" in pg_type.upper():
-                extras["generator_present"] = "YES"
+        # Real structure: pg.pv_other.type (not pg.type)
+        pv_other = pg.get("pv_other") or {} if isinstance(pg, dict) else {}
+        pg_type = pv_other.get("type") or ""
+        if not pg_type:
+            continue
+        if "SOLAR" in pg_type.upper() or "PV" in pg_type.upper():
+            extras["solar_present"] = "YES"
+        elif "BATTERY" in pg_type.upper() or "ESS" in pg_type.upper():
+            extras["battery_ess_present"] = "YES"
+        elif "GENERATOR" in pg_type.upper():
+            extras["generator_present"] = "YES"
+        elif pg_type != "NOT_APPLICABLE":
+            extras["powergen_type"] = pg_type
     csst = record.get("csst_hazard") or {}
     if csst:
-        extras["csst_present"] = "YES" if csst.get("lightning_suspected") else "UNKNOWN"
+        # CSST is an ignition source concern — ignition_source is the key field.
+        # lightning_suspected is a sub-detail. A truthy string like "UNKNOWN"
+        # does NOT mean CSST was present.
+        ignition = csst.get("ignition_source")
+        if ignition is True:
+            extras["csst_present"] = "YES"
+        elif ignition is False:
+            extras["csst_present"] = "NO"
+        else:
+            extras["csst_present"] = "UNKNOWN"
+        lightning = csst.get("lightning_suspected")
+        if lightning and lightning != "UNKNOWN":
+            extras["csst_lightning_suspected"] = lightning
+        grounded = csst.get("grounded")
+        if grounded is not None:
+            extras["csst_grounded"] = grounded
 
     # --- People & occupancy (in base) ---
     people_present = base.get("people_present")
@@ -399,6 +496,12 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
     displaced = base.get("displacement_count")
     if displaced is not None:
         prefill["displaced_count"] = displaced
+    displacement_causes = base.get("displacement_causes")
+    if displacement_causes:
+        extras["displacement_causes"] = displacement_causes
+    animals_rescued = base.get("animals_rescued")
+    if animals_rescued is not None:
+        extras["animals_rescued"] = animals_rescued
 
     # --- Impediment narrative (in base) ---
     impediment = base.get("impediment_narrative")
@@ -425,6 +528,7 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
     tactic_ts = record.get("tactic_timestamps") or {}
     for ts_key in (
         "command_established",
+        "completed_sizeup",
         "water_on_fire",
         "fire_under_control",
         "fire_knocked_down",
@@ -439,13 +543,46 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
 
     # --- Casualty/rescue data (top-level in NERIS response) ---
     casualty_rescues = record.get("casualty_rescues") or []
-    for cr in casualty_rescues:
-        rescue = cr.get("rescue") or {}
-        if rescue:
-            for rk in ("rescue_mode", "rescue_actions", "rescue_impediment", "rescue_elevation"):
-                val = rescue.get(rk)
-                if val is not None:
-                    extras[rk] = val
+    if casualty_rescues:
+        cr_list = []
+        for cr in casualty_rescues:
+            cr_entry: dict = {}
+            cr_entry["type"] = cr.get("type", "")  # FF or NONFF
+            cr_entry["gender"] = cr.get("gender")
+
+            # Casualty info
+            casualty = cr.get("casualty") or {}
+            injury = casualty.get("injury_or_noninjury") or {}
+            if injury:
+                cr_entry["injury_type"] = injury.get("type")  # INJURED_NONFATAL, etc.
+                cr_entry["injury_cause"] = injury.get("cause")  # EXPOSURE, etc.
+
+            # Rescue info — nested under ffrescue_or_nonffrescue
+            rescue = cr.get("rescue") or {}
+            ff_rescue = rescue.get("ffrescue_or_nonffrescue") or {}
+            if ff_rescue:
+                cr_entry["rescue_type"] = ff_rescue.get("type")  # RESCUED_BY_FIREFIGHTER, etc.
+                cr_entry["rescue_actions"] = ff_rescue.get("actions")
+                cr_entry["rescue_impediments"] = ff_rescue.get("impediments")
+                removal = ff_rescue.get("removal_or_nonremoval") or {}
+                if removal:
+                    cr_entry["removal_type"] = removal.get("type")
+                    cr_entry["removal_room"] = removal.get("room_type")
+                    cr_entry["removal_elevation"] = removal.get("elevation_type")
+                    cr_entry["rescue_path"] = removal.get("rescue_path_type")
+
+            presence_known = rescue.get("presence_known") or {}
+            if presence_known:
+                cr_entry["presence_known"] = presence_known.get("presence_known_type")
+
+            # Strip None values
+            cr_list.append({k: v for k, v in cr_entry.items() if v is not None})
+        extras["casualty_rescues"] = cr_list
+
+    # --- Non-FD aids (top-level in NERIS response) ---
+    nonfd_aids = record.get("nonfd_aids") or []
+    if nonfd_aids:
+        extras["nonfd_aids"] = [a.get("type") for a in nonfd_aids if a.get("type")]
 
     if extras:
         prefill["extras"] = extras
@@ -1394,6 +1531,7 @@ async def import_from_neris(
     *,
     incident_id: str | None = None,
     station: str = "S31",
+    force: bool = False,
 ) -> dict:
     """Import a NERIS record, cross-referencing with dispatch and schedule data.
 
@@ -1420,6 +1558,8 @@ async def import_from_neris(
             When omitted a new draft is created from the NERIS data.
         station: Station code for new incidents (default "S31",
             ignored when importing into an existing incident)
+        force: Bypass the locked-status check, allowing reimport into
+            submitted/approved incidents (e.g. after parser fixes).
 
     Returns:
         The incident document with an ``import_comparison`` key showing
@@ -1462,7 +1602,7 @@ async def import_from_neris(
             return {"error": "Incident not found"}
         if not await _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to edit this incident"}
-        if doc.status in _LOCKED_STATUSES:
+        if doc.status in _LOCKED_STATUSES and not force:
             return {"error": f"Cannot modify a {doc.status} incident"}
 
         dispatch_number = doc.incident_number
@@ -1493,7 +1633,7 @@ async def import_from_neris(
     if incident_id and doc is not None:
         # Update existing incident
         return await _apply_neris_import_to_existing(
-            doc, neris_prefill, dispatch_prefill, crew, comparison, user
+            doc, neris_prefill, dispatch_prefill, crew, comparison, user, force=force
         )
     else:
         # Create new incident from NERIS
@@ -1516,6 +1656,8 @@ async def _apply_neris_import_to_existing(
     crew: list[dict],
     comparison: dict,
     user,
+    *,
+    force: bool = False,
 ) -> dict:
     """Apply merged NERIS + dispatch + schedule data to an existing incident."""
     fields_changed: list[str] = []
@@ -1645,7 +1787,7 @@ async def _apply_neris_import_to_existing(
     if neris_extras:
         merged_extras = {**doc.extras}
         for k, v in neris_extras.items():
-            if k not in merged_extras:
+            if force or k not in merged_extras:
                 merged_extras[k] = v
         if merged_extras != doc.extras:
             doc.extras = merged_extras
