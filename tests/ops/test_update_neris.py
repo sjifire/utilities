@@ -158,6 +158,35 @@ class TestBuildNerisDiff:
         # Address differs: "94 Zepher Ln" vs parsed NERIS address
         assert "address" in diff
 
+    def test_first_unit_dispatched_diff(self, sample_doc, neris_record):
+        """Detect first_unit_dispatched timestamp differences."""
+        sample_doc.timestamps["first_unit_dispatched"] = "2026-02-20T10:31:00Z"
+        neris_record["dispatch"]["first_unit_dispatched"] = "2026-02-20T10:30:00Z"
+        diff = _build_neris_diff(sample_doc, neris_record)
+        assert "timestamps" in diff
+        assert "first_unit_dispatched" in diff["timestamps"]["local"]
+        assert diff["timestamps"]["local"]["first_unit_dispatched"] == "2026-02-20T10:31:00Z"
+        assert diff["timestamps"]["neris"]["first_unit_dispatched"] == "2026-02-20T10:30:00Z"
+
+    def test_automatic_alarm_diff(self, sample_doc, neris_record):
+        """Detect automatic_alarm differences."""
+        sample_doc.automatic_alarm = True
+        neris_record["dispatch"]["automatic_alarm"] = False
+        diff = _build_neris_diff(sample_doc, neris_record)
+        assert "automatic_alarm" in diff
+        assert diff["automatic_alarm"]["local"] is True
+        assert diff["automatic_alarm"]["neris"] is False
+
+    def test_unit_staged_diff(self, sample_doc, neris_record):
+        """Detect unit staged time differences (maps to NERIS staging)."""
+        sample_doc.units[0].staged = "2026-02-20T10:35:00Z"
+        neris_record["dispatch"]["unit_responses"][0]["staging"] = "2026-02-20T10:34:00Z"
+        diff = _build_neris_diff(sample_doc, neris_record)
+        assert "units" in diff
+        assert "E31.staged" in diff["units"]["local"]
+        assert diff["units"]["local"]["E31.staged"] == "2026-02-20T10:35:00Z"
+        assert diff["units"]["neris"]["E31.staged"] == "2026-02-20T10:34:00Z"
+
 
 class TestBuildNerisPatch:
     """Tests for _build_neris_patch."""
@@ -198,6 +227,42 @@ class TestBuildNerisPatch:
         patch = _build_neris_patch(diff)
         assert "dispatch" in patch
         assert "unit_responses" in patch["dispatch"]
+
+    def test_first_unit_dispatched_patch(self):
+        diff = {
+            "timestamps": {
+                "local": {"first_unit_dispatched": "2026-02-20T10:31:00Z"},
+                "neris": {"first_unit_dispatched": "2026-02-20T10:30:00Z"},
+            }
+        }
+        result = _build_neris_patch(diff)
+        assert result["dispatch"]["first_unit_dispatched"] == {
+            "action": "set",
+            "value": "2026-02-20T10:31:00Z",
+        }
+
+    def test_automatic_alarm_patch(self):
+        diff = {"automatic_alarm": {"local": True, "neris": False}}
+        result = _build_neris_patch(diff)
+        assert result["dispatch"]["automatic_alarm"] == {
+            "action": "set",
+            "value": True,
+        }
+
+    def test_unit_staged_patch(self):
+        diff = {
+            "units": {
+                "local": {"E31.staged": "2026-02-20T10:35:00Z"},
+                "neris": {"E31.staged": "2026-02-20T10:34:00Z"},
+            }
+        }
+        result = _build_neris_patch(diff)
+        unit_responses = result["dispatch"]["unit_responses"]
+        assert unit_responses["action"] == "set"
+        assert unit_responses["value"]["E31"]["staging"] == {
+            "action": "set",
+            "value": "2026-02-20T10:35:00Z",
+        }
 
     def test_empty_diff_returns_empty_patch(self):
         patch = _build_neris_patch({})
@@ -246,6 +311,33 @@ class TestUpdateNerisIncident:
         assert "snapshot_id" in result
         assert len(result["fields_updated"]) > 0
         mock_patch_neris.assert_called_once()
+
+    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    async def test_dry_run_returns_diff_without_patching(
+        self,
+        mock_store_cls,
+        mock_get_neris,
+        officer_user,
+        sample_doc,
+        neris_record,
+    ):
+        """dry_run=True returns diff, no snapshot created, no patch called."""
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        mock_get_neris.return_value = neris_record
+
+        with patch("sjifire.ops.incidents.tools._patch_neris_incident") as mock_patch:
+            result = await update_neris_incident("doc-neris-1", dry_run=True)
+
+        assert result["status"] == "dry_run"
+        assert "diff" in result
+        assert len(result["fields_available"]) > 0
+        assert result["neris_id"] == sample_doc.neris_incident_id
+        mock_patch.assert_not_called()
 
     @patch("sjifire.ops.incidents.tools._get_neris_incident")
     @patch("sjifire.ops.incidents.tools.IncidentStore")

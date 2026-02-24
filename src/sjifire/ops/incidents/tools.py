@@ -2225,6 +2225,7 @@ async def finalize_incident(incident_id: str) -> dict:
 async def update_neris_incident(
     incident_id: str,
     fields: list[str] | None = None,
+    dry_run: bool = False,
 ) -> dict:
     """Push corrections from the local incident report to the NERIS record.
 
@@ -2236,6 +2237,7 @@ async def update_neris_incident(
         incident_id: Local incident document ID
         fields: Optional list of field names to update (e.g. ["narrative",
             "timestamps"]). If omitted, updates all differing fields.
+        dry_run: If True, return the diff without applying changes.
 
     Returns:
         Summary of what was updated, or an error
@@ -2292,6 +2294,16 @@ async def update_neris_incident(
             "status": "no_changes",
             "message": "Local data matches the NERIS record — nothing to update.",
             "neris_id": doc.neris_incident_id,
+        }
+
+    if dry_run:
+        return {
+            "status": "dry_run",
+            "neris_id": doc.neris_incident_id,
+            "neris_status": neris_status,
+            "diff": diff,
+            "fields_available": list(diff.keys()),
+            "message": f"{len(diff)} field(s) differ between local and NERIS.",
         }
 
     # 5. Build NERIS patch properties
@@ -2395,6 +2407,7 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     # Dispatch-level timestamps
     ts_map = {
         "psap_answer": ("call_create", dispatch),
+        "first_unit_dispatched": ("first_unit_dispatched", dispatch),
         "incident_clear": ("incident_clear", dispatch),
     }
     for local_key, (neris_key, section) in ts_map.items():
@@ -2420,6 +2433,7 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
         field_map = {
             "dispatch": "dispatch",
             "enroute": "enroute_to_scene",
+            "staged": "staging",
             "on_scene": "on_scene",
             "cleared": "unit_clear",
             "canceled": "canceled_enroute",
@@ -2448,6 +2462,11 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     neris_displaced = base.get("displacement_count")
     if doc.displaced_count is not None and doc.displaced_count != neris_displaced:
         diff["displaced_count"] = {"local": doc.displaced_count, "neris": neris_displaced}
+
+    # Automatic alarm
+    neris_auto_alarm = dispatch.get("automatic_alarm")
+    if doc.automatic_alarm is not None and doc.automatic_alarm != neris_auto_alarm:
+        diff["automatic_alarm"] = {"local": doc.automatic_alarm, "neris": neris_auto_alarm}
 
     return diff
 
@@ -2516,12 +2535,25 @@ def _build_neris_patch(diff: dict) -> dict:
                 "action": "set",
                 "value": ts_local["psap_answer"],
             }
+        if "first_unit_dispatched" in ts_local:
+            properties.setdefault("dispatch", {})
+            properties["dispatch"]["first_unit_dispatched"] = {
+                "action": "set",
+                "value": ts_local["first_unit_dispatched"],
+            }
         if "incident_clear" in ts_local:
             properties.setdefault("dispatch", {})
             properties["dispatch"]["incident_clear"] = {
                 "action": "set",
                 "value": ts_local["incident_clear"],
             }
+
+    if "automatic_alarm" in diff:
+        properties.setdefault("dispatch", {})
+        properties["dispatch"]["automatic_alarm"] = {
+            "action": "set",
+            "value": diff["automatic_alarm"]["local"],
+        }
 
     if "units" in diff:
         # Unit timestamps need to be patched via dispatch.unit_responses
@@ -2532,6 +2564,7 @@ def _build_neris_patch(diff: dict) -> dict:
             neris_field_map = {
                 "dispatch": "dispatch",
                 "enroute": "enroute_to_scene",
+                "staged": "staging",
                 "on_scene": "on_scene",
                 "cleared": "unit_clear",
                 "canceled": "canceled_enroute",

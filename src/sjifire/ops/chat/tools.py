@@ -257,6 +257,13 @@ TOOL_SCHEMAS: list[dict] = [
                         "If omitted, updates all differing fields."
                     ),
                 },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, return the diff without applying changes. "
+                        "Use before locking to check what would be pushed."
+                    ),
+                },
             },
             "required": ["incident_id"],
         },
@@ -583,7 +590,11 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
                 "This report was imported from NERIS (already reviewed there). "
                 "Present a summary of what was imported and highlight any "
                 "discrepancies between NERIS, dispatch, and crew data. "
-                "Then ask if the user wants to lock the report."
+                "Walk through crew assignments and corrections with the user. "
+                "When the report is complete, call update_neris_incident with "
+                "dry_run=true to check what local corrections differ from NERIS "
+                "and present the diff to the user. If there are changes, ask "
+                "whether to push them before locking."
             )
             return summary
         return result
@@ -595,6 +606,7 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         return await incident_tools.update_neris_incident(
             tool_input["incident_id"],
             fields=tool_input.get("fields"),
+            dry_run=tool_input.get("dry_run", False),
         )
 
     if name == "get_dispatch_call":
