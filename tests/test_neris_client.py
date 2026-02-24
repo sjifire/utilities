@@ -474,6 +474,35 @@ class TestGetIncidentByNumber:
         assert result is not None
         assert mock_api.list_incidents.call_count == 3
 
+    def test_found_by_determinant_code(self, mock_credentials, mock_api):
+        """Falls through to determinant_code scan as last resort."""
+        mock_api.list_incidents.side_effect = [
+            # incident_number exact → miss
+            {"incidents": []},
+            # incident_number stripped → miss
+            {"incidents": []},
+            # dispatch_incident_number exact → miss
+            {"incidents": []},
+            # dispatch_incident_number stripped → miss
+            {"incidents": []},
+            # full scan → found via determinant_code
+            {
+                "incidents": [
+                    {
+                        "neris_id": SAMPLE_NERIS_ID,
+                        "dispatch": {"determinant_code": "26002358"},
+                    }
+                ]
+            },
+        ]
+
+        with NerisClient() as client:
+            result = client.get_incident("26-002358")
+
+        assert result is not None
+        assert result["neris_id"] == SAMPLE_NERIS_ID
+        assert mock_api.list_incidents.call_count == 5
+
     def test_not_found(self, mock_credentials, mock_api):
         """Returns None when no filter matches."""
         mock_api.list_incidents.return_value = {"incidents": []}

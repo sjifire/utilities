@@ -14,6 +14,7 @@ from sjifire.ops.incidents.tools import (
     _check_edit_access,
     _check_view_access,
     _extract_timestamps,
+    _neris_dispatch_to_cad_number,
     _parse_neris_record,
     _prefill_from_dispatch,
     _prefill_from_neris,
@@ -1877,6 +1878,42 @@ class TestImportFromNeris:
 
 
 # ── parse_neris_record (the pure-parsing half) ──
+class TestNerisDispatchToCadNumber:
+    """Tests for _neris_dispatch_to_cad_number."""
+
+    def test_determinant_code_with_dash_insertion(self):
+        """determinant_code '26002358' → '26-002358'."""
+        assert _neris_dispatch_to_cad_number({"determinant_code": "26002358"}) == "26-002358"
+
+    def test_determinant_code_short(self):
+        """Short determinant_code still gets dash after 2-digit prefix."""
+        assert _neris_dispatch_to_cad_number({"determinant_code": "26123"}) == "26-123"
+
+    def test_no_determinant_code_falls_back_to_dispatch_incident_number(self):
+        dispatch = {"dispatch_incident_number": "DIN-001"}
+        assert _neris_dispatch_to_cad_number(dispatch) == "DIN-001"
+
+    def test_no_determinant_or_dispatch_falls_back_to_incident_number(self):
+        dispatch = {"incident_number": "1771359925"}
+        assert _neris_dispatch_to_cad_number(dispatch) == "1771359925"
+
+    def test_empty_dispatch(self):
+        assert _neris_dispatch_to_cad_number({}) == ""
+
+    def test_non_numeric_prefix_falls_through(self):
+        """determinant_code with non-numeric prefix skips dash insertion."""
+        dispatch = {"determinant_code": "AB12345", "incident_number": "fallback"}
+        assert _neris_dispatch_to_cad_number(dispatch) == "fallback"
+
+    def test_determinant_code_preferred_over_incident_number(self):
+        dispatch = {
+            "determinant_code": "26002358",
+            "incident_number": "1771359925",
+            "dispatch_incident_number": "DIN-001",
+        }
+        assert _neris_dispatch_to_cad_number(dispatch) == "26-002358"
+
+
 class TestParseNerisRecord:
     def test_extracts_core_fields(self):
         result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD53055879|26-000039|1767316361")

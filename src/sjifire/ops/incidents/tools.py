@@ -112,6 +112,31 @@ def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, st
     return unit_times
 
 
+def _neris_dispatch_to_cad_number(neris_dispatch: dict) -> str:
+    """Derive our CAD incident number from a NERIS dispatch section.
+
+    NERIS stores three identifiers in the dispatch section:
+    - ``incident_number``: NERIS internal dispatch ID (e.g. ``"1771359925"``)
+    - ``determinant_code``: Our CAD number without dash (e.g. ``"26002358"``)
+    - ``dispatch_incident_number``: Sometimes populated, sometimes null
+
+    Our canonical format is ``"YY-NNNNNN"`` (e.g. ``"26-002358"``), matching
+    iSpyFire's ``long_term_call_id``.  Prefer ``determinant_code`` and
+    re-insert the dash; fall back to ``incident_number`` if unavailable.
+    """
+    det_code = (neris_dispatch.get("determinant_code") or "").strip()
+    if det_code and len(det_code) >= 3 and det_code[:2].isdigit():
+        # Re-insert dash after the two-digit year prefix: "26002358" → "26-002358"
+        return f"{det_code[:2]}-{det_code[2:]}"
+
+    # Fall back to dispatch_incident_number, then incident_number
+    return (
+        neris_dispatch.get("dispatch_incident_number")
+        or neris_dispatch.get("incident_number")
+        or ""
+    )
+
+
 async def _prefill_from_dispatch(incident_number: str) -> dict:
     """Look up dispatch data and return pre-fill fields for an incident.
 
@@ -1424,7 +1449,7 @@ async def import_from_neris(
 
     # ── 2. Derive dispatch number and date from NERIS record ──
     neris_dispatch = neris_record.get("dispatch") or {}
-    neris_incident_number = neris_dispatch.get("incident_number", "")
+    neris_incident_number = _neris_dispatch_to_cad_number(neris_dispatch)
     neris_call_create = neris_dispatch.get("call_create", "")
 
     # ── 3. Fetch dispatch data ──

@@ -228,9 +228,15 @@ class NerisClient:
         *,
         neris_id: str,
     ) -> dict | None:
-        """Look up by local CAD / incident number (e.g. 26-002358)."""
-        # Try incident_number filter (NERIS stores without dashes)
+        """Look up by local CAD / incident number (e.g. 26-002358).
+
+        Tries API filters first (``incident_number``, then
+        ``dispatch_incident_number``).  As a last resort, fetches all
+        incidents and checks ``dispatch.determinant_code`` — the CAD
+        number lives there in NERIS but isn't a filterable API field.
+        """
         stripped = number.replace("-", "")
+        # Try incident_number filter
         for variant in (number, stripped):
             incidents = self.get_all_incidents(
                 neris_id=neris_id,
@@ -257,6 +263,15 @@ class NerisClient:
                     len(incidents),
                 )
                 return incidents[0]
+
+        # Last resort: scan all and match by dispatch.determinant_code
+        # (our CAD number often lands here but isn't a filterable field)
+        logger.debug("API filters missed for %s, scanning determinant_code", number)
+        for inc in self.get_all_incidents(neris_id=neris_id):
+            dispatch = inc.get("dispatch") or {}
+            det_code = dispatch.get("determinant_code") or ""
+            if det_code in (number, stripped):
+                return inc
 
         logger.warning("Incident not found for number: %s", number)
         return None
