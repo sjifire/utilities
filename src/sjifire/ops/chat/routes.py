@@ -64,20 +64,42 @@ def _fmt_time(value: object) -> str:
 
 
 def _group_action_codes(codes: list[str]) -> list[tuple[str, list[str]]]:
-    """Group ``CATEGORY||sub||detail`` action codes by primary category."""
-    groups: dict[str, list[str]] = {}
+    """Group ``CATEGORY||sub||detail`` action codes by primary category.
+
+    Folds third-level qualifiers into parentheses on the second-level
+    entry, e.g. ``VENTILATION||VERTICAL||POST_SUPPRESSION`` becomes
+    "Vertical (Post Suppression)" instead of "Vertical > Post Suppression".
+    Standalone entries like ``VENTILATION||VERTICAL`` merge into the
+    qualified form when one exists.
+    """
+    # category → { sub → [detail, ...] }
+    groups: dict[str, dict[str, list[str]]] = {}
     order: list[str] = []
     for code in codes:
         parts = code.split("||")
         category = parts[0].replace("_", " ").title()
         if category not in groups:
-            groups[category] = []
+            groups[category] = {}
             order.append(category)
         if len(parts) > 1:
-            sub = " > ".join(p.replace("_", " ").title() for p in parts[1:])
+            sub = parts[1].replace("_", " ").title()
             if sub not in groups[category]:
-                groups[category].append(sub)
-    return [(cat, groups[cat]) for cat in order]
+                groups[category][sub] = []
+            if len(parts) > 2:
+                detail = ", ".join(p.replace("_", " ").title() for p in parts[2:])
+                if detail not in groups[category][sub]:
+                    groups[category][sub].append(detail)
+
+    result: list[tuple[str, list[str]]] = []
+    for cat in order:
+        formatted: list[str] = []
+        for sub, details in groups[cat].items():
+            if details:
+                formatted.append(f"{sub} ({', '.join(details)})")
+            else:
+                formatted.append(sub)
+        result.append((cat, formatted))
+    return result
 
 
 _jinja_env.filters["fmt_dt"] = _fmt_datetime
