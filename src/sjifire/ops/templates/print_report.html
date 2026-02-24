@@ -71,6 +71,16 @@
       padding-bottom: 10px;
       margin-bottom: 16px;
     }
+    .header-top {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .header-logo {
+      width: 52px;
+      height: 52px;
+      flex-shrink: 0;
+    }
     .dept-name {
       font-size: 18px;
       font-weight: 700;
@@ -163,6 +173,13 @@
       color: #1a1a1a;
     }
     .report-table tr:last-child td { border-bottom: none; }
+    .unit-comment-row td {
+      padding: 2px 10px 6px 30px;
+      font-style: italic;
+      color: #4b5563;
+      font-size: 11px;
+      border-bottom: 1px solid #e5e7eb;
+    }
 
     /* ── Narrative ── */
     .narrative-block {
@@ -215,6 +232,7 @@
       }
       .screen-controls { display: none !important; }
       .no-print { display: none !important; }
+      .header-logo { filter: grayscale(1); }
 
       .section { break-inside: avoid; }
       .report-header { break-after: avoid; }
@@ -242,15 +260,20 @@
   <div class="page">
     <!-- ── Report Header ── -->
     <div class="report-header">
-      <div class="dept-name">San Juan Island Fire &amp; Rescue</div>
-      <div class="report-title">Incident Report</div>
+      <div class="header-top">
+        <img class="header-logo" src="https://res.cloudinary.com/san-juan-fire-district-3/image/fetch/f_auto/https://www.sjifire.org/assets/sjifire-logo-clear.png" alt="SJIF&amp;R">
+        <div>
+          <div class="dept-name">San Juan Island Fire &amp; Rescue</div>
+          <div class="report-title">Incident Report</div>
+        </div>
+      </div>
       <div class="report-meta">
         <span><span class="meta-label">Incident #:</span> <span class="meta-value">{{ doc.incident_number }}</span></span>
-        <span><span class="meta-label">Date:</span> <span class="meta-value">{{ doc.incident_datetime }}</span></span>
+        <span><span class="meta-label">Date:</span> <span class="meta-value">{{ doc.incident_datetime | fmt_dt }}</span></span>
         <span><span class="meta-label">Station:</span> <span class="meta-value">{{ doc.extras.station or "--" }}</span></span>
         <span><span class="meta-label">Status:</span> <span class="meta-value" style="text-transform:capitalize">{{ doc.status | replace("_", " ") }}</span></span>
         {% if doc.neris_incident_id %}
-        <span><span class="meta-label">NERIS ID:</span> <span class="meta-value" style="font-size:11px">{{ doc.neris_incident_id }}</span></span>
+        <span><span class="meta-label">NERIS ID:</span> <span class="meta-value" style="font-size:11px">{{ doc.neris_incident_id | replace("|", " | ") }}</span></span>
         {% endif %}
       </div>
     </div>
@@ -263,15 +286,39 @@
           <span class="kv-label">Type</span>
           <span class="kv-value">{% if doc.incident_type %}{{ doc.incident_type | replace("||", " > ") | replace("_", " ") | title }}{% else %}<span class="empty">Not set</span>{% endif %}</span>
         </div>
+        {% if doc.additional_incident_types %}
+        <div class="kv-row">
+          <span class="kv-label">Additional Types</span>
+          <span class="kv-value">{% for t in doc.additional_incident_types %}{{ t | replace("||", " > ") | replace("_", " ") | title }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+        </div>
+        {% endif %}
+        {% if doc.automatic_alarm is not none %}
+        <div class="kv-row">
+          <span class="kv-label">Automatic Alarm</span>
+          <span class="kv-value">{{ "Yes" if doc.automatic_alarm else "No" }}</span>
+        </div>
+        {% endif %}
         {% if doc.location_use %}
         <div class="kv-row">
           <span class="kv-label">Location Use</span>
           <span class="kv-value">{{ doc.location_use | replace("||", " > ") | replace("_", " ") | title }}</span>
         </div>
         {% endif %}
+        {% set zip_val = doc.zip_code or doc.extras.get("zip_code", "") %}
         <div class="kv-row">
           <span class="kv-label">Address</span>
-          <span class="kv-value">{% if doc.address %}{{ doc.address }}{% if doc.city %}, {{ doc.city }}{% endif %}{% if doc.state %}, {{ doc.state }}{% endif %}{% else %}<span class="empty">Not set</span>{% endif %}</span>
+          <span class="kv-value">
+            {% if doc.address -%}
+              {{ doc.address }}
+              {%- if doc.apt_suite %}, {{ doc.apt_suite }}{% endif %}
+              {%- if doc.city %}, {{ doc.city }}{% endif %}
+              {%- if doc.state %}, {{ doc.state }}{% endif %}
+              {%- if zip_val %} {{ zip_val }}{% endif %}
+              {%- if doc.county %} ({{ doc.county }} County){% endif %}
+            {%- else -%}
+              <span class="empty">Not set</span>
+            {%- endif %}
+          </span>
         </div>
         {% if doc.latitude and doc.longitude %}
         <div class="kv-row">
@@ -279,35 +326,91 @@
           <span class="kv-value">{{ "%.4f" | format(doc.latitude) }}, {{ "%.4f" | format(doc.longitude) }}</span>
         </div>
         {% endif %}
+        {% if doc.arrival_conditions %}
+        <div class="kv-row">
+          <span class="kv-label">Arrival Conditions</span>
+          <span class="kv-value">{{ doc.arrival_conditions | replace("_", " ") | title }}</span>
+        </div>
+        {% endif %}
+        {% if doc.people_present is not none %}
+        <div class="kv-row">
+          <span class="kv-label">People Present</span>
+          <span class="kv-value">{{ "Yes" if doc.people_present else "No" }}</span>
+        </div>
+        {% endif %}
+        {% if doc.displaced_count %}
+        <div class="kv-row">
+          <span class="kv-label">Displaced</span>
+          <span class="kv-value">{{ doc.displaced_count }}</span>
+        </div>
+        {% endif %}
       </div>
     </div>
+
+    <!-- ── Fire-Specific Fields ── -->
+    {% if doc.outside_fire_cause or doc.outside_fire_acres %}
+    <div class="section">
+      <div class="section-header">Fire Details</div>
+      <div class="section-body">
+        {% if doc.outside_fire_cause %}
+        <div class="kv-row">
+          <span class="kv-label">Outside Fire Cause</span>
+          <span class="kv-value">{{ doc.outside_fire_cause | replace("_", " ") | title }}</span>
+        </div>
+        {% endif %}
+        {% if doc.outside_fire_acres %}
+        <div class="kv-row">
+          <span class="kv-label">Acres Burned</span>
+          <span class="kv-value">{{ doc.outside_fire_acres }} acres</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
 
     <!-- ── Response Timeline ── -->
     {% if doc.timestamps %}
     <div class="section">
       <div class="section-header">Response Timeline</div>
       <div class="section-body">
-        {% set ts_labels = {
-          "psap_answer_time": "PSAP Answer",
-          "event_first_unit_dispatched": "First Unit Dispatched",
-          "event_first_unit_enroute": "First Unit Enroute",
-          "event_first_unit_arrived": "First Unit Arrived",
-          "event_controlled": "Controlled",
-          "event_last_unit_cleared": "Last Unit Cleared"
-        } %}
-        {% for key, label in ts_labels.items() %}
+        {# Ordered timeline keys — incident_clear always last #}
+        {% set ts_labels = [
+          ("psap_answer", "PSAP Answer"),
+          ("psap_answer_time", "PSAP Answer"),
+          ("event_first_unit_dispatched", "First Unit Dispatched"),
+          ("first_unit_dispatched", "First Unit Dispatched"),
+          ("command_established", "Command Established"),
+          ("event_first_unit_enroute", "First Unit Enroute"),
+          ("first_unit_enroute", "First Unit Enroute"),
+          ("event_first_unit_arrived", "First Unit Arrived"),
+          ("first_unit_arrived", "First Unit On Scene"),
+          ("water_on_fire", "Water on Fire"),
+          ("fire_knocked_down", "Fire Knocked Down"),
+          ("fire_under_control", "Fire Under Control"),
+          ("suppression_complete", "Suppression Complete"),
+          ("primary_search_begin", "Primary Search Begin"),
+          ("primary_search_complete", "Primary Search Complete"),
+          ("extrication_complete", "Extrication Complete"),
+          ("event_controlled", "Controlled"),
+          ("event_last_unit_cleared", "Last Unit Cleared"),
+          ("incident_clear", "Incident Clear"),
+        ] %}
+        {% set shown_keys = [] %}
+        {% for key, label in ts_labels %}
         {% if key in doc.timestamps %}
+        {% if shown_keys.append(key) %}{% endif %}
         <div class="kv-row">
           <span class="kv-label">{{ label }}</span>
-          <span class="kv-value" style="font-family:monospace">{{ doc.timestamps[key] }}</span>
+          <span class="kv-value" style="font-family:monospace">{{ doc.timestamps[key] | fmt_dt }}</span>
         </div>
         {% endif %}
         {% endfor %}
+        {# Catch any remaining keys not in the ordered list #}
         {% for key, val in doc.timestamps.items() %}
-        {% if key not in ts_labels %}
+        {% if key not in shown_keys %}
         <div class="kv-row">
           <span class="kv-label">{{ key | replace("_", " ") | title }}</span>
-          <span class="kv-value" style="font-family:monospace">{{ val }}</span>
+          <span class="kv-value" style="font-family:monospace">{{ val | fmt_dt }}</span>
         </div>
         {% endif %}
         {% endfor %}
@@ -315,8 +418,37 @@
     </div>
     {% endif %}
 
+    <!-- ── Actions & Tactics ── -->
+    {% if doc.action_taken %}
+    <div class="section">
+      <div class="section-header">Actions &amp; Tactics</div>
+      <div class="section-body">
+        <div class="kv-row">
+          <span class="kv-label">Action Taken</span>
+          <span class="kv-value">{{ "Action Taken" if doc.action_taken == "ACTION" else "No Action Taken" }}</span>
+        </div>
+        {% if doc.action_taken == "ACTION" and doc.action_codes %}
+        <div class="kv-row">
+          <span class="kv-label">Action Codes</span>
+          <span class="kv-value">{% for code in doc.action_codes %}{{ code | replace("_", " ") | title }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+        </div>
+        {% endif %}
+        {% if doc.action_taken == "NOACTION" and doc.noaction_reason %}
+        <div class="kv-row">
+          <span class="kv-label">Reason</span>
+          <span class="kv-value">{{ doc.noaction_reason | replace("_", " ") | title }}</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
     <!-- ── Apparatus Response ── -->
     {% if doc.units %}
+    {% set has_staged = doc.units | selectattr("staged") | list | length > 0 %}
+    {% set has_canceled = doc.units | selectattr("canceled") | list | length > 0 %}
+    {% set has_iq = doc.units | selectattr("in_quarters") | list | length > 0 %}
+    {% set has_mode = doc.units | selectattr("response_mode") | list | length > 0 %}
     <div class="section">
       <div class="section-header">Apparatus Response</div>
       <div class="section-body" style="padding:0">
@@ -326,19 +458,32 @@
               <th>Unit</th>
               <th>Dispatched</th>
               <th>Enroute</th>
+              {% if has_staged %}<th>Staged</th>{% endif %}
               <th>On Scene</th>
               <th>Cleared</th>
+              {% if has_canceled %}<th>Canceled</th>{% endif %}
+              {% if has_iq %}<th>In Quarters</th>{% endif %}
+              {% if has_mode %}<th>Mode</th>{% endif %}
             </tr>
           </thead>
           <tbody>
             {% for unit in doc.units %}
             <tr>
               <td style="font-weight:600">{{ unit.unit_id }}</td>
-              <td style="font-family:monospace">{{ unit.dispatch or "--" }}</td>
-              <td style="font-family:monospace">{{ unit.enroute or "--" }}</td>
-              <td style="font-family:monospace">{{ unit.on_scene or "--" }}</td>
-              <td style="font-family:monospace">{{ unit.cleared or "--" }}</td>
+              <td style="font-family:monospace">{{ unit.dispatch | fmt_time if unit.dispatch else "--" }}</td>
+              <td style="font-family:monospace">{{ unit.enroute | fmt_time if unit.enroute else "--" }}</td>
+              {% if has_staged %}<td style="font-family:monospace">{{ unit.staged | fmt_time if unit.staged else "--" }}</td>{% endif %}
+              <td style="font-family:monospace">{{ unit.on_scene | fmt_time if unit.on_scene else "--" }}</td>
+              <td style="font-family:monospace">{{ unit.cleared | fmt_time if unit.cleared else "--" }}</td>
+              {% if has_canceled %}<td style="font-family:monospace">{{ unit.canceled | fmt_time if unit.canceled else "--" }}</td>{% endif %}
+              {% if has_iq %}<td style="font-family:monospace">{{ unit.in_quarters | fmt_time if unit.in_quarters else "--" }}</td>{% endif %}
+              {% if has_mode %}<td>{{ unit.response_mode | replace("_", " ") | title if unit.response_mode else "--" }}</td>{% endif %}
             </tr>
+            {% if unit.comment %}
+            <tr class="unit-comment-row">
+              <td colspan="99">{{ unit.comment }}</td>
+            </tr>
+            {% endif %}
             {% endfor %}
           </tbody>
         </table>
@@ -349,6 +494,8 @@
     <!-- ── Personnel ── -->
     {% if doc.units %}
     {% set has_personnel = doc.units | selectattr("personnel") | list | length > 0 %}
+    {% set has_role = [] %}
+    {% for unit in doc.units %}{% for m in unit.personnel %}{% if m.role %}{% if has_role.append(1) %}{% endif %}{% endif %}{% endfor %}{% endfor %}
     {% if has_personnel %}
     <div class="section">
       <div class="section-header">Personnel</div>
@@ -360,6 +507,7 @@
               <th>Rank</th>
               <th>Unit</th>
               <th>Position</th>
+              {% if has_role %}<th>Role</th>{% endif %}
             </tr>
           </thead>
           <tbody>
@@ -367,9 +515,10 @@
             {% for member in unit.personnel %}
             <tr>
               <td style="font-weight:600">{{ member.name }}</td>
-              <td>{{ member.rank or "--" }}</td>
+              <td>{{ member.rank | title if member.rank else "--" }}</td>
               <td>{{ unit.unit_id }}</td>
-              <td>{{ member.position or "--" }}</td>
+              <td>{{ member.position | title if member.position else "--" }}</td>
+              {% if has_role %}<td>{{ member.role | title if member.role else "--" }}</td>{% endif %}
             </tr>
             {% endfor %}
             {% endfor %}
@@ -380,6 +529,16 @@
     {% endif %}
     {% endif %}
 
+    <!-- ── Dispatch Comments ── -->
+    {% if doc.dispatch_comments %}
+    <div class="section">
+      <div class="section-header">Dispatch Comments</div>
+      <div class="section-body">
+        <div class="narrative-block">{{ doc.dispatch_comments }}</div>
+      </div>
+    </div>
+    {% endif %}
+
     <!-- ── Narrative ── -->
     {% if doc.narrative %}
     <div class="section">
@@ -388,6 +547,87 @@
         <div class="narrative-text">
           <div class="narrative-block">{{ doc.narrative }}</div>
         </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Attachments ── -->
+    {% if doc.attachments %}
+    <div class="section">
+      <div class="section-header">Attachments</div>
+      <div class="section-body" style="padding:0">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Filename</th>
+              <th>Uploaded</th>
+              <th>By</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for att in doc.attachments %}
+            <tr>
+              <td>{{ att.filename }}</td>
+              <td style="font-family:monospace">{{ att.uploaded_at | fmt_dt }}</td>
+              <td>{{ att.uploaded_by }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Additional Details (extras) ── -->
+    {# Keys already displayed elsewhere — skip in extras #}
+    {% set skip_extras = ["station", "zip_code"] %}
+    {# Human-friendly labels for known extras keys #}
+    {% set extras_labels = {
+      "smoke_alarm_presence": "Smoke Alarm",
+      "fire_alarm_presence": "Fire Alarm",
+      "sprinkler_presence": "Fire Suppression / Sprinkler",
+      "electric_hazards": "Electrical Hazards",
+      "solar_present": "Solar Panels",
+      "battery_ess_present": "Battery / ESS",
+      "generator_present": "Generator",
+      "csst_present": "CSST Gas Lines",
+      "patient_count": "Patient Count",
+      "care_disposition": "Care Disposition",
+      "transport_disposition": "Transport Disposition",
+      "patient_status": "Patient Status",
+      "impediment_narrative": "Impediment",
+      "rescue_mode": "Rescue Mode",
+      "rescue_actions": "Rescue Actions",
+      "rescue_impediment": "Rescue Impediment",
+      "rescue_elevation": "Rescue Elevation",
+    } %}
+    {% set extra_keys = [] %}
+    {% for k in doc.extras %}{% if k not in skip_extras %}{% if extra_keys.append(k) %}{% endif %}{% endif %}{% endfor %}
+    {% if extra_keys %}
+    <div class="section">
+      <div class="section-header">Additional Details</div>
+      <div class="section-body">
+        {% for k in extra_keys %}
+        {% set val = doc.extras[k] %}
+        <div class="kv-row">
+          <span class="kv-label">{{ extras_labels.get(k, k | replace("_", " ") | title) }}</span>
+          <span class="kv-value">
+            {% if val is sameas true -%}
+              Yes
+            {%- elif val is sameas false -%}
+              No
+            {%- elif val is string -%}
+              {{ val | replace("_", " ") | title }}
+            {%- elif val is iterable and val is not mapping -%}
+              {% for item in val %}{{ item | replace("_", " ") | title if item is string else item }}{% if not loop.last %}, {% endif %}{% endfor %}
+            {%- elif val is mapping -%}
+              {% for sk, sv in val.items() %}{{ sk | replace("_", " ") | title }}: {{ sv | replace("_", " ") | title if sv is string else sv }}{% if not loop.last %}; {% endif %}{% endfor %}
+            {%- else -%}
+              {{ val }}
+            {%- endif %}
+          </span>
+        </div>
+        {% endfor %}
       </div>
     </div>
     {% endif %}
@@ -418,7 +658,7 @@
           <tbody>
             {% for entry in doc.edit_history %}
             <tr>
-              <td style="font-family:monospace; font-size:11px">{{ entry.timestamp }}</td>
+              <td style="font-family:monospace; font-size:11px">{{ entry.timestamp | fmt_dt }}</td>
               <td>{{ entry.editor_name }}</td>
               <td style="font-size:11px">{{ entry.fields_changed | join(", ") }}</td>
             </tr>
@@ -432,8 +672,9 @@
     <!-- ── Footer ── -->
     <div class="report-footer">
       <span>Report by: {{ doc.created_by }}</span>
-      <span>Created: {{ doc.created_at }}</span>
-      {% if doc.updated_at %}<span>Updated: {{ doc.updated_at }}</span>{% endif %}
+      <span>Created: {{ doc.created_at | fmt_dt }}</span>
+      {% if doc.updated_at %}<span>Updated: {{ doc.updated_at | fmt_dt }}</span>{% endif %}
+      {% if doc.contributed_by %}<span>Contributors: {{ doc.contributed_by | join(", ") }}</span>{% endif %}
       <span>Printed: {{ now }}</span>
     </div>
   </div>

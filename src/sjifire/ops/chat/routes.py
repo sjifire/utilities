@@ -31,7 +31,7 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 _jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=True)
 
 
-def _fmt_datetime(value: object, fmt: str = "%b %d, %Y %H:%M") -> str:
+def _fmt_datetime(value: object, fmt: str = "%m/%d/%Y %H:%M") -> str:
     """Format an ISO datetime string or datetime for display."""
     if not value:
         return "--"
