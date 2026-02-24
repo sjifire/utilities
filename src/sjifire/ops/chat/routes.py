@@ -32,7 +32,13 @@ _jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=Tru
 
 
 def _fmt_datetime(value: object, fmt: str = "%m/%d/%Y %H:%M") -> str:
-    """Format an ISO datetime string or datetime for display."""
+    """Format an ISO datetime string or datetime for display.
+
+    Timezone-aware values are converted to local time.  Naive values
+    (no timezone info) are assumed to already be in the org timezone
+    — this matches NERIS tactic timestamps and CAD unit times which
+    arrive as local time without an offset.
+    """
     if not value:
         return "--"
     if isinstance(value, str):
@@ -45,9 +51,9 @@ def _fmt_datetime(value: object, fmt: str = "%m/%d/%Y %H:%M") -> str:
     if isinstance(value, datetime):
         tz = get_timezone()
         if value.tzinfo is None:
-            from datetime import UTC
-
-            value = value.replace(tzinfo=UTC)
+            # Naive timestamps from external sources (NERIS, CAD) are
+            # already in local time — localize rather than assuming UTC.
+            value = value.replace(tzinfo=tz)
         return value.astimezone(tz).strftime(fmt)
     return str(value)
 
@@ -173,7 +179,7 @@ async def print_report(request: Request) -> Response:
     template = _jinja_env.get_template("print_report.html")
     html = template.render(
         doc=doc.model_dump(mode="json"),
-        now=local_now().strftime("%b %d, %Y %H:%M"),
+        now=local_now().strftime("%m/%d/%Y %H:%M"),
     )
     return Response(html, media_type="text/html")
 
