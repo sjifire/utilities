@@ -37,7 +37,11 @@ class TestImportFromNerisDispatch:
         """When both incident_id and neris_id are provided, pass them correctly."""
         from sjifire.ops.chat.tools import _dispatch
 
-        fake_result = {"id": "doc-1", "neris_incident_id": "FD123|456|789"}
+        fake_result = {
+            "id": "doc-1",
+            "neris_incident_id": "FD123|456|789",
+            "units": [],
+        }
 
         with patch(
             "sjifire.ops.incidents.tools.import_from_neris",
@@ -50,14 +54,22 @@ class TestImportFromNerisDispatch:
             )
 
         mock_import.assert_awaited_once_with("FD123|456|789", incident_id="doc-1")
-        assert result == fake_result
+        # Dispatch transforms the result into a summary
+        assert result["status"] == "success"
+        assert result["neris_incident_id"] == "FD123|456|789"
+        assert "next_step" in result
 
     async def test_dispatch_resolves_neris_id_from_incident(self, officer_user):
         """When neris_id is not provided, resolve it from the incident doc."""
         from sjifire.ops.chat.tools import _dispatch
 
         fake_incident = {"id": "doc-1", "neris_incident_id": "FD123|456|789"}
-        fake_import_result = {"id": "doc-1", "import_comparison": {}}
+        fake_import_result = {
+            "id": "doc-1",
+            "neris_incident_id": "FD123|456|789",
+            "import_comparison": {"discrepancies": ["addr mismatch"]},
+            "units": [{"unit_id": "E31", "personnel": []}],
+        }
 
         with (
             patch(
@@ -77,7 +89,11 @@ class TestImportFromNerisDispatch:
             )
 
         mock_import.assert_awaited_once_with("FD123|456|789", incident_id="doc-1")
-        assert result == fake_import_result
+        # Dispatch transforms the result into a summary
+        assert result["status"] == "success"
+        assert result["neris_incident_id"] == "FD123|456|789"
+        assert result["units"] == ["E31"]
+        assert result["discrepancies"] == ["addr mismatch"]
 
     async def test_dispatch_no_neris_id_returns_error(self, officer_user):
         """When incident has no neris_incident_id, return an error."""
