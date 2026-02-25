@@ -121,7 +121,7 @@ def sample_incident():
         ],
         created_by="ff@sjifire.org",
         status="in_progress",
-        extras={"station": "S31"},
+        station="S31",
     )
 
 
@@ -253,7 +253,7 @@ class TestGetDashboard:
         assert call_1["report"] is not None
         assert call_1["report"]["source"] == "local"
         assert call_1["report"]["status"] == "in_progress"
-        assert call_1["report"]["completeness"]["filled"] == 4
+        assert call_1["report"]["completeness"]["filled"] == 5
 
         # Second call has no report
         call_2 = result["recent_calls"][1]
@@ -720,8 +720,8 @@ class TestFetchIncidents:
         result = await _fetch_incidents("ff@sjifire.org", is_editor=False)
 
         comp = result["26-001678"]["completeness"]
-        assert comp["filled"] == 4  # incident_type + address + units + personnel
-        assert comp["total"] == 7
+        assert comp["filled"] == 5  # station + incident_type + address + units + personnel
+        assert comp["total"] == 8
 
     @patch("sjifire.ops.dashboard.IncidentStore")
     async def test_empty_store_returns_empty_lookup(self, mock_store_cls, regular_user):
@@ -801,7 +801,7 @@ class TestDashboardIntegration:
         assert call_1["report"]["source"] == "local"
         assert call_1["report"]["status"] == "in_progress"
         assert call_1["report"]["incident_id"] == "inc-uuid-1"
-        assert call_1["report"]["completeness"]["filled"] == 4
+        assert call_1["report"]["completeness"]["filled"] == 5
 
         call_2 = result["recent_calls"][1]
         assert call_2["dispatch_id"] == "26-001650"
@@ -850,7 +850,7 @@ class TestDashboardIntegration:
             incident_datetime=datetime(2026, 2, 10, tzinfo=UTC),
             created_by="ff@sjifire.org",
             status="submitted",
-            extras={"station": "S31"},
+            station="S31",
         )
 
         async with DispatchStore() as store:
@@ -896,7 +896,7 @@ class TestDashboardIntegration:
                 incident_type="MEDICAL" if i == 0 else None,
                 created_by="chief@sjifire.org",
                 status=["in_progress", "draft"][i],
-                extras={"station": "S31"},
+                station="S31",
             )
             for i in range(2)
         ]
@@ -946,7 +946,7 @@ class TestDashboardIntegration:
             incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="chief@sjifire.org",
             status="in_progress",
-            extras={"station": "S31"},
+            station="S31",
         )
 
         async with DispatchStore() as store:
@@ -984,7 +984,7 @@ class TestDashboardIntegration:
             incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
             status="draft",
-            extras={"station": "S31"},
+            station="S31",
         )
 
         async with DispatchStore() as store:
@@ -1033,7 +1033,7 @@ class TestDashboardIntegration:
             timestamps={"dispatch": "2026-02-12T10:00:00"},
             created_by="ff@sjifire.org",
             status="ready_review",
-            extras={"station": "S31"},
+            station="S31",
         )
 
         async with DispatchStore() as store:
@@ -1046,9 +1046,9 @@ class TestDashboardIntegration:
         report = result["recent_calls"][0]["report"]
         assert report["status"] == "ready_review"
         assert (
-            report["completeness"]["filled"] == 6
-        )  # type + address + units + personnel + narrative + timestamps
-        assert report["completeness"]["total"] == 7
+            report["completeness"]["filled"] == 7
+        )  # station + type + address + units + personnel + narrative + timestamps
+        assert report["completeness"]["total"] == 8
 
     @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
@@ -1509,7 +1509,7 @@ class TestLockedStatusDashboard:
             incident_datetime=datetime(2026, 2, 10, tzinfo=UTC),
             created_by="ff@sjifire.org",
             status="approved",
-            extras={"station": "S31"},
+            station="S31",
         )
 
         async with DispatchStore() as store:

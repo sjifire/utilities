@@ -223,7 +223,7 @@ class TestSyncNerisToLocal:
             created_by="ff@sjifire.org",
             status="submitted",
             neris_incident_id="FD|26001980|123",
-            extras={"station": "S31"},
+            station="S31",
         )
         async with IncidentStore() as store:
             await store.create(incident)
@@ -254,7 +254,7 @@ class TestSyncNerisToLocal:
             created_by="ff@sjifire.org",
             status="draft",
             neris_incident_id="FD|26002000|999",
-            extras={"station": "S31"},
+            station="S31",
         )
         async with IncidentStore() as store:
             await store.create(incident)
@@ -282,7 +282,7 @@ class TestSyncNerisToLocal:
             created_by="ff@sjifire.org",
             status="approved",
             neris_incident_id="FD|26003000|111",
-            extras={"station": "S31"},
+            station="S31",
         )
         async with IncidentStore() as store:
             await store.create(incident)
@@ -307,7 +307,7 @@ class TestSyncNerisToLocal:
             created_by="ff@sjifire.org",
             status="submitted",
             neris_incident_id="FD|26004000|222",
-            extras={"station": "S31"},
+            station="S31",
         )
         async with IncidentStore() as store:
             await store.create(incident)
@@ -432,7 +432,7 @@ class TestNerisSync:
             created_by="ff@sjifire.org",
             status="submitted",
             neris_incident_id="FD|26001980|123",
-            extras={"station": "S31"},
+            station="S31",
         )
         async with IncidentStore() as store:
             await store.create(incident)

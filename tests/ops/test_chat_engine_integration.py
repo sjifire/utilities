@@ -227,7 +227,7 @@ async def seed_incident(incident_id: str, **overrides) -> IncidentDocument:
         "incident_number": "26-001234",
         "incident_datetime": "2026-02-15T14:30:00+00:00",
         "created_by": "firefighter@sjifire.org",
-        "extras": {"station": "S31"},
+        "station": "S31",
     }
     defaults.update(overrides)
     doc = IncidentDocument(**defaults)

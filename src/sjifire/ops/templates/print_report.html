@@ -347,16 +347,16 @@
     </div>
 
     <!-- ── Fire Details ── -->
-    {% set ex = doc.extras %}
-    {% set has_fire = doc.outside_fire_cause or doc.outside_fire_acres or ex.get("fire_cause_in") or ex.get("water_supply") or ex.get("fire_bldg_damage") or ex.get("room_of_origin") or ex.get("floor_of_origin") or ex.get("fire_investigation") or ex.get("suppression_appliances") or ex.get("fire_progression_evident") is not none %}
+    {% set fd = doc.fire_detail %}
+    {% set has_fire = doc.outside_fire_cause or doc.outside_fire_acres or (fd and (fd.fire_cause_in or fd.water_supply or fd.fire_bldg_damage or fd.room_of_origin or fd.floor_of_origin is not none or fd.fire_investigation or fd.suppression_appliances or fd.fire_progression_evident is not none)) %}
     {% if has_fire %}
     <div class="section">
       <div class="section-header">Fire Details</div>
       <div class="section-body">
-        {% if ex.get("fire_cause_in") %}
+        {% if fd and fd.fire_cause_in %}
         <div class="kv-row">
           <span class="kv-label">Cause</span>
-          <span class="kv-value">{{ ex.fire_cause_in | replace("_", " ") | title }}</span>
+          <span class="kv-value">{{ fd.fire_cause_in | replace("_", " ") | title }}</span>
         </div>
         {% endif %}
         {% if doc.outside_fire_cause %}
@@ -371,52 +371,52 @@
           <span class="kv-value">{{ doc.outside_fire_acres }} acres</span>
         </div>
         {% endif %}
-        {% if ex.get("fire_bldg_damage") %}
+        {% if fd and fd.fire_bldg_damage %}
         <div class="kv-row">
           <span class="kv-label">Building Damage</span>
-          <span class="kv-value">{{ ex.fire_bldg_damage | replace("_", " ") | title }}</span>
+          <span class="kv-value">{{ fd.fire_bldg_damage | replace("_", " ") | title }}</span>
         </div>
         {% endif %}
-        {% if ex.get("room_of_origin") %}
+        {% if fd and fd.room_of_origin %}
         <div class="kv-row">
           <span class="kv-label">Room of Origin</span>
-          <span class="kv-value">{{ ex.room_of_origin | replace("_", " ") | title }}</span>
+          <span class="kv-value">{{ fd.room_of_origin | replace("_", " ") | title }}</span>
         </div>
         {% endif %}
-        {% if ex.get("floor_of_origin") is not none %}
+        {% if fd and fd.floor_of_origin is not none %}
         <div class="kv-row">
           <span class="kv-label">Floor of Origin</span>
-          <span class="kv-value">{{ ex.floor_of_origin }}</span>
+          <span class="kv-value">{{ fd.floor_of_origin }}</span>
         </div>
         {% endif %}
-        {% if ex.get("fire_progression_evident") is not none %}
+        {% if fd and fd.fire_progression_evident is not none %}
         <div class="kv-row">
           <span class="kv-label">Fire Progression</span>
-          <span class="kv-value">{{ "Evident" if ex.fire_progression_evident else "Not Evident" }}</span>
+          <span class="kv-value">{{ "Evident" if fd.fire_progression_evident else "Not Evident" }}</span>
         </div>
         {% endif %}
-        {% if ex.get("water_supply") %}
+        {% if fd and fd.water_supply %}
         <div class="kv-row">
           <span class="kv-label">Water Supply</span>
-          <span class="kv-value">{{ ex.water_supply | replace("_", " ") | title }}</span>
+          <span class="kv-value">{{ fd.water_supply | replace("_", " ") | title }}</span>
         </div>
         {% endif %}
-        {% if ex.get("suppression_appliances") %}
+        {% if fd and fd.suppression_appliances %}
         <div class="kv-row">
           <span class="kv-label">Suppression Appliances</span>
-          <span class="kv-value">{% for a in ex.suppression_appliances %}{{ a | replace("_", " ") | title }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+          <span class="kv-value">{% for a in fd.suppression_appliances %}{{ a | replace("_", " ") | title }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
         </div>
         {% endif %}
-        {% if ex.get("fire_investigation") %}
+        {% if fd and fd.fire_investigation %}
         <div class="kv-row">
           <span class="kv-label">Investigation</span>
-          <span class="kv-value">{{ ex.fire_investigation | replace("_", " ") | title }}</span>
+          <span class="kv-value">{{ fd.fire_investigation | replace("_", " ") | title }}</span>
         </div>
         {% endif %}
-        {% if ex.get("fire_investigation_types") %}
+        {% if fd and fd.fire_investigation_types %}
         <div class="kv-row">
           <span class="kv-label">Investigation Types</span>
-          <span class="kv-value">{% for t in ex.fire_investigation_types %}{{ t | replace("_", " ") | title }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+          <span class="kv-value">{% for t in fd.fire_investigation_types %}{{ t | replace("_", " ") | title }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
         </div>
         {% endif %}
       </div>
@@ -424,54 +424,56 @@
     {% endif %}
 
     <!-- ── Alarms & Hazards ── -->
-    {% set has_alarms = ex.get("smoke_alarm_presence") or ex.get("fire_alarm_presence") or ex.get("sprinkler_presence") or ex.get("electric_hazards") or ex.get("csst_present") or ex.get("solar_present") or ex.get("battery_ess_present") or ex.get("generator_present") %}
+    {% set ai = doc.alarm_info %}
+    {% set hi = doc.hazard_info %}
+    {% set has_alarms = (ai and (ai.smoke_alarm_presence or ai.fire_alarm_presence or ai.sprinkler_presence)) or (hi and (hi.electric_hazards or hi.csst_present or hi.solar_present or hi.battery_ess_present or hi.generator_present)) %}
     {% if has_alarms %}
     <div class="section">
       <div class="section-header">Alarms &amp; Hazards</div>
       <div class="section-body">
-        {% if ex.get("smoke_alarm_presence") %}
+        {% if ai and ai.smoke_alarm_presence %}
         <div class="kv-row">
           <span class="kv-label">Smoke Alarm</span>
-          <span class="kv-value">{{ ex.smoke_alarm_presence | replace("_", " ") | title }}{% if ex.get("smoke_alarm_operation") %} &mdash; {{ ex.smoke_alarm_operation | replace("_", " ") | title }}{% endif %}</span>
+          <span class="kv-value">{{ ai.smoke_alarm_presence | replace("_", " ") | title }}{% if ai.smoke_alarm_operation %} &mdash; {{ ai.smoke_alarm_operation | replace("_", " ") | title }}{% endif %}</span>
         </div>
-        {% if ex.get("smoke_alarm_occupant_action") %}
+        {% if ai.smoke_alarm_occupant_action %}
         <div class="kv-row">
           <span class="kv-label">Occupant Action</span>
-          <span class="kv-value">{{ ex.smoke_alarm_occupant_action | replace("_", " ") | title }}</span>
+          <span class="kv-value">{{ ai.smoke_alarm_occupant_action | replace("_", " ") | title }}</span>
         </div>
         {% endif %}
         {% endif %}
-        {% if ex.get("fire_alarm_presence") %}
+        {% if ai and ai.fire_alarm_presence %}
         <div class="kv-row">
           <span class="kv-label">Fire Alarm</span>
-          <span class="kv-value">{{ ex.fire_alarm_presence | replace("_", " ") | title }}</span>
+          <span class="kv-value">{{ ai.fire_alarm_presence | replace("_", " ") | title }}</span>
         </div>
         {% endif %}
-        {% if ex.get("sprinkler_presence") %}
+        {% if ai and ai.sprinkler_presence %}
         <div class="kv-row">
           <span class="kv-label">Fire Suppression / Sprinkler</span>
-          <span class="kv-value">{{ ex.sprinkler_presence | replace("_", " ") | title }}</span>
+          <span class="kv-value">{{ ai.sprinkler_presence | replace("_", " ") | title }}</span>
         </div>
         {% endif %}
-        {% if ex.get("electric_hazards") %}
+        {% if hi and hi.electric_hazards %}
         <div class="kv-row">
           <span class="kv-label">Electrical Hazards</span>
-          <span class="kv-value">{% if ex.electric_hazards is iterable and ex.electric_hazards is not string %}{% for eh in ex.electric_hazards %}{{ eh | replace("||", " > ") | replace("_", " ") | title }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}Yes{% endif %}</span>
+          <span class="kv-value">{% for eh in hi.electric_hazards %}{{ eh | replace("||", " > ") | replace("_", " ") | title }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
         </div>
         {% endif %}
-        {% if ex.get("csst_present") %}
+        {% if hi and hi.csst_present %}
         <div class="kv-row">
           <span class="kv-label">CSST Gas Lines</span>
-          <span class="kv-value">{{ ex.csst_present | replace("_", " ") | title }}</span>
+          <span class="kv-value">{{ hi.csst_present | replace("_", " ") | title }}</span>
         </div>
         {% endif %}
-        {% if ex.get("solar_present") %}
+        {% if hi and hi.solar_present %}
         <div class="kv-row"><span class="kv-label">Solar Panels</span><span class="kv-value">Yes</span></div>
         {% endif %}
-        {% if ex.get("battery_ess_present") %}
+        {% if hi and hi.battery_ess_present %}
         <div class="kv-row"><span class="kv-label">Battery / ESS</span><span class="kv-value">Yes</span></div>
         {% endif %}
-        {% if ex.get("generator_present") %}
+        {% if hi and hi.generator_present %}
         <div class="kv-row"><span class="kv-label">Generator</span><span class="kv-value">Yes</span></div>
         {% endif %}
       </div>
@@ -479,6 +481,7 @@
     {% endif %}
 
     <!-- ── Casualty & Rescue ── -->
+    {% set ex = doc.extras %}
     {% if ex.get("casualty_rescues") %}
     {% set cr_type_labels = {"NONFF": "Civilian", "FF": "Firefighter"} %}
     {% set cr_injury_labels = {"INJURED_NONFATAL": "Injured (Non-Fatal)", "INJURED_FATAL": "Fatal Injury", "NOT_INJURED": "Not Injured"} %}
@@ -809,7 +812,9 @@
     {% endif %}
 
     <!-- ── Additional Details (extras) ── -->
-    {# Keys already displayed in dedicated sections — skip here #}
+    {# Keys already displayed in dedicated sections — skip here.
+       Fire/alarm/hazard keys live in typed sub-models now, but old docs
+       may still have them in extras until migrated. #}
     {% set skip_extras = [
       "station", "zip_code",
       "fire_cause_in", "fire_bldg_damage", "room_of_origin", "floor_of_origin",

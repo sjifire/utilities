@@ -15,6 +15,77 @@ MAX_UNITS = 50
 MAX_TIMESTAMPS = 30
 MAX_EDIT_HISTORY = 200
 
+# Keys belonging to each sub-model — used for lazy migration and routing
+FIRE_DETAIL_KEYS = frozenset({
+    "fire_cause_in",
+    "fire_bldg_damage",
+    "room_of_origin",
+    "floor_of_origin",
+    "fire_progression_evident",
+    "water_supply",
+    "fire_investigation",
+    "fire_investigation_types",
+    "suppression_appliances",
+})
+
+ALARM_INFO_KEYS = frozenset({
+    "smoke_alarm_presence",
+    "smoke_alarm_types",
+    "smoke_alarm_operation",
+    "smoke_alarm_occupant_action",
+    "fire_alarm_presence",
+    "sprinkler_presence",
+})
+
+HAZARD_INFO_KEYS = frozenset({
+    "electric_hazards",
+    "csst_present",
+    "csst_lightning_suspected",
+    "csst_grounded",
+    "solar_present",
+    "battery_ess_present",
+    "generator_present",
+    "powergen_type",
+})
+
+
+class FireDetail(BaseModel):
+    """Fire detail sub-model — replaces flat extras keys for fire data."""
+
+    fire_cause_in: str | None = None
+    fire_bldg_damage: str | None = None
+    room_of_origin: str | None = None
+    floor_of_origin: int | None = None
+    fire_progression_evident: bool | None = None
+    water_supply: str | None = None
+    fire_investigation: str | None = None
+    fire_investigation_types: list[str] = Field(default_factory=list)
+    suppression_appliances: list[str] = Field(default_factory=list)
+
+
+class AlarmInfo(BaseModel):
+    """Alarm info sub-model — replaces flat extras keys for alarm data."""
+
+    smoke_alarm_presence: str | None = None
+    smoke_alarm_types: list[str] = Field(default_factory=list)
+    smoke_alarm_operation: str | None = None
+    smoke_alarm_occupant_action: str | None = None
+    fire_alarm_presence: str | None = None
+    sprinkler_presence: str | None = None
+
+
+class HazardInfo(BaseModel):
+    """Hazard info sub-model — replaces flat extras keys for hazard data."""
+
+    electric_hazards: list[str] = Field(default_factory=list)
+    csst_present: str | None = None
+    csst_lightning_suspected: str | None = None
+    csst_grounded: bool | None = None
+    solar_present: str | None = None
+    battery_ess_present: str | None = None
+    generator_present: str | None = None
+    powergen_type: str | None = None
+
 
 class PersonnelAssignment(BaseModel):
     """A person assigned to a unit on an incident.
@@ -140,9 +211,17 @@ class IncidentDocument(BaseModel):
     # Attachments — metadata only; blobs live in Azure Blob Storage
     attachments: list[AttachmentMeta] = Field(default_factory=list)
 
-    # Flexible extras for conditional NERIS sections (alarms, hazards,
-    # exposures, casualties, etc.). Claude saves edge-case data with
-    # descriptive snake_case keys.
+    # Station code (e.g., "S31"). Core field for filtering and display.
+    station: str = Field(default="", max_length=10)
+
+    # Typed sub-models for NERIS fire/alarm/hazard sections
+    fire_detail: FireDetail | None = None
+    alarm_info: AlarmInfo | None = None
+    hazard_info: HazardInfo | None = None
+
+    # Flexible extras for remaining conditional NERIS sections (medical,
+    # casualties, etc.). Claude saves edge-case data with descriptive
+    # snake_case keys.
     extras: dict = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -170,6 +249,24 @@ class IncidentDocument(BaseModel):
         for key in ("city", "state", "zip_code", "county"):
             if key in data and data[key] is None:
                 data[key] = ""
+        # Migrate station from extras to top-level field (Phase 1)
+        if "station" not in data or not data.get("station"):
+            extras = data.get("extras") or {}
+            if "station" in extras:
+                data["station"] = extras.pop("station")
+
+        # Migrate fire/alarm/hazard keys from extras to typed sub-models (Phase 2)
+        extras = data.get("extras") or {}
+        for field_name, key_set in (
+            ("fire_detail", FIRE_DETAIL_KEYS),
+            ("alarm_info", ALARM_INFO_KEYS),
+            ("hazard_info", HAZARD_INFO_KEYS),
+        ):
+            if not data.get(field_name):
+                migrated = {k: extras.pop(k) for k in list(extras) if k in key_set}
+                if migrated:
+                    data[field_name] = migrated
+
         return cls.model_validate(data)
 
     def all_personnel(self) -> list[PersonnelAssignment]:
@@ -192,6 +289,7 @@ class IncidentDocument(BaseModel):
         """
         sections = {
             "incident_type": bool(self.incident_type),
+            "station": bool(self.station),
             "units": len(self.units) > 0,
             "personnel": self.personnel_count() > 0,
             "timestamps": len(self.timestamps) > 0,

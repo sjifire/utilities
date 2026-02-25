@@ -586,7 +586,7 @@ class TestUpdateNerisIncident:
     async def test_rejects_approved_neris(
         self, mock_store_cls, mock_get_neris, officer_user, sample_doc
     ):
-        """APPROVED NERIS records should be rejected."""
+        """APPROVED NERIS records should return status data (not error)."""
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=sample_doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
@@ -600,8 +600,10 @@ class TestUpdateNerisIncident:
         }
 
         result = await update_neris_incident("doc-neris-1")
-        assert "error" in result
-        assert "APPROVED" in result["error"]
+        assert result["status"] == "neris_locked"
+        assert result["neris_status"] == "APPROVED"
+        assert result["neris_id"] == sample_doc.neris_incident_id
+        assert "error" not in result
 
     @patch("sjifire.ops.incidents.neris._patch_neris_incident")
     @patch("sjifire.ops.incidents.neris._get_neris_incident")

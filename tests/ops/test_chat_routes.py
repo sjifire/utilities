@@ -203,7 +203,7 @@ def _make_incident(**overrides) -> IncidentDocument:
         "incident_number": "26-001678",
         "incident_datetime": datetime(2026, 2, 2, tzinfo=UTC),
         "created_by": "firefighter@sjifire.org",
-        "extras": {"station": "S31"},
+        "station": "S31",
     }
     defaults.update(overrides)
     return IncidentDocument(**defaults)

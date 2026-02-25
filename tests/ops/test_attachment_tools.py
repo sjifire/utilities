@@ -77,7 +77,7 @@ def sample_doc():
         incident_number="26-000944",
         incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
         created_by="ff@sjifire.org",
-        extras={"station": "S31"},
+        station="S31",
         units=[
             UnitAssignment(
                 unit_id="E31",

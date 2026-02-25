@@ -36,12 +36,12 @@ def _make_doc(**overrides) -> IncidentDocument:
 
 class TestCreate:
     async def test_creates_draft(self):
-        doc = _make_doc(extras={"station": "S31"})
+        doc = _make_doc(station="S31")
         async with IncidentStore() as store:
             result = await store.create(doc)
         assert result.id == doc.id
         assert result.year == "2026"
-        assert result.extras.get("station") == "S31"
+        assert result.station == "S31"
         assert result.status == "draft"
 
     async def test_create_and_get_back(self):

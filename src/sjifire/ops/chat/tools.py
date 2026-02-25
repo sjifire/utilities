@@ -166,10 +166,37 @@ TOOL_SCHEMAS: list[dict] = [
                     "type": "integer",
                     "description": "Number of people displaced",
                 },
+                "fire_detail": {
+                    "type": "object",
+                    "description": (
+                        "Fire detail fields: fire_cause_in, fire_bldg_damage, room_of_origin, "
+                        "floor_of_origin (int), fire_progression_evident (bool), water_supply, "
+                        "fire_investigation, fire_investigation_types (list), "
+                        "suppression_appliances (list)"
+                    ),
+                },
+                "alarm_info": {
+                    "type": "object",
+                    "description": (
+                        "Alarm info fields: smoke_alarm_presence, smoke_alarm_types (list), "
+                        "smoke_alarm_operation, smoke_alarm_occupant_action, "
+                        "fire_alarm_presence, sprinkler_presence"
+                    ),
+                },
+                "hazard_info": {
+                    "type": "object",
+                    "description": (
+                        "Hazard info fields: electric_hazards (list), csst_present, "
+                        "csst_lightning_suspected, csst_grounded (bool), solar_present, "
+                        "battery_ess_present, generator_present, powergen_type"
+                    ),
+                },
                 "extras": {
                     "type": "object",
                     "description": (
-                        "Additional NERIS fields merged into existing extras. Use snake_case keys."
+                        "Additional NERIS fields for medical, casualty, and other sections. "
+                        "Use snake_case keys. Fire/alarm/hazard keys are auto-routed to "
+                        "their typed sub-models."
                     ),
                 },
             },
@@ -211,6 +238,14 @@ TOOL_SCHEMAS: list[dict] = [
                 "neris_id": {
                     "type": "string",
                     "description": "NERIS compound ID (optional if already set on incident)",
+                },
+                "incident_number": {
+                    "type": "string",
+                    "description": (
+                        "Override for dispatch incident number (e.g. '26-002358'). "
+                        "Use when NERIS doesn't store our CAD number in its dispatch "
+                        "section and auto-detection returns a NERIS internal ID."
+                    ),
                 },
             },
             "required": ["incident_id"],
@@ -562,6 +597,7 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         result = await incident_tools.import_from_neris(
             neris_id,
             incident_id=incident_id,
+            incident_number=tool_input.get("incident_number"),
         )
         if isinstance(result, dict) and "error" not in result:
             # Return a concise summary instead of the full document dump

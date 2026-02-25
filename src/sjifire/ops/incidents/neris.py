@@ -13,9 +13,16 @@ from datetime import UTC, datetime
 from sjifire.core.config import get_org_config, get_timezone
 from sjifire.ops.auth import check_is_editor, get_current_user
 from sjifire.ops.incidents.models import (
+    AlarmInfo,
     EditEntry,
+    FireDetail,
+    HazardInfo,
     IncidentDocument,
     UnitAssignment,
+)
+from sjifire.ops.incidents.neris_models import (
+    NerisRecord,
+    NerisUnitResponse,
 )
 from sjifire.ops.incidents.store import IncidentStore
 
@@ -84,19 +91,22 @@ def _neris_dispatch_to_cad_number(neris_dispatch: dict) -> str:
     )
 
 
-def _address_from_neris_location(loc: dict) -> str:
+def _address_from_neris_location(loc) -> str:
     """Assemble a street address from NERIS granular location fields.
 
     NERIS locations have separate fields for number, direction prefix,
     street name, and street suffix. This combines them into a single
     address string like "94 Zepher Ln" or "1632 San Juan Rd".
+
+    Accepts either a dict or a ``NerisLocation`` model instance.
     """
+    _get = loc.get if isinstance(loc, dict) else lambda k, d=None: getattr(loc, k, d)
     parts: list[str] = []
-    number = loc.get("complete_number") or loc.get("number") or ""
+    number = _get("complete_number") or _get("number") or ""
     if number:
         parts.append(str(number).strip())
     for field in ("street_prefix_direction", "street", "street_postfix"):
-        val = loc.get(field)
+        val = _get(field)
         if val:
             parts.append(str(val).strip())
     return " ".join(parts)
@@ -136,6 +146,70 @@ def _timestamps_equal(a: str, b: str) -> bool:
     return dt_a == dt_b
 
 
+def _getattr_path(obj, path: str):
+    """Resolve dotted attribute path, returning None if any segment is None."""
+    for part in path.split("."):
+        if obj is None:
+            return None
+        obj = getattr(obj, part, None)
+    return obj
+
+
+# Fire detail: NERIS attribute path → local model key
+_FIRE_LOCATION_MAP: dict[str, str] = {
+    "damage_type": "fire_bldg_damage",
+    "room_of_origin_type": "room_of_origin",
+    "floor_of_origin": "floor_of_origin",
+    "cause": "fire_cause_in",
+    "progression_evident": "fire_progression_evident",
+}
+
+_FIRE_TOP_MAP: dict[str, str] = {
+    "water_supply": "water_supply",
+    "investigation_needed": "fire_investigation",
+    "investigation_types": "fire_investigation_types",
+    "suppression_appliances": "suppression_appliances",
+}
+
+# Alarm sections: NERIS record attr → local alarm_info key
+_ALARM_SECTION_MAP: tuple[tuple[str, str], ...] = (
+    ("smoke_alarm", "smoke_alarm_presence"),
+    ("fire_alarm", "fire_alarm_presence"),
+    ("fire_suppression", "sprinkler_presence"),
+)
+
+# Tactic timestamp keys (same name in NERIS and local)
+_TACTIC_TS_KEYS: tuple[str, ...] = (
+    "command_established",
+    "completed_sizeup",
+    "water_on_fire",
+    "fire_under_control",
+    "fire_knocked_down",
+    "suppression_complete",
+    "primary_search_begin",
+    "primary_search_complete",
+    "extrication_complete",
+)
+
+
+def _build_unit_from_neris(u: NerisUnitResponse) -> UnitAssignment:
+    """Convert a NERIS unit response to a local UnitAssignment."""
+    raw_id = u.reported_unit_id or _resolve_neris_unit_id(u.unit_neris_id or "")
+    unit = UnitAssignment(
+        unit_id=raw_id,
+        response_mode=u.response_mode or "",
+        dispatch=u.dispatch or "",
+        enroute=u.enroute_to_scene or "",
+        staged=u.staging or "",
+        on_scene=u.on_scene or "",
+        cleared=u.unit_clear or "",
+        canceled=u.canceled_enroute or "",
+    )
+    if u.staffing is not None:
+        unit.comment = f"Staffing: {u.staffing}"
+    return unit
+
+
 def _parse_neris_record(record: dict, neris_id: str) -> dict:
     """Extract pre-fill fields from a NERIS incident record.
 
@@ -149,280 +223,197 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
     Returns:
         Dict of pre-fill field values
     """
+    rec = NerisRecord.model_validate(record)
     prefill: dict = {"neris_incident_id": neris_id}
+    extras: dict = {}
+    timestamps: dict[str, str] = {}
 
-    # Incident type — first primary type
-    types = record.get("incident_types") or []
-    if types:
-        prefill["incident_type"] = types[0].get("type", "")
+    # ── Incident type — first primary type ──
+    types = rec.incident_types or []
+    if types and types[0].type:
+        prefill["incident_type"] = types[0].type
 
-    # Outcome narrative
-    base = record.get("base") or {}
-    if base.get("outcome_narrative"):
-        prefill["narrative"] = base["outcome_narrative"]
+    # ── Additional incident types ──
+    if len(types) > 1:
+        prefill["additional_incident_types"] = [t.type for t in types[1:] if t.type]
 
-    # Location use (e.g. "RESIDENTIAL||MANUFACTURED_MOBILE_HOME")
-    location_use_obj = base.get("location_use") or {}
-    use_type = location_use_obj.get("use_type") or ""
-    if use_type:
-        prefill["location_use"] = use_type
+    # ── Base section ──
+    base = rec.base
+    if base:
+        if base.outcome_narrative:
+            prefill["narrative"] = base.outcome_narrative
+        if base.location_use and base.location_use.use_type:
+            prefill["location_use"] = base.location_use.use_type
+        if base.people_present is not None:
+            prefill["people_present"] = base.people_present
+        if base.displacement_count is not None:
+            prefill["displaced_count"] = base.displacement_count
+        if base.displacement_causes:
+            extras["displacement_causes"] = base.displacement_causes
+        if base.animals_rescued is not None:
+            extras["animals_rescued"] = base.animals_rescued
+        if base.impediment_narrative:
+            extras["impediment_narrative"] = base.impediment_narrative
 
-    # Location — prefer base.location (corrected), fall back to dispatch
-    loc = base.get("location") or {}
+    # ── Location — prefer base.location (corrected), fall back to dispatch ──
+    loc = _getattr_path(rec, "base.location")
     if not loc:
-        dispatch = record.get("dispatch") or {}
-        loc = dispatch.get("location") or {}
+        loc = _getattr_path(rec, "dispatch.location")
     if loc:
         addr = _address_from_neris_location(loc)
         if addr:
             prefill["address"] = addr
-        city = loc.get("incorporated_municipality") or ""
-        if city:
-            prefill["city"] = city
-        state = loc.get("state") or ""
-        if state:
-            prefill["state"] = state
-        zip_code = loc.get("postal_code") or ""
-        if zip_code:
-            prefill["zip_code"] = zip_code
-        county = loc.get("county") or ""
-        if county:
-            prefill["county"] = county
+        if loc.incorporated_municipality:
+            prefill["city"] = loc.incorporated_municipality
+        if loc.state:
+            prefill["state"] = loc.state
+        if loc.postal_code:
+            prefill["zip_code"] = loc.postal_code
+        if loc.county:
+            prefill["county"] = loc.county
 
-    # Unit responses from dispatch
-    dispatch = record.get("dispatch") or {}
-    neris_units = dispatch.get("unit_responses") or []
-    if neris_units:
-        units = []
-        for u in neris_units:
-            raw_id = u.get("reported_unit_id") or _resolve_neris_unit_id(u.get("unit_neris_id", ""))
-            unit = UnitAssignment(
-                unit_id=raw_id,
-                response_mode=u.get("response_mode") or "",
-                dispatch=u.get("dispatch") or "",
-                enroute=u.get("enroute_to_scene") or "",
-                staged=u.get("staging") or "",
-                on_scene=u.get("on_scene") or "",
-                cleared=u.get("unit_clear") or "",
-                canceled=u.get("canceled_enroute") or "",
-            )
-            # Staffing count into unit comment if available
-            staffing = u.get("staffing")
-            if staffing is not None:
-                unit.comment = f"Staffing: {staffing}"
-            units.append(unit)
-        prefill["units"] = units
+    # ── Dispatch section ──
+    dispatch = rec.dispatch
+    if dispatch:
+        neris_units = dispatch.unit_responses or []
+        if neris_units:
+            prefill["units"] = [_build_unit_from_neris(u) for u in neris_units]
+        if dispatch.automatic_alarm is not None:
+            prefill["automatic_alarm"] = dispatch.automatic_alarm
+        if dispatch.call_create:
+            timestamps["psap_answer"] = dispatch.call_create
+        if dispatch.incident_clear:
+            timestamps["incident_clear"] = dispatch.incident_clear
 
-    # Automatic alarm from dispatch
-    auto_alarm = dispatch.get("automatic_alarm")
-    if auto_alarm is not None:
-        prefill["automatic_alarm"] = auto_alarm
-
-    # Timestamps — from dispatch-level fields and earliest unit times
-    timestamps: dict[str, str] = {}
-    if dispatch.get("call_create"):
-        timestamps["psap_answer"] = dispatch["call_create"]
-    if dispatch.get("incident_clear"):
-        timestamps["incident_clear"] = dispatch["incident_clear"]
-
-    # Earliest unit enroute/on_scene across all units
-    for field, ts_key in [
-        ("enroute_to_scene", "first_unit_enroute"),
-        ("on_scene", "first_unit_arrived"),
-    ]:
-        times = [u[field] for u in neris_units if u.get(field)]
-        if times:
-            timestamps[ts_key] = min(times)
-
-    if timestamps:
-        prefill["timestamps"] = timestamps
-
-    # --- Actions & tactics (top-level in NERIS response) ---
-    actions_tactics = record.get("actions_tactics") or {}
-    action_noaction = actions_tactics.get("action_noaction") or {}
-    action_type = action_noaction.get("type")  # "ACTION" or "NOACTION"
-    if action_type:
-        prefill["action_taken"] = action_type
-    if action_type == "NOACTION":
-        noaction_type = action_noaction.get("noaction_type")
-        if noaction_type:
-            prefill["noaction_reason"] = noaction_type
-    elif action_type == "ACTION":
-        actions = action_noaction.get("actions") or []
-        if actions:
-            prefill["action_codes"] = [a for a in actions if isinstance(a, str) and a]
-
-    # --- Additional incident types ---
-    if len(types) > 1:
-        prefill["additional_incident_types"] = [
-            t.get("type", "") for t in types[1:] if t.get("type")
-        ]
-
-    # --- Fire detail (top-level in NERIS response) ---
-    extras: dict = {}
-    fire_detail = record.get("fire_detail") or {}
-    if fire_detail:
-        location_detail = fire_detail.get("location_detail") or {}
-        arrival = location_detail.get("arrival_condition")
-        if arrival:
-            prefill["arrival_conditions"] = arrival
-        for fd_key, extras_key in (
-            ("damage_type", "fire_bldg_damage"),
-            ("room_of_origin_type", "room_of_origin"),
-            ("floor_of_origin", "floor_of_origin"),
-            ("cause", "fire_cause_in"),
+        # Earliest unit enroute/on_scene across all units
+        for field, ts_key in (
+            ("enroute_to_scene", "first_unit_enroute"),
+            ("on_scene", "first_unit_arrived"),
         ):
-            val = location_detail.get(fd_key)
-            if val is not None:
-                extras[extras_key] = val
+            times = [getattr(u, field) for u in neris_units if getattr(u, field, None)]
+            if times:
+                timestamps[ts_key] = min(times)
 
-        # Outside fire: location_detail.type == "OUTSIDE"
-        if location_detail.get("type") == "OUTSIDE":
-            cause = location_detail.get("cause")
-            if cause:
-                prefill["outside_fire_cause"] = cause
-            acres = location_detail.get("acres_burned")
-            if acres is not None:
-                prefill["outside_fire_acres"] = acres
+    # ── Actions & tactics ──
+    action_noaction = _getattr_path(rec, "actions_tactics.action_noaction")
+    if action_noaction and action_noaction.type:
+        prefill["action_taken"] = action_noaction.type
+        if action_noaction.type == "NOACTION" and action_noaction.noaction_type:
+            prefill["noaction_reason"] = action_noaction.noaction_type
+        elif action_noaction.type == "ACTION" and action_noaction.actions:
+            prefill["action_codes"] = [
+                a for a in action_noaction.actions if isinstance(a, str) and a
+            ]
 
-        progression = location_detail.get("progression_evident")
-        if progression is not None:
-            extras["fire_progression_evident"] = progression
+    # ── Fire detail → typed sub-model ──
+    fire_detail_data: dict = {}
+    fd = rec.fire_detail
+    if fd:
+        ld = fd.location_detail
+        if ld:
+            if ld.arrival_condition:
+                prefill["arrival_conditions"] = ld.arrival_condition
+            for neris_key, model_key in _FIRE_LOCATION_MAP.items():
+                val = getattr(ld, neris_key, None)
+                if val is not None:
+                    fire_detail_data[model_key] = val
+            # Outside fire
+            if ld.type == "OUTSIDE":
+                if ld.cause:
+                    prefill["outside_fire_cause"] = ld.cause
+                if ld.acres_burned is not None:
+                    prefill["outside_fire_acres"] = ld.acres_burned
 
-        water_supply = fire_detail.get("water_supply")
-        if water_supply:
-            extras["water_supply"] = water_supply
-        investigation = fire_detail.get("investigation_needed")
-        if investigation:
-            extras["fire_investigation"] = investigation
-        inv_types = fire_detail.get("investigation_types")
-        if inv_types:
-            extras["fire_investigation_types"] = inv_types
-        supp_appliances = fire_detail.get("suppression_appliances")
-        if supp_appliances:
-            extras["suppression_appliances"] = supp_appliances
+        for neris_key, model_key in _FIRE_TOP_MAP.items():
+            val = getattr(fd, neris_key, None)
+            if val:
+                fire_detail_data[model_key] = val
 
-    # --- Alarms & suppression (top-level in NERIS response) ---
-    for alarm_section, extras_key in (
-        ("smoke_alarm", "smoke_alarm_presence"),
-        ("fire_alarm", "fire_alarm_presence"),
-        ("fire_suppression", "sprinkler_presence"),
-    ):
-        alarm = record.get(alarm_section) or {}
-        presence = alarm.get("presence") or {}
-        ptype = presence.get("type")
+    if fire_detail_data:
+        prefill["fire_detail"] = fire_detail_data
+
+    # ── Alarms & suppression → typed sub-model ──
+    alarm_info_data: dict = {}
+    for alarm_attr, model_key in _ALARM_SECTION_MAP:
+        ptype = _getattr_path(rec, f"{alarm_attr}.presence.type")
         if ptype:
-            extras[extras_key] = ptype
+            alarm_info_data[model_key] = ptype
 
     # Smoke alarm details when present
-    smoke_alarm = record.get("smoke_alarm") or {}
-    smoke_presence = smoke_alarm.get("presence") or {}
-    if smoke_presence.get("type") == "PRESENT":
-        alarm_types = smoke_presence.get("alarm_types")
-        if alarm_types:
-            extras["smoke_alarm_types"] = alarm_types
-        operation = smoke_presence.get("operation") or {}
-        alerted = operation.get("alerted_failed_other") or {}
-        op_type = alerted.get("type")
-        if op_type:
-            extras["smoke_alarm_operation"] = op_type
-        occ_action = alerted.get("occupant_action")
-        if occ_action:
-            extras["smoke_alarm_occupant_action"] = occ_action
+    smoke_presence = _getattr_path(rec, "smoke_alarm.presence")
+    if smoke_presence and smoke_presence.type == "PRESENT":
+        if smoke_presence.alarm_types:
+            alarm_info_data["smoke_alarm_types"] = smoke_presence.alarm_types
+        operation = smoke_presence.operation
+        if operation:
+            alerted = operation.alerted_failed_other or {}
+            if alerted.get("type"):
+                alarm_info_data["smoke_alarm_operation"] = alerted["type"]
+            if alerted.get("occupant_action"):
+                alarm_info_data["smoke_alarm_occupant_action"] = alerted["occupant_action"]
 
-    # --- Hazards (top-level in NERIS response) ---
-    electric_hazards = record.get("electric_hazards") or []
-    if electric_hazards:
-        eh_types = [eh.get("type") for eh in electric_hazards if eh.get("type")]
-        extras["electric_hazards"] = eh_types if eh_types else True
-    powergen = record.get("powergen_hazards") or []
-    for pg in powergen:
-        # Real structure: pg.pv_other.type (not pg.type)
-        pv_other = pg.get("pv_other") or {} if isinstance(pg, dict) else {}
-        pg_type = pv_other.get("type") or ""
+    if alarm_info_data:
+        prefill["alarm_info"] = alarm_info_data
+
+    # ── Hazards → typed sub-model ──
+    hazard_info_data: dict = {}
+    if rec.electric_hazards:
+        eh_types = [eh.type for eh in rec.electric_hazards if eh.type]
+        hazard_info_data["electric_hazards"] = eh_types if eh_types else []
+
+    for pg in rec.powergen_hazards or []:
+        pg_type = _getattr_path(pg, "pv_other.type") or ""
         if not pg_type:
             continue
-        if "SOLAR" in pg_type.upper() or "PV" in pg_type.upper():
-            extras["solar_present"] = "YES"
-        elif "BATTERY" in pg_type.upper() or "ESS" in pg_type.upper():
-            extras["battery_ess_present"] = "YES"
-        elif "GENERATOR" in pg_type.upper():
-            extras["generator_present"] = "YES"
+        upper = pg_type.upper()
+        if "SOLAR" in upper or "PV" in upper:
+            hazard_info_data["solar_present"] = "YES"
+        elif "BATTERY" in upper or "ESS" in upper:
+            hazard_info_data["battery_ess_present"] = "YES"
+        elif "GENERATOR" in upper:
+            hazard_info_data["generator_present"] = "YES"
         elif pg_type != "NOT_APPLICABLE":
-            extras["powergen_type"] = pg_type
-    csst = record.get("csst_hazard") or {}
+            hazard_info_data["powergen_type"] = pg_type
+
+    csst = rec.csst_hazard
     if csst:
-        # CSST is an ignition source concern — ignition_source is the key field.
-        # lightning_suspected is a sub-detail. A truthy string like "UNKNOWN"
-        # does NOT mean CSST was present.
-        ignition = csst.get("ignition_source")
-        if ignition is True:
-            extras["csst_present"] = "YES"
-        elif ignition is False:
-            extras["csst_present"] = "NO"
+        if csst.ignition_source is True:
+            hazard_info_data["csst_present"] = "YES"
+        elif csst.ignition_source is False:
+            hazard_info_data["csst_present"] = "NO"
         else:
-            extras["csst_present"] = "UNKNOWN"
-        lightning = csst.get("lightning_suspected")
-        if lightning and lightning != "UNKNOWN":
-            extras["csst_lightning_suspected"] = lightning
-        grounded = csst.get("grounded")
-        if grounded is not None:
-            extras["csst_grounded"] = grounded
+            hazard_info_data["csst_present"] = "UNKNOWN"
+        if csst.lightning_suspected and csst.lightning_suspected != "UNKNOWN":
+            hazard_info_data["csst_lightning_suspected"] = csst.lightning_suspected
+        if csst.grounded is not None:
+            hazard_info_data["csst_grounded"] = csst.grounded
 
-    # --- People & occupancy (in base) ---
-    people_present = base.get("people_present")
-    if people_present is not None:
-        prefill["people_present"] = people_present
-    displaced = base.get("displacement_count")
-    if displaced is not None:
-        prefill["displaced_count"] = displaced
-    displacement_causes = base.get("displacement_causes")
-    if displacement_causes:
-        extras["displacement_causes"] = displacement_causes
-    animals_rescued = base.get("animals_rescued")
-    if animals_rescued is not None:
-        extras["animals_rescued"] = animals_rescued
+    if hazard_info_data:
+        prefill["hazard_info"] = hazard_info_data
 
-    # --- Impediment narrative (in base) ---
-    impediment = base.get("impediment_narrative")
-    if impediment:
-        extras["impediment_narrative"] = impediment
-
-    # --- Medical details (top-level in NERIS response) ---
-    medical_details = record.get("medical_details") or []
+    # ── Medical details ──
+    medical_details = rec.medical_details or []
     if medical_details:
         extras["patient_count"] = len(medical_details)
         for i, med in enumerate(medical_details):
             prefix = "" if len(medical_details) == 1 else f"patient_{i + 1}_"
-            care = med.get("patient_care_evaluation")
-            if care:
-                extras[f"{prefix}care_disposition"] = care
-            transport = med.get("transport_disposition")
-            if transport:
-                extras[f"{prefix}transport_disposition"] = transport
-            status = med.get("patient_status")
-            if status:
-                extras[f"{prefix}patient_status"] = status
+            if med.patient_care_evaluation:
+                extras[f"{prefix}care_disposition"] = med.patient_care_evaluation
+            if med.transport_disposition:
+                extras[f"{prefix}transport_disposition"] = med.transport_disposition
+            if med.patient_status:
+                extras[f"{prefix}patient_status"] = med.patient_status
 
-    # --- Tactic timestamps (top-level in NERIS response) ---
-    tactic_ts = record.get("tactic_timestamps") or {}
-    for ts_key in (
-        "command_established",
-        "completed_sizeup",
-        "water_on_fire",
-        "fire_under_control",
-        "fire_knocked_down",
-        "suppression_complete",
-        "primary_search_begin",
-        "primary_search_complete",
-        "extrication_complete",
-    ):
-        val = tactic_ts.get(ts_key)
-        if val:
-            timestamps[ts_key] = val if isinstance(val, str) else str(val)
+    # ── Tactic timestamps ──
+    tactic_ts = rec.tactic_timestamps
+    if tactic_ts:
+        for ts_key in _TACTIC_TS_KEYS:
+            val = getattr(tactic_ts, ts_key, None)
+            if val:
+                timestamps[ts_key] = val if isinstance(val, str) else str(val)
 
-    # --- Casualty/rescue data (top-level in NERIS response) ---
-    casualty_rescues = record.get("casualty_rescues") or []
+    # ── Casualty/rescue data (complex nested — kept as dict traversal) ──
+    casualty_rescues = rec.casualty_rescues or []
     if casualty_rescues:
         cr_list = []
         for cr in casualty_rescues:
@@ -430,18 +421,16 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
             cr_entry["type"] = cr.get("type", "")  # FF or NONFF
             cr_entry["gender"] = cr.get("gender")
 
-            # Casualty info
             casualty = cr.get("casualty") or {}
             injury = casualty.get("injury_or_noninjury") or {}
             if injury:
-                cr_entry["injury_type"] = injury.get("type")  # INJURED_NONFATAL, etc.
-                cr_entry["injury_cause"] = injury.get("cause")  # EXPOSURE, etc.
+                cr_entry["injury_type"] = injury.get("type")
+                cr_entry["injury_cause"] = injury.get("cause")
 
-            # Rescue info — nested under ffrescue_or_nonffrescue
             rescue = cr.get("rescue") or {}
             ff_rescue = rescue.get("ffrescue_or_nonffrescue") or {}
             if ff_rescue:
-                cr_entry["rescue_type"] = ff_rescue.get("type")  # RESCUED_BY_FIREFIGHTER, etc.
+                cr_entry["rescue_type"] = ff_rescue.get("type")
                 cr_entry["rescue_actions"] = ff_rescue.get("actions")
                 cr_entry["rescue_impediments"] = ff_rescue.get("impediments")
                 removal = ff_rescue.get("removal_or_nonremoval") or {}
@@ -455,15 +444,17 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
             if presence_known:
                 cr_entry["presence_known"] = presence_known.get("presence_known_type")
 
-            # Strip None values
             cr_list.append({k: v for k, v in cr_entry.items() if v is not None})
         extras["casualty_rescues"] = cr_list
 
-    # --- Non-FD aids (top-level in NERIS response) ---
-    nonfd_aids = record.get("nonfd_aids") or []
-    if nonfd_aids:
-        extras["nonfd_aids"] = [a.get("type") for a in nonfd_aids if a.get("type")]
+    # ── Non-FD aids ──
+    if rec.nonfd_aids:
+        aid_types = [a.type for a in rec.nonfd_aids if a.type]
+        if aid_types:
+            extras["nonfd_aids"] = aid_types
 
+    if timestamps:
+        prefill["timestamps"] = timestamps
     if extras:
         prefill["extras"] = extras
 
@@ -586,6 +577,11 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     if doc.zip_code and doc.zip_code != neris_zip:
         diff["zip_code"] = {"local": doc.zip_code, "neris": neris_zip}
 
+    # County
+    neris_county = loc.get("county") or ""
+    if doc.county and doc.county != neris_county:
+        diff["county"] = {"local": doc.county, "neris": neris_county}
+
     # Dispatch-level timestamps
     ts_map = {
         "psap_answer": ("call_create", dispatch),
@@ -705,6 +701,12 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
             "value": diff["zip_code"]["local"],
         }
 
+    if "county" in diff:
+        base_location_props["county"] = {
+            "action": "set",
+            "value": diff["county"]["local"],
+        }
+
     if "people_present" in diff:
         base_props["people_present"] = {
             "action": "set",
@@ -782,18 +784,22 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
                 unit_props = {}
                 for field_name, field_val in fields.items():
                     unit_props[field_name] = {"action": "set", "value": field_val}
-                unit_actions.append({
-                    "neris_uid": neris_uid,
-                    "action": "patch",
-                    "properties": unit_props,
-                })
+                unit_actions.append(
+                    {
+                        "neris_uid": neris_uid,
+                        "action": "patch",
+                        "properties": unit_props,
+                    }
+                )
             else:
                 # New unit not in NERIS — append with full payload
                 payload = {"reported_unit_id": unit_id, **fields}
-                unit_actions.append({
-                    "action": "append",
-                    "value": payload,
-                })
+                unit_actions.append(
+                    {
+                        "action": "append",
+                        "value": payload,
+                    }
+                )
 
         if unit_actions:
             dispatch_props["unit_responses"] = unit_actions
@@ -886,6 +892,7 @@ async def import_from_neris(
     neris_id: str,
     *,
     incident_id: str | None = None,
+    incident_number: str | None = None,
     station: str = "S31",
     force: bool = False,
 ) -> dict:
@@ -912,6 +919,9 @@ async def import_from_neris(
             (e.g., "FD53055879|26001980|1770500761")
         incident_id: Existing incident document ID to import into.
             When omitted a new draft is created from the NERIS data.
+        incident_number: Override for dispatch incident number
+            (e.g., "26-002358"). When NERIS doesn't store our CAD
+            number in determinant_code, use this to link to dispatch.
         station: Station code for new incidents (default "S31",
             ignored when importing into an existing incident)
         force: Bypass the locked-status check, allowing reimport into
@@ -952,7 +962,7 @@ async def import_from_neris(
 
     # ── 2. Derive dispatch number and date from NERIS record ──
     neris_dispatch = neris_record.get("dispatch") or {}
-    neris_incident_number = _neris_dispatch_to_cad_number(neris_dispatch)
+    neris_incident_number = incident_number or _neris_dispatch_to_cad_number(neris_dispatch)
     neris_call_create = neris_dispatch.get("call_create", "")
 
     # ── 3. Fetch dispatch data ──
@@ -1012,6 +1022,44 @@ async def import_from_neris(
         )
 
 
+def _merge_sub_model(doc, field_name: str, model_class, data: dict, *, force: bool = False) -> None:
+    """Create or merge into a Pydantic sub-model field."""
+    current = getattr(doc, field_name)
+    if current is None:
+        setattr(doc, field_name, model_class(**data))
+    else:
+        for k, v in data.items():
+            if force or getattr(current, k, None) is None:
+                setattr(current, k, v)
+
+
+# Simple fields set from NERIS if present (fill-if-empty for existing docs)
+_NERIS_SIMPLE_FIELDS: tuple[str, ...] = (
+    "incident_type",
+    "location_use",
+    "narrative",
+    "action_taken",
+    "noaction_reason",
+    "action_codes",
+    "additional_incident_types",
+    "arrival_conditions",
+    "outside_fire_cause",
+    "people_present",
+    "displaced_count",
+    "automatic_alarm",
+)
+
+# Fields that always overwrite from NERIS (corrected data)
+_NERIS_OVERWRITE_FIELDS: tuple[str, ...] = (
+    "incident_type",
+    "location_use",
+    "narrative",
+)
+
+# Location fields: NERIS preferred, dispatch fallback
+_LOCATION_FIELDS: tuple[str, ...] = ("address", "city", "state", "zip_code", "county")
+
+
 async def _apply_neris_import_to_existing(
     doc: IncidentDocument,
     neris_prefill: dict,
@@ -1031,80 +1079,51 @@ async def _apply_neris_import_to_existing(
     doc.neris_incident_id = neris_prefill.get("neris_incident_id", doc.neris_incident_id)
     fields_changed.append("neris_incident_id")
 
-    # Incident type from NERIS (dispatch doesn't have this)
-    if "incident_type" in neris_prefill:
-        doc.incident_type = neris_prefill["incident_type"]
-        fields_changed.append("incident_type")
+    # Simple NERIS fields: overwrite fields always from NERIS, fill-if-empty for the rest
+    for field in _NERIS_SIMPLE_FIELDS:
+        if field not in neris_prefill:
+            continue
+        if field in _NERIS_OVERWRITE_FIELDS or force or not getattr(doc, field, None):
+            setattr(doc, field, neris_prefill[field])
+            fields_changed.append(field)
 
-    # Location use from NERIS
-    if "location_use" in neris_prefill:
-        doc.location_use = neris_prefill["location_use"]
-        fields_changed.append("location_use")
+    # outside_fire_acres uses None check (0.0 is a valid value)
+    if "outside_fire_acres" in neris_prefill and (force or doc.outside_fire_acres is None):
+        doc.outside_fire_acres = neris_prefill["outside_fire_acres"]
+        fields_changed.append("outside_fire_acres")
 
-    # Narrative from NERIS
-    if "narrative" in neris_prefill:
-        doc.narrative = neris_prefill["narrative"]
-        fields_changed.append("narrative")
-
-    # Address — prefer NERIS (may be corrected), fall back to dispatch
-    if "address" in neris_prefill:
-        doc.address = neris_prefill["address"]
-        fields_changed.append("address")
-    elif "address" in dispatch_prefill and not doc.address:
-        doc.address = dispatch_prefill["address"]
-        fields_changed.append("address")
-    if "city" in neris_prefill:
-        doc.city = neris_prefill["city"]
-    elif "city" in dispatch_prefill and not doc.city:
-        doc.city = dispatch_prefill["city"]
-    if "state" in neris_prefill:
-        doc.state = neris_prefill["state"]
-    elif "state" in dispatch_prefill and not doc.state:
-        doc.state = dispatch_prefill["state"]
-    if "zip_code" in neris_prefill:
-        doc.zip_code = neris_prefill["zip_code"]
-    elif "zip_code" in dispatch_prefill and not doc.zip_code:
-        doc.zip_code = dispatch_prefill["zip_code"]
-    if "county" in neris_prefill:
-        doc.county = neris_prefill["county"]
-    elif "county" in dispatch_prefill and not doc.county:
-        doc.county = dispatch_prefill["county"]
+    # Location fields: NERIS preferred, dispatch fallback
+    for field in _LOCATION_FIELDS:
+        if field in neris_prefill:
+            setattr(doc, field, neris_prefill[field])
+            if field == "address":
+                fields_changed.append(field)
+        elif field in dispatch_prefill and not getattr(doc, field, None):
+            setattr(doc, field, dispatch_prefill[field])
+            if field == "address":
+                fields_changed.append(field)
 
     # Coordinates from dispatch (NERIS doesn't provide these)
-    if "latitude" in dispatch_prefill and doc.latitude is None:
-        doc.latitude = dispatch_prefill["latitude"]
-        fields_changed.append("latitude")
-    if "longitude" in dispatch_prefill and doc.longitude is None:
-        doc.longitude = dispatch_prefill["longitude"]
-        fields_changed.append("longitude")
+    for coord in ("latitude", "longitude"):
+        if coord in dispatch_prefill and getattr(doc, coord) is None:
+            setattr(doc, coord, dispatch_prefill[coord])
+            fields_changed.append(coord)
 
-    # Units — prefer dispatch (local unit codes), but keep NERIS response_mode
-    if "units" in dispatch_prefill:
-        neris_modes = {}
-        for u in neris_prefill.get("units", []):
-            if u.response_mode:
-                neris_modes[u.unit_id] = u.response_mode
+    # Units — prefer dispatch (local unit codes), fall back to NERIS
+    units_source = dispatch_prefill.get("units") or neris_prefill.get("units") or None
+    if units_source is not None:
         existing_personnel = {u.unit_id: u.personnel for u in doc.units}
-        for u in dispatch_prefill["units"]:
+        for u in units_source:
             if u.unit_id in existing_personnel:
                 u.personnel = existing_personnel[u.unit_id]
-        doc.units = dispatch_prefill["units"]
-        fields_changed.append("units")
-    elif "units" in neris_prefill:
-        existing_personnel = {u.unit_id: u.personnel for u in doc.units}
-        for u in neris_prefill["units"]:
-            if u.unit_id in existing_personnel:
-                u.personnel = existing_personnel[u.unit_id]
-        doc.units = neris_prefill["units"]
+        doc.units = units_source
         fields_changed.append("units")
 
     # Timestamps — dispatch is ground truth, NERIS fills gaps
     merged_ts = {**doc.timestamps}
     neris_ts = neris_prefill.get("timestamps", {})
     dispatch_ts = dispatch_prefill.get("timestamps", {})
-    # Dispatch timestamps overwrite everything (ground truth)
     merged_ts.update(dispatch_ts)
-    # NERIS timestamps fill remaining gaps only
     for k, v in neris_ts.items():
         if k not in merged_ts:
             merged_ts[k] = v
@@ -1117,45 +1136,17 @@ async def _apply_neris_import_to_existing(
         doc.dispatch_comments = dispatch_prefill["dispatch_comments"]
         fields_changed.append("dispatch_comments")
 
-    # Actions & tactics from NERIS
-    if "action_taken" in neris_prefill and not doc.action_taken:
-        doc.action_taken = neris_prefill["action_taken"]
-        fields_changed.append("action_taken")
-    if "noaction_reason" in neris_prefill and not doc.noaction_reason:
-        doc.noaction_reason = neris_prefill["noaction_reason"]
-        fields_changed.append("noaction_reason")
-    if "action_codes" in neris_prefill and not doc.action_codes:
-        doc.action_codes = neris_prefill["action_codes"]
-        fields_changed.append("action_codes")
+    # Typed sub-models (fire detail, alarm info, hazard info)
+    for field_name, cls in (
+        ("fire_detail", FireDetail),
+        ("alarm_info", AlarmInfo),
+        ("hazard_info", HazardInfo),
+    ):
+        if field_name in neris_prefill:
+            _merge_sub_model(doc, field_name, cls, neris_prefill[field_name], force=force)
+            fields_changed.append(field_name)
 
-    # Additional incident types
-    if "additional_incident_types" in neris_prefill and not doc.additional_incident_types:
-        doc.additional_incident_types = neris_prefill["additional_incident_types"]
-        fields_changed.append("additional_incident_types")
-
-    # Fire-specific first-class fields
-    if "arrival_conditions" in neris_prefill and not doc.arrival_conditions:
-        doc.arrival_conditions = neris_prefill["arrival_conditions"]
-        fields_changed.append("arrival_conditions")
-    if "outside_fire_cause" in neris_prefill and not doc.outside_fire_cause:
-        doc.outside_fire_cause = neris_prefill["outside_fire_cause"]
-        fields_changed.append("outside_fire_cause")
-    if "outside_fire_acres" in neris_prefill and doc.outside_fire_acres is None:
-        doc.outside_fire_acres = neris_prefill["outside_fire_acres"]
-        fields_changed.append("outside_fire_acres")
-
-    # People & occupancy
-    if "people_present" in neris_prefill and doc.people_present is None:
-        doc.people_present = neris_prefill["people_present"]
-        fields_changed.append("people_present")
-    if "displaced_count" in neris_prefill and doc.displaced_count is None:
-        doc.displaced_count = neris_prefill["displaced_count"]
-        fields_changed.append("displaced_count")
-    if "automatic_alarm" in neris_prefill and doc.automatic_alarm is None:
-        doc.automatic_alarm = neris_prefill["automatic_alarm"]
-        fields_changed.append("automatic_alarm")
-
-    # Extras (fire module details, alarms, hazards, medical, rescue)
+    # Remaining extras (medical, casualty, displacement, etc.)
     neris_extras = neris_prefill.get("extras", {})
     if neris_extras:
         merged_extras = {**doc.extras}
@@ -1280,8 +1271,13 @@ async def _create_incident_from_neris(
     if crew and units:
         _overlay_crew_from_schedule(units, crew)
 
-    # Merge extras: station + any NERIS extras (fire module, alarms, hazards, etc.)
-    merged_extras = {"station": station}
+    # Typed sub-models from NERIS prefill
+    fire_detail = neris_prefill.get("fire_detail")
+    alarm_info = neris_prefill.get("alarm_info")
+    hazard_info = neris_prefill.get("hazard_info")
+
+    # Remaining extras (medical, casualty, displacement, etc.)
+    merged_extras = {}
     neris_extras = neris_prefill.get("extras", {})
     merged_extras.update(neris_extras)
 
@@ -1312,6 +1308,10 @@ async def _create_incident_from_neris(
         people_present=merged.get("people_present"),
         displaced_count=merged.get("displaced_count"),
         automatic_alarm=merged.get("automatic_alarm"),
+        station=station,
+        fire_detail=fire_detail,
+        alarm_info=alarm_info,
+        hazard_info=hazard_info,
         extras=merged_extras,
         created_by=user.email,
     )
@@ -1329,7 +1329,7 @@ async def _create_incident_from_neris(
         result["neris_approved"] = True
         result["finalize_hint"] = (
             "This NERIS record is already APPROVED. You can lock the local report "
-            "by calling finalize_incident to prevent further local edits."
+            "by calling finalize_incident to mark it as submitted."
         )
 
     return result
@@ -1387,12 +1387,14 @@ async def update_neris_incident(
     if not neris_record:
         return {"error": f"NERIS record not found: {doc.neris_incident_id}"}
 
-    # 3. Check NERIS status — reject if APPROVED (locked)
+    # 3. Check NERIS status — return status data if APPROVED (locked)
     neris_status = (neris_record.get("incident_status") or {}).get("status", "")
     if neris_status == "APPROVED":
         return {
-            "error": "NERIS record is APPROVED and locked. "
-            "It cannot be modified. Contact NERIS support to reopen it."
+            "status": "neris_locked",
+            "neris_id": doc.neris_incident_id,
+            "neris_status": "APPROVED",
+            "message": "NERIS record is approved and locked. No corrections needed.",
         }
 
     # 4. Build diff between local and NERIS
@@ -1537,9 +1539,8 @@ async def finalize_incident(incident_id: str) -> dict:
             return {"error": f"NERIS record not found: {doc.neris_incident_id}"}
 
         neris_status = (neris_record.get("incident_status") or {}).get("status", "")
-        new_status = "approved" if neris_status == "APPROVED" else "submitted"
 
-        doc.status = new_status
+        doc.status = "submitted"
         doc.updated_at = datetime.now(UTC)
         doc.edit_history.append(
             EditEntry(
@@ -1552,10 +1553,9 @@ async def finalize_incident(incident_id: str) -> dict:
         updated = await store.update(doc)
 
     logger.info(
-        "User %s finalized incident %s → %s (NERIS status: %s)",
+        "User %s finalized incident %s → submitted (NERIS status: %s)",
         user.email,
         incident_id,
-        new_status,
         neris_status,
     )
     return updated.model_dump(mode="json")

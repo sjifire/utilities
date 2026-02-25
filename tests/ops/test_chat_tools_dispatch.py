@@ -53,7 +53,9 @@ class TestImportFromNerisDispatch:
                 {"incident_id": "doc-1", "neris_id": "FD123|456|789"},
             )
 
-        mock_import.assert_awaited_once_with("FD123|456|789", incident_id="doc-1")
+        mock_import.assert_awaited_once_with(
+            "FD123|456|789", incident_id="doc-1", incident_number=None
+        )
         # Dispatch transforms the result into a summary
         assert result["status"] == "success"
         assert result["neris_incident_id"] == "FD123|456|789"
@@ -88,7 +90,9 @@ class TestImportFromNerisDispatch:
                 {"incident_id": "doc-1"},
             )
 
-        mock_import.assert_awaited_once_with("FD123|456|789", incident_id="doc-1")
+        mock_import.assert_awaited_once_with(
+            "FD123|456|789", incident_id="doc-1", incident_number=None
+        )
         # Dispatch transforms the result into a summary
         assert result["status"] == "success"
         assert result["neris_incident_id"] == "FD123|456|789"

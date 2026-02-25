@@ -11,13 +11,20 @@ NERIS-specific functions (parsing, diffing, patching, import/export) live in
 """
 
 import asyncio
+import contextlib
 import logging
 from datetime import UTC, datetime
 
 from sjifire.core.config import get_org_config, get_timezone
 from sjifire.ops.auth import check_is_editor, get_current_user
 from sjifire.ops.incidents.models import (
+    ALARM_INFO_KEYS,
+    FIRE_DETAIL_KEYS,
+    HAZARD_INFO_KEYS,
+    AlarmInfo,
     EditEntry,
+    FireDetail,
+    HazardInfo,
     IncidentDocument,
     PersonnelAssignment,
     UnitAssignment,
@@ -586,8 +593,17 @@ async def create_incident(
         # Auto-assign schedule crew when no explicit crew provided
         _overlay_crew_from_schedule(units, schedule_crew)
 
-    # Parse incident_date as datetime (start of day)
+    # Parse incident_date as datetime (start of day), then refine from
+    # dispatch psap_answer if available — gives accurate incident time for
+    # crew lookups and NERIS dispatch.call_create.
     dt = datetime.strptime(incident_date, "%Y-%m-%d").replace(tzinfo=UTC)
+    psap = prefill.get("timestamps", {}).get("psap_answer")
+    if psap:
+        with contextlib.suppress(ValueError):
+            parsed = datetime.fromisoformat(psap)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=get_timezone())
+            dt = parsed
 
     doc = IncidentDocument(
         incident_number=incident_number,
@@ -604,7 +620,7 @@ async def create_incident(
         narrative=prefill.get("narrative", ""),
         dispatch_comments=prefill.get("dispatch_comments", ""),
         neris_incident_id=prefill.get("neris_incident_id"),
-        extras={"station": station},
+        station=station,
         created_by=user.email,
     )
 
@@ -679,16 +695,16 @@ async def list_incidents(
                 user.email, status=status, exclude_status=exclude_status
             )
 
-    # Filter by station in extras if requested
+    # Filter by station if requested
     if station:
-        incidents = [d for d in incidents if d.extras.get("station") == station]
+        incidents = [d for d in incidents if d.station == station]
 
     summaries = [
         {
             "id": doc.id,
             "incident_number": doc.incident_number,
             "incident_datetime": doc.incident_datetime.isoformat(),
-            "station": doc.extras.get("station", ""),
+            "station": doc.station,
             "status": doc.status,
             "incident_type": doc.incident_type,
             "created_by": doc.created_by,
@@ -736,6 +752,10 @@ async def update_incident(
     # People
     people_present: bool | None = None,
     displaced_count: int | None = None,
+    # Typed sub-models
+    fire_detail: dict | None = None,
+    alarm_info: dict | None = None,
+    hazard_info: dict | None = None,
     # Flexible extras
     extras: dict | None = None,
 ) -> dict:
@@ -774,6 +794,9 @@ async def update_incident(
         county: County name
         people_present: Were people present at the incident location?
         displaced_count: Number of people displaced
+        fire_detail: Fire detail fields (fire_cause_in, water_supply, etc.)
+        alarm_info: Alarm info fields (smoke_alarm_presence, etc.)
+        hazard_info: Hazard info fields (electric_hazards, csst_present, etc.)
         extras: Additional fields merged into existing extras dict
 
     Returns:
@@ -927,10 +950,69 @@ async def update_incident(
             doc.displaced_count = displaced_count
             fields_changed.append("displaced_count")
 
-        # Extras — merge into existing
+        # Typed sub-models — merge into existing
+        if fire_detail is not None:
+            if doc.fire_detail is None:
+                doc.fire_detail = FireDetail(**fire_detail)
+            else:
+                for k, v in fire_detail.items():
+                    setattr(doc.fire_detail, k, v)
+            fields_changed.append("fire_detail")
+
+        if alarm_info is not None:
+            if doc.alarm_info is None:
+                doc.alarm_info = AlarmInfo(**alarm_info)
+            else:
+                for k, v in alarm_info.items():
+                    setattr(doc.alarm_info, k, v)
+            fields_changed.append("alarm_info")
+
+        if hazard_info is not None:
+            if doc.hazard_info is None:
+                doc.hazard_info = HazardInfo(**hazard_info)
+            else:
+                for k, v in hazard_info.items():
+                    setattr(doc.hazard_info, k, v)
+            fields_changed.append("hazard_info")
+
+        # Extras — route fire/alarm/hazard keys to sub-models, keep rest
         if extras is not None:
-            doc.extras = {**doc.extras, **extras}
-            fields_changed.append("extras")
+            # Extract keys that belong to typed sub-models
+            fd_routed = {k: extras.pop(k) for k in list(extras) if k in FIRE_DETAIL_KEYS}
+            ai_routed = {k: extras.pop(k) for k in list(extras) if k in ALARM_INFO_KEYS}
+            hi_routed = {k: extras.pop(k) for k in list(extras) if k in HAZARD_INFO_KEYS}
+
+            if fd_routed:
+                if doc.fire_detail is None:
+                    doc.fire_detail = FireDetail(**fd_routed)
+                else:
+                    for k, v in fd_routed.items():
+                        setattr(doc.fire_detail, k, v)
+                if "fire_detail" not in fields_changed:
+                    fields_changed.append("fire_detail")
+
+            if ai_routed:
+                if doc.alarm_info is None:
+                    doc.alarm_info = AlarmInfo(**ai_routed)
+                else:
+                    for k, v in ai_routed.items():
+                        setattr(doc.alarm_info, k, v)
+                if "alarm_info" not in fields_changed:
+                    fields_changed.append("alarm_info")
+
+            if hi_routed:
+                if doc.hazard_info is None:
+                    doc.hazard_info = HazardInfo(**hi_routed)
+                else:
+                    for k, v in hi_routed.items():
+                        setattr(doc.hazard_info, k, v)
+                if "hazard_info" not in fields_changed:
+                    fields_changed.append("hazard_info")
+
+            # Merge remaining extras
+            if extras:
+                doc.extras = {**doc.extras, **extras}
+                fields_changed.append("extras")
 
         # Record edit history
         if fields_changed:
@@ -1023,13 +1105,10 @@ async def reset_incident(incident_id: str) -> dict:
                 f"Only draft or in_progress incidents can be reset."
             }
 
-        # Preserve identity fields
-        station = doc.extras.get("station", "")
-
         # Pre-fill from dispatch (same as creation)
         prefill = await _prefill_from_dispatch(doc.incident_number)
 
-        # Clear content fields
+        # Clear content fields (station is preserved as top-level field)
         doc.incident_type = None
         doc.additional_incident_types = []
         doc.automatic_alarm = None
@@ -1044,7 +1123,10 @@ async def reset_incident(incident_id: str) -> dict:
         doc.people_present = None
         doc.displaced_count = None
         doc.internal_notes = ""
-        doc.extras = {"station": station} if station else {}
+        doc.fire_detail = None
+        doc.alarm_info = None
+        doc.hazard_info = None
+        doc.extras = {}
 
         # Apply dispatch pre-fill
         doc.address = prefill.get("address")

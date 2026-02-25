@@ -97,6 +97,7 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
+"src/sjifire/ops/incidents/neris_models.py" = ["D101"]  # Lightweight input models documented by module docstring
 "src/sjifire/ops/incidents/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
 "src/sjifire/ops/dispatch/store.py" = ["S608"]  # Cosmos SQL uses parameterized queries
 "src/sjifire/ops/token_store.py" = ["S608"]  # Cosmos SQL uses parameterized queries

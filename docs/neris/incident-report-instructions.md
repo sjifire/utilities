@@ -348,22 +348,26 @@ update_incident(
     action_codes=["FIRE_SUPPRESSION||EXTINGUISHMENT", ...],
     actions_taken_narrative="...",
     arrival_conditions="FIRE_OUT_UPON_ARRIVAL",
-    extras={
+    fire_detail={
         "water_supply": "NONE",
         "fire_investigation": "NO_CAUSE_OBVIOUS",
         "floor_of_origin": 1,
         "room_of_origin": "LIVING_SPACE",
         "fire_cause_in": "OPERATING_EQUIPMENT",
-        "fire_bldg_damage": "MINOR_DAMAGE",
+        "fire_bldg_damage": "MINOR_DAMAGE"
+    },
+    alarm_info={
         "smoke_alarm_presence": "PRESENT_AND_WORKING",
         "fire_alarm_presence": "NOT_APPLICABLE",
-        "sprinkler_presence": "NOT_PRESENT",
+        "sprinkler_presence": "NOT_PRESENT"
+    },
+    hazard_info={
         "solar_present": "NO",
         "battery_ess_present": "NO",
         "generator_present": "NO",
-        "csst_present": "UNKNOWN",
-        "ev_involved": "NO"
-    }
+        "csst_present": "UNKNOWN"
+    },
+    extras={"ev_involved": "NO"}
 )
 ```
 
@@ -733,36 +737,37 @@ Reports in `submitted` or `approved` status are **locked** — they cannot be ed
 
 If a user tries to edit a locked report, explain that the report has been submitted/approved and cannot be modified locally. Direct them to the NERIS portal if corrections are needed.
 
-## Using the `extras` Field
+## Typed Sub-Models and the `extras` Field
 
-The incident model has strict, typed fields for data that appears on every call (incident type, location, crew, units, timestamps, narratives, actions). For everything else — conditional NERIS sections, edge-case fields, incident-specific details — use the `extras` dict.
+The incident model has three typed sub-models for the largest NERIS conditional sections:
 
-**When to use extras:** Any information the user provides that doesn't fit a named field on `update_incident`. This includes risk reduction (alarms, sprinklers), casualty/rescue details, exposures, hazard info, location booleans (people present, displaced count), mutual aid details, automatic alarm flag, and anything else NERIS or the district tracks.
+- **`fire_detail`**: `fire_cause_in`, `fire_bldg_damage`, `room_of_origin`, `floor_of_origin` (int), `fire_progression_evident` (bool), `water_supply`, `fire_investigation`, `fire_investigation_types` (list), `suppression_appliances` (list)
+- **`alarm_info`**: `smoke_alarm_presence`, `smoke_alarm_types` (list), `smoke_alarm_operation`, `smoke_alarm_occupant_action`, `fire_alarm_presence`, `sprinkler_presence`
+- **`hazard_info`**: `electric_hazards` (list), `csst_present`, `csst_lightning_suspected`, `csst_grounded` (bool), `solar_present`, `battery_ess_present`, `generator_present`, `powergen_type`
 
-**How to save:** Use `update_incident(extras={...})` with descriptive `snake_case` keys. Merge semantically — don't overwrite the whole dict when adding one field.
-
-**Examples:**
-```json
-{
-  "automatic_alarm": true,
-  "mutual_aid_received": "OIFR Engine 34",
-  "smoke_alarm_presence": "NOT_APPLICABLE",
-  "fire_alarm_presence": "PRESENT_AND_WORKING",
-  "sprinkler_presence": "NOT_APPLICABLE",
-  "people_present": true,
-  "displaced_count": 0,
-  "impediment_narrative": "Narrow driveway limited apparatus access",
-  "exposure_count": 0,
-  "patient_count": 1,
-  "patient_1_casualty_type": "INJURED_NONFATAL",
-  "patient_1_rescue_type": "NONE",
-  "fire_cause": "COOKING",
-  "water_on_fire": "2026-02-12T14:42:00",
-  "fire_under_control": "2026-02-12T14:55:00"
-}
+**How to save:** Use the typed parameters on `update_incident`:
+```
+update_incident(
+    fire_detail={"fire_cause_in": "ELECTRICAL", "water_supply": "HYDRANT_LESS_500"},
+    alarm_info={"smoke_alarm_presence": "PRESENT_AND_WORKING"},
+    hazard_info={"solar_present": "NO", "csst_present": "UNKNOWN"}
+)
 ```
 
-**When reviewing or submitting:** Read `extras` alongside the typed fields to build a complete picture. Flag any NERIS-required fields that are missing from both the typed fields and extras.
+**Backward compatibility:** If fire/alarm/hazard keys are passed via `extras`, they are automatically routed to the correct sub-model.
+
+For everything else — medical, casualty/rescue, hazmat, exposures, and other edge cases — use `extras`:
+
+```
+update_incident(extras={
+    "patient_count": 1,
+    "care_disposition": "PATIENT_EVALUATED_CARE_PROVIDED",
+    "impediment_narrative": "Narrow driveway limited apparatus access",
+    "mutual_aid_received": "OIFR Engine 34"
+})
+```
+
+**When reviewing or submitting:** Read `fire_detail`, `alarm_info`, `hazard_info`, and `extras` alongside the typed fields to build a complete picture. Flag any NERIS-required fields that are missing.
 
 ## Tips
 

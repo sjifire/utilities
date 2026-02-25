@@ -557,7 +557,7 @@ class TestSlimDispatchContext:
             incident_number="26-009999",
             incident_datetime="2026-02-15T00:00:00+00:00",
             created_by="test@sjifire.org",
-            extras={"station": "S31"},
+            station="S31",
         )
         async with IncidentStore() as store:
             await store.create(incident)
@@ -1032,7 +1032,7 @@ class TestAttachmentsSummary:
             incident_number="26-009000",
             incident_datetime="2026-02-15T00:00:00+00:00",
             created_by="ff@sjifire.org",
-            extras={"station": "S31"},
+            station="S31",
             attachments=[meta],
         )
         async with IncidentStore() as store:
@@ -1064,7 +1064,7 @@ class TestFetchContextAttachmentEdgeCases:
             incident_number="26-009100",
             incident_datetime="2026-02-15T00:00:00+00:00",
             created_by="ff@sjifire.org",
-            extras={"station": "S31"},
+            station="S31",
             attachments=attachments or [],
         )
         async with IncidentStore() as store:
