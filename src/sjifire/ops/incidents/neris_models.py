@@ -8,7 +8,7 @@ so that:
 - We don't couple to the upstream ``neris-api-client`` strict schema
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class NerisLocation(BaseModel):
@@ -22,6 +22,14 @@ class NerisLocation(BaseModel):
     state: str | None = None
     postal_code: str | None = None
     county: str | None = None
+
+    @field_validator("postal_code", mode="before")
+    @classmethod
+    def _coerce_postal_code(cls, v: object) -> str | None:
+        """NERIS may send postal_code as int (e.g. 98250)."""
+        if v is None:
+            return None
+        return str(v)
 
 
 class NerisLocationUse(BaseModel):

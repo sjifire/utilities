@@ -375,3 +375,26 @@ class TestIncidentDocument:
         assert restored.fire_detail is None
         assert restored.alarm_info is None
         assert restored.hazard_info is None
+
+    # ── Location field coercion ──
+
+    def test_from_cosmos_coerces_int_zip_code_to_string(self):
+        """zip_code stored as int (e.g. from NERIS) is coerced to string."""
+        cosmos_dict = self._make_doc().to_cosmos()
+        cosmos_dict["zip_code"] = 98250
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.zip_code == "98250"
+        assert isinstance(restored.zip_code, str)
+
+    def test_from_cosmos_coerces_null_location_fields(self):
+        """None values in location string fields are coerced to empty string."""
+        cosmos_dict = self._make_doc().to_cosmos()
+        cosmos_dict["city"] = None
+        cosmos_dict["state"] = None
+        cosmos_dict["zip_code"] = None
+        cosmos_dict["county"] = None
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.city == "Friday Harbor"  # default from org config
+        assert restored.state == "WA"  # default from org config
+        assert restored.zip_code == ""
+        assert restored.county == ""

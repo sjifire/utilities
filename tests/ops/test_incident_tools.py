@@ -2336,6 +2336,16 @@ class TestParseNerisRecord:
         assert "incident_type" not in result
         assert "timestamps" not in result
 
+    def test_int_postal_code_coerced_to_string(self):
+        """NERIS may send postal_code as int — must be stored as string."""
+        record = {
+            "base": {"location": {"postal_code": 98250, "state": "WA"}},
+            "incident_types": [{"type": "MEDICAL"}],
+        }
+        result = _parse_neris_record(record, "FD|X|Y")
+        assert result["zip_code"] == "98250"
+        assert isinstance(result["zip_code"], str)
+
 
 # ── _getattr_path helper ──
 class TestGetAttrPath:

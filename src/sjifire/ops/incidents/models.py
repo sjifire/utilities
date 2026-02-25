@@ -249,6 +249,8 @@ class IncidentDocument(BaseModel):
         for key in ("city", "state", "zip_code", "county"):
             if key in data and data[key] is None:
                 data[key] = ""
+            elif key in data and not isinstance(data[key], str):
+                data[key] = str(data[key])
         # Migrate station from extras to top-level field (Phase 1)
         if "station" not in data or not data.get("station"):
             extras = data.get("extras") or {}

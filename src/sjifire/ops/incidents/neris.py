@@ -268,7 +268,7 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
         if loc.state:
             prefill["state"] = loc.state
         if loc.postal_code:
-            prefill["zip_code"] = loc.postal_code
+            prefill["zip_code"] = str(loc.postal_code)
         if loc.county:
             prefill["county"] = loc.county
 
