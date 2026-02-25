@@ -102,9 +102,26 @@ def _group_action_codes(codes: list[str]) -> list[tuple[str, list[str]]]:
     return result
 
 
+_RANK_PREFIXES = [
+    "Battalion Chief", "Division Chief", "Assistant Chief", "Fire Chief",
+    "Chief", "Captain", "Lieutenant", "Firefighter", "EMT",
+]
+
+
+def _strip_rank(name: str) -> str:
+    """Strip rank prefix from display name (e.g., 'Captain Tad Lean' → 'Tad Lean')."""
+    if not name:
+        return name
+    for prefix in _RANK_PREFIXES:
+        if name.startswith(prefix + " "):
+            return name[len(prefix) + 1:]
+    return name
+
+
 _jinja_env.filters["fmt_dt"] = _fmt_datetime
 _jinja_env.filters["fmt_time"] = _fmt_time
 _jinja_env.filters["group_action_codes"] = _group_action_codes
+_jinja_env.filters["strip_rank"] = _strip_rank
 
 
 def _forbidden_page() -> Response:
@@ -216,10 +233,25 @@ async def print_report(request: Request) -> Response:
     if doc is None:
         return JSONResponse({"error": "Incident not found"}, status_code=404)
 
+    # Look up IC from dispatch data
+    ic_name = ""
+    try:
+        async with DispatchStore() as dstore:
+            dispatch = await dstore.get_by_dispatch_id(doc.incident_number)
+        if dispatch:
+            ic_name = (
+                dispatch.analysis.incident_commander_name
+                or dispatch.analysis.incident_commander
+                or ""
+            )
+    except Exception:
+        logger.debug("Failed to load dispatch IC for %s", doc.incident_number, exc_info=True)
+
     template = _jinja_env.get_template("print_report.html")
     html = template.render(
         doc=doc.model_dump(mode="json"),
         now=local_now().strftime("%m/%d/%Y %H:%M"),
+        ic_name=ic_name,
     )
     return Response(html, media_type="text/html")
 

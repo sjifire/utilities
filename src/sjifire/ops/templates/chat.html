@@ -916,6 +916,7 @@
     {% if doc.units %}
     {% set has_personnel = doc.units | selectattr("personnel") | list | length > 0 %}
     {% if has_personnel %}
+    {% set ic = dispatch.get("ic", "") if dispatch else "" %}
     <div class="section">
       <div class="section-header">Personnel</div>
       <div class="section-body" style="padding:0">
@@ -931,8 +932,10 @@
           <tbody>
             {% for unit in doc.units %}
             {% for member in unit.personnel %}
-            <tr>
-              <td style="font-weight:600">{{ member.name }}</td>
+            {% set clean_name = member.name | strip_rank %}
+            {% set is_ic = ic and (ic in member.name or ic in clean_name or member.name in ic or clean_name in ic) %}
+            <tr{% if is_ic %} style="background:var(--bg-panel-alt)"{% endif %}>
+              <td style="font-weight:600">{{ clean_name }}{% if is_ic %} <span style="font-size:10px;font-weight:700;background:var(--accent);color:#fff;padding:1px 6px;border-radius:3px;margin-left:6px;vertical-align:middle">IC</span>{% endif %}</td>
               <td>{{ member.rank | title if member.rank else "--" }}</td>
               <td>{{ unit.unit_id }}</td>
               <td>{{ member.role | title if member.role else member.position | title if member.position and member.position != member.rank else "--" }}</td>
