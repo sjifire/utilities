@@ -212,10 +212,10 @@ class TestRefreshNerisReportCache:
 
 
 class TestSyncNerisToLocal:
-    """Tests for _sync_neris_to_local status transitions."""
+    """Tests for _sync_neris_to_local — never auto-transitions status."""
 
-    async def test_transitions_submitted_to_approved(self):
-        """Submitted + NERIS APPROVED → local approved."""
+    async def test_never_transitions_submitted(self):
+        """Submitted + NERIS APPROVED → stays submitted (chief must approve)."""
         incident = IncidentDocument(
             id="inc-1",
             incident_number="26-001980",
@@ -237,16 +237,13 @@ class TestSyncNerisToLocal:
         ]
         count = await _sync_neris_to_local(summaries)
 
-        assert count == 1
+        assert count == 0
         async with IncidentStore() as store:
             updated = await store.get_by_id("inc-1")
-        assert updated.status == "approved"
-        assert updated.edit_history[-1].editor_email == "system@sjifire.org"
-        assert updated.edit_history[-1].editor_name == "NERIS Sync"
-        assert "status:approved" in updated.edit_history[-1].fields_changed
+        assert updated.status == "submitted"
 
-    async def test_skips_draft_incidents(self):
-        """Draft incidents are not transitioned even if NERIS is APPROVED."""
+    async def test_never_transitions_draft(self):
+        """Draft + NERIS APPROVED → stays draft."""
         incident = IncidentDocument(
             id="inc-draft",
             incident_number="26-002000",
@@ -273,59 +270,6 @@ class TestSyncNerisToLocal:
             doc = await store.get_by_id("inc-draft")
         assert doc.status == "draft"
 
-    async def test_skips_already_approved(self):
-        """Already-approved incidents are not re-transitioned."""
-        incident = IncidentDocument(
-            id="inc-appr",
-            incident_number="26-003000",
-            incident_datetime=datetime(2026, 2, 11, tzinfo=UTC),
-            created_by="ff@sjifire.org",
-            status="approved",
-            neris_incident_id="FD|26003000|111",
-            station="S31",
-        )
-        async with IncidentStore() as store:
-            await store.create(incident)
-
-        summaries = [
-            {
-                "neris_id": "FD|26003000|111",
-                "status": "APPROVED",
-                "incident_number": "26-003000",
-            }
-        ]
-        count = await _sync_neris_to_local(summaries)
-
-        assert count == 0
-
-    async def test_skips_pending_neris_status(self):
-        """Submitted + NERIS PENDING_APPROVAL → no change."""
-        incident = IncidentDocument(
-            id="inc-pending",
-            incident_number="26-004000",
-            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
-            created_by="ff@sjifire.org",
-            status="submitted",
-            neris_incident_id="FD|26004000|222",
-            station="S31",
-        )
-        async with IncidentStore() as store:
-            await store.create(incident)
-
-        summaries = [
-            {
-                "neris_id": "FD|26004000|222",
-                "status": "PENDING_APPROVAL",
-                "incident_number": "26-004000",
-            }
-        ]
-        count = await _sync_neris_to_local(summaries)
-
-        assert count == 0
-        async with IncidentStore() as store:
-            doc = await store.get_by_id("inc-pending")
-        assert doc.status == "submitted"
-
     async def test_no_matching_local_incident(self):
         """NERIS summary with no local match is silently skipped."""
         summaries = [
@@ -337,56 +281,6 @@ class TestSyncNerisToLocal:
         ]
         count = await _sync_neris_to_local(summaries)
         assert count == 0
-
-    async def test_skips_reopened_incident(self):
-        """Submitted incident with a 'reopened' history entry is not auto-approved."""
-        from sjifire.ops.incidents.models import EditEntry
-
-        incident = IncidentDocument(
-            id="inc-reopen",
-            incident_number="26-006000",
-            incident_datetime=datetime(2026, 2, 13, tzinfo=UTC),
-            created_by="ff@sjifire.org",
-            status="submitted",
-            neris_incident_id="FD|26006000|444",
-            station="S31",
-            edit_history=[
-                # Sync originally approved it
-                EditEntry(
-                    editor_email="system@sjifire.org",
-                    editor_name="NERIS Sync",
-                    fields_changed=["status:approved"],
-                ),
-                # Officer reopened it for edits
-                EditEntry(
-                    editor_email="chief@sjifire.org",
-                    editor_name="Chief",
-                    fields_changed=["reopened (was approved)"],
-                ),
-                # Finalized again locally
-                EditEntry(
-                    editor_email="chief@sjifire.org",
-                    editor_name="Chief",
-                    fields_changed=["status:submitted"],
-                ),
-            ],
-        )
-        async with IncidentStore() as store:
-            await store.create(incident)
-
-        summaries = [
-            {
-                "neris_id": "FD|26006000|444",
-                "status": "APPROVED",
-                "incident_number": "26-006000",
-            }
-        ]
-        count = await _sync_neris_to_local(summaries)
-
-        assert count == 0
-        async with IncidentStore() as store:
-            doc = await store.get_by_id("inc-reopen")
-        assert doc.status == "submitted"  # NOT auto-approved
 
 
 class TestCheckpoint:
@@ -473,8 +367,8 @@ class TestNerisSync:
         assert parsed.tzinfo is not None
 
     @patch("sjifire.ops.tasks.neris_sync.fetch_neris_summaries")
-    async def test_sync_transitions_submitted_to_approved(self, mock_fetch):
-        """neris_sync transitions local submitted incidents when NERIS is APPROVED."""
+    async def test_sync_never_auto_approves(self, mock_fetch):
+        """neris_sync never transitions local status — chief reviews manually."""
         incident = IncidentDocument(
             id="inc-sync",
             incident_number="26-001980",
@@ -503,4 +397,4 @@ class TestNerisSync:
 
         async with IncidentStore() as store:
             doc = await store.get_by_id("inc-sync")
-        assert doc.status == "approved"
+        assert doc.status == "submitted"  # NOT auto-approved

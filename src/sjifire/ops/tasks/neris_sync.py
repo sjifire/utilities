@@ -121,23 +121,19 @@ async def refresh_neris_report_cache(summaries: list[dict]) -> int:
 
 
 async def _sync_neris_to_local(summaries: list[dict]) -> int:
-    """Transition local incidents based on NERIS status changes.
+    """Log NERIS status changes for local incidents (informational only).
 
-    For each NERIS summary, check if a local incident exists with
-    the same ``neris_incident_id``. If the local incident is in
-    ``submitted`` status and NERIS shows ``APPROVED``, transition
-    the local incident to ``approved``.
+    The sync task never auto-transitions local incident status.
+    Approval is a manual action performed by the chief upon review.
 
     Args:
         summaries: List of summary dicts from ``fetch_neris_summaries()``
 
     Returns:
-        Number of local incidents transitioned
+        Always 0 (no transitions performed)
     """
-    from sjifire.ops.incidents.models import EditEntry
     from sjifire.ops.incidents.store import IncidentStore
 
-    transitioned = 0
     async with IncidentStore() as store:
         for summary in summaries:
             neris_id = summary.get("neris_id", "")
@@ -149,48 +145,16 @@ async def _sync_neris_to_local(summaries: list[dict]) -> int:
             if doc is None:
                 continue
 
-            # Only transition submitted → approved
-            if doc.status != "submitted":
-                continue
-
-            # Skip if the incident was manually reopened after the last
-            # sync approval — the user deliberately unlocked it for edits.
-            # Only re-approve once a new submit_incident call resets the cycle.
-            reopened_after_sync = False
-            for entry in reversed(doc.edit_history):
-                changed = " ".join(entry.fields_changed)
-                if "reopened" in changed:
-                    reopened_after_sync = True
-                    break
-                if entry.editor_email == "system@sjifire.org" and "approved" in changed:
-                    break  # last sync approval is more recent — OK to transition
-            if reopened_after_sync:
+            if doc.status != "approved":
                 logger.info(
-                    "Skipping NERIS sync approval for %s — was manually reopened",
-                    doc.id,
+                    "NERIS %s is APPROVED but local %s is '%s' — "
+                    "awaiting manual chief review",
+                    neris_id,
+                    doc.incident_number,
+                    doc.status,
                 )
-                continue
 
-            doc.status = "approved"
-            doc.updated_at = datetime.now(UTC)
-            doc.edit_history.append(
-                EditEntry(
-                    editor_email="system@sjifire.org",
-                    editor_name="NERIS Sync",
-                    fields_changed=["status:approved"],
-                )
-            )
-            await store.update(doc)
-            transitioned += 1
-            logger.info(
-                "NERIS sync transitioned incident %s → approved (NERIS: %s)",
-                doc.id,
-                neris_id,
-            )
-
-    if transitioned:
-        logger.info("Transitioned %d local incidents to approved", transitioned)
-    return transitioned
+    return 0
 
 
 @register("neris-sync")
