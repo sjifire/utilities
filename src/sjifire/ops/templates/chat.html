@@ -2178,7 +2178,9 @@ function chatApp() {
         this.streaming = false;
         this._setTurnActive(false);
         this.turnHolder = null;  // Turn lock released
-        this.scrollToBottom(true);
+        // Wait for Alpine DOM flush (chat-hints appear, streaming-msg removed)
+        // so the messages container height is correct before scrolling.
+        this.$nextTick(() => this.scrollToBottom(true));
 
         // Send queued message if user typed while we were streaming
         if (this._queuedMessage) {
@@ -2206,7 +2208,7 @@ function chatApp() {
         this.streaming = false;
         this._setTurnActive(false);
         this.turnHolder = null;  // Turn lock released on error too
-        this.scrollToBottom(true);
+        this.$nextTick(() => this.scrollToBottom(true));
       }
     }
   };
