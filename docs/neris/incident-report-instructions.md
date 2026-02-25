@@ -255,7 +255,9 @@ See the DEPARTMENT-SPECIFIC section in the system prompt for crew-to-apparatus m
 
 Using the on-duty schedule, assign personnel to each responding unit. Present grouped by unit. **List every responding unit** — if you don't know who was on a unit, show it as needing assignment.
 
-**Driver & Officer roles**: Only relevant for units with 2+ personnel — do NOT show or ask about roles for single-person units (they are implicitly both). For multi-person units, identify the **officer** (in charge) and **driver** (operating apparatus). The AO (Apparatus Operator) is always the driver. The highest-ranked person is usually the officer. Pre-fill based on rank and ask the user to confirm. Save using the `role` field: `"officer"` or `"driver"`.
+**Rank**: Only use rank values from the PERSONNEL ROSTER provided in the system prompt. If a person has no `rank` field in the roster, leave rank **blank** — do NOT guess or infer rank from positions, unit assignment, or role. Scheduling positions (e.g., someone qualified to fill "Lieutenant") are not the same as current rank.
+
+**Driver & Officer roles**: Only relevant for units with 2+ personnel — do NOT show or ask about roles for single-person units (they are implicitly both). For multi-person units, identify the **officer** (in charge) and **driver** (operating apparatus). The AO (Apparatus Operator) is always the driver. The highest-ranked person is usually the officer. Pre-fill based on rank (when known from the roster) and ask the user to confirm. Save using the `role` field: `"officer"` or `"driver"`.
 
 > Based on the on-duty schedule, here's who I have for each unit:
 >
