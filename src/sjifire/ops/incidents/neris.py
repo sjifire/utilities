@@ -657,83 +657,91 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
 def _build_neris_patch(diff: dict) -> dict:
     """Convert a diff dict into NERIS patch properties format.
 
-    Each field uses ``{"action": "set", "value": ...}`` format.
+    The NERIS API uses discriminated unions at every nesting level.
+    Each section (``base``, ``dispatch``) must be wrapped with
+    ``{"action": "patch", "properties": {...}}``, and sub-objects like
+    ``base.location`` need the same wrapping.
     """
     properties: dict = {}
 
+    # ── base section ──
+    base_props: dict = {}
+    base_location_props: dict = {}
+
     if "narrative" in diff:
-        properties.setdefault("base", {})
-        properties["base"]["outcome_narrative"] = {
+        base_props["outcome_narrative"] = {
             "action": "set",
             "value": diff["narrative"]["local"],
         }
 
     if "address" in diff:
-        properties.setdefault("base", {}).setdefault("location", {})
-        properties["base"]["location"]["street_address"] = {
+        base_location_props["street_address"] = {
             "action": "set",
             "value": diff["address"]["local"],
         }
 
     if "city" in diff:
-        properties.setdefault("base", {}).setdefault("location", {})
-        properties["base"]["location"]["incorporated_municipality"] = {
+        base_location_props["incorporated_municipality"] = {
             "action": "set",
             "value": diff["city"]["local"],
         }
 
     if "state" in diff:
-        properties.setdefault("base", {}).setdefault("location", {})
-        properties["base"]["location"]["state"] = {
+        base_location_props["state"] = {
             "action": "set",
             "value": diff["state"]["local"],
         }
 
     if "zip_code" in diff:
-        properties.setdefault("base", {}).setdefault("location", {})
-        properties["base"]["location"]["postal_code"] = {
+        base_location_props["postal_code"] = {
             "action": "set",
             "value": diff["zip_code"]["local"],
         }
 
     if "people_present" in diff:
-        properties.setdefault("base", {})
-        properties["base"]["people_present"] = {
+        base_props["people_present"] = {
             "action": "set",
             "value": diff["people_present"]["local"],
         }
 
     if "displaced_count" in diff:
-        properties.setdefault("base", {})
-        properties["base"]["displacement_count"] = {
+        base_props["displacement_count"] = {
             "action": "set",
             "value": diff["displaced_count"]["local"],
         }
 
+    if base_location_props:
+        base_props["location"] = {
+            "action": "patch",
+            "properties": base_location_props,
+        }
+
+    if base_props:
+        properties["base"] = {
+            "action": "patch",
+            "properties": base_props,
+        }
+
+    # ── dispatch section ──
+    dispatch_props: dict = {}
+
     if "timestamps" in diff:
         ts_local = diff["timestamps"]["local"]
         if "psap_answer" in ts_local:
-            properties.setdefault("dispatch", {})
-            properties["dispatch"]["call_create"] = {
+            dispatch_props["call_create"] = {
                 "action": "set",
                 "value": ts_local["psap_answer"],
             }
-        if "first_unit_dispatched" in ts_local:
-            properties.setdefault("dispatch", {})
-            properties["dispatch"]["first_unit_dispatched"] = {
-                "action": "set",
-                "value": ts_local["first_unit_dispatched"],
-            }
+        # first_unit_dispatched is a read-only computed field in NERIS
+        # (derived from earliest unit dispatch time) — not patchable.
         if "incident_clear" in ts_local:
-            properties.setdefault("dispatch", {})
-            properties["dispatch"]["incident_clear"] = {
+            dispatch_props["incident_clear"] = {
                 "action": "set",
                 "value": ts_local["incident_clear"],
             }
 
     if "automatic_alarm" in diff:
-        properties.setdefault("dispatch", {})
-        properties["dispatch"]["automatic_alarm"] = {
+        dispatch_props["automatic_alarm"] = {
             "action": "set",
             "value": diff["automatic_alarm"]["local"],
         }
@@ -781,14 +789,21 @@ def _build_neris_patch(diff: dict) -> dict:
                 })
 
         if unit_actions:
-            properties.setdefault("dispatch", {})
-            properties["dispatch"]["unit_responses"] = unit_actions
+            dispatch_props["unit_responses"] = unit_actions
+
+    if dispatch_props:
+        properties["dispatch"] = {
+            "action": "patch",
+            "properties": dispatch_props,
+        }
 
     if "incident_type" in diff:
-        properties["incident_types"] = {
-            "action": "set",
-            "value": [{"type": diff["incident_type"]["local"]}],
-        }
+        properties["incident_types"] = [
+            {
+                "action": "append",
+                "value": {"type": diff["incident_type"]["local"]},
+            },
+        ]
 
     return properties
 

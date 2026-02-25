@@ -286,7 +286,11 @@ class TestBuildNerisPatch:
     def test_narrative_patch(self):
         diff = {"narrative": {"local": "Updated text", "neris": "Old text"}}
         patch = _build_neris_patch(diff)
-        assert patch["base"]["outcome_narrative"] == {"action": "set", "value": "Updated text"}
+        assert patch["base"]["action"] == "patch"
+        assert patch["base"]["properties"]["outcome_narrative"] == {
+            "action": "set",
+            "value": "Updated text",
+        }
 
     def test_timestamp_patch(self):
         diff = {
@@ -296,7 +300,8 @@ class TestBuildNerisPatch:
             }
         }
         patch = _build_neris_patch(diff)
-        assert patch["dispatch"]["call_create"] == {
+        assert patch["dispatch"]["action"] == "patch"
+        assert patch["dispatch"]["properties"]["call_create"] == {
             "action": "set",
             "value": "2026-02-20T10:30:00Z",
         }
@@ -304,7 +309,11 @@ class TestBuildNerisPatch:
     def test_address_patch(self):
         diff = {"address": {"local": "94 Zepher Ln", "neris": "94 Zepher Lane"}}
         patch = _build_neris_patch(diff)
-        assert patch["base"]["location"]["street_address"] == {
+        base = patch["base"]
+        assert base["action"] == "patch"
+        location = base["properties"]["location"]
+        assert location["action"] == "patch"
+        assert location["properties"]["street_address"] == {
             "action": "set",
             "value": "94 Zepher Ln",
         }
@@ -320,7 +329,8 @@ class TestBuildNerisPatch:
         }
         patch = _build_neris_patch(diff)
         assert "dispatch" in patch
-        actions = patch["dispatch"]["unit_responses"]
+        assert patch["dispatch"]["action"] == "patch"
+        actions = patch["dispatch"]["properties"]["unit_responses"]
         assert isinstance(actions, list)
         assert len(actions) == 1
         assert actions[0]["neris_uid"] == 42
@@ -330,7 +340,8 @@ class TestBuildNerisPatch:
             "value": "2026-02-20T10:31:00Z",
         }
 
-    def test_first_unit_dispatched_patch(self):
+    def test_first_unit_dispatched_skipped(self):
+        """first_unit_dispatched is read-only in NERIS — not patchable."""
         diff = {
             "timestamps": {
                 "local": {"first_unit_dispatched": "2026-02-20T10:31:00Z"},
@@ -338,15 +349,14 @@ class TestBuildNerisPatch:
             }
         }
         result = _build_neris_patch(diff)
-        assert result["dispatch"]["first_unit_dispatched"] == {
-            "action": "set",
-            "value": "2026-02-20T10:31:00Z",
-        }
+        # Should produce no patch at all (only non-patchable field)
+        assert result == {}
 
     def test_automatic_alarm_patch(self):
         diff = {"automatic_alarm": {"local": True, "neris": False}}
         result = _build_neris_patch(diff)
-        assert result["dispatch"]["automatic_alarm"] == {
+        assert result["dispatch"]["action"] == "patch"
+        assert result["dispatch"]["properties"]["automatic_alarm"] == {
             "action": "set",
             "value": True,
         }
@@ -361,7 +371,7 @@ class TestBuildNerisPatch:
             }
         }
         result = _build_neris_patch(diff)
-        actions = result["dispatch"]["unit_responses"]
+        actions = result["dispatch"]["properties"]["unit_responses"]
         assert isinstance(actions, list)
         assert actions[0]["neris_uid"] == 99
         assert actions[0]["properties"]["staging"] == {
@@ -385,7 +395,7 @@ class TestBuildNerisPatch:
             }
         }
         result = _build_neris_patch(diff)
-        actions = result["dispatch"]["unit_responses"]
+        actions = result["dispatch"]["properties"]["unit_responses"]
         assert isinstance(actions, list)
         assert len(actions) == 1
         assert actions[0]["action"] == "append"
@@ -410,7 +420,7 @@ class TestBuildNerisPatch:
             }
         }
         result = _build_neris_patch(diff)
-        actions = result["dispatch"]["unit_responses"]
+        actions = result["dispatch"]["properties"]["unit_responses"]
         assert len(actions) == 2
         # E31 should be a patch action (has neris_uid)
         e31_action = next(a for a in actions if a.get("neris_uid") == 42)
@@ -426,10 +436,9 @@ class TestBuildNerisPatch:
     def test_incident_type_patch(self):
         diff = {"incident_type": {"local": "FIRE||STRUCTURE_FIRE", "neris": "FIRE||CHIMNEY_FIRE"}}
         patch = _build_neris_patch(diff)
-        assert patch["incident_types"] == {
-            "action": "set",
-            "value": [{"type": "FIRE||STRUCTURE_FIRE"}],
-        }
+        assert patch["incident_types"] == [
+            {"action": "append", "value": {"type": "FIRE||STRUCTURE_FIRE"}},
+        ]
 
 
 class TestUpdateNerisIncident:
