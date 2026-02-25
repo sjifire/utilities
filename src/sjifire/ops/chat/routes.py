@@ -118,10 +118,48 @@ def _strip_rank(name: str) -> str:
     return name
 
 
+_TS_LABELS = {
+    "psap_answer": "PSAP Answer",
+    "psap_answer_time": "PSAP Answer",
+    "event_first_unit_dispatched": "First Unit Dispatched",
+    "first_unit_dispatched": "First Unit Dispatched",
+    "command_established": "Command Established",
+    "completed_sizeup": "Size-Up Complete",
+    "event_first_unit_enroute": "First Unit Enroute",
+    "first_unit_enroute": "First Unit Enroute",
+    "event_first_unit_arrived": "First Unit Arrived",
+    "first_unit_arrived": "First Unit On Scene",
+    "water_on_fire": "Water on Fire",
+    "fire_knocked_down": "Fire Knocked Down",
+    "fire_under_control": "Fire Under Control",
+    "suppression_complete": "Suppression Complete",
+    "primary_search_begin": "Primary Search Begin",
+    "primary_search_complete": "Primary Search Complete",
+    "extrication_complete": "Extrication Complete",
+    "event_controlled": "Controlled",
+    "event_last_unit_cleared": "Last Unit Cleared",
+    "incident_clear": "Incident Clear",
+}
+
+
+def _sort_timestamps(timestamps: dict) -> list[tuple[str, str]]:
+    """Sort timestamps dict by value, returning (label, raw_value) pairs."""
+    if not timestamps:
+        return []
+    items = [
+        (_TS_LABELS.get(k, k.replace("_", " ").title()), v)
+        for k, v in timestamps.items()
+        if v
+    ]
+    items.sort(key=lambda pair: pair[1])
+    return items
+
+
 _jinja_env.filters["fmt_dt"] = _fmt_datetime
 _jinja_env.filters["fmt_time"] = _fmt_time
 _jinja_env.filters["group_action_codes"] = _group_action_codes
 _jinja_env.filters["strip_rank"] = _strip_rank
+_jinja_env.filters["sort_timestamps"] = _sort_timestamps
 
 
 def _forbidden_page() -> Response:

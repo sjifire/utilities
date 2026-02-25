@@ -794,44 +794,11 @@
     <div class="section">
       <div class="section-header">Response Timeline</div>
       <div class="section-body">
-        {% set ts_labels = [
-          ("psap_answer", "PSAP Answer"),
-          ("psap_answer_time", "PSAP Answer"),
-          ("event_first_unit_dispatched", "First Unit Dispatched"),
-          ("first_unit_dispatched", "First Unit Dispatched"),
-          ("command_established", "Command Established"),
-          ("event_first_unit_enroute", "First Unit Enroute"),
-          ("first_unit_enroute", "First Unit Enroute"),
-          ("event_first_unit_arrived", "First Unit Arrived"),
-          ("first_unit_arrived", "First Unit On Scene"),
-          ("water_on_fire", "Water on Fire"),
-          ("fire_knocked_down", "Fire Knocked Down"),
-          ("fire_under_control", "Fire Under Control"),
-          ("suppression_complete", "Suppression Complete"),
-          ("primary_search_begin", "Primary Search Begin"),
-          ("primary_search_complete", "Primary Search Complete"),
-          ("extrication_complete", "Extrication Complete"),
-          ("event_controlled", "Controlled"),
-          ("event_last_unit_cleared", "Last Unit Cleared"),
-          ("incident_clear", "Incident Clear"),
-        ] %}
-        {% set shown_keys = [] %}
-        {% for key, label in ts_labels %}
-        {% if key in doc.timestamps %}
-        {% if shown_keys.append(key) %}{% endif %}
+        {% for label, val in doc.timestamps | sort_timestamps %}
         <div class="kv-row">
           <span class="kv-label">{{ label }}</span>
-          <span class="kv-value" style="font-family:monospace">{{ doc.timestamps[key] | fmt_dt }}</span>
-        </div>
-        {% endif %}
-        {% endfor %}
-        {% for key, val in doc.timestamps.items() %}
-        {% if key not in shown_keys %}
-        <div class="kv-row">
-          <span class="kv-label">{{ key | replace("_", " ") | title }}</span>
           <span class="kv-value" style="font-family:monospace">{{ val | fmt_dt }}</span>
         </div>
-        {% endif %}
         {% endfor %}
       </div>
     </div>
