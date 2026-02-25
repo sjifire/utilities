@@ -280,19 +280,19 @@ class ExchangeOnlineClient:
                 group_type=group_data.get("RecipientTypeDetails", ""),
             )
 
-        # Parse members
+        # Parse members (skip entries with empty PrimarySmtpAddress — disabled users)
         members: list[str] = []
         members_data = result.get("Members")
         if members_data:
             if isinstance(members_data, dict):
                 # Single member
-                if "PrimarySmtpAddress" in members_data:
+                if members_data.get("PrimarySmtpAddress"):
                     members.append(members_data["PrimarySmtpAddress"].lower())
             elif isinstance(members_data, list):
                 members.extend(
                     m["PrimarySmtpAddress"].lower()
                     for m in members_data
-                    if isinstance(m, dict) and "PrimarySmtpAddress" in m
+                    if isinstance(m, dict) and m.get("PrimarySmtpAddress")
                 )
 
         return group, members
@@ -568,14 +568,15 @@ class ExchangeOnlineClient:
 
         members: list[str] = []
         # Handle single member (dict) vs multiple (list)
+        # Skip entries with empty PrimarySmtpAddress (disabled users)
         if isinstance(result, dict):
-            if "PrimarySmtpAddress" in result:
+            if result.get("PrimarySmtpAddress"):
                 members.append(result["PrimarySmtpAddress"].lower())
         elif isinstance(result, list):
             members.extend(
                 m["PrimarySmtpAddress"].lower()
                 for m in result
-                if isinstance(m, dict) and "PrimarySmtpAddress" in m
+                if isinstance(m, dict) and m.get("PrimarySmtpAddress")
             )
 
         return members
