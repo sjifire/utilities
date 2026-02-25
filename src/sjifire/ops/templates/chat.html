@@ -993,8 +993,46 @@
     </div>
     {% endif %}
 
+    <!-- Casualty & Rescue -->
+    {% if doc.extras.get("casualty_rescues") %}
+    {% set cr_type_labels = {"NONFF": "Civilian", "FF": "Firefighter"} %}
+    {% set cr_injury_labels = {"INJURED_NONFATAL": "Injured (Non-Fatal)", "INJURED_FATAL": "Fatal Injury", "NOT_INJURED": "Not Injured"} %}
+    {% set cr_rescue_labels = {
+      "RESCUED_BY_FIREFIGHTER": "Rescued by Firefighter",
+      "EVAC_ASSISTED_BY_FIREFIGHTER": "Evac Assisted by Firefighter",
+      "SELF_EVACUATED": "Self-Evacuated",
+      "RESCUED_BY_OTHER": "Rescued by Other",
+      "NOT_RESCUED": "Not Rescued",
+    } %}
+    <div class="section">
+      <div class="section-header">Casualty &amp; Rescue ({{ doc.extras.casualty_rescues | length }})</div>
+      <div class="section-body">
+        {% for cr in doc.extras.casualty_rescues %}
+        {% if not loop.first %}<hr style="border:none;border-top:1px solid var(--border-subtle);margin:8px 0">{% endif %}
+        <div style="font-weight:600;font-size:12px;margin-bottom:4px">
+          Person {{ loop.index }}: {{ cr_type_labels.get(cr.get("type"), cr.get("type", "--") | replace("_", " ") | title) }}{% if cr.get("gender") %}, {{ cr.gender | title }}{% endif %}
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Injury</span>
+          <span class="kv-value">{{ cr_injury_labels.get(cr.get("injury_type"), cr.get("injury_type", "--") | replace("_", " ") | title) }}</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Rescue</span>
+          <span class="kv-value">{{ cr_rescue_labels.get(cr.get("rescue_type"), cr.get("rescue_type", "--") | replace("_", " ") | title) }}</span>
+        </div>
+        {% if cr.get("injury_cause") %}
+        <div class="kv-row">
+          <span class="kv-label">Cause</span>
+          <span class="kv-value">{{ cr.injury_cause | replace("_", " ") | title }}</span>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Additional Details (extras) -->
-    {% set skip_extras = ["station", "zip_code"] %}
+    {% set skip_extras = ["station", "zip_code", "casualty_rescues"] %}
     {% set extras_labels = {
       "smoke_alarm_presence": "Smoke Alarm",
       "fire_alarm_presence": "Fire Alarm",
@@ -1032,7 +1070,7 @@
             {%- elif val is string -%}
               {{ val | replace("_", " ") | title }}
             {%- elif val is iterable and val is not mapping -%}
-              {% for item in val %}{{ item | replace("_", " ") | title if item is string else item }}{% if not loop.last %}, {% endif %}{% endfor %}
+              {% for item in val %}{% if item is mapping %}{% for ik, iv in item.items() %}{{ ik | replace("_", " ") | title }}: {{ iv | replace("_", " ") | title if iv is string else iv }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not loop.last %}; {% endif %}{% elif item is string %}{{ item | replace("_", " ") | title }}{% else %}{{ item }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
             {%- elif val is mapping -%}
               {% for sk, sv in val.items() %}{{ sk | replace("_", " ") | title }}: {{ sv | replace("_", " ") | title if sv is string else sv }}{% if not loop.last %}; {% endif %}{% endfor %}
             {%- else -%}
