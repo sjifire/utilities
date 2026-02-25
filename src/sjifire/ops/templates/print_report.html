@@ -727,8 +727,6 @@
     <!-- ── Personnel ── -->
     {% if doc.units %}
     {% set has_personnel = doc.units | selectattr("personnel") | list | length > 0 %}
-    {% set has_role = [] %}
-    {% for unit in doc.units %}{% for m in unit.personnel %}{% if m.role %}{% if has_role.append(1) %}{% endif %}{% endif %}{% endfor %}{% endfor %}
     {% if has_personnel %}
     <div class="section">
       <div class="section-header">Personnel</div>
@@ -739,8 +737,7 @@
               <th>Name</th>
               <th>Rank</th>
               <th>Unit</th>
-              <th>Position</th>
-              {% if has_role %}<th>Role</th>{% endif %}
+              <th>Role</th>
             </tr>
           </thead>
           <tbody>
@@ -750,8 +747,7 @@
               <td style="font-weight:600">{{ member.name }}</td>
               <td>{{ member.rank | title if member.rank else "--" }}</td>
               <td>{{ unit.unit_id }}</td>
-              <td>{{ member.position | title if member.position else "--" }}</td>
-              {% if has_role %}<td>{{ member.role | title if member.role else "--" }}</td>{% endif %}
+              <td>{{ member.role | title if member.role else member.position | title if member.position and member.position != member.rank else "--" }}</td>
             </tr>
             {% endfor %}
             {% endfor %}

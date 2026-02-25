@@ -1070,6 +1070,20 @@ def _summarize_tool_result(name: str, data: dict) -> str:
         neris_id = data.get("neris_incident_id", "")
         return f"Imported from NERIS {neris_id}" if neris_id else "Imported from NERIS"
 
+    if name == "finalize_incident":
+        num = data.get("incident_number", "")
+        status = data.get("status", "")
+        return f"Finalized incident {num} → {status}"
+
+    if name == "submit_incident":
+        num = data.get("incident_number", "")
+        neris_id = data.get("neris_incident_id", "")
+        return f"Submitted incident {num} (NERIS: {neris_id})" if neris_id else f"Submitted {num}"
+
+    if name == "create_incident":
+        num = data.get("incident_number", "")
+        return f"Created incident {num}"
+
     return json.dumps(data, default=str)[:200]
 
 
