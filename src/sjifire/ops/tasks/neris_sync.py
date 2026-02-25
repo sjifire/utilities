@@ -153,6 +153,24 @@ async def _sync_neris_to_local(summaries: list[dict]) -> int:
             if doc.status != "submitted":
                 continue
 
+            # Skip if the incident was manually reopened after the last
+            # sync approval — the user deliberately unlocked it for edits.
+            # Only re-approve once a new submit_incident call resets the cycle.
+            reopened_after_sync = False
+            for entry in reversed(doc.edit_history):
+                changed = " ".join(entry.fields_changed)
+                if "reopened" in changed:
+                    reopened_after_sync = True
+                    break
+                if entry.editor_email == "system@sjifire.org" and "approved" in changed:
+                    break  # last sync approval is more recent — OK to transition
+            if reopened_after_sync:
+                logger.info(
+                    "Skipping NERIS sync approval for %s — was manually reopened",
+                    doc.id,
+                )
+                continue
+
             doc.status = "approved"
             doc.updated_at = datetime.now(UTC)
             doc.edit_history.append(

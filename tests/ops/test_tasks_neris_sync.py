@@ -338,6 +338,56 @@ class TestSyncNerisToLocal:
         count = await _sync_neris_to_local(summaries)
         assert count == 0
 
+    async def test_skips_reopened_incident(self):
+        """Submitted incident with a 'reopened' history entry is not auto-approved."""
+        from sjifire.ops.incidents.models import EditEntry
+
+        incident = IncidentDocument(
+            id="inc-reopen",
+            incident_number="26-006000",
+            incident_datetime=datetime(2026, 2, 13, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="submitted",
+            neris_incident_id="FD|26006000|444",
+            station="S31",
+            edit_history=[
+                # Sync originally approved it
+                EditEntry(
+                    editor_email="system@sjifire.org",
+                    editor_name="NERIS Sync",
+                    fields_changed=["status:approved"],
+                ),
+                # Officer reopened it for edits
+                EditEntry(
+                    editor_email="chief@sjifire.org",
+                    editor_name="Chief",
+                    fields_changed=["reopened (was approved)"],
+                ),
+                # Finalized again locally
+                EditEntry(
+                    editor_email="chief@sjifire.org",
+                    editor_name="Chief",
+                    fields_changed=["status:submitted"],
+                ),
+            ],
+        )
+        async with IncidentStore() as store:
+            await store.create(incident)
+
+        summaries = [
+            {
+                "neris_id": "FD|26006000|444",
+                "status": "APPROVED",
+                "incident_number": "26-006000",
+            }
+        ]
+        count = await _sync_neris_to_local(summaries)
+
+        assert count == 0
+        async with IncidentStore() as store:
+            doc = await store.get_by_id("inc-reopen")
+        assert doc.status == "submitted"  # NOT auto-approved
+
 
 class TestCheckpoint:
     """Tests for sync checkpoint (high-water mark)."""
