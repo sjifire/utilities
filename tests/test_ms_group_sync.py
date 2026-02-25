@@ -701,15 +701,17 @@ class TestReconcileGhostMembers:
         mock_entra_groups.remove_user_from_group.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_removes_ghost_member_live(self, manager):
-        """Ghost member removed via Graph API in live run."""
+    async def test_removes_ghost_member_live(self, manager, mock_exchange_client):
+        """Ghost member removed via Exchange PowerShell in live run."""
         mock_entra_groups = AsyncMock()
         mock_entra_group = MagicMock()
         mock_entra_group.id = "group-id-1"
         mock_entra_groups.get_group_by_mail_nickname = AsyncMock(return_value=mock_entra_group)
         mock_entra_groups.get_group_members = AsyncMock(return_value=["user-1", "ghost-1"])
-        mock_entra_groups.remove_user_from_group = AsyncMock(return_value=True)
         manager._entra_groups = mock_entra_groups
+
+        mock_exchange_client.remove_distribution_group_member = AsyncMock(return_value=True)
+        manager._exchange_client = mock_exchange_client
 
         active_user = self._make_entra_user("user-1", "Active User", "active@test.org")
         ghost_user = self._make_entra_user(
@@ -727,7 +729,9 @@ class TestReconcileGhostMembers:
         assert len(removed) == 1
         assert "Ghost User (ghost)" in removed
         assert not errors
-        mock_entra_groups.remove_user_from_group.assert_called_once_with("group-id-1", "ghost-1")
+        mock_exchange_client.remove_distribution_group_member.assert_called_once_with(
+            identity="firefighters@test.org", member="ghost-1"
+        )
 
     @pytest.mark.asyncio
     async def test_skips_target_members(self, manager):
@@ -796,15 +800,17 @@ class TestReconcileGhostMembers:
         assert not errors
 
     @pytest.mark.asyncio
-    async def test_reports_removal_failure(self, manager):
+    async def test_reports_removal_failure(self, manager, mock_exchange_client):
         """Failed removal is reported as an error."""
         mock_entra_groups = AsyncMock()
         mock_entra_group = MagicMock()
         mock_entra_group.id = "group-id-1"
         mock_entra_groups.get_group_by_mail_nickname = AsyncMock(return_value=mock_entra_group)
         mock_entra_groups.get_group_members = AsyncMock(return_value=["ghost-1"])
-        mock_entra_groups.remove_user_from_group = AsyncMock(return_value=False)
         manager._entra_groups = mock_entra_groups
+
+        mock_exchange_client.remove_distribution_group_member = AsyncMock(return_value=False)
+        manager._exchange_client = mock_exchange_client
 
         ghost_user = self._make_entra_user(
             "ghost-1", "Ghost User", "ghost@test.org", account_enabled=False

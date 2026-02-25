@@ -601,12 +601,16 @@ class UnifiedGroupSyncManager:
         target_emails: set[str],
         dry_run: bool,
     ) -> tuple[list[str], list[str]]:
-        """Remove ghost members from an Exchange group via Graph API.
+        """Remove ghost members from an Exchange group via PowerShell.
 
         Exchange PowerShell's Get-DistributionGroupMember only returns members
-        with active mailboxes. Disabled users (no mailbox) are invisible to
-        PowerShell but still visible via Graph API. This reconciliation step
-        finds and removes those ghost members.
+        with active mailboxes (PrimarySmtpAddress set). Disabled users (no
+        mailbox) are invisible to the normal sync but still visible via Graph
+        API. This reconciliation step uses Graph API to detect ghosts, then
+        removes them via Exchange PowerShell using their directory object ID.
+
+        Graph API's remove_user_from_group doesn't work for mail-enabled
+        security groups, so we must use Exchange PowerShell for removal.
 
         Args:
             alias: Mail nickname of the group (e.g., "firefighters")
@@ -660,7 +664,11 @@ class UnifiedGroupSyncManager:
                 logger.info(f"Would remove {name} from {email} (ghost member)")
                 removed.append(f"{name} (ghost)")
             else:
-                if await self.entra_groups.remove_user_from_group(entra_group.id, member_id):
+                # Use Exchange PowerShell with the directory object ID
+                # (Graph API can't modify mail-enabled security groups)
+                if await self.exchange_client.remove_distribution_group_member(
+                    identity=email, member=member_id
+                ):
                     logger.info(f"Removed ghost member {name} from {email}")
                     removed.append(f"{name} (ghost)")
                 else:
