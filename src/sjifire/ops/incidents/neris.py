@@ -654,14 +654,21 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     return diff
 
 
-def _build_neris_patch(diff: dict) -> dict:
+def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
     """Convert a diff dict into NERIS patch properties format.
 
     The NERIS API uses discriminated unions at every nesting level.
     Each section (``base``, ``dispatch``) must be wrapped with
     ``{"action": "patch", "properties": {...}}``, and sub-objects like
-    ``base.location`` need the same wrapping.
+    ``base.location`` need the same wrapping.  Each wrapper includes
+    the section's ``neris_uid`` so the API can identify which nested
+    record to patch.
     """
+    neris_record = neris_record or {}
+    neris_base = neris_record.get("base") or {}
+    neris_dispatch = neris_record.get("dispatch") or {}
+    neris_location = neris_base.get("location") or {}
+
     properties: dict = {}
 
     # ── base section ──
@@ -711,16 +718,16 @@ def _build_neris_patch(diff: dict) -> dict:
         }
 
     if base_location_props:
-        base_props["location"] = {
-            "action": "patch",
-            "properties": base_location_props,
-        }
+        loc_action: dict = {"action": "patch", "properties": base_location_props}
+        if neris_location.get("neris_uid") is not None:
+            loc_action["neris_uid"] = neris_location["neris_uid"]
+        base_props["location"] = loc_action
 
     if base_props:
-        properties["base"] = {
-            "action": "patch",
-            "properties": base_props,
-        }
+        base_action: dict = {"action": "patch", "properties": base_props}
+        if neris_base.get("neris_uid") is not None:
+            base_action["neris_uid"] = neris_base["neris_uid"]
+        properties["base"] = base_action
 
     # ── dispatch section ──
     dispatch_props: dict = {}
@@ -792,10 +799,10 @@ def _build_neris_patch(diff: dict) -> dict:
             dispatch_props["unit_responses"] = unit_actions
 
     if dispatch_props:
-        properties["dispatch"] = {
-            "action": "patch",
-            "properties": dispatch_props,
-        }
+        dispatch_action: dict = {"action": "patch", "properties": dispatch_props}
+        if neris_dispatch.get("neris_uid") is not None:
+            dispatch_action["neris_uid"] = neris_dispatch["neris_uid"]
+        properties["dispatch"] = dispatch_action
 
     if "incident_type" in diff:
         properties["incident_types"] = [
@@ -1054,6 +1061,14 @@ async def _apply_neris_import_to_existing(
         doc.state = neris_prefill["state"]
     elif "state" in dispatch_prefill and not doc.state:
         doc.state = dispatch_prefill["state"]
+    if "zip_code" in neris_prefill:
+        doc.zip_code = neris_prefill["zip_code"]
+    elif "zip_code" in dispatch_prefill and not doc.zip_code:
+        doc.zip_code = dispatch_prefill["zip_code"]
+    if "county" in neris_prefill:
+        doc.county = neris_prefill["county"]
+    elif "county" in dispatch_prefill and not doc.county:
+        doc.county = dispatch_prefill["county"]
 
     # Coordinates from dispatch (NERIS doesn't provide these)
     if "latitude" in dispatch_prefill and doc.latitude is None:
@@ -1239,6 +1254,8 @@ async def _create_incident_from_neris(
         "arrival_conditions",
         "outside_fire_cause",
         "outside_fire_acres",
+        "zip_code",
+        "county",
         "people_present",
         "displaced_count",
         "automatic_alarm",
@@ -1276,6 +1293,8 @@ async def _create_incident_from_neris(
         address=merged.get("address"),
         city=merged.get("city", ""),
         state=merged.get("state", ""),
+        zip_code=merged.get("zip_code", ""),
+        county=merged.get("county", ""),
         latitude=merged.get("latitude"),
         longitude=merged.get("longitude"),
         units=units,
@@ -1401,7 +1420,7 @@ async def update_neris_incident(
         }
 
     # 5. Build NERIS patch properties
-    properties = _build_neris_patch(diff)
+    properties = _build_neris_patch(diff, neris_record)
 
     if not properties:
         return {
