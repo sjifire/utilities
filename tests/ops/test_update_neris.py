@@ -8,7 +8,7 @@ import pytest
 
 from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.incidents.models import IncidentDocument, UnitAssignment
-from sjifire.ops.incidents.tools import (
+from sjifire.ops.incidents.neris import (
     _build_neris_diff,
     _build_neris_patch,
     _timestamps_equal,
@@ -435,9 +435,9 @@ class TestBuildNerisPatch:
 class TestUpdateNerisIncident:
     """Integration tests for update_neris_incident tool."""
 
-    @patch("sjifire.ops.incidents.tools._patch_neris_incident")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._patch_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     @patch(
         "sjifire.ops.neris.store.get_cosmos_container", new_callable=AsyncMock, return_value=None
     )
@@ -467,8 +467,8 @@ class TestUpdateNerisIncident:
         assert len(result["fields_updated"]) > 0
         mock_patch_neris.assert_called_once()
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_dry_run_returns_diff_without_patching(
         self,
         mock_store_cls,
@@ -494,8 +494,8 @@ class TestUpdateNerisIncident:
         assert result["neris_id"] == sample_doc.neris_incident_id
         mock_patch.assert_not_called()
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     @patch(
         "sjifire.ops.neris.store.get_cosmos_container", new_callable=AsyncMock, return_value=None
     )
@@ -545,14 +545,14 @@ class TestUpdateNerisIncident:
         result = await update_neris_incident("doc-match")
         assert result["status"] == "no_changes"
 
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_rejects_non_editor(self, mock_store_cls, regular_user):
         """Non-editors should be rejected."""
         result = await update_neris_incident("doc-neris-1")
         assert "error" in result
         assert "not authorized" in result["error"].lower()
 
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_rejects_no_neris_id(self, mock_store_cls, officer_user):
         """Incidents without neris_incident_id should be rejected."""
         doc = IncidentDocument(
@@ -572,8 +572,8 @@ class TestUpdateNerisIncident:
         assert "error" in result
         assert "no linked NERIS record" in result["error"]
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_rejects_approved_neris(
         self, mock_store_cls, mock_get_neris, officer_user, sample_doc
     ):
@@ -594,9 +594,9 @@ class TestUpdateNerisIncident:
         assert "error" in result
         assert "APPROVED" in result["error"]
 
-    @patch("sjifire.ops.incidents.tools._patch_neris_incident")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._patch_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     @patch(
         "sjifire.ops.neris.store.get_cosmos_container", new_callable=AsyncMock, return_value=None
     )
@@ -624,7 +624,7 @@ class TestUpdateNerisIncident:
         assert result["status"] == "updated"
         assert result["fields_updated"] == ["narrative"]
 
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_incident_not_found(self, mock_store_cls, officer_user):
         """Non-existent incident should return error."""
         mock_store = AsyncMock()
@@ -636,8 +636,8 @@ class TestUpdateNerisIncident:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_neris_fetch_failure(
         self, mock_store_cls, mock_get_neris, officer_user, sample_doc
     ):
@@ -653,9 +653,9 @@ class TestUpdateNerisIncident:
         assert "error" in result
         assert "Failed to fetch" in result["error"]
 
-    @patch("sjifire.ops.incidents.tools._patch_neris_incident")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._patch_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     @patch(
         "sjifire.ops.neris.store.get_cosmos_container", new_callable=AsyncMock, return_value=None
     )
@@ -682,9 +682,9 @@ class TestUpdateNerisIncident:
         assert "error" in result
         assert "snapshot_id" in result
 
-    @patch("sjifire.ops.incidents.tools._patch_neris_incident")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._patch_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     @patch(
         "sjifire.ops.neris.store.get_cosmos_container", new_callable=AsyncMock, return_value=None
     )
@@ -721,7 +721,7 @@ class TestPatchNerisIncident:
         """When NERIS client returns a Response object (HTTP error), raise RuntimeError."""
         from unittest.mock import MagicMock
 
-        from sjifire.ops.incidents.tools import _patch_neris_incident
+        from sjifire.ops.incidents.neris import _patch_neris_incident
 
         # Simulate the NERIS client returning a Response object on 422
         mock_response = MagicMock()
@@ -741,7 +741,7 @@ class TestPatchNerisIncident:
         """When NERIS client returns a dict, pass through normally."""
         from unittest.mock import MagicMock
 
-        from sjifire.ops.incidents.tools import _patch_neris_incident
+        from sjifire.ops.incidents.neris import _patch_neris_incident
 
         with patch("sjifire.neris.client.NerisClient") as mock_cls:
             mock_client = MagicMock()

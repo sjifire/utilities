@@ -8,23 +8,25 @@ import pytest
 
 from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.incidents.models import IncidentDocument, PersonnelAssignment, UnitAssignment
-from sjifire.ops.incidents.tools import (
+from sjifire.ops.incidents.neris import (
     _address_from_neris_location,
+    _neris_dispatch_to_cad_number,
+    _parse_neris_record,
+    _prefill_from_neris,
+    finalize_incident,
+    get_neris_incident,
+    import_from_neris,
+    list_neris_incidents,
+)
+from sjifire.ops.incidents.tools import (
     _build_import_comparison,
     _check_edit_access,
     _check_view_access,
     _extract_timestamps,
-    _neris_dispatch_to_cad_number,
-    _parse_neris_record,
     _prefill_from_dispatch,
-    _prefill_from_neris,
     create_incident,
-    finalize_incident,
     get_incident,
-    get_neris_incident,
-    import_from_neris,
     list_incidents,
-    list_neris_incidents,
     reopen_incident,
     reset_incident,
     submit_incident,
@@ -438,7 +440,7 @@ class TestSubmitIncident:
 
 
 class TestListNerisIncidents:
-    @patch("sjifire.ops.incidents.tools._list_neris_incidents")
+    @patch("sjifire.ops.incidents.neris._list_neris_incidents")
     async def test_officer_can_list(self, mock_list, officer_user):
         mock_list.return_value = {
             "incidents": [
@@ -463,7 +465,7 @@ class TestListNerisIncidents:
         assert "error" in result
         assert "not authorized" in result["error"].lower()
 
-    @patch("sjifire.ops.incidents.tools._list_neris_incidents")
+    @patch("sjifire.ops.incidents.neris._list_neris_incidents")
     async def test_handles_api_error(self, mock_list, officer_user):
         mock_list.side_effect = RuntimeError("Connection failed")
 
@@ -473,7 +475,7 @@ class TestListNerisIncidents:
 
 
 class TestGetNerisIncident:
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_officer_can_get(self, mock_get, officer_user):
         mock_get.return_value = {
             "neris_id": "FD53055879|26SJ0001|123",
@@ -490,7 +492,7 @@ class TestGetNerisIncident:
         assert "error" in result
         assert "not authorized" in result["error"].lower()
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_not_found(self, mock_get, officer_user):
         mock_get.return_value = None
 
@@ -498,7 +500,7 @@ class TestGetNerisIncident:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_handles_api_error(self, mock_get, officer_user):
         mock_get.side_effect = RuntimeError("Connection failed")
 
@@ -864,7 +866,7 @@ _SAMPLE_NERIS_RECORD = {
 
 
 class TestPrefillFromNeris:
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_extracts_all_fields(self, mock_get):
         mock_get.return_value = _SAMPLE_NERIS_RECORD
 
@@ -892,7 +894,7 @@ class TestPrefillFromNeris:
         assert result["extras"]["patient_count"] == 1
         assert result["timestamps"]["water_on_fire"] == "2026-01-02T01:42:00+00:00"
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_picks_earliest_unit_timestamps(self, mock_get):
         mock_get.return_value = _SAMPLE_NERIS_RECORD
 
@@ -905,7 +907,7 @@ class TestPrefillFromNeris:
         # first_unit_dispatched is not extracted (only enroute and on_scene)
         assert "first_unit_dispatched" not in result["timestamps"]
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_prefers_base_location_over_dispatch(self, mock_get):
         """base.location is the corrected address; dispatch.location is the original."""
         mock_get.return_value = _SAMPLE_NERIS_RECORD
@@ -915,7 +917,7 @@ class TestPrefillFromNeris:
         # base.location has "94 Zepher", dispatch has "1632 San Juan"
         assert result["address"] == "94 Zepher"
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_falls_back_to_dispatch_location(self, mock_get):
         record = {
             "base": {"location": None},
@@ -937,7 +939,7 @@ class TestPrefillFromNeris:
         assert result["address"] == "200 Spring"
         assert result["city"] == "Friday Harbor"
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_handles_empty_location(self, mock_get):
         record = {
             "base": {"location": {}},
@@ -951,7 +953,7 @@ class TestPrefillFromNeris:
         assert "address" not in result
         assert "city" not in result
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_handles_no_unit_responses(self, mock_get):
         record = {
             "base": {},
@@ -965,7 +967,7 @@ class TestPrefillFromNeris:
         assert "units" not in result
         assert result["incident_type"] == "FIRE||CHIMNEY"
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_handles_no_incident_types(self, mock_get):
         record = {
             "base": {},
@@ -978,7 +980,7 @@ class TestPrefillFromNeris:
 
         assert "incident_type" not in result
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_handles_no_narrative(self, mock_get):
         record = {
             "base": {"outcome_narrative": None},
@@ -991,7 +993,7 @@ class TestPrefillFromNeris:
 
         assert "narrative" not in result
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_returns_empty_on_not_found(self, mock_get):
         mock_get.return_value = None
 
@@ -999,7 +1001,7 @@ class TestPrefillFromNeris:
 
         assert result == {}
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_returns_empty_on_api_error(self, mock_get):
         mock_get.side_effect = RuntimeError("Connection refused")
 
@@ -1007,7 +1009,7 @@ class TestPrefillFromNeris:
 
         assert result == {}
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_handles_missing_dispatch_section(self, mock_get):
         record = {
             "base": {"outcome_narrative": "Test"},
@@ -1533,8 +1535,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_imports_neris_into_existing_draft(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -1569,8 +1571,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_creates_new_incident_from_neris(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -1615,8 +1617,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_returns_comparison_with_discrepancies(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -1674,8 +1676,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_dispatch_timestamps_are_ground_truth(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -1704,7 +1706,7 @@ class TestImportFromNeris:
         # NERIS-only timestamp fills gap
         assert result["timestamps"]["incident_clear"] == "2026-02-12T16:00:00+00:00"
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_error_neris_not_found(self, mock_get_neris, regular_user):
         mock_get_neris.return_value = None
 
@@ -1713,7 +1715,7 @@ class TestImportFromNeris:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
     async def test_error_neris_api_unavailable(self, mock_get_neris, regular_user):
         mock_get_neris.side_effect = RuntimeError("Connection refused")
 
@@ -1724,8 +1726,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_error_submitted_incident(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -1753,8 +1755,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_force_bypasses_locked_status(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -1786,8 +1788,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_access_denied_non_creator_non_officer(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew
     ):
@@ -1817,8 +1819,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_timestamps_merge_dispatch_wins(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -1857,8 +1859,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_edit_history_records_neris_import(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -1888,8 +1890,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_duplicate_incident_number_returns_error(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -1918,8 +1920,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_neris_narrative_overwrites_existing(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -1948,8 +1950,8 @@ class TestImportFromNeris:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_comparison_includes_neris_data_section(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -2355,8 +2357,8 @@ class TestLockedStatusGuards:
 
     @patch("sjifire.ops.incidents.tools._get_crew_for_incident", new_callable=AsyncMock)
     @patch("sjifire.ops.incidents.tools._prefill_from_dispatch")
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_cannot_import_into_approved_incident(
         self, mock_store_cls, mock_get_neris, mock_dispatch, mock_crew, regular_user
     ):
@@ -2450,8 +2452,8 @@ class TestReopenIncident:
 
 # ── Finalize incident ──
 class TestFinalizeIncident:
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_finalize_sets_approved(self, mock_store_cls, mock_get_neris, officer_user):
         doc = IncidentDocument(
             id="doc-finalize-1",
@@ -2477,8 +2479,8 @@ class TestFinalizeIncident:
         assert result["status"] == "approved"
         assert result["edit_history"][-1]["fields_changed"] == ["finalized"]
 
-    @patch("sjifire.ops.incidents.tools._get_neris_incident")
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_finalize_sets_submitted_when_pending(
         self, mock_store_cls, mock_get_neris, officer_user
     ):
@@ -2505,7 +2507,7 @@ class TestFinalizeIncident:
 
         assert result["status"] == "submitted"
 
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_finalize_requires_neris_id(self, mock_store_cls, officer_user):
         doc = IncidentDocument(
             id="doc-finalize-3",
@@ -2531,7 +2533,7 @@ class TestFinalizeIncident:
         assert "error" in result
         assert "not authorized" in result["error"].lower()
 
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_finalize_rejects_already_locked(self, mock_store_cls, officer_user):
         doc = IncidentDocument(
             id="doc-finalize-4",
@@ -2552,7 +2554,7 @@ class TestFinalizeIncident:
         assert "error" in result
         assert "already submitted" in result["error"].lower()
 
-    @patch("sjifire.ops.incidents.tools.IncidentStore")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_finalize_rejects_approved(self, mock_store_cls, officer_user):
         doc = IncidentDocument(
             id="doc-finalize-5",
