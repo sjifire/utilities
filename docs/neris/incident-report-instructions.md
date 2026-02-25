@@ -739,6 +739,8 @@ Reports in `submitted` or `approved` status are **locked** — they cannot be ed
 
 If a user tries to edit a locked report, explain that the report has been submitted/approved and cannot be modified locally. Direct them to the NERIS portal if corrections are needed.
 
+**NERIS report URL**: `https://neris.fsri.org/departments/{fd_id}/incidents/{neris_id_url_encoded}` — the `neris_incident_id` format is `{fd_id}|{incident_num}|{timestamp}`, where pipes (`|`) are URL-encoded as `%7C`. The FD ID is the first segment of the NERIS ID. Example: for NERIS ID `FD53055879|26001927|1770500761`, the URL is `https://neris.fsri.org/departments/FD53055879/incidents/FD53055879%7C26001927%7C1770500761`.
+
 ## Typed Sub-Models and the `extras` Field
 
 The incident model has three typed sub-models for the largest NERIS conditional sections:
