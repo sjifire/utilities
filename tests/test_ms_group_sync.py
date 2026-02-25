@@ -567,6 +567,7 @@ class TestSyncExchangeGroup:
         )
 
         manager._exchange_client = mock_exchange_client
+        manager._reconcile_ghost_members = AsyncMock(return_value=([], []))
 
         strategy = FirefighterStrategy()
         user = self._make_entra_user()
@@ -598,6 +599,7 @@ class TestSyncExchangeGroup:
         )
 
         manager._exchange_client = mock_exchange_client
+        manager._reconcile_ghost_members = AsyncMock(return_value=([], []))
 
         strategy = FirefighterStrategy()
         user = self._make_entra_user()
@@ -622,6 +624,7 @@ class TestSyncExchangeGroup:
         )
 
         manager._exchange_client = mock_exchange_client
+        manager._reconcile_ghost_members = AsyncMock(return_value=([], []))
 
         strategy = FirefighterStrategy()
         user = self._make_entra_user()
@@ -639,6 +642,191 @@ class TestSyncExchangeGroup:
         assert "existing@test.org" in result.members_removed
         # Should not call sync_group
         mock_exchange_client.sync_group.assert_not_called()
+
+
+# =============================================================================
+# Ghost Member Reconciliation Tests
+# =============================================================================
+
+
+class TestReconcileGhostMembers:
+    """Tests for _reconcile_ghost_members method."""
+
+    def _make_entra_user(
+        self,
+        user_id: str = "user-1",
+        display_name: str = "John Doe",
+        email: str = "john@test.org",
+        account_enabled: bool = True,
+    ) -> EntraUser:
+        return EntraUser(
+            id=user_id,
+            display_name=display_name,
+            email=email,
+            upn=email,
+            first_name=display_name.split()[0],
+            last_name=display_name.split()[-1] if " " in display_name else "",
+            account_enabled=account_enabled,
+            employee_id=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_removes_ghost_member_dry_run(self, manager):
+        """Ghost member detected and reported in dry run."""
+        mock_entra_groups = AsyncMock()
+        mock_entra_group = MagicMock()
+        mock_entra_group.id = "group-id-1"
+        mock_entra_groups.get_group_by_mail_nickname = AsyncMock(return_value=mock_entra_group)
+        # Graph sees two members: active user + disabled ghost
+        mock_entra_groups.get_group_members = AsyncMock(return_value=["user-1", "ghost-1"])
+        mock_entra_groups.remove_user_from_group = AsyncMock(return_value=True)
+        manager._entra_groups = mock_entra_groups
+
+        active_user = self._make_entra_user("user-1", "Active User", "active@test.org")
+        ghost_user = self._make_entra_user(
+            "ghost-1", "Ghost User", "ghost@test.org", account_enabled=False
+        )
+        manager._all_users_cache = [active_user, ghost_user]
+
+        removed, errors = await manager._reconcile_ghost_members(
+            alias="firefighters",
+            email="firefighters@test.org",
+            target_emails={"active@test.org"},
+            dry_run=True,
+        )
+
+        assert len(removed) == 1
+        assert "Ghost User (ghost)" in removed
+        assert not errors
+        mock_entra_groups.remove_user_from_group.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_removes_ghost_member_live(self, manager, mock_exchange_client):
+        """Ghost member removed via Exchange PowerShell in live run."""
+        mock_entra_groups = AsyncMock()
+        mock_entra_group = MagicMock()
+        mock_entra_group.id = "group-id-1"
+        mock_entra_groups.get_group_by_mail_nickname = AsyncMock(return_value=mock_entra_group)
+        mock_entra_groups.get_group_members = AsyncMock(return_value=["user-1", "ghost-1"])
+        manager._entra_groups = mock_entra_groups
+
+        mock_exchange_client.remove_distribution_group_member = AsyncMock(return_value=True)
+        manager._exchange_client = mock_exchange_client
+
+        active_user = self._make_entra_user("user-1", "Active User", "active@test.org")
+        ghost_user = self._make_entra_user(
+            "ghost-1", "Ghost User", "ghost@test.org", account_enabled=False
+        )
+        manager._all_users_cache = [active_user, ghost_user]
+
+        removed, errors = await manager._reconcile_ghost_members(
+            alias="firefighters",
+            email="firefighters@test.org",
+            target_emails={"active@test.org"},
+            dry_run=False,
+        )
+
+        assert len(removed) == 1
+        assert "Ghost User (ghost)" in removed
+        assert not errors
+        mock_exchange_client.remove_distribution_group_member.assert_called_once_with(
+            identity="firefighters@test.org", member="ghost-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_skips_target_members(self, manager):
+        """Members in target_emails are not treated as ghosts."""
+        mock_entra_groups = AsyncMock()
+        mock_entra_group = MagicMock()
+        mock_entra_group.id = "group-id-1"
+        mock_entra_groups.get_group_by_mail_nickname = AsyncMock(return_value=mock_entra_group)
+        mock_entra_groups.get_group_members = AsyncMock(return_value=["user-1"])
+        manager._entra_groups = mock_entra_groups
+
+        active_user = self._make_entra_user("user-1", "Active User", "active@test.org")
+        manager._all_users_cache = [active_user]
+
+        removed, errors = await manager._reconcile_ghost_members(
+            alias="firefighters",
+            email="firefighters@test.org",
+            target_emails={"active@test.org"},
+            dry_run=False,
+        )
+
+        assert not removed
+        assert not errors
+
+    @pytest.mark.asyncio
+    async def test_skips_service_account(self, manager):
+        """Service account is never removed as a ghost."""
+        mock_entra_groups = AsyncMock()
+        mock_entra_group = MagicMock()
+        mock_entra_group.id = "group-id-1"
+        mock_entra_groups.get_group_by_mail_nickname = AsyncMock(return_value=mock_entra_group)
+        mock_entra_groups.get_group_members = AsyncMock(return_value=["svc-1"])
+        manager._entra_groups = mock_entra_groups
+
+        svc_user = self._make_entra_user("svc-1", "Service Account", "service@test.org")
+        manager._all_users_cache = [svc_user]
+
+        with patch(
+            "sjifire.scripts.ms_group_sync.get_service_email", return_value="service@test.org"
+        ):
+            removed, errors = await manager._reconcile_ghost_members(
+                alias="firefighters",
+                email="firefighters@test.org",
+                target_emails=set(),
+                dry_run=False,
+            )
+
+        assert not removed
+        assert not errors
+
+    @pytest.mark.asyncio
+    async def test_no_group_in_entra(self, manager):
+        """Returns empty if group not found in Entra ID."""
+        mock_entra_groups = AsyncMock()
+        mock_entra_groups.get_group_by_mail_nickname = AsyncMock(return_value=None)
+        manager._entra_groups = mock_entra_groups
+
+        removed, errors = await manager._reconcile_ghost_members(
+            alias="nonexistent",
+            email="nonexistent@test.org",
+            target_emails=set(),
+            dry_run=False,
+        )
+
+        assert not removed
+        assert not errors
+
+    @pytest.mark.asyncio
+    async def test_reports_removal_failure(self, manager, mock_exchange_client):
+        """Failed removal is reported as an error."""
+        mock_entra_groups = AsyncMock()
+        mock_entra_group = MagicMock()
+        mock_entra_group.id = "group-id-1"
+        mock_entra_groups.get_group_by_mail_nickname = AsyncMock(return_value=mock_entra_group)
+        mock_entra_groups.get_group_members = AsyncMock(return_value=["ghost-1"])
+        manager._entra_groups = mock_entra_groups
+
+        mock_exchange_client.remove_distribution_group_member = AsyncMock(return_value=False)
+        manager._exchange_client = mock_exchange_client
+
+        ghost_user = self._make_entra_user(
+            "ghost-1", "Ghost User", "ghost@test.org", account_enabled=False
+        )
+        manager._all_users_cache = [ghost_user]
+
+        removed, errors = await manager._reconcile_ghost_members(
+            alias="firefighters",
+            email="firefighters@test.org",
+            target_emails=set(),
+            dry_run=False,
+        )
+
+        assert not removed
+        assert len(errors) == 1
+        assert "Failed to remove ghost member" in errors[0]
 
 
 # =============================================================================

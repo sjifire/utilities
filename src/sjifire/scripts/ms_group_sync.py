@@ -127,6 +127,7 @@ class UnifiedGroupSyncManager:
         self._entra_users: EntraUserManager | None = None
         self._exchange_client: ExchangeOnlineClient | None = None
         self._entra_users_cache: list[EntraUser] | None = None
+        self._all_users_cache: list[EntraUser] | None = None
 
     @property
     def entra_groups(self) -> EntraGroupManager:
@@ -164,6 +165,17 @@ class UnifiedGroupSyncManager:
             ]
             logger.info(f"Loaded {len(self._entra_users_cache)} Entra users for group sync")
         return self._entra_users_cache
+
+    async def get_all_entra_users(self) -> list[EntraUser]:
+        """Get all Entra users including disabled (cached).
+
+        Used for ghost member reconciliation where we need to map user IDs
+        to emails for disabled accounts that PowerShell can't see.
+        """
+        if self._all_users_cache is None:
+            self._all_users_cache = await self.entra_users.get_users(include_disabled=True)
+            logger.info(f"Loaded {len(self._all_users_cache)} Entra users (including disabled)")
+        return self._all_users_cache
 
     async def _add_service_account_to_group(self, group_id: str) -> bool:
         """Add service account to an M365 group for delegated calendar auth.
@@ -582,6 +594,88 @@ class UnifiedGroupSyncManager:
             errors=errors,
         )
 
+    async def _reconcile_ghost_members(
+        self,
+        alias: str,
+        email: str,
+        target_emails: set[str],
+        dry_run: bool,
+    ) -> tuple[list[str], list[str]]:
+        """Remove ghost members from an Exchange group via PowerShell.
+
+        Exchange PowerShell's Get-DistributionGroupMember only returns members
+        with active mailboxes (PrimarySmtpAddress set). Disabled users (no
+        mailbox) are invisible to the normal sync but still visible via Graph
+        API. This reconciliation step uses Graph API to detect ghosts, then
+        removes them via Exchange PowerShell using their directory object ID.
+
+        Graph API's remove_user_from_group doesn't work for mail-enabled
+        security groups, so we must use Exchange PowerShell for removal.
+
+        Args:
+            alias: Mail nickname of the group (e.g., "firefighters")
+            email: Full email of the group (e.g., "firefighters@sjifire.org")
+            target_emails: Set of lowercase emails that should be in the group
+            dry_run: If True, only log what would be done
+
+        Returns:
+            Tuple of (removed display names, error messages)
+        """
+        removed: list[str] = []
+        errors: list[str] = []
+
+        # Look up the group's Entra ID
+        entra_group = await self.entra_groups.get_group_by_mail_nickname(alias)
+        if not entra_group:
+            logger.debug(f"Ghost reconciliation: group {email} not found in Entra ID")
+            return removed, errors
+
+        # Get all member IDs from Graph API (sees disabled users too)
+        graph_member_ids = set(await self.entra_groups.get_group_members(entra_group.id))
+        if not graph_member_ids:
+            return removed, errors
+
+        # Build ID→user lookup from all users (including disabled)
+        all_users = await self.get_all_entra_users()
+        users_by_id = {u.id: u for u in all_users}
+
+        # Service account should never be removed
+        service_email = get_service_email().lower()
+
+        for member_id in graph_member_ids:
+            user = users_by_id.get(member_id)
+            if not user:
+                continue  # Unknown directory object (service principal, etc.)
+
+            user_email = (user.email or "").lower()
+
+            # If this member's email is in the target set, they belong — keep them
+            if user_email in target_emails:
+                continue
+
+            # Skip service account
+            if user_email == service_email:
+                continue
+
+            # This member is in Graph but not in the target list — ghost member
+            name = user.display_name or user_email or member_id
+
+            if dry_run:
+                logger.info(f"Would remove {name} from {email} (ghost member)")
+                removed.append(f"{name} (ghost)")
+            else:
+                # Use Exchange PowerShell with the directory object ID
+                # (Graph API can't modify mail-enabled security groups)
+                if await self.exchange_client.remove_distribution_group_member(
+                    identity=email, member=member_id
+                ):
+                    logger.info(f"Removed ghost member {name} from {email}")
+                    removed.append(f"{name} (ghost)")
+                else:
+                    errors.append(f"Failed to remove ghost member {name} from {email}")
+
+        return removed, errors
+
     async def _sync_exchange_group(
         self,
         strategy: GroupStrategy,
@@ -676,6 +770,15 @@ class UnifiedGroupSyncManager:
                 logger.info(f"Would remove {member_email} from {email}")
                 removed.append(member_email)
 
+            # Reconcile ghost members (disabled users invisible to PowerShell)
+            ghost_removed, ghost_errors = await self._reconcile_ghost_members(
+                alias=alias,
+                email=email,
+                target_emails=target_set,
+                dry_run=True,
+            )
+            removed.extend(ghost_removed)
+
             return GroupSyncResult(
                 group_name=display_name,
                 group_email=email,
@@ -683,7 +786,7 @@ class UnifiedGroupSyncManager:
                 created=False,
                 members_added=added,
                 members_removed=removed,
-                errors=[],
+                errors=ghost_errors,
             )
 
         # SINGLE CONNECTION: Do everything in one PowerShell call
@@ -727,14 +830,25 @@ class UnifiedGroupSyncManager:
                 domain=self.domain,
             )
 
+        # Reconcile ghost members (disabled users invisible to PowerShell)
+        ghost_removed, ghost_errors = await self._reconcile_ghost_members(
+            alias=alias,
+            email=email,
+            target_emails=set(target_emails),
+            dry_run=False,
+        )
+
+        all_removed = result.get("removed", []) + ghost_removed
+        all_errors = result.get("errors", []) + ghost_errors
+
         return GroupSyncResult(
             group_name=display_name,
             group_email=email,
             group_type=GroupType.EXCHANGE,
             created=creating,
             members_added=added,
-            members_removed=result.get("removed", []),
-            errors=result.get("errors", []),
+            members_removed=all_removed,
+            errors=all_errors,
         )
 
     async def sync(
