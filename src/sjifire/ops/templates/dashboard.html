@@ -137,7 +137,24 @@
       border-radius: 2px;
       background: var(--color-blue);
     }
-    .report-status.locked { color: var(--text-dim); font-size: 12px; }
+    /* ── Severity dot (call priority indicator) ── */
+    .dot-cell { width: 12px; padding-right: 0 !important; }
+    .severity-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border-medium);
+    }
+    .severity-dot.high   { background: var(--color-red); }
+    .severity-dot.medium { background: var(--color-amber-dark); }
+    .severity-dot.low    { background: var(--color-green); }
+
+    /* ── Report status badges ── */
+    .report-status { font-size: 12px; font-weight: 600; }
+    .report-status.neris   { color: var(--color-green); }
+    .report-status.local   { color: var(--color-blue); text-transform: capitalize; }
+    .report-status.locked  { color: var(--text-dim); }
+    .report-status.missing { color: var(--color-amber-dark); }
     .call-id { font-family: monospace; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
     .nature  { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
     .address { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
