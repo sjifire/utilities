@@ -7,6 +7,7 @@ that callers using ``incident_tools.import_from_neris`` etc. continue to work.
 
 import asyncio
 import contextlib
+import html
 import logging
 from datetime import UTC, datetime
 
@@ -288,7 +289,7 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
     base = rec.base
     if base:
         if base.outcome_narrative:
-            prefill["narrative"] = base.outcome_narrative
+            prefill["narrative"] = html.unescape(base.outcome_narrative)
         if base.location_use and base.location_use.use_type:
             prefill["location_use"] = base.location_use.use_type
         if base.people_present is not None:
@@ -300,7 +301,7 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
         if base.animals_rescued is not None:
             extras["animals_rescued"] = base.animals_rescued
         if base.impediment_narrative:
-            extras["impediment_narrative"] = base.impediment_narrative
+            extras["impediment_narrative"] = html.unescape(base.impediment_narrative)
 
     # ── Location — prefer base.location (corrected), fall back to dispatch ──
     loc = _getattr_path(rec, "base.location")
@@ -338,7 +339,7 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
         if neris_comments:
             notes = []
             for c in neris_comments:
-                text = c.get("comment", "").strip()
+                text = html.unescape(c.get("comment", "")).strip()
                 ts = c.get("timestamp") or ""
                 if text:
                     notes.append(DispatchNote(timestamp=str(ts), text=text))
@@ -615,8 +616,8 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     base = neris_record.get("base") or {}
     dispatch = neris_record.get("dispatch") or {}
 
-    # Narrative
-    neris_narrative = base.get("outcome_narrative") or ""
+    # Narrative (NERIS HTML-encodes text — decode for comparison)
+    neris_narrative = html.unescape(base.get("outcome_narrative") or "")
     if doc.narrative and doc.narrative != neris_narrative:
         diff["narrative"] = {"local": doc.narrative, "neris": neris_narrative}
 
