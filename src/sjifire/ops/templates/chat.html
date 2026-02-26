@@ -240,6 +240,17 @@
     .msg.assistant.streaming-msg {
       overflow: visible;  /* Allow element to grow during streaming so scroll container tracks height */
     }
+    .msg.user.queued-msg {
+      opacity: 0.6;
+      position: relative;
+    }
+    .queued-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      opacity: 0.7;
+      margin-top: 4px;
+    }
     .msg.assistant p             { margin-bottom: 8px; }
     .msg.assistant p:last-child  { margin-bottom: 0; }
     .msg.assistant strong        { color: var(--text-primary); }
@@ -1256,6 +1267,19 @@
       <div class="msg assistant streaming-msg" x-ref="streamingMsg" x-html="renderMarkdown(currentText, true)"
            x-effect="if (!_userScrolledAway) { _programmaticScroll = true; $el.scrollIntoView({block: 'end', behavior: 'instant'}); requestAnimationFrame(() => { _programmaticScroll = false; }); }"></div>
     </template>
+
+    <!-- Queued user messages (shown below streaming, sent after current turn) -->
+    <template x-for="(qm, qi) in _messageQueue" :key="'q'+qi">
+      <div class="msg user queued-msg">
+        <div class="msg-images" x-show="qm.images && qm.images.length">
+          <template x-for="(img, j) in (qm.images || [])" :key="j">
+            <img :src="img.dataUrl">
+          </template>
+        </div>
+        <div x-text="qm.displayText"></div>
+        <div class="queued-label">Queued</div>
+      </div>
+    </template>
   </div>
 
   <!-- Quick action chips -->
@@ -1455,7 +1479,7 @@ function chatApp() {
     _programmaticScroll: false,
     _centrifuge: null,
     _subscription: null,
-    _queuedMessage: null,
+    _messageQueue: [],
     _turnCount: 0,
     // Multi-user state
     currentUserEmail: '{{ user_email }}',
@@ -1904,15 +1928,15 @@ function chatApp() {
 
       const displayText = text || '(Attached photo)';
 
-      // If already streaming, queue the message for after the current turn completes.
-      // Do NOT push to this.messages yet — the assistant's streaming text hasn't been
-      // finalized, so appending now would place the user message before the assistant
-      // response in the display array. The queued message is shown after `done` fires.
+      // If already streaming, queue for send after current turn completes.
+      // The message is rendered below the streaming bubble from _messageQueue
+      // so the user sees it immediately (like Claude Code CLI).
       if (this.streaming) {
-        this._queuedMessage = {displayText, images};
+        this._messageQueue.push({displayText, images});
         this.inputText = '';
         this.pendingImages = [];
         if (this.$refs.input) this.$refs.input.style.height = 'auto';
+        this.scrollToBottom(true);
         return;
       }
 
@@ -2185,12 +2209,11 @@ function chatApp() {
         // so the messages container height is correct before scrolling.
         this.$nextTick(() => this.scrollToBottom(true));
 
-        // Send queued message if user typed while we were streaming.
-        // Push to display array NOW (after assistant text is finalized above)
-        // so the user message appears in the correct order.
-        if (this._queuedMessage) {
-          const queued = this._queuedMessage;
-          this._queuedMessage = null;
+        // Send next queued message if user typed while we were streaming.
+        // Move it from the queue into the messages array (after finalized
+        // assistant text) so it appears in the correct chronological order.
+        if (this._messageQueue.length) {
+          const queued = this._messageQueue.shift();
           const msgObj = {type: 'message', role: 'user', content: queued.displayText};
           if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
           this.messages.push(msgObj);
@@ -2220,6 +2243,18 @@ function chatApp() {
         this._setTurnActive(false);
         this.turnHolder = null;  // Turn lock released on error too
         this.$nextTick(() => this.scrollToBottom(true));
+
+        // Process queued messages even after errors
+        if (this._messageQueue.length) {
+          const queued = this._messageQueue.shift();
+          const msgObj = {type: 'message', role: 'user', content: queued.displayText};
+          if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
+          this.messages.push(msgObj);
+          this.$nextTick(() => {
+            this.scrollToBottom(true);
+            this._sendViaRPC(queued.displayText, queued.images);
+          });
+        }
       }
     }
   };
