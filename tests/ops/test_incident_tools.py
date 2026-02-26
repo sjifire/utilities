@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from sjifire.core.config import to_utc_iso
 from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.incidents.models import (
     AlarmInfo,
@@ -17,11 +18,13 @@ from sjifire.ops.incidents.models import (
 )
 from sjifire.ops.incidents.neris import (
     _address_from_neris_location,
+    _build_neris_patch,
     _build_unit_from_neris,
     _getattr_path,
     _merge_sub_model,
     _neris_dispatch_to_cad_number,
     _parse_neris_record,
+    _parse_timestamp,
     _prefill_from_neris,
     finalize_incident,
     get_neris_incident,
@@ -588,8 +591,9 @@ class TestExtractTimestamps:
             {"status": "On Scene", "time_of_status_change": "2026-02-12T14:40:00"},
         ]
         result = _extract_timestamps(details)
-        assert result["first_unit_enroute"] == "2026-02-12T14:32:00"
-        assert result["first_unit_arrived"] == "2026-02-12T14:40:00"
+        # Naive Pacific timestamps are converted to UTC (PST = UTC-8)
+        assert result["first_unit_enroute"] == "2026-02-12T22:32:00+00:00"
+        assert result["first_unit_arrived"] == "2026-02-12T22:40:00+00:00"
 
     def test_uses_first_of_each_status(self):
         details = [
@@ -599,7 +603,7 @@ class TestExtractTimestamps:
             {"status": "Enroute", "time_of_status_change": "2026-02-12T14:33:00"},
         ]
         result = _extract_timestamps(details)
-        assert result["first_unit_enroute"] == "2026-02-12T14:32:00"
+        assert result["first_unit_enroute"] == "2026-02-12T22:32:00+00:00"
 
     def test_dispatch_without_agency_unit_ignored(self):
         """Dispatch status without SJF3/SJF2 unit is not captured as alarm_time."""
@@ -950,7 +954,8 @@ class TestPrefillFromNeris:
         assert result["state"] == "WA"
         assert result["location_use"] == "OUTDOOR||WATERFRONT"
         assert len(result["units"]) == 2
-        assert result["units"][0].unit_id == "FD53055879S001U005"
+        # Units sorted by enroute: U000 (01:15:00) before U005 (01:15:52)
+        assert result["units"][0].unit_id == "FD53055879S001U000"
         assert result["timestamps"]["psap_answer"] == "2026-01-02T01:12:41+00:00"
         assert result["timestamps"]["incident_clear"] == "2026-01-02T02:16:31+00:00"
         # New fields from expanded extraction
@@ -2235,13 +2240,17 @@ class TestParseNerisRecord:
     def test_extracts_unit_staged_and_canceled(self):
         result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
 
-        # First unit has staging time
-        assert result["units"][0].staged == "2026-01-02T01:35:00+00:00"
-        # Second unit has no staging
-        assert result["units"][1].staged == ""
-        # Staffing in comments
-        assert "Staffing: 1" in result["units"][0].comment
-        assert "Staffing: 4" in result["units"][1].comment
+        # Units are sorted by enroute time: U000 (01:15:00) before U005 (01:15:52)
+        u000 = next(u for u in result["units"] if "Staffing: 4" in u.comment)
+        u005 = next(u for u in result["units"] if "Staffing: 1" in u.comment)
+
+        # U005 has staging time, U000 does not
+        assert u005.staged == "2026-01-02T01:35:00+00:00"
+        assert u000.staged == ""
+
+        # U000 enroute is earlier, so it should be first
+        assert result["units"][0] == u000
+        assert result["units"][1] == u005
 
     def test_extracts_electric_hazard_types(self):
         result = _parse_neris_record(_SAMPLE_NERIS_RECORD, "FD|X|Y")
@@ -2912,3 +2921,200 @@ class TestFinalizeIncident:
 
         assert "error" in result
         assert "already approved" in result["error"].lower()
+
+
+class TestToUtcIso:
+    """Tests for _to_utc_iso — naive local timestamps converted to UTC."""
+
+    def test_naive_pacific_converted_to_utc(self):
+        """A naive timestamp (Pacific local) is converted to UTC (+8h in winter)."""
+        # 1:46 PM Pacific = 9:46 PM UTC (PST = UTC-8)
+        result = to_utc_iso("2026-02-07T13:46:01")
+        dt = datetime.fromisoformat(result)
+        assert dt.tzinfo is not None
+        assert dt.hour == 21  # 13 + 8 = 21 UTC
+        assert dt.minute == 46
+        assert dt.second == 1
+
+    def test_aware_utc_passes_through(self):
+        """Already-UTC timestamps pass through unchanged."""
+        result = to_utc_iso("2026-02-07T21:46:01+00:00")
+        dt = datetime.fromisoformat(result)
+        assert dt.hour == 21
+        assert dt.minute == 46
+
+    def test_aware_pacific_converted_to_utc(self):
+        """Aware Pacific timestamps are converted to UTC."""
+        result = to_utc_iso("2026-02-07T13:46:01-08:00")
+        dt = datetime.fromisoformat(result)
+        assert dt.hour == 21
+
+    def test_empty_string_passes_through(self):
+        """Empty string returns empty string."""
+        assert to_utc_iso("") == ""
+
+    def test_unparseable_passes_through(self):
+        """Unparseable strings are returned as-is."""
+        assert to_utc_iso("not-a-date") == "not-a-date"
+
+
+class TestParseTimestamp:
+    """Tests for _parse_timestamp — naive assumed local, aware preserved."""
+
+    def test_naive_gets_local_tz(self):
+        dt = _parse_timestamp("2026-02-07T13:46:01")
+        assert dt is not None
+        assert dt.tzinfo is not None
+        # Should be Pacific timezone
+        assert "Pacific" in str(dt.tzinfo) or "America/Los_Angeles" in str(dt.tzinfo)
+
+    def test_aware_utc_preserved(self):
+        dt = _parse_timestamp("2026-02-07T21:46:01+00:00")
+        assert dt is not None
+        assert dt.hour == 21
+
+    def test_invalid_returns_none(self):
+        assert _parse_timestamp("garbage") is None
+        assert _parse_timestamp("") is None
+
+
+class TestBuildNerisPatchTimezoneConversion:
+    """Tests that _build_neris_patch converts naive timestamps to UTC."""
+
+    def test_dispatch_timestamps_converted(self):
+        """Naive local timestamps in diff are converted to UTC in patch."""
+        diff = {
+            "timestamps": {
+                "local": {
+                    "psap_answer": "2026-02-07T13:46:01",  # 1:46 PM Pacific
+                    "incident_clear": "2026-02-07T15:30:00",  # 3:30 PM Pacific
+                },
+                "neris": {
+                    "call_create": "2026-02-07T21:46:01+00:00",
+                    "incident_clear": "",
+                },
+            }
+        }
+        neris_record = {"dispatch": {"neris_uid": "abc123"}, "base": {}}
+        patch = _build_neris_patch(diff, neris_record)
+
+        dispatch_props = patch["dispatch"]["properties"]
+
+        # psap_answer → call_create should be UTC
+        call_create = dispatch_props["call_create"]["value"]
+        dt = datetime.fromisoformat(call_create)
+        assert dt.hour == 21  # 13 + 8
+
+        # incident_clear should also be UTC
+        inc_clear = dispatch_props["incident_clear"]["value"]
+        dt2 = datetime.fromisoformat(inc_clear)
+        assert dt2.hour == 23  # 15 + 8
+
+    def test_unit_timestamps_converted(self):
+        """Per-unit timestamps are converted to UTC."""
+        diff = {
+            "units": {
+                "local": {
+                    "E31.enroute": "2026-02-07T13:50:00",
+                    "E31.on_scene": "2026-02-07T14:00:10",
+                },
+                "neris": {
+                    "E31.enroute": "",
+                    "E31.on_scene": "",
+                },
+                "neris_uids": {"E31": "unit-uid-1"},
+            }
+        }
+        neris_record = {"dispatch": {"neris_uid": "d123"}, "base": {}}
+        patch = _build_neris_patch(diff, neris_record)
+
+        unit_actions = patch["dispatch"]["properties"]["unit_responses"]
+        assert len(unit_actions) == 1
+
+        props = unit_actions[0]["properties"]
+        enroute_val = props["enroute_to_scene"]["value"]
+        dt = datetime.fromisoformat(enroute_val)
+        assert dt.hour == 21  # 13 + 8
+
+        on_scene_val = props["on_scene"]["value"]
+        dt2 = datetime.fromisoformat(on_scene_val)
+        assert dt2.hour == 22  # 14 + 8
+
+    def test_new_unit_timestamps_converted(self):
+        """New unit (append) timestamps are converted to UTC."""
+        diff = {
+            "units": {
+                "local": {
+                    "M31.dispatch": "2026-02-07T13:46:01",
+                },
+                "neris": {
+                    "M31.dispatch": "",
+                },
+                "neris_uids": {},  # No neris_uid → append
+            }
+        }
+        neris_record = {"dispatch": {"neris_uid": "d123"}, "base": {}}
+        patch = _build_neris_patch(diff, neris_record)
+
+        unit_actions = patch["dispatch"]["properties"]["unit_responses"]
+        assert len(unit_actions) == 1
+        assert unit_actions[0]["action"] == "append"
+        val = unit_actions[0]["value"]
+        dt = datetime.fromisoformat(val["dispatch"])
+        assert dt.hour == 21  # 13 + 8
+
+
+class TestUnitOrdering:
+    """Tests that units are sorted by enroute time."""
+
+    def test_neris_units_sorted_by_enroute(self):
+        """_parse_neris_record sorts units by enroute_to_scene."""
+        record = {
+            "dispatch": {
+                "unit_responses": [
+                    {
+                        "reported_unit_id": "M31",
+                        "enroute_to_scene": "2026-02-07T14:00:00+00:00",
+                        "dispatch": "2026-02-07T13:55:00+00:00",
+                    },
+                    {
+                        "reported_unit_id": "E31",
+                        "enroute_to_scene": "2026-02-07T13:50:00+00:00",
+                        "dispatch": "2026-02-07T13:48:00+00:00",
+                    },
+                    {
+                        "reported_unit_id": "BN31",
+                        "enroute_to_scene": "2026-02-07T13:52:00+00:00",
+                        "dispatch": "2026-02-07T13:50:00+00:00",
+                    },
+                ],
+            },
+            "incident_types": [{"type": "MEDICAL"}],
+        }
+        result = _parse_neris_record(record, "FD|X|Y")
+        units = result["units"]
+        assert [u.unit_id for u in units] == ["E31", "BN31", "M31"]
+
+    def test_units_without_enroute_sorted_last(self):
+        """Units missing enroute_to_scene fall back to dispatch time."""
+        record = {
+            "dispatch": {
+                "unit_responses": [
+                    {
+                        "reported_unit_id": "POV",
+                        "dispatch": "2026-02-07T14:10:00+00:00",
+                    },
+                    {
+                        "reported_unit_id": "E31",
+                        "enroute_to_scene": "2026-02-07T13:50:00+00:00",
+                        "dispatch": "2026-02-07T13:48:00+00:00",
+                    },
+                ],
+            },
+            "incident_types": [],
+        }
+        result = _parse_neris_record(record, "FD|X|Y")
+        units = result["units"]
+        # E31 has enroute, POV only has dispatch — E31 first
+        assert units[0].unit_id == "E31"
+        assert units[1].unit_id == "POV"

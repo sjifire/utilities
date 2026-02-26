@@ -15,7 +15,7 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 
-from sjifire.core.config import get_org_config, get_timezone
+from sjifire.core.config import get_org_config, get_timezone, to_utc_iso
 from sjifire.ops.auth import check_is_editor, get_current_user
 from sjifire.ops.incidents.models import (
     ALARM_INFO_KEYS,
@@ -47,11 +47,15 @@ def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
     - First "Enroute" → first_unit_enroute
     - First "On Scene" → first_unit_arrived
 
+    Timestamps are converted to UTC ISO format at extraction time so
+    that naive local timestamps (from iSpyFire) are never stored
+    without timezone context.
+
     Args:
         responder_details: List of responder status dicts from dispatch
 
     Returns:
-        Dict of NERIS timestamp field → ISO datetime string
+        Dict of NERIS timestamp field → UTC ISO datetime string
     """
     timestamps: dict[str, str] = {}
     status_map = {
@@ -69,18 +73,20 @@ def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
         # Agency page (SJF3 or SJF2 paged) → alarm_time
         if status in ("Dispatch", "Dispatched", "Paged") and unit in ("SJF3", "SJF2"):
             if "alarm_time" not in timestamps:
-                timestamps["alarm_time"] = str(time_str)
+                timestamps["alarm_time"] = to_utc_iso(str(time_str))
             continue
 
         neris_field = status_map.get(status)
         if neris_field and neris_field not in timestamps:
-            timestamps[neris_field] = str(time_str)
+            timestamps[neris_field] = to_utc_iso(str(time_str))
 
     return timestamps
 
 
 def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, str]]:
     """Extract per-unit timestamps from dispatch responder details.
+
+    Timestamps are converted to UTC ISO format at extraction time.
 
     Returns a dict of unit_id → {dispatch, enroute, on_scene, cleared, ...}.
     """
@@ -114,7 +120,7 @@ def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, st
             unit_times[unit] = {}
         # Keep earliest time for each field
         if field not in unit_times[unit]:
-            unit_times[unit][field] = str(time_str)
+            unit_times[unit][field] = to_utc_iso(str(time_str))
 
     return unit_times
 
@@ -164,16 +170,18 @@ async def _prefill_from_dispatch(incident_number: str) -> dict:
     # Extract incident-level timestamps from responder details
     ts = _extract_timestamps(dispatch.responder_details)
     if dispatch.time_reported:
-        ts["psap_answer"] = dispatch.time_reported.isoformat()
+        ts["psap_answer"] = to_utc_iso(dispatch.time_reported.isoformat())
     if ts:
         prefill["timestamps"] = ts
 
-    # Extract per-unit timestamps to build unit shells
+    # Extract per-unit timestamps to build unit shells, sorted by enroute time
     unit_times = _extract_unit_times(dispatch.responder_details)
     if unit_times:
         units = []
         for unit_id, times in unit_times.items():
             units.append(UnitAssignment(unit_id=unit_id, **times))
+        # Sort by enroute time (earliest first), falling back to dispatch time
+        units.sort(key=lambda u: u.enroute or u.dispatch or "\xff")
         prefill["units"] = units
 
     # Snapshot dispatch comments (plain string from iSpyFire JoinedComments)

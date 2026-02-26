@@ -303,7 +303,7 @@ class TestBuildNerisPatch:
         assert patch["dispatch"]["action"] == "patch"
         assert patch["dispatch"]["properties"]["call_create"] == {
             "action": "set",
-            "value": "2026-02-20T10:30:00Z",
+            "value": "2026-02-20T10:30:00+00:00",
         }
 
     def test_address_patch(self):
@@ -337,7 +337,7 @@ class TestBuildNerisPatch:
         assert actions[0]["action"] == "patch"
         assert actions[0]["properties"]["dispatch"] == {
             "action": "set",
-            "value": "2026-02-20T10:31:00Z",
+            "value": "2026-02-20T10:31:00+00:00",
         }
 
     def test_first_unit_dispatched_skipped(self):
@@ -376,7 +376,7 @@ class TestBuildNerisPatch:
         assert actions[0]["neris_uid"] == 99
         assert actions[0]["properties"]["staging"] == {
             "action": "set",
-            "value": "2026-02-20T10:35:00Z",
+            "value": "2026-02-20T10:35:00+00:00",
         }
 
     def test_unit_append_when_no_neris_uid(self):
@@ -401,8 +401,8 @@ class TestBuildNerisPatch:
         assert actions[0]["action"] == "append"
         payload = actions[0]["value"]
         assert payload["reported_unit_id"] == "E33"
-        assert payload["staging"] == "2026-02-20T10:43:54Z"
-        assert payload["on_scene"] == "2026-02-20T10:50:00Z"
+        assert payload["staging"] == "2026-02-20T10:43:54+00:00"
+        assert payload["on_scene"] == "2026-02-20T10:50:00+00:00"
 
     def test_unit_mixed_patch_and_append(self):
         """Mix of existing (patch) and new (append) units in one diff."""

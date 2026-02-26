@@ -10,7 +10,7 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 
-from sjifire.core.config import get_org_config, get_timezone
+from sjifire.core.config import get_org_config, get_timezone, to_utc_iso
 from sjifire.ops.auth import check_is_editor, get_current_user
 from sjifire.ops.incidents.models import (
     AlarmInfo,
@@ -277,7 +277,12 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
     if dispatch:
         neris_units = dispatch.unit_responses or []
         if neris_units:
-            prefill["units"] = [_build_unit_from_neris(u) for u in neris_units]
+            # Sort units by enroute time (earliest first) for consistent ordering
+            sorted_units = sorted(
+                neris_units,
+                key=lambda u: u.enroute_to_scene or u.dispatch or "\xff",
+            )
+            prefill["units"] = [_build_unit_from_neris(u) for u in sorted_units]
         if dispatch.automatic_alarm is not None:
             prefill["automatic_alarm"] = dispatch.automatic_alarm
         if dispatch.call_create:
@@ -739,14 +744,14 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
         if "psap_answer" in ts_local:
             dispatch_props["call_create"] = {
                 "action": "set",
-                "value": ts_local["psap_answer"],
+                "value": to_utc_iso(ts_local["psap_answer"]),
             }
         # first_unit_dispatched is a read-only computed field in NERIS
         # (derived from earliest unit dispatch time) — not patchable.
         if "incident_clear" in ts_local:
             dispatch_props["incident_clear"] = {
                 "action": "set",
-                "value": ts_local["incident_clear"],
+                "value": to_utc_iso(ts_local["incident_clear"]),
             }
 
     if "automatic_alarm" in diff:
@@ -783,7 +788,7 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
                 # Existing unit — patch its timestamp fields
                 unit_props = {}
                 for field_name, field_val in fields.items():
-                    unit_props[field_name] = {"action": "set", "value": field_val}
+                    unit_props[field_name] = {"action": "set", "value": to_utc_iso(field_val)}
                 unit_actions.append(
                     {
                         "neris_uid": neris_uid,
@@ -793,7 +798,9 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
                 )
             else:
                 # New unit not in NERIS — append with full payload
-                payload = {"reported_unit_id": unit_id, **fields}
+                payload = {"reported_unit_id": unit_id}
+                for k, v in fields.items():
+                    payload[k] = to_utc_iso(v)
                 unit_actions.append(
                     {
                         "action": "append",

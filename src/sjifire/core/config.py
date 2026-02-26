@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -374,3 +374,26 @@ def local_now() -> datetime:
     date/time after 4 PM Pacific.
     """
     return datetime.now(get_timezone())
+
+
+def to_utc_iso(val: str) -> str:
+    """Convert a timestamp string to UTC ISO format.
+
+    iSpyFire dispatch timestamps are naive strings in the org's local
+    timezone (e.g. ``"2026-02-07T13:46:01"`` for 1:46 PM Pacific).
+    NERIS and other external systems interpret bare timestamps as UTC,
+    so we must convert before sending.
+
+    - Naive timestamps → treated as local timezone → converted to UTC
+    - Already-aware timestamps → converted to UTC
+    - Empty or unparseable strings → returned as-is
+    """
+    if not val:
+        return val
+    try:
+        dt = datetime.fromisoformat(val)
+    except (ValueError, TypeError):
+        return val
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=get_timezone())
+    return dt.astimezone(UTC).isoformat()
