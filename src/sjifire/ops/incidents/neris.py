@@ -34,20 +34,16 @@ _LOCKED_STATUSES = {"submitted", "approved"}
 # Ephemeral cache: NERIS unit ID → local CAD designation (e.g. FD53055879S001U000 → E31).
 # Rebuilt from NERIS entity API on first use; lost on restart (acceptable).
 _neris_unit_map: dict[str, str] = {}
+# Case-insensitive canonical names: lowercase → uppercase CAD designation.
+# Built from the NERIS entity's cad_designation_1 values so that "Ops31"
+# and "OPS31" both resolve to the same canonical name without hardcoding.
+_cad_canonical: dict[str, str] = {}
 
 
-def _resolve_neris_unit_id(neris_unit_id: str) -> str:
-    """Map a NERIS unit ID to local CAD designation, fetching entity data if needed.
-
-    Falls back to the raw NERIS ID if the mapping isn't available
-    (e.g. credentials not set, API unreachable).
-    """
-    if not neris_unit_id:
-        return neris_unit_id
+def _load_neris_unit_maps() -> None:
+    """Populate unit maps from the NERIS entity API (once per process)."""
     if _neris_unit_map:
-        return _neris_unit_map.get(neris_unit_id, neris_unit_id)
-
-    # Try to populate the map from the NERIS entity API
+        return
     try:
         from sjifire.neris.client import NerisClient
 
@@ -58,13 +54,36 @@ def _resolve_neris_unit_id(neris_unit_id: str) -> str:
                 uid = unit.get("neris_id", "")
                 cad = unit.get("cad_designation_1", "")
                 if uid and cad:
-                    _neris_unit_map[uid] = cad
+                    _neris_unit_map[uid] = cad.upper()
+                    _cad_canonical[cad.lower()] = cad.upper()
         logger.info("Loaded %d NERIS unit mappings", len(_neris_unit_map))
     except Exception:
         logger.debug("Could not load NERIS unit mappings", exc_info=True)
-        return neris_unit_id
 
+
+def _resolve_neris_unit_id(neris_unit_id: str) -> str:
+    """Map a NERIS unit ID to local CAD designation, fetching entity data if needed.
+
+    Falls back to the raw NERIS ID if the mapping isn't available
+    (e.g. credentials not set, API unreachable).
+    """
+    if not neris_unit_id:
+        return neris_unit_id
+    _load_neris_unit_maps()
     return _neris_unit_map.get(neris_unit_id, neris_unit_id)
+
+
+def _normalize_unit_id(unit_id: str) -> str:
+    """Normalize a unit ID to canonical uppercase form.
+
+    Uses the NERIS entity's cad_designation_1 values as the source of truth,
+    so "Ops31" → "OPS31", "b31" → "B31", etc. Falls back to uppercase
+    if the unit isn't in the entity.
+    """
+    if not unit_id:
+        return unit_id
+    _load_neris_unit_maps()
+    return _cad_canonical.get(unit_id.lower(), unit_id.upper())
 
 
 def _neris_dispatch_to_cad_number(neris_dispatch: dict) -> str:
@@ -197,7 +216,7 @@ def _build_unit_from_neris(u: NerisUnitResponse) -> UnitAssignment:
     """Convert a NERIS unit response to a local UnitAssignment."""
     raw_id = u.reported_unit_id or _resolve_neris_unit_id(u.unit_neris_id or "")
     unit = UnitAssignment(
-        unit_id=raw_id,
+        unit_id=_normalize_unit_id(raw_id),
         response_mode=u.response_mode or "",
         dispatch=u.dispatch or "",
         enroute=u.enroute_to_scene or "",
@@ -209,6 +228,33 @@ def _build_unit_from_neris(u: NerisUnitResponse) -> UnitAssignment:
     if u.staffing is not None:
         unit.comment = f"Staffing: {u.staffing}"
     return unit
+
+
+def _dedup_units(units: list[UnitAssignment]) -> list[UnitAssignment]:
+    """Merge units with the same unit_id, keeping the earliest non-empty timestamp for each field.
+
+    NERIS records sometimes have duplicate entries for the same unit — e.g.,
+    one with a ``reported_unit_id`` and another with a ``unit_neris_id`` that
+    resolve to the same canonical ID.  Merging avoids duplicate rows.
+    """
+    seen: dict[str, UnitAssignment] = {}
+    ts_fields = ("dispatch", "enroute", "staged", "on_scene", "cleared", "canceled")
+    for unit in units:
+        key = unit.unit_id
+        if key not in seen:
+            seen[key] = unit
+            continue
+        existing = seen[key]
+        for field in ts_fields:
+            new_val = getattr(unit, field, "")
+            cur_val = getattr(existing, field, "")
+            if new_val and (not cur_val or new_val < cur_val):
+                setattr(existing, field, new_val)
+        if not existing.response_mode and unit.response_mode:
+            existing.response_mode = unit.response_mode
+        if not existing.comment and unit.comment:
+            existing.comment = unit.comment
+    return list(seen.values())
 
 
 def _parse_neris_record(record: dict, neris_id: str) -> dict:
@@ -283,7 +329,9 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
                 neris_units,
                 key=lambda u: u.enroute_to_scene or u.dispatch or "\xff",
             )
-            prefill["units"] = [_build_unit_from_neris(u) for u in sorted_units]
+            prefill["units"] = _dedup_units(
+                [_build_unit_from_neris(u) for u in sorted_units]
+            )
         if dispatch.automatic_alarm is not None:
             prefill["automatic_alarm"] = dispatch.automatic_alarm
 
@@ -600,6 +648,20 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     if doc.county and doc.county != neris_county:
         diff["county"] = {"local": doc.county, "neris": neris_county}
 
+    # Dispatch incident number (CAD number)
+    neris_dispatch_num = dispatch.get("dispatch_incident_number") or ""
+    neris_incident_num = dispatch.get("incident_number") or ""
+    if doc.incident_number:
+        local_normalized = doc.incident_number.replace("-", "")
+        neris_disp_normalized = neris_dispatch_num.replace("-", "")
+        neris_inc_normalized = neris_incident_num.replace("-", "")
+        # Diff if neither NERIS field matches our local dispatch number
+        if local_normalized != neris_disp_normalized and local_normalized != neris_inc_normalized:
+            diff["dispatch_incident_number"] = {
+                "local": doc.incident_number,
+                "neris": neris_dispatch_num or neris_incident_num,
+            }
+
     # Dispatch-level timestamps
     ts_map = {
         "psap_answer": ("call_create", dispatch),
@@ -618,7 +680,9 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     neris_units = dispatch.get("unit_responses") or []
     neris_unit_map_local: dict[str, dict] = {}
     for nu in neris_units:
-        uid = nu.get("reported_unit_id") or _resolve_neris_unit_id(nu.get("unit_neris_id", ""))
+        uid = _normalize_unit_id(
+            nu.get("reported_unit_id") or _resolve_neris_unit_id(nu.get("unit_neris_id", ""))
+        )
         if uid:
             neris_unit_map_local[uid] = nu
 
@@ -665,16 +729,25 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     if doc.automatic_alarm is not None and doc.automatic_alarm != neris_auto_alarm:
         diff["automatic_alarm"] = {"local": doc.automatic_alarm, "neris": neris_auto_alarm}
 
-    # Dispatch comments — find local notes not yet in NERIS
+    # Dispatch comments — find local notes not yet in NERIS.
+    # Match by timestamp (not text) because NERIS redacts PII in
+    # comment text (phone numbers, names → "************").
     if doc.dispatch_notes:
         neris_comments = dispatch.get("comments") or []
-        neris_comment_texts = {c.get("comment", "").strip().lower() for c in neris_comments}
+        neris_comment_timestamps: set[str] = set()
+        for c in neris_comments:
+            ts = c.get("timestamp") or ""
+            if ts:
+                neris_comment_timestamps.add(ts)
 
         new_notes = []
         for note in doc.dispatch_notes:
-            # Match by text content (case-insensitive) — timestamp format may differ
-            note_text = f"[{note.unit}] {note.text}" if note.unit else note.text
-            if note_text.strip().lower() not in neris_comment_texts:
+            if not note.timestamp:
+                new_notes.append(note)
+                continue
+            # Normalize local timestamp to UTC for comparison
+            local_utc = to_utc_iso(note.timestamp)
+            if local_utc not in neris_comment_timestamps:
                 new_notes.append(note)
 
         if new_notes:
@@ -784,6 +857,13 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
                 "action": "set",
                 "value": to_utc_iso(ts_local["incident_clear"]),
             }
+
+    if "dispatch_incident_number" in diff:
+        # NERIS patch model uses "incident_number" (not "dispatch_incident_number")
+        dispatch_props["incident_number"] = {
+            "action": "set",
+            "value": diff["dispatch_incident_number"]["local"],
+        }
 
     if "automatic_alarm" in diff:
         dispatch_props["automatic_alarm"] = {
@@ -1453,15 +1533,8 @@ async def update_neris_incident(
     if not neris_record:
         return {"error": f"NERIS record not found: {doc.neris_incident_id}"}
 
-    # 3. Check NERIS status — return status data if APPROVED (locked)
+    # 3. Check NERIS status
     neris_status = (neris_record.get("incident_status") or {}).get("status", "")
-    if neris_status == "APPROVED":
-        return {
-            "status": "neris_locked",
-            "neris_id": doc.neris_incident_id,
-            "neris_status": "APPROVED",
-            "message": "NERIS record is approved and locked. No corrections needed.",
-        }
 
     # 4. Build diff between local and NERIS
     diff = _build_neris_diff(doc, neris_record)
@@ -1477,15 +1550,25 @@ async def update_neris_incident(
             "neris_id": doc.neris_incident_id,
         }
 
+    approved_warning = ""
+    if neris_status == "APPROVED":
+        approved_warning = (
+            " WARNING: This NERIS record is APPROVED. Pushing changes will "
+            "overwrite the approved record. Confirm with the user before proceeding."
+        )
+
     if dry_run:
-        return {
+        result = {
             "status": "dry_run",
             "neris_id": doc.neris_incident_id,
             "neris_status": neris_status,
             "diff": diff,
             "fields_available": list(diff.keys()),
-            "message": f"{len(diff)} field(s) differ between local and NERIS.",
+            "message": f"{len(diff)} field(s) differ between local and NERIS.{approved_warning}",
         }
+        if neris_status == "APPROVED":
+            result["approved_warning"] = True
+        return result
 
     # 5. Build NERIS patch properties
     properties = _build_neris_patch(diff, neris_record)
@@ -1525,11 +1608,11 @@ async def update_neris_incident(
         patch_result = await asyncio.to_thread(
             _patch_neris_incident, doc.neris_incident_id, properties
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to patch NERIS incident %s", doc.neris_incident_id)
         return {
-            "error": "Failed to update NERIS record. The snapshot was saved — "
-            "no data was lost. Try again later.",
+            "error": f"Failed to update NERIS record: {exc}. "
+            "The snapshot was saved — no data was lost.",
             "snapshot_id": snapshot_doc.id,
         }
 
