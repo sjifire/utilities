@@ -12,6 +12,7 @@ NERIS-specific functions (parsing, diffing, patching, import/export) live in
 
 import asyncio
 import contextlib
+import html
 import logging
 import re
 from datetime import UTC, datetime
@@ -149,6 +150,8 @@ def _parse_cad_comments(cad_comments: str, call_ts: str = "") -> list[DispatchNo
     if not cad_comments:
         return []
 
+    # iSpyFire stores HTML-encoded text (e.g. &#x27; for apostrophes)
+    cad_comments = html.unescape(cad_comments)
     lines = cad_comments.split("\n")
     notes: list[DispatchNote] = []
     current_ts = call_ts
@@ -211,7 +214,7 @@ def _extract_dispatch_notes(responder_details: list[dict]) -> list[DispatchNote]
     for detail in responder_details:
         if detail.get("status") != "NOTE":
             continue
-        text = detail.get("radio_log", "").strip()
+        text = html.unescape(detail.get("radio_log", "")).strip()
         ts = detail.get("time_of_status_change", "")
         unit = detail.get("unit_number", "")
         if text:
@@ -291,9 +294,10 @@ async def _prefill_from_dispatch(incident_number: str) -> dict:
         units.sort(key=lambda u: u.enroute or u.dispatch or "\xff")
         prefill["units"] = units
 
-    # Snapshot dispatch comments (plain string from iSpyFire JoinedComments)
+    # Snapshot dispatch comments (plain string from iSpyFire JoinedComments).
+    # iSpyFire HTML-encodes text (&#x27; for apostrophes, etc.) — decode here.
     if dispatch.cad_comments:
-        prefill["dispatch_comments"] = dispatch.cad_comments
+        prefill["dispatch_comments"] = html.unescape(dispatch.cad_comments)
 
     # Extract individual NOTE entries for NERIS dispatch.comments
     notes = _extract_dispatch_notes(dispatch.responder_details)
