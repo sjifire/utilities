@@ -358,7 +358,8 @@ TOOL_SCHEMAS: list[dict] = [
         "description": (
             "Get the crew on duty for a specific date and time. Uses shift-change "
             "logic: if target_hour is before the shift change (e.g. 18:00), returns "
-            "the previous day's crew who were still on duty."
+            "the previous day's crew who were still on duty. Pass include_admin=true "
+            "when the user asks about admin or office staff."
         ),
         "input_schema": {
             "type": "object",
@@ -370,6 +371,11 @@ TOOL_SCHEMAS: list[dict] = [
                 "target_hour": {
                     "type": "integer",
                     "description": "Hour of day (0-23) for shift-change-aware lookup",
+                },
+                "include_admin": {
+                    "type": "boolean",
+                    "description": "Include admin/office staff (default false)",
+                    "default": False,
                 },
             },
         },
@@ -676,6 +682,7 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         return await schedule_tools.get_on_duty_crew(
             target_date=tool_input.get("target_date"),
             target_hour=tool_input.get("target_hour"),
+            include_admin=tool_input.get("include_admin", False),
         )
 
     if name == "get_neris_values":
@@ -806,7 +813,8 @@ GENERAL_TOOL_SCHEMAS: list[dict] = [
         "description": (
             "Get the crew on duty for a specific date and time. Uses shift-change "
             "logic: if target_hour is before the shift change (e.g. 18:00), returns "
-            "the previous day's crew who were still on duty."
+            "the previous day's crew who were still on duty. Pass include_admin=true "
+            "when the user asks about admin or office staff."
         ),
         "input_schema": {
             "type": "object",
@@ -818,6 +826,11 @@ GENERAL_TOOL_SCHEMAS: list[dict] = [
                 "target_hour": {
                     "type": "integer",
                     "description": "Hour of day (0-23) for shift-change-aware lookup",
+                },
+                "include_admin": {
+                    "type": "boolean",
+                    "description": "Include admin/office staff (default false)",
+                    "default": False,
                 },
             },
         },
@@ -937,6 +950,7 @@ async def _dispatch_general(name: str, tool_input: dict) -> dict:
         return await schedule_tools.get_on_duty_crew(
             target_date=tool_input.get("target_date"),
             target_hour=tool_input.get("target_hour"),
+            include_admin=tool_input.get("include_admin", False),
         )
 
     if name == "get_neris_values":
