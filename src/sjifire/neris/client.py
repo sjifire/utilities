@@ -5,7 +5,6 @@ import os
 from typing import Self
 
 from neris_api_client import Config, GrantType, NerisApiClient
-from neris_api_client.models import TypeIncidentStatusPayloadValue
 
 from sjifire.core.config import get_org_config
 
@@ -313,44 +312,3 @@ class NerisClient:
         logger.info(f"Patching incident {neris_id_incident}")
         return self.api.patch_incident(neris_id, neris_id_incident, body)
 
-    def approve_incident(
-        self,
-        neris_id_incident: str,
-        *,
-        neris_id: str | None = None,
-    ) -> dict:
-        """Approve an incident (transition from PENDING_APPROVAL to APPROVED).
-
-        Args:
-            neris_id_incident: Full incident NERIS ID
-            neris_id: Entity ID (defaults to configured entity)
-
-        Returns:
-            Updated incident response
-        """
-        neris_id = neris_id or self.entity_id
-        logger.info(f"Approving incident {neris_id_incident}")
-        return self.api.update_incident_status(
-            neris_id, neris_id_incident, TypeIncidentStatusPayloadValue.APPROVED
-        )
-
-    def reject_incident(
-        self,
-        neris_id_incident: str,
-        *,
-        neris_id: str | None = None,
-    ) -> dict:
-        """Reject an incident.
-
-        Args:
-            neris_id_incident: Full incident NERIS ID
-            neris_id: Entity ID (defaults to configured entity)
-
-        Returns:
-            Updated incident response
-        """
-        neris_id = neris_id or self.entity_id
-        logger.info(f"Rejecting incident {neris_id_incident}")
-        return self.api.update_incident_status(
-            neris_id, neris_id_incident, TypeIncidentStatusPayloadValue.REJECTED
-        )

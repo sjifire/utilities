@@ -13,6 +13,7 @@ NERIS-specific functions (parsing, diffing, patching, import/export) live in
 import asyncio
 import contextlib
 import logging
+import re
 from datetime import UTC, datetime
 
 from sjifire.core.config import get_org_config, get_timezone, to_utc_iso
@@ -125,6 +126,73 @@ def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, st
     return unit_times
 
 
+# Pattern for CAD comment timestamps like "18:56:01 02/02/2026 - M Rennick"
+_CAD_TIMESTAMP_RE = re.compile(
+    r"^(\d{1,2}:\d{2}:\d{2}\s+\d{1,2}/\d{1,2}/\d{4})\s*-\s*(.+)$"
+)
+
+
+def _parse_cad_comments(cad_comments: str, call_ts: str = "") -> list[DispatchNote]:
+    """Split a CAD comments blob into individual timestamped notes.
+
+    The iSpyFire ``cad_comments`` field joins all dispatcher comments
+    with newlines.  Timestamped entries look like::
+
+        18:56:01 02/02/2026 - M Rennick
+        2 calls from on site. advise false alarm.
+        18:57:30 02/02/2026 - M Rennick
+        good codes from on site per alarm company
+
+    Lines before the first timestamp are the initial caller narrative.
+
+    Returns one ``DispatchNote`` per timestamp block, plus an initial
+    note for the caller narrative (if present).
+    """
+    if not cad_comments:
+        return []
+
+    lines = cad_comments.split("\n")
+    notes: list[DispatchNote] = []
+    current_ts = call_ts
+    current_lines: list[str] = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        match = _CAD_TIMESTAMP_RE.match(line)
+        if match:
+            # Flush previous block
+            if current_lines:
+                notes.append(DispatchNote(
+                    timestamp=current_ts,
+                    text=" ".join(current_lines),
+                ))
+                current_lines = []
+
+            # Parse timestamp: "18:56:01 02/02/2026" → ISO format
+            raw_ts = match.group(1).strip()
+            try:
+                dt = datetime.strptime(raw_ts, "%H:%M:%S %m/%d/%Y")
+                tz = get_timezone()
+                dt = dt.replace(tzinfo=tz)
+                current_ts = dt.isoformat()
+            except ValueError:
+                current_ts = raw_ts
+        else:
+            current_lines.append(line)
+
+    # Flush final block
+    if current_lines:
+        notes.append(DispatchNote(
+            timestamp=current_ts,
+            text=" ".join(current_lines),
+        ))
+
+    return notes
+
+
 def _extract_dispatch_notes(responder_details: list[dict]) -> list[DispatchNote]:
     """Extract individual NOTE entries from dispatch responder details.
 
@@ -228,19 +296,16 @@ async def _prefill_from_dispatch(incident_number: str) -> dict:
     # Extract individual NOTE entries for NERIS dispatch.comments
     notes = _extract_dispatch_notes(dispatch.responder_details)
 
-    # Prepend the caller narrative (cad_comments) as the first note
-    # using the call reported time as timestamp
+    # Parse cad_comments into individual timestamped notes.
+    # The cad_comments blob contains multiple dispatcher entries
+    # separated by timestamp lines; split them so each gets its
+    # own NERIS dispatch.comment entry.
     if dispatch.cad_comments:
         caller_ts = ""
         if dispatch.time_reported:
             caller_ts = dispatch.time_reported.isoformat()
-        notes.insert(
-            0,
-            DispatchNote(
-                timestamp=caller_ts,
-                text=dispatch.cad_comments.replace("\n", " ").strip(),
-            ),
-        )
+        cad_notes = _parse_cad_comments(dispatch.cad_comments, call_ts=caller_ts)
+        notes = cad_notes + notes
 
     if notes:
         prefill["dispatch_notes"] = notes
