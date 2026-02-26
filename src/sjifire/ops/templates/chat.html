@@ -1904,17 +1904,15 @@ function chatApp() {
 
       const displayText = text || '(Attached photo)';
 
-      // If already streaming, queue the message for after completion
+      // If already streaming, queue the message for after the current turn completes.
+      // Do NOT push to this.messages yet — the assistant's streaming text hasn't been
+      // finalized, so appending now would place the user message before the assistant
+      // response in the display array. The queued message is shown after `done` fires.
       if (this.streaming) {
         this._queuedMessage = {displayText, images};
         this.inputText = '';
         this.pendingImages = [];
         if (this.$refs.input) this.$refs.input.style.height = 'auto';
-        // Show queued message in chat immediately
-        const msgObj = {type: 'message', role: 'user', content: displayText};
-        if (images.length) msgObj.images = images.map(img => img.dataUrl);
-        this.messages.push(msgObj);
-        this.scrollToBottom(true);
         return;
       }
 
@@ -2187,11 +2185,19 @@ function chatApp() {
         // so the messages container height is correct before scrolling.
         this.$nextTick(() => this.scrollToBottom(true));
 
-        // Send queued message if user typed while we were streaming
+        // Send queued message if user typed while we were streaming.
+        // Push to display array NOW (after assistant text is finalized above)
+        // so the user message appears in the correct order.
         if (this._queuedMessage) {
           const queued = this._queuedMessage;
           this._queuedMessage = null;
-          this.$nextTick(() => this._sendViaRPC(queued.displayText, queued.images));
+          const msgObj = {type: 'message', role: 'user', content: queued.displayText};
+          if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
+          this.messages.push(msgObj);
+          this.$nextTick(() => {
+            this.scrollToBottom(true);
+            this._sendViaRPC(queued.displayText, queued.images);
+          });
           return;
         }
         // Auto-retry message that was blocked by turn lock (409)
