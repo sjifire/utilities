@@ -16,37 +16,43 @@ MAX_TIMESTAMPS = 30
 MAX_EDIT_HISTORY = 200
 
 # Keys belonging to each sub-model — used for lazy migration and routing
-FIRE_DETAIL_KEYS = frozenset({
-    "fire_cause_in",
-    "fire_bldg_damage",
-    "room_of_origin",
-    "floor_of_origin",
-    "fire_progression_evident",
-    "water_supply",
-    "fire_investigation",
-    "fire_investigation_types",
-    "suppression_appliances",
-})
+FIRE_DETAIL_KEYS = frozenset(
+    {
+        "fire_cause_in",
+        "fire_bldg_damage",
+        "room_of_origin",
+        "floor_of_origin",
+        "fire_progression_evident",
+        "water_supply",
+        "fire_investigation",
+        "fire_investigation_types",
+        "suppression_appliances",
+    }
+)
 
-ALARM_INFO_KEYS = frozenset({
-    "smoke_alarm_presence",
-    "smoke_alarm_types",
-    "smoke_alarm_operation",
-    "smoke_alarm_occupant_action",
-    "fire_alarm_presence",
-    "sprinkler_presence",
-})
+ALARM_INFO_KEYS = frozenset(
+    {
+        "smoke_alarm_presence",
+        "smoke_alarm_types",
+        "smoke_alarm_operation",
+        "smoke_alarm_occupant_action",
+        "fire_alarm_presence",
+        "sprinkler_presence",
+    }
+)
 
-HAZARD_INFO_KEYS = frozenset({
-    "electric_hazards",
-    "csst_present",
-    "csst_lightning_suspected",
-    "csst_grounded",
-    "solar_present",
-    "battery_ess_present",
-    "generator_present",
-    "powergen_type",
-})
+HAZARD_INFO_KEYS = frozenset(
+    {
+        "electric_hazards",
+        "csst_present",
+        "csst_lightning_suspected",
+        "csst_grounded",
+        "solar_present",
+        "battery_ess_present",
+        "generator_present",
+        "powergen_type",
+    }
+)
 
 
 class FireDetail(BaseModel):

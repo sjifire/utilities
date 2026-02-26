@@ -147,8 +147,7 @@ async def _sync_neris_to_local(summaries: list[dict]) -> int:
 
             if doc.status != "approved":
                 logger.info(
-                    "NERIS %s is APPROVED but local %s is '%s' — "
-                    "awaiting manual chief review",
+                    "NERIS %s is APPROVED but local %s is '%s' — awaiting manual chief review",
                     neris_id,
                     doc.incident_number,
                     doc.status,

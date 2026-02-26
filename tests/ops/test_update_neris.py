@@ -852,7 +852,9 @@ class TestDispatchCommentsDiff:
             created_by="chief@sjifire.org",
             neris_incident_id="FD53055879|26001927|1770500761",
             dispatch_notes=[
-                DispatchNote(timestamp="2026-02-07T13:45:45", unit="DISPATCH", text="Possible chimney fire"),
+                DispatchNote(
+                    timestamp="2026-02-07T13:45:45", unit="DISPATCH", text="Possible chimney fire"
+                ),
                 DispatchNote(timestamp="2026-02-07T13:48:35", unit="E31", text="w/4"),
             ],
         )

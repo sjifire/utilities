@@ -103,8 +103,15 @@ def _group_action_codes(codes: list[str]) -> list[tuple[str, list[str]]]:
 
 
 _RANK_PREFIXES = [
-    "Battalion Chief", "Division Chief", "Assistant Chief", "Fire Chief",
-    "Chief", "Captain", "Lieutenant", "Firefighter", "EMT",
+    "Battalion Chief",
+    "Division Chief",
+    "Assistant Chief",
+    "Fire Chief",
+    "Chief",
+    "Captain",
+    "Lieutenant",
+    "Firefighter",
+    "EMT",
 ]
 
 
@@ -114,7 +121,7 @@ def _strip_rank(name: str) -> str:
         return name
     for prefix in _RANK_PREFIXES:
         if name.startswith(prefix + " "):
-            return name[len(prefix) + 1:]
+            return name[len(prefix) + 1 :]
     return name
 
 
@@ -147,9 +154,7 @@ def _sort_timestamps(timestamps: dict) -> list[tuple[str, str]]:
     if not timestamps:
         return []
     items = [
-        (_TS_LABELS.get(k, k.replace("_", " ").title()), v)
-        for k, v in timestamps.items()
-        if v
+        (_TS_LABELS.get(k, k.replace("_", " ").title()), v) for k, v in timestamps.items() if v
     ]
     items.sort(key=lambda pair: pair[1])
     return items
