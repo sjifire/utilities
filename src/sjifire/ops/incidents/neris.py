@@ -167,6 +167,18 @@ def _timestamps_equal(a: str, b: str) -> bool:
     return dt_a == dt_b
 
 
+def _sanitize_for_neris(text: str) -> str:
+    """Prepare text for the NERIS API to avoid HTML entity encoding.
+
+    NERIS HTML-encodes certain characters on storage (e.g. ``'`` → ``&#x27;``).
+    Replace them with visually identical Unicode alternatives that pass through
+    without encoding.
+    """
+    # ASCII apostrophe / single quote → Modifier Letter Apostrophe (U+02BC)
+    # Looks identical in all fonts, avoids &#x27; encoding.
+    return text.replace("'", "\u02bc")
+
+
 def _getattr_path(obj, path: str):
     """Resolve dotted attribute path, returning None if any segment is None."""
     for part in path.split("."):
@@ -616,8 +628,9 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     base = neris_record.get("base") or {}
     dispatch = neris_record.get("dispatch") or {}
 
-    # Narrative (NERIS HTML-encodes text — decode for comparison)
-    neris_narrative = html.unescape(base.get("outcome_narrative") or "")
+    # Narrative (NERIS HTML-encodes text — decode for comparison;
+    # also normalize modifier apostrophe U+02BC back to ASCII for matching)
+    neris_narrative = html.unescape(base.get("outcome_narrative") or "").replace("\u02bc", "'")
     if doc.narrative and doc.narrative != neris_narrative:
         diff["narrative"] = {"local": doc.narrative, "neris": neris_narrative}
 
@@ -794,7 +807,7 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
     if "narrative" in diff:
         base_props["outcome_narrative"] = {
             "action": "set",
-            "value": diff["narrative"]["local"],
+            "value": _sanitize_for_neris(diff["narrative"]["local"]),
         }
 
     if "address" in diff:
@@ -938,7 +951,8 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
         comment_actions = []
         for note in diff["dispatch_comments"]["local"]:
             # Format: "[UNIT] text" with unit prefix, UTC timestamp
-            comment_text = f"[{note.unit}] {note.text}" if note.unit else note.text
+            raw_text = f"[{note.unit}] {note.text}" if note.unit else note.text
+            comment_text = _sanitize_for_neris(raw_text)
             comment_payload: dict = {"comment": comment_text}
             if note.timestamp:
                 comment_payload["timestamp"] = to_utc_iso(note.timestamp)
