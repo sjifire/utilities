@@ -732,7 +732,19 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     # Dispatch comments — find local notes not yet in NERIS.
     # Match by timestamp (not text) because NERIS redacts PII in
     # comment text (phone numbers, names → "************").
-    if doc.dispatch_notes:
+    #
+    # Re-parse dispatch_comments blob if it produces more granular
+    # entries than the stored dispatch_notes (fixes old single-blob imports).
+    notes_to_diff = doc.dispatch_notes
+    if doc.dispatch_comments:
+        from sjifire.ops.incidents.tools import _parse_cad_comments
+
+        call_ts = doc.timestamps.get("psap_answer", "")
+        reparsed = _parse_cad_comments(doc.dispatch_comments, call_ts=call_ts)
+        if len(reparsed) > len(notes_to_diff):
+            notes_to_diff = reparsed
+
+    if notes_to_diff:
         neris_comments = dispatch.get("comments") or []
         neris_comment_timestamps: set[str] = set()
         for c in neris_comments:
@@ -741,7 +753,7 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
                 neris_comment_timestamps.add(ts)
 
         new_notes = []
-        for note in doc.dispatch_notes:
+        for note in notes_to_diff:
             if not note.timestamp:
                 new_notes.append(note)
                 continue
@@ -1622,6 +1634,20 @@ async def update_neris_incident(
         doc.neris_incident_id,
         list(diff.keys()),
     )
+
+    # If dispatch comments were pushed, update local dispatch_notes
+    # to the split format so future diffs don't re-push.
+    if "dispatch_comments" in diff and doc.dispatch_comments:
+        from sjifire.ops.incidents.tools import _parse_cad_comments
+
+        call_ts = doc.timestamps.get("psap_answer", "")
+        reparsed = _parse_cad_comments(doc.dispatch_comments, call_ts=call_ts)
+        if len(reparsed) > len(doc.dispatch_notes):
+            doc.dispatch_notes = reparsed
+            doc.updated_at = datetime.now(UTC)
+            async with IncidentStore() as store:
+                await store.update(doc)
+            logger.info("Updated local dispatch_notes to split format for %s", doc.id)
 
     return {
         "status": "updated",
