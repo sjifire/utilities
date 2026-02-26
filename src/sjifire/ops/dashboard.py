@@ -449,6 +449,9 @@ def _build_template_context(
                 "incident_id": report.get("incident_id", "") if report else "",
                 "completeness": completeness,
                 "is_locked": is_locked,
+                "neris_export_declined": (
+                    report.get("neris_export_declined", False) if report else False
+                ),
                 "report_label": report_label,
                 "report_prompt": report_prompt,
                 "report_status": report.get("status", "").replace("_", " ") if report else "",
@@ -1303,6 +1306,8 @@ async def _fetch_incidents(user_email: str, is_editor: bool) -> dict[str, dict]:
             "status": doc.status,
             "completeness": doc.completeness(),
             "incident_id": doc.id,
+            "neris_id": doc.neris_incident_id or "",
+            "neris_export_declined": bool(doc.extras.get("neris_export_declined")),
         }
     return lookup
 

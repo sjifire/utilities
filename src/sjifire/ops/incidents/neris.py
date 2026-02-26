@@ -1545,18 +1545,21 @@ async def update_neris_incident(
     }
 
 
-async def finalize_incident(incident_id: str) -> dict:
-    """Lock a locally-imported NERIS incident based on its current NERIS status.
+async def finalize_incident(incident_id: str, *, skip_neris: bool = False) -> dict:
+    """Lock an incident report.
 
-    Fetches the current NERIS record status and sets the local incident to
-    ``approved`` (if NERIS status is APPROVED) or ``submitted`` (otherwise).
-    The incident must have a ``neris_incident_id`` and be in an editable
-    status (not already locked).
+    When the incident has a ``neris_incident_id``, fetches the current NERIS
+    record status and sets the local incident to ``submitted``.
+
+    When ``skip_neris`` is True (or the incident has no NERIS ID), locks the
+    report locally without NERIS and records that the export was declined.
 
     Only editors can finalize incidents.
 
     Args:
         incident_id: The incident document ID
+        skip_neris: If True, close the report without NERIS export.
+            Sets ``extras.neris_export_declined = True``.
 
     Returns:
         The updated incident document, or an error
@@ -1576,31 +1579,35 @@ async def finalize_incident(incident_id: str) -> dict:
         if doc is None:
             return {"error": "Incident not found"}
 
-        if not doc.neris_incident_id:
-            return {
-                "error": "Cannot finalize — this incident has no NERIS ID. "
-                "Import from NERIS first using import_from_neris."
-            }
-
         if doc.status in _LOCKED_STATUSES:
             return {
                 "error": f"Incident is already {doc.status} and locked. "
                 "No further changes can be made locally."
             }
 
-        # Fetch current NERIS status
-        try:
-            neris_record = await asyncio.to_thread(_get_neris_incident, doc.neris_incident_id)
-        except Exception:
-            logger.warning(
-                "Failed to fetch NERIS status for %s", doc.neris_incident_id, exc_info=True
-            )
-            return {"error": "Failed to fetch NERIS status. Try again later."}
+        neris_status = ""
 
-        if not neris_record:
-            return {"error": f"NERIS record not found: {doc.neris_incident_id}"}
+        if skip_neris or not doc.neris_incident_id:
+            # Close without NERIS export
+            doc.extras = {**doc.extras, "neris_export_declined": True}
+            finalize_note = "finalized_no_neris"
+        else:
+            # Fetch current NERIS status
+            try:
+                neris_record = await asyncio.to_thread(_get_neris_incident, doc.neris_incident_id)
+            except Exception:
+                logger.warning(
+                    "Failed to fetch NERIS status for %s",
+                    doc.neris_incident_id,
+                    exc_info=True,
+                )
+                return {"error": "Failed to fetch NERIS status. Try again later."}
 
-        neris_status = (neris_record.get("incident_status") or {}).get("status", "")
+            if not neris_record:
+                return {"error": f"NERIS record not found: {doc.neris_incident_id}"}
+
+            neris_status = (neris_record.get("incident_status") or {}).get("status", "")
+            finalize_note = "finalized"
 
         doc.status = "submitted"
         doc.updated_at = datetime.now(UTC)
@@ -1608,16 +1615,17 @@ async def finalize_incident(incident_id: str) -> dict:
             EditEntry(
                 editor_email=user.email,
                 editor_name=user.name,
-                fields_changed=["finalized"],
+                fields_changed=[finalize_note],
             )
         )
 
         updated = await store.update(doc)
 
     logger.info(
-        "User %s finalized incident %s → submitted (NERIS status: %s)",
+        "User %s finalized incident %s → submitted (NERIS status: %s, skip_neris: %s)",
         user.email,
         incident_id,
-        neris_status,
+        neris_status or "n/a",
+        skip_neris,
     )
     return updated.model_dump(mode="json")

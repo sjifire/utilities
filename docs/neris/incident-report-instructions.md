@@ -658,6 +658,14 @@ Use `update_incident` to save all fields. If the user confirms, call `finalize_i
 
 **When the user says "close", "done", "lock it", "finalize", or similar** — that means finalize. First set status to `ready_review` via `update_incident` if not already, then immediately call `finalize_incident` to lock it. Do NOT leave the report in `ready_review` — always follow through to `finalize_incident` in the same turn.
 
+**NERIS export check**: If the report has NOT been submitted to NERIS yet (no NERIS ID), ask before closing:
+
+> This report hasn't been exported to NERIS yet. Would you like to:
+> 1. **Submit to NERIS first** — I'll submit it, then lock
+> 2. **Close without NERIS** — Lock the report locally only
+
+If the user explicitly says "no NERIS", "skip NERIS", "close without NERIS", or similar, call `finalize_incident(incident_id, skip_neris=true)`. If the report already has a NERIS ID, just call `finalize_incident(incident_id)` — no need to ask.
+
 ## Workflow: Resume / Edit Existing Report
 
 1. Use `get_incident` or `list_incidents` to find the report

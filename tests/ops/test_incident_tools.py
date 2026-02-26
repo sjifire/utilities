@@ -3084,7 +3084,8 @@ class TestFinalizeIncident:
         assert result["status"] == "submitted"
 
     @patch("sjifire.ops.incidents.neris.IncidentStore")
-    async def test_finalize_requires_neris_id(self, mock_store_cls, officer_user):
+    async def test_finalize_no_neris_id_closes_locally(self, mock_store_cls, officer_user):
+        """Finalizing without a NERIS ID closes locally with neris_export_declined."""
         doc = IncidentDocument(
             id="doc-finalize-3",
             incident_number="26-000944",
@@ -3095,13 +3096,36 @@ class TestFinalizeIncident:
 
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.update = AsyncMock(side_effect=lambda d: d)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
         result = await finalize_incident("doc-finalize-3")
 
-        assert "error" in result
-        assert "no NERIS ID" in result["error"]
+        assert result["status"] == "submitted"
+        assert result["extras"]["neris_export_declined"] is True
+
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
+    async def test_finalize_skip_neris_closes_locally(self, mock_store_cls, officer_user):
+        """Passing skip_neris=True closes locally even if NERIS ID exists."""
+        doc = IncidentDocument(
+            id="doc-finalize-4",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            neris_incident_id="FD53055879|26000944|123",
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await finalize_incident("doc-finalize-4", skip_neris=True)
+
+        assert result["status"] == "submitted"
+        assert result["extras"]["neris_export_declined"] is True
 
     async def test_finalize_requires_editor(self, regular_user):
         result = await finalize_incident("doc-123")

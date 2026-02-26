@@ -957,7 +957,7 @@
                   </template>
                   <template x-if="c.report_source === 'local' && c.is_locked">
                     <div>
-                      <div class="report-status locked" x-text="c.report_status === 'approved' ? '\uD83D\uDD12 Approved' : '\uD83D\uDD12 Submitted to NERIS'"></div>
+                      <div class="report-status locked" x-text="c.report_status === 'approved' ? '\uD83D\uDD12 Approved' : (c.neris_export_declined ? '\uD83D\uDD12 Closed (no NERIS)' : '\uD83D\uDD12 Submitted to NERIS')"></div>
                     </div>
                   </template>
                   <template x-if="c.report_source === 'local' && !c.is_locked">
