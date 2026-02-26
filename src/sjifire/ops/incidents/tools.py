@@ -60,19 +60,19 @@ def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
     """
     timestamps: dict[str, str] = {}
     status_map = {
-        "Enroute": "first_unit_enroute",
-        "On Scene": "first_unit_arrived",
+        "ENRT": "first_unit_enroute",
+        "ARRVD": "first_unit_arrived",
     }
 
     for detail in responder_details:
         status = detail.get("status", "")
         time_str = detail.get("time_of_status_change", "")
-        unit = detail.get("unit", "")
+        unit = detail.get("unit_number", "")
         if not status or not time_str:
             continue
 
         # Agency page (SJF3 or SJF2 paged) → alarm_time
-        if status in ("Dispatch", "Dispatched", "Paged") and unit in ("SJF3", "SJF2"):
+        if status == "PAGED" and unit in ("SJF3", "SJF2"):
             if "alarm_time" not in timestamps:
                 timestamps["alarm_time"] = to_utc_iso(str(time_str))
             continue
@@ -93,18 +93,17 @@ def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, st
     """
     unit_times: dict[str, dict[str, str]] = {}
     status_map = {
-        "Dispatch": "dispatch",
-        "Dispatched": "dispatch",
-        "Enroute": "enroute",
-        "On Scene": "on_scene",
-        "Complete": "cleared",
-        "Returning": "cleared",
-        "In Quarters": "in_quarters",
-        "Cancelled": "canceled",
+        "PAGED": "dispatch",
+        "ENRT": "enroute",
+        "ARSTN": "staged",
+        "ARRNL": "staged",
+        "ARRVD": "on_scene",
+        "CMPLT": "cleared",
+        "RTQ": "in_quarters",
     }
 
     for detail in responder_details:
-        unit = detail.get("unit", "")
+        unit = detail.get("unit_number", "")
         status = detail.get("status", "")
         time_str = detail.get("time_of_status_change", "")
         if not unit or not status or not time_str:
@@ -144,7 +143,7 @@ def _extract_dispatch_notes(responder_details: list[dict]) -> list[DispatchNote]
             continue
         text = detail.get("radio_log", "").strip()
         ts = detail.get("time_of_status_change", "")
-        unit = detail.get("unit", "")
+        unit = detail.get("unit_number", "")
         if text:
             raw_notes.append({"timestamp": str(ts), "unit": unit, "text": text})
 

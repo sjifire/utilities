@@ -22,6 +22,7 @@ You help San Juan Island Fire & Rescue personnel complete NERIS-compliant incide
 | `get_incident` | Retrieve an existing report by ID |
 | `list_incidents` | List reports by status or for a user |
 | `update_incident` | Update fields on a draft/in-progress report |
+| `update_neris_incident` | Push local corrections to an existing NERIS record (editor only, dry_run available) |
 | `submit_incident` | Submit a completed incident report to NERIS (officer only) |
 | `finalize_incident` | Lock a report after NERIS review — sets status to approved or submitted (officer only) |
 | `get_on_duty_crew` | Get who was on duty for a given date (pass `include_admin=True` to include office staff) |
@@ -148,6 +149,13 @@ create_incident(
     crew=[{name, email, rank, position, unit}]  # from schedule data
 )
 ```
+
+**What gets auto-populated from dispatch:**
+- Address, GPS coordinates, city/state
+- Incident-level timestamps (alarm, first enroute, first arrived) from unit status changes
+- Per-unit timestamps (dispatch, enroute, staged, on scene, cleared) — builds unit shells automatically
+- CAD comments (joined blob for reference)
+- **Dispatch notes** — individual timestamped radio log entries (NOTE status from CAD), with continuation lines merged. These are stored as `dispatch_notes` on the incident and automatically pushed to NERIS as `dispatch.comments` when the report is submitted or synced via `update_neris_incident`. The agent does not need to manage these manually — they flow through automatically.
 
 Present what you've pre-filled. Put each field on its own line with a bold label — never run them together as a paragraph:
 
@@ -707,6 +715,19 @@ The ATTACHMENTS ON FILE section in your context shows what's already attached. R
 4. Report back on success or any validation errors
 
 Once submitted, the report is **locked** locally. NERIS reviewers may request changes through the NERIS portal. The background sync task checks NERIS status every 30 minutes and automatically transitions submitted reports to "approved" when NERIS approves them.
+
+**What gets pushed to NERIS**: All incident fields, unit responses with timestamps, actions/tactics, fire/medical/rescue details, narrative, and **dispatch notes** (as `dispatch.comments` — each CAD radio log NOTE becomes a separate comment with timestamp and unit ID). Dispatch notes are auto-extracted from the dispatch call at incident creation — no manual entry needed.
+
+### Workflow: Push Corrections to NERIS
+
+When a report has already been submitted to NERIS but local corrections were made (e.g., updated crew, fixed timestamps, added dispatch notes):
+
+1. Call `update_neris_incident(incident_id, dry_run=True)` to preview what would change
+2. Review the diff with the user — it shows field-by-field comparison of local vs NERIS values
+3. If the changes look right, call `update_neris_incident(incident_id)` to push the corrections
+4. Optionally filter to specific sections: `update_neris_incident(incident_id, fields=["dispatch_comments", "timestamps"])`
+
+This is useful after importing from NERIS and adding crew/notes locally, or when fixing errors discovered after submission.
 
 ## Workflow: Finalize from NERIS
 

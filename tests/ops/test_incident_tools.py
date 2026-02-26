@@ -587,11 +587,11 @@ class TestGetNerisIncident:
 
 # Pre-fill tests
 class TestExtractTimestamps:
-    def test_extracts_dispatch_enroute_onscene(self):
+    def test_extracts_enroute_arrived(self):
         details = [
-            {"status": "Dispatched", "time_of_status_change": "2026-02-12T14:30:15"},
-            {"status": "Enroute", "time_of_status_change": "2026-02-12T14:32:00"},
-            {"status": "On Scene", "time_of_status_change": "2026-02-12T14:40:00"},
+            {"status": "PAGED", "time_of_status_change": "2026-02-12T14:30:15", "unit_number": "E31"},
+            {"status": "ENRT", "time_of_status_change": "2026-02-12T14:32:00", "unit_number": "E31"},
+            {"status": "ARRVD", "time_of_status_change": "2026-02-12T14:40:00", "unit_number": "E31"},
         ]
         result = _extract_timestamps(details)
         # Naive Pacific timestamps are converted to UTC (PST = UTC-8)
@@ -600,20 +600,29 @@ class TestExtractTimestamps:
 
     def test_uses_first_of_each_status(self):
         details = [
-            {"status": "Dispatched", "time_of_status_change": "2026-02-12T14:30:15"},
-            {"status": "Dispatched", "time_of_status_change": "2026-02-12T14:31:00"},
-            {"status": "Enroute", "time_of_status_change": "2026-02-12T14:32:00"},
-            {"status": "Enroute", "time_of_status_change": "2026-02-12T14:33:00"},
+            {"status": "PAGED", "time_of_status_change": "2026-02-12T14:30:15", "unit_number": "E31"},
+            {"status": "PAGED", "time_of_status_change": "2026-02-12T14:31:00", "unit_number": "M31"},
+            {"status": "ENRT", "time_of_status_change": "2026-02-12T14:32:00", "unit_number": "E31"},
+            {"status": "ENRT", "time_of_status_change": "2026-02-12T14:33:00", "unit_number": "M31"},
         ]
         result = _extract_timestamps(details)
         assert result["first_unit_enroute"] == "2026-02-12T22:32:00+00:00"
 
-    def test_dispatch_without_agency_unit_ignored(self):
-        """Dispatch status without SJF3/SJF2 unit is not captured as alarm_time."""
+    def test_paged_without_agency_unit_ignored(self):
+        """PAGED status without SJF3/SJF2 unit is not captured as alarm_time."""
         details = [
-            {"status": "Dispatch", "time_of_status_change": "2026-02-12T14:30:15"},
+            {"status": "PAGED", "time_of_status_change": "2026-02-12T14:30:15", "unit_number": "E31"},
         ]
+        # PAGED for E31 is not alarm_time (only SJF3/SJF2), but also not enroute/arrived
         assert _extract_timestamps(details) == {}
+
+    def test_paged_sjf3_captures_alarm_time(self):
+        """PAGED for SJF3 agency unit captures alarm_time."""
+        details = [
+            {"status": "PAGED", "time_of_status_change": "2026-02-12T14:30:15", "unit_number": "SJF3"},
+        ]
+        result = _extract_timestamps(details)
+        assert result["alarm_time"] == "2026-02-12T22:30:15+00:00"
 
     def test_empty_details(self):
         assert _extract_timestamps([]) == {}
@@ -626,7 +635,7 @@ class TestExtractTimestamps:
 
     def test_skips_missing_fields(self):
         details = [
-            {"status": "Dispatched"},
+            {"status": "PAGED"},
             {"time_of_status_change": "2026-02-12T14:30:15"},
             {"status": "", "time_of_status_change": "2026-02-12T14:30:15"},
         ]
@@ -649,8 +658,8 @@ class TestPrefillFromDispatch:
             state="WA",
             geo_location="48.5343,-123.0170",
             responder_details=[
-                {"status": "Dispatched", "time_of_status_change": "2026-02-12T14:30:15"},
-                {"status": "Enroute", "time_of_status_change": "2026-02-12T14:32:00"},
+                {"status": "PAGED", "time_of_status_change": "2026-02-12T14:30:15", "unit_number": "E31"},
+                {"status": "ENRT", "time_of_status_change": "2026-02-12T14:32:00", "unit_number": "E31"},
             ],
         )
 
@@ -737,10 +746,10 @@ class TestPrefillFromDispatch:
 class TestExtractDispatchNotes:
     def test_extracts_note_entries(self):
         details = [
-            {"status": "ENRT", "time_of_status_change": "2026-02-07T13:48:30", "unit": "E31", "radio_log": "Enroute"},
-            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:48:35", "unit": "E31", "radio_log": "w/4"},
-            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:54:05", "unit": "OPS31", "radio_log": "Fire confined to chimney"},
-            {"status": "ARRVD", "time_of_status_change": "2026-02-07T14:00:10", "unit": "E31", "radio_log": "On scene"},
+            {"status": "ENRT", "time_of_status_change": "2026-02-07T13:48:30", "unit_number": "E31", "radio_log": "Enroute"},
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:48:35", "unit_number": "E31", "radio_log": "w/4"},
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:54:05", "unit_number": "OPS31", "radio_log": "Fire confined to chimney"},
+            {"status": "ARRVD", "time_of_status_change": "2026-02-07T14:00:10", "unit_number": "E31", "radio_log": "On scene"},
         ]
         notes = _extract_dispatch_notes(details)
         assert len(notes) == 2
@@ -751,8 +760,8 @@ class TestExtractDispatchNotes:
 
     def test_merges_continuation_lines(self):
         details = [
-            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:54:05", "unit": "OPS31", "radio_log": "Fire is confined to the chimney,"},
-            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:54:05", "unit": "OPS31", "radio_log": "+ will be checking upstairs"},
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:54:05", "unit_number": "OPS31", "radio_log": "Fire is confined to the chimney,"},
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:54:05", "unit_number": "OPS31", "radio_log": "+ will be checking upstairs"},
         ]
         notes = _extract_dispatch_notes(details)
         assert len(notes) == 1
@@ -761,8 +770,8 @@ class TestExtractDispatchNotes:
 
     def test_sorts_chronologically(self):
         details = [
-            {"status": "NOTE", "time_of_status_change": "2026-02-07T14:20:01", "unit": "OPS31", "radio_log": "Fire ext"},
-            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:48:35", "unit": "E31", "radio_log": "w/4"},
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T14:20:01", "unit_number": "OPS31", "radio_log": "Fire ext"},
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:48:35", "unit_number": "E31", "radio_log": "w/4"},
         ]
         notes = _extract_dispatch_notes(details)
         assert len(notes) == 2
@@ -774,7 +783,7 @@ class TestExtractDispatchNotes:
 
     def test_no_notes_returns_empty(self):
         details = [
-            {"status": "ENRT", "time_of_status_change": "2026-02-07T13:48:30", "unit": "E31", "radio_log": "Enroute"},
+            {"status": "ENRT", "time_of_status_change": "2026-02-07T13:48:30", "unit_number": "E31", "radio_log": "Enroute"},
         ]
         assert _extract_dispatch_notes(details) == []
 
@@ -794,8 +803,8 @@ class TestPrefillDispatchNotes:
             cad_comments="Possible chimney fire, advised by deputy on duty.",
             time_reported=datetime(2026, 2, 7, 13, 45, 45),
             responder_details=[
-                {"status": "NOTE", "time_of_status_change": "2026-02-07T13:48:35", "unit": "E31", "radio_log": "w/4"},
-                {"status": "NOTE", "time_of_status_change": "2026-02-07T14:09:29", "unit": "BN31", "radio_log": "has command"},
+                {"status": "NOTE", "time_of_status_change": "2026-02-07T13:48:35", "unit_number": "E31", "radio_log": "w/4"},
+                {"status": "NOTE", "time_of_status_change": "2026-02-07T14:09:29", "unit_number": "BN31", "radio_log": "has command"},
             ],
         )
 
