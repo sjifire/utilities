@@ -967,7 +967,8 @@ async def import_from_neris(
 
     Args:
         neris_id: NERIS compound incident ID
-            (e.g., "FD53055879|26001980|1770500761")
+            (e.g., "FD53055879|26001980|1770500761") or a local dispatch
+            number (e.g., "26-002548") which will be searched in NERIS.
         incident_id: Existing incident document ID to import into.
             When omitted a new draft is created from the NERIS data.
         incident_number: Override for dispatch incident number
@@ -1006,7 +1007,10 @@ async def import_from_neris(
     if not neris_record:
         return {"error": f"NERIS incident not found: {neris_id}. Verify the NERIS ID is correct."}
 
-    neris_prefill = _parse_neris_record(neris_record, neris_id)
+    # Use the record's actual compound NERIS ID (the lookup may have been
+    # a dispatch number like "26-002548" instead of the compound ID).
+    actual_neris_id = neris_record.get("neris_id") or neris_id
+    neris_prefill = _parse_neris_record(neris_record, actual_neris_id)
     # Stash NERIS status for downstream hints (not persisted in the document)
     neris_status_info = neris_record.get("incident_status") or {}
     neris_prefill["_neris_status"] = neris_status_info.get("status", "")

@@ -55,7 +55,8 @@ When a NERIS report already exists for a call (e.g., someone filed it directly i
 
 ### Step 1 — Import the NERIS record
 
-Call `import_from_neris` with the NERIS compound ID. This does everything at once:
+Call `import_from_neris` with either a NERIS compound ID or the dispatch number (e.g., `26-002548`). The system searches NERIS automatically using the dispatch number. This does everything at once:
+- Searches NERIS by compound ID or dispatch number
 - Fetches the full NERIS record
 - Looks up the matching dispatch call
 - Pulls the on-duty crew schedule for the incident time
@@ -63,13 +64,20 @@ Call `import_from_neris` with the NERIS compound ID. This does everything at onc
 - Returns an `import_comparison` section
 
 ```
+import_from_neris("26-002548")
+```
+
+Or with a NERIS compound ID:
+```
 import_from_neris("FD53055879|26001980|1770500761")
 ```
 
-Or to re-import into an existing incident:
+Or to re-import into an existing incident (no neris_id needed — auto-resolved from dispatch number):
 ```
-import_from_neris("FD53055879|26001980|1770500761", incident_id="abc-123")
+import_from_neris(incident_id="abc-123")
 ```
+
+**Do NOT ask the user for the NERIS ID.** If the incident has a dispatch number (e.g., from the dashboard), use that directly. The system will search NERIS and find the matching record.
 
 ### Step 2 — Present summary and note differences
 

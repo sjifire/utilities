@@ -237,7 +237,11 @@ TOOL_SCHEMAS: list[dict] = [
                 },
                 "neris_id": {
                     "type": "string",
-                    "description": "NERIS compound ID (optional if already set on incident)",
+                    "description": (
+                        "NERIS compound ID or dispatch number (e.g. '26-002548'). "
+                        "Optional if already set on the incident — will auto-resolve "
+                        "from the incident's dispatch number."
+                    ),
                 },
                 "incident_number": {
                     "type": "string",
@@ -593,14 +597,16 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         neris_id = tool_input.get("neris_id")
         incident_id = tool_input["incident_id"]
         if not neris_id:
-            # Resolve neris_id from the existing incident document
+            # Resolve neris_id from the existing incident document,
+            # falling back to the dispatch number (e.g. "26-002548")
+            # which the NERIS client can search by automatically.
             inc = await incident_tools.get_incident(incident_id)
             if isinstance(inc, dict) and not inc.get("error"):
-                neris_id = inc.get("neris_incident_id")
+                neris_id = inc.get("neris_incident_id") or inc.get("incident_number")
         if not neris_id:
             return {
-                "error": "NERIS ID is required. Use the neris_id parameter "
-                "or link the incident to a NERIS record first."
+                "error": "Could not determine NERIS ID or dispatch number. "
+                "Provide a neris_id or ensure the incident has an incident_number."
             }
         result = await incident_tools.import_from_neris(
             neris_id,

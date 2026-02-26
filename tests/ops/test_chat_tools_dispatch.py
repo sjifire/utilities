@@ -99,11 +99,11 @@ class TestImportFromNerisDispatch:
         assert result["units"] == ["E31"]
         assert result["discrepancies"] == ["addr mismatch"]
 
-    async def test_dispatch_no_neris_id_returns_error(self, officer_user):
-        """When incident has no neris_incident_id, return an error."""
+    async def test_dispatch_no_neris_id_or_number_returns_error(self, officer_user):
+        """When incident has no neris_incident_id or incident_number, error."""
         from sjifire.ops.chat.tools import _dispatch
 
-        fake_incident = {"id": "doc-1", "neris_incident_id": None}
+        fake_incident = {"id": "doc-1", "neris_incident_id": None, "incident_number": ""}
 
         with patch(
             "sjifire.ops.incidents.tools.get_incident",
@@ -116,4 +116,4 @@ class TestImportFromNerisDispatch:
             )
 
         assert "error" in result
-        assert "NERIS ID is required" in result["error"]
+        assert "Could not determine" in result["error"]
