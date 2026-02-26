@@ -816,8 +816,8 @@ class TestPrefillDispatchNotes:
         result = await _prefill_from_dispatch("26-001927")
 
         notes = result["dispatch_notes"]
-        # First note is the caller narrative (DISPATCH)
-        assert notes[0].unit == "DISPATCH"
+        # First note is the caller narrative (no unit)
+        assert notes[0].unit == ""
         assert "chimney fire" in notes[0].text.lower()
         # Followed by individual CAD notes
         assert notes[1].unit == "E31"

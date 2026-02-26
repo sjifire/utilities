@@ -238,7 +238,6 @@ async def _prefill_from_dispatch(incident_number: str) -> dict:
             0,
             DispatchNote(
                 timestamp=caller_ts,
-                unit="DISPATCH",
                 text=dispatch.cad_comments.replace("\n", " ").strip(),
             ),
         )
