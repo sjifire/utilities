@@ -127,9 +127,7 @@ def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, st
 
 
 # Pattern for CAD comment timestamps like "18:56:01 02/02/2026 - M Rennick"
-_CAD_TIMESTAMP_RE = re.compile(
-    r"^(\d{1,2}:\d{2}:\d{2}\s+\d{1,2}/\d{1,2}/\d{4})\s*-\s*(.+)$"
-)
+_CAD_TIMESTAMP_RE = re.compile(r"^(\d{1,2}:\d{2}:\d{2}\s+\d{1,2}/\d{1,2}/\d{4})\s*-\s*(.+)$")
 
 
 def _parse_cad_comments(cad_comments: str, call_ts: str = "") -> list[DispatchNote]:
@@ -165,10 +163,12 @@ def _parse_cad_comments(cad_comments: str, call_ts: str = "") -> list[DispatchNo
         if match:
             # Flush previous block
             if current_lines:
-                notes.append(DispatchNote(
-                    timestamp=current_ts,
-                    text=" ".join(current_lines),
-                ))
+                notes.append(
+                    DispatchNote(
+                        timestamp=current_ts,
+                        text=" ".join(current_lines),
+                    )
+                )
                 current_lines = []
 
             # Parse timestamp: "18:56:01 02/02/2026" → ISO format
@@ -185,10 +185,12 @@ def _parse_cad_comments(cad_comments: str, call_ts: str = "") -> list[DispatchNo
 
     # Flush final block
     if current_lines:
-        notes.append(DispatchNote(
-            timestamp=current_ts,
-            text=" ".join(current_lines),
-        ))
+        notes.append(
+            DispatchNote(
+                timestamp=current_ts,
+                text=" ".join(current_lines),
+            )
+        )
 
     return notes
 

@@ -191,6 +191,27 @@ class TestBuildNerisDiff:
         assert diff["units"]["local"]["E31.staged"] == "2026-02-20T10:35:00Z"
         assert diff["units"]["neris"]["E31.staged"] == "2026-02-20T10:34:00Z"
 
+    def test_dispatch_incident_number_diff(self, sample_doc, neris_record):
+        """Detect dispatch_incident_number when NERIS has different value."""
+        neris_record["dispatch"]["incident_number"] = "26SJ0020"
+        diff = _build_neris_diff(sample_doc, neris_record)
+        assert "dispatch_incident_number" in diff
+        assert diff["dispatch_incident_number"]["local"] == "26-002358"
+        assert diff["dispatch_incident_number"]["neris"] == "26SJ0020"
+
+    def test_dispatch_incident_number_no_diff_when_matching(self, sample_doc, neris_record):
+        """No diff when NERIS incident_number matches local (normalized)."""
+        neris_record["dispatch"]["incident_number"] = "26002358"
+        diff = _build_neris_diff(sample_doc, neris_record)
+        assert "dispatch_incident_number" not in diff
+
+    def test_dispatch_incident_number_matches_dispatch_field(self, sample_doc, neris_record):
+        """No diff when NERIS dispatch_incident_number matches local."""
+        neris_record["dispatch"]["incident_number"] = "26SJ0020"
+        neris_record["dispatch"]["dispatch_incident_number"] = "26-002358"
+        diff = _build_neris_diff(sample_doc, neris_record)
+        assert "dispatch_incident_number" not in diff
+
 
 class TestTimestampsEqual:
     """Tests for timezone-aware timestamp comparison."""
@@ -429,6 +450,18 @@ class TestBuildNerisPatch:
         e33_action = next(a for a in actions if a.get("action") == "append")
         assert e33_action["value"]["reported_unit_id"] == "E33"
 
+    def test_dispatch_incident_number_patch(self):
+        """dispatch_incident_number diff patches NERIS 'incident_number' field."""
+        diff = {
+            "dispatch_incident_number": {"local": "26-001913", "neris": "26SJ0020"},
+        }
+        result = _build_neris_patch(diff)
+        assert result["dispatch"]["action"] == "patch"
+        assert result["dispatch"]["properties"]["incident_number"] == {
+            "action": "set",
+            "value": "26-001913",
+        }
+
     def test_empty_diff_returns_empty_patch(self):
         patch = _build_neris_patch({})
         assert patch == {}
@@ -537,6 +570,7 @@ class TestUpdateNerisIncident:
                 },
             },
             "dispatch": {
+                "incident_number": "26002358",
                 "call_create": "2026-02-20T10:29:00Z",
                 "incident_clear": "2026-02-20T11:14:00Z",
                 "unit_responses": [],
@@ -583,10 +617,10 @@ class TestUpdateNerisIncident:
 
     @patch("sjifire.ops.incidents.neris._get_neris_incident")
     @patch("sjifire.ops.incidents.neris.IncidentStore")
-    async def test_rejects_approved_neris(
+    async def test_approved_neris_returns_diff_with_warning(
         self, mock_store_cls, mock_get_neris, officer_user, sample_doc
     ):
-        """APPROVED NERIS records should return status data (not error)."""
+        """APPROVED NERIS records should return diff with warning, not block."""
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=sample_doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
@@ -599,10 +633,11 @@ class TestUpdateNerisIncident:
             "incident_types": [],
         }
 
-        result = await update_neris_incident("doc-neris-1")
-        assert result["status"] == "neris_locked"
+        result = await update_neris_incident("doc-neris-1", dry_run=True)
+        assert result["status"] == "dry_run"
         assert result["neris_status"] == "APPROVED"
-        assert result["neris_id"] == sample_doc.neris_incident_id
+        assert result["approved_warning"] is True
+        assert "APPROVED" in result["message"]
         assert "error" not in result
 
     @patch("sjifire.ops.incidents.neris._patch_neris_incident")

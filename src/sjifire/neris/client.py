@@ -311,4 +311,3 @@ class NerisClient:
         }
         logger.info(f"Patching incident {neris_id_incident}")
         return self.api.patch_incident(neris_id, neris_id_incident, body)
-

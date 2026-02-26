@@ -329,9 +329,7 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
                 neris_units,
                 key=lambda u: u.enroute_to_scene or u.dispatch or "\xff",
             )
-            prefill["units"] = _dedup_units(
-                [_build_unit_from_neris(u) for u in sorted_units]
-            )
+            prefill["units"] = _dedup_units([_build_unit_from_neris(u) for u in sorted_units])
         if dispatch.automatic_alarm is not None:
             prefill["automatic_alarm"] = dispatch.automatic_alarm
 
