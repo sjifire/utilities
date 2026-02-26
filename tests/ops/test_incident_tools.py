@@ -391,8 +391,10 @@ class TestUpdateIncident:
 
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_extras_merge(self, mock_store_cls, regular_user, sample_doc):
-        """Extras should merge into existing, not replace. Fire/alarm/hazard keys
-        passed via extras are auto-routed to typed sub-models."""
+        """Extras should merge into existing, not replace.
+
+        Fire/alarm/hazard keys passed via extras are auto-routed to typed sub-models.
+        """
         sample_doc.extras = {"existing_key": "keep_me"}
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=sample_doc)
