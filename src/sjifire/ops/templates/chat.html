@@ -928,7 +928,20 @@
     {% endif %}
 
     <!-- Dispatch Comments -->
-    {% if doc.dispatch_comments %}
+    {% if doc.dispatch_notes %}
+    <div class="section">
+      <div class="section-header">Dispatch Comments</div>
+      <div class="section-body">
+        {% for note in doc.dispatch_notes %}
+        <div style="margin-bottom:6px{% if not loop.last %};padding-bottom:6px;border-bottom:1px solid #f3f4f6{% endif %}">
+          <span style="font-family:monospace;font-size:11px;color:#6b7280">{{ note.timestamp | fmt_dt if note.timestamp else "--" }}</span>
+          {% if note.unit %}<span style="font-weight:600;font-size:11px;color:#4b5563">[{{ note.unit }}]</span>{% endif %}
+          <span>{{ note.text }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% elif doc.dispatch_comments %}
     <div class="section">
       <div class="section-header">Dispatch Comments</div>
       <div class="section-body">
@@ -1013,7 +1026,7 @@
     {% endif %}
 
     <!-- Additional Details (extras) -->
-    {% set skip_extras = ["station", "zip_code", "casualty_rescues"] %}
+    {% set skip_extras = ["station", "zip_code", "casualty_rescues", "dispatch_notes"] %}
     {% set extras_labels = {
       "smoke_alarm_presence": "Smoke Alarm",
       "fire_alarm_presence": "Fire Alarm",
@@ -1465,6 +1478,15 @@ function chatApp() {
     return parts.length > 1 ? (parts[0][0] + parts[parts.length-1][0]).toUpperCase() : name.slice(0,2).toUpperCase();
   }
 
+  // Open all markdown links in a new tab.
+  // DOMPurify strips target by default, so we add it via a hook after sanitization.
+  DOMPurify.addHook('afterSanitizeAttributes', function(node) {
+    if (node.tagName === 'A' && node.getAttribute('href')) {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener');
+    }
+  });
+
   return {
     messages: [],
     inputText: '',
@@ -1487,6 +1509,7 @@ function chatApp() {
     presenceUsers: {},   // {email: {name, initials, color}} — excludes self
     turnHolder: null,    // {email, name} — who has the current turn
     _blockedMessage: null, // Message blocked by 409, auto-retry after done
+    _localTurnActive: false, // True when this session initiated an RPC turn
 
     get presenceLabel() {
       const names = Object.values(this.presenceUsers).map(u => u.name.split(' ')[0]);
@@ -1982,6 +2005,7 @@ function chatApp() {
     async _sendViaRPC(displayText, images) {
       this.streaming = true;
       this.currentText = '';
+      this._localTurnActive = true;
       this._setTurnActive(true);
 
       const payload = {
@@ -2019,6 +2043,7 @@ function chatApp() {
         console.error('Chat RPC error:', err);
         this.messages.push({type: 'error', content: err.message || 'Failed to send message. Please try again.'});
         this.streaming = false;
+        this._localTurnActive = false;
         this._setTurnActive(false);
       }
     },
@@ -2073,9 +2098,14 @@ function chatApp() {
           this.turnHolder = null;
           this.scrollToBottom(true);
           this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+        } else if (this._localTurnActive) {
+          // Local RPC turn in flight — don't kill the spinner.
+          // The done/error event will handle cleanup.
+          console.log('No new server turn but local turn active — keeping spinner');
         } else {
-          // Server has no new turn — stop the spinner. If a turn IS
-          // running, WS events (turn_start/text/done) will restart it.
+          // Server has no new turn and no local turn — stop the spinner.
+          // This handles stale page-load recovery (e.g. tab was closed
+          // before the response arrived and the turn has since expired).
           console.log('No new server turn — stopping recovery spinner');
           this.streaming = false;
           this._setTurnActive(false);
@@ -2203,6 +2233,7 @@ function chatApp() {
         }
         this._turnCount++;  // Track completed turn
         this.streaming = false;
+        this._localTurnActive = false;
         this._setTurnActive(false);
         this.turnHolder = null;  // Turn lock released
         // Wait for Alpine DOM flush (chat-hints appear, streaming-msg removed)
@@ -2240,6 +2271,7 @@ function chatApp() {
         this.messages.push({type: 'error', content: data.message});
         this._turnCount++;  // Error turns also increment server-side
         this.streaming = false;
+        this._localTurnActive = false;
         this._setTurnActive(false);
         this.turnHolder = null;  // Turn lock released on error too
         this.$nextTick(() => this.scrollToBottom(true));
