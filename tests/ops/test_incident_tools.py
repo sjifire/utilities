@@ -18,6 +18,7 @@ from sjifire.ops.incidents.models import (
 )
 from sjifire.ops.incidents.neris import (
     _address_from_neris_location,
+    _build_neris_creation_payload,
     _build_neris_patch,
     _build_unit_from_neris,
     _getattr_path,
@@ -30,6 +31,7 @@ from sjifire.ops.incidents.neris import (
     get_neris_incident,
     import_from_neris,
     list_neris_incidents,
+    submit_to_neris,
 )
 from sjifire.ops.incidents.neris_models import NerisLocation, NerisRecord, NerisUnitResponse
 from sjifire.ops.incidents.tools import (
@@ -508,11 +510,34 @@ class TestSubmitIncident:
         assert "error" in result
         assert "not authorized" in result["error"].lower()
 
-    async def test_officer_gets_not_available(self, officer_user):
-        result = await submit_incident("doc-123")
-        assert result["status"] == "not_available"
-        assert "not yet enabled" in result["message"]
-        assert result["incident_id"] == "doc-123"
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
+    async def test_officer_delegates_to_submit_to_neris(self, mock_store_cls, officer_user):
+        """submit_incident now delegates to submit_to_neris."""
+        doc = IncidentDocument(
+            id="doc-submit-1",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            station="S31",
+            incident_type="EMS||MEDICAL",
+            address="100 Spring St",
+            timestamps={"psap_answer": "2026-02-12T10:00:00-08:00"},
+            units=[UnitAssignment(unit_id="E31")],
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # submit_incident delegates to submit_to_neris — test that it returns
+        # a validation-passing result (not the old "not_available" stub)
+        with patch("sjifire.ops.incidents.neris._submit_to_neris") as mock_submit:
+            mock_submit.return_value = {"neris_id": "FD53055879|26SJ0001|123"}
+            result = await submit_incident("doc-submit-1")
+            assert result["status"] == "created"
+            assert "neris_id" in result
 
 
 class TestListNerisIncidents:
@@ -3024,13 +3049,261 @@ class TestReopenIncident:
 
 
 # ── Finalize incident ──
-class TestFinalizeIncident:
-    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+class TestSubmitToNeris:
+    async def test_requires_editor(self, regular_user):
+        result = await submit_to_neris("doc-123")
+        assert "error" in result
+        assert "not authorized" in result["error"].lower()
+
     @patch("sjifire.ops.incidents.neris.IncidentStore")
-    async def test_finalize_always_sets_submitted(
-        self, mock_store_cls, mock_get_neris, officer_user
+    async def test_missing_incident(self, mock_store_cls, officer_user):
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=None)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await submit_to_neris("nonexistent")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
+    async def test_validates_required_fields(self, mock_store_cls, officer_user):
+        """Missing incident_type, address, units, or psap_answer returns clear errors."""
+        doc = IncidentDocument(
+            id="doc-submit-val",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            station="S31",
+            # No incident_type, no address, no units, no psap_answer
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await submit_to_neris("doc-submit-val")
+        assert "error" in result
+        assert "missing_fields" in result
+        assert "incident_type" in result["missing_fields"]
+        assert "address" in result["missing_fields"]
+
+    @patch("sjifire.ops.incidents.neris._submit_to_neris")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
+    async def test_create_path_success(self, mock_store_cls, mock_submit, officer_user):
+        """Create path: no neris_incident_id → builds payload, POSTs, stores ID."""
+        doc = IncidentDocument(
+            id="doc-submit-new",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            station="S31",
+            incident_type="EMS||MEDICAL",
+            address="100 Spring St",
+            timestamps={"psap_answer": "2026-02-12T10:00:00-08:00"},
+            units=[UnitAssignment(unit_id="E31")],
+        )
+
+        mock_submit.return_value = {"neris_id": "FD53055879|26SJ0001|123"}
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store.update = AsyncMock(side_effect=lambda d: d)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await submit_to_neris("doc-submit-new")
+        assert result["status"] == "created"
+        assert result["neris_id"] == "FD53055879|26SJ0001|123"
+        # Verify the ID was stored on the document
+        assert doc.neris_incident_id == "FD53055879|26SJ0001|123"
+        mock_store.update.assert_called_once()
+
+    @patch("sjifire.ops.incidents.neris.update_neris_incident")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
+    async def test_update_path_delegates(self, mock_store_cls, mock_update, officer_user):
+        """Update path: existing neris_incident_id → delegates to update_neris_incident."""
+        doc = IncidentDocument(
+            id="doc-submit-existing",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            station="S31",
+            neris_incident_id="FD53055879|26SJ0001|123",
+        )
+
+        mock_update.return_value = {"status": "no_changes", "neris_id": "FD53055879|26SJ0001|123"}
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await submit_to_neris("doc-submit-existing")
+        assert result["status"] == "no_changes"
+        mock_update.assert_called_once_with("doc-submit-existing", dry_run=False)
+
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
+    async def test_dry_run_returns_payload(self, mock_store_cls, officer_user):
+        """dry_run=True returns the payload without submitting."""
+        doc = IncidentDocument(
+            id="doc-submit-dry",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            station="S31",
+            incident_type="FIRE||STRUCTURE_FIRE",
+            address="100 Spring St",
+            timestamps={"psap_answer": "2026-02-12T10:00:00-08:00"},
+            units=[UnitAssignment(unit_id="E31")],
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await submit_to_neris("doc-submit-dry", dry_run=True)
+        assert result["status"] == "dry_run"
+        assert "payload" in result
+        assert result["payload"]["incident_types"][0]["type"] == "FIRE||STRUCTURE_FIRE"
+
+    @patch("sjifire.ops.incidents.neris._submit_to_neris")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
+    async def test_neris_api_error_returned(self, mock_store_cls, mock_submit, officer_user):
+        """NERIS API error is returned without locking."""
+        doc = IncidentDocument(
+            id="doc-submit-err",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            station="S31",
+            incident_type="EMS||MEDICAL",
+            address="100 Spring St",
+            timestamps={"psap_answer": "2026-02-12T10:00:00-08:00"},
+            units=[UnitAssignment(unit_id="E31")],
+        )
+
+        mock_submit.return_value = {"error": "NERIS API error (HTTP 400): bad request"}
+
+        mock_store = AsyncMock()
+        mock_store.get_by_id = AsyncMock(return_value=doc)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await submit_to_neris("doc-submit-err")
+        assert "error" in result
+        assert "NERIS API error" in result["error"]
+
+
+class TestBuildNerisCreationPayload:
+    def test_minimal_payload(self):
+        """Builds a valid payload from minimal required fields."""
+        doc = IncidentDocument(
+            id="doc-payload-1",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            station="S31",
+            incident_type="EMS||MEDICAL",
+            address="100 Spring St",
+            city="Friday Harbor",
+            state="WA",
+            timestamps={"psap_answer": "2026-02-12T18:00:00+00:00"},
+            units=[UnitAssignment(unit_id="E31", dispatch="2026-02-12T18:01:00+00:00")],
+        )
+
+        payload = _build_neris_creation_payload(doc)
+
+        assert payload["incident_types"][0] == {"type": "EMS||MEDICAL", "primary": True}
+        assert payload["base"]["incident_number"] == "26-000944"
+        assert payload["dispatch"]["determinant_code"] == "26000944"
+        assert len(payload["dispatch"]["unit_responses"]) == 1
+        assert payload["dispatch"]["unit_responses"][0]["reported_unit_id"] == "E31"
+
+    def test_address_parsing(self):
+        """Address with leading number splits into complete_number + street."""
+        doc = IncidentDocument(
+            id="doc-payload-2",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            incident_type="FIRE||STRUCTURE_FIRE",
+            address="1632 San Juan Rd",
+            timestamps={"psap_answer": "2026-02-12T18:00:00+00:00"},
+            units=[UnitAssignment(unit_id="E31")],
+        )
+
+        payload = _build_neris_creation_payload(doc)
+        loc = payload["base"].get("location", {})
+        assert loc.get("complete_number") == "1632"
+        assert loc.get("street") == "San Juan Rd"
+
+    def test_additional_incident_types(self):
+        """Additional incident types included as non-primary."""
+        doc = IncidentDocument(
+            id="doc-payload-3",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            incident_type="FIRE||STRUCTURE_FIRE",
+            additional_incident_types=["EMS||MEDICAL"],
+            address="100 Spring St",
+            timestamps={"psap_answer": "2026-02-12T18:00:00+00:00"},
+            units=[UnitAssignment(unit_id="E31")],
+        )
+
+        payload = _build_neris_creation_payload(doc)
+        assert len(payload["incident_types"]) == 2
+        assert payload["incident_types"][1] == {"type": "EMS||MEDICAL", "primary": False}
+
+    def test_noaction_payload(self):
+        """NOACTION with reason generates correct actions_tactics section."""
+        doc = IncidentDocument(
+            id="doc-payload-4",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            incident_type="EMS||MEDICAL",
+            address="100 Spring St",
+            action_taken="NOACTION",
+            noaction_reason="CANCELLED",
+            timestamps={"psap_answer": "2026-02-12T18:00:00+00:00"},
+            units=[UnitAssignment(unit_id="E31")],
+        )
+
+        payload = _build_neris_creation_payload(doc)
+        at = payload["actions_tactics"]["action_noaction"]
+        assert at["type"] == "NOACTION"
+        assert at["noaction_type"] == "CANCELLED"
+
+    def test_fire_detail_included(self):
+        """Fire detail sub-model maps to NERIS fire_detail section."""
+        doc = IncidentDocument(
+            id="doc-payload-5",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            incident_type="FIRE||STRUCTURE_FIRE",
+            address="100 Spring St",
+            timestamps={"psap_answer": "2026-02-12T18:00:00+00:00"},
+            units=[UnitAssignment(unit_id="E31")],
+            fire_detail=FireDetail(water_supply="MUNICIPAL", fire_investigation="NO"),
+        )
+
+        payload = _build_neris_creation_payload(doc)
+        assert "fire_detail" in payload
+        assert payload["fire_detail"]["water_supply"] == "MUNICIPAL"
+
+
+class TestFinalizeIncident:
+    @patch("sjifire.ops.incidents.neris.submit_to_neris")
+    @patch("sjifire.ops.incidents.neris.IncidentStore")
+    async def test_finalize_calls_submit_to_neris_then_locks(
+        self, mock_store_cls, mock_submit, officer_user
     ):
-        """Finalize always sets status to 'submitted'; only neris-sync promotes to approved."""
+        """Finalize calls submit_to_neris (update path) then locks as submitted."""
         doc = IncidentDocument(
             id="doc-finalize-1",
             incident_number="26-000944",
@@ -3040,8 +3313,9 @@ class TestFinalizeIncident:
             status="ready_review",
         )
 
-        mock_get_neris.return_value = {
-            "incident_status": {"status": "APPROVED"},
+        mock_submit.return_value = {
+            "status": "no_changes",
+            "neris_id": "FD53055879|26-000944|123",
         }
 
         mock_store = AsyncMock()
@@ -3054,56 +3328,36 @@ class TestFinalizeIncident:
 
         assert result["status"] == "submitted"
         assert result["edit_history"][-1]["fields_changed"] == ["finalized"]
+        mock_submit.assert_called_once_with("doc-finalize-1")
 
-    @patch("sjifire.ops.incidents.neris._get_neris_incident")
+    @patch("sjifire.ops.incidents.neris.submit_to_neris")
     @patch("sjifire.ops.incidents.neris.IncidentStore")
-    async def test_finalize_sets_submitted_when_pending(
-        self, mock_store_cls, mock_get_neris, officer_user
-    ):
+    async def test_finalize_aborts_on_neris_error(self, mock_store_cls, mock_submit, officer_user):
+        """If submit_to_neris returns an error, finalize does NOT lock."""
         doc = IncidentDocument(
-            id="doc-finalize-2",
+            id="doc-finalize-err",
             incident_number="26-000944",
             incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
-            neris_incident_id="FD53055879|26-000944|123",
             status="ready_review",
         )
 
-        mock_get_neris.return_value = {
-            "incident_status": {"status": "SUBMITTED"},
+        mock_submit.return_value = {
+            "error": "Cannot submit to NERIS — required fields are missing.",
+            "missing_fields": ["incident_type"],
         }
 
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=doc)
-        mock_store.update = AsyncMock(side_effect=lambda d: d)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        result = await finalize_incident("doc-finalize-2")
+        result = await finalize_incident("doc-finalize-err")
 
-        assert result["status"] == "submitted"
-
-    @patch("sjifire.ops.incidents.neris.IncidentStore")
-    async def test_finalize_no_neris_id_closes_locally(self, mock_store_cls, officer_user):
-        """Finalizing without a NERIS ID closes locally with neris_export_declined."""
-        doc = IncidentDocument(
-            id="doc-finalize-3",
-            incident_number="26-000944",
-            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
-            created_by="ff@sjifire.org",
-            neris_incident_id=None,
-        )
-
-        mock_store = AsyncMock()
-        mock_store.get_by_id = AsyncMock(return_value=doc)
-        mock_store.update = AsyncMock(side_effect=lambda d: d)
-        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        result = await finalize_incident("doc-finalize-3")
-
-        assert result["status"] == "submitted"
-        assert result["extras"]["neris_export_declined"] is True
+        assert "error" in result
+        assert "missing" in result["error"].lower()
+        # Document should NOT have been locked
+        assert doc.status == "ready_review"
 
     @patch("sjifire.ops.incidents.neris.IncidentStore")
     async def test_finalize_skip_neris_closes_locally(self, mock_store_cls, officer_user):

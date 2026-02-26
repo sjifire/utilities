@@ -611,11 +611,303 @@ def _submit_to_neris(payload: dict) -> dict:  # pragma: no cover
                 neris_id_entity=client.entity_id,
                 body=payload,
             )
+            # The upstream library returns a raw Response on HTTP errors
+            if not isinstance(result, dict):
+                status = getattr(result, "status_code", "unknown")
+                body = ""
+                with contextlib.suppress(Exception):
+                    body = result.text[:500] if hasattr(result, "text") else str(result)
+                return {"error": f"NERIS API error (HTTP {status}): {body}"}
             neris_id = result.get("neris_id") or result.get("id", "")
             return {"neris_id": neris_id}
     except Exception as e:
         logger.exception("NERIS submission failed")
         return {"error": f"NERIS submission failed: {e}", "details": str(e)}
+
+
+def _resolve_local_to_neris_id(unit_id: str) -> str | None:
+    """Map local unit ID (e.g. 'E31') to NERIS unit ID (e.g. 'FD53055879S001U000')."""
+    _load_neris_unit_maps()
+    canonical = _cad_canonical.get(unit_id.lower(), unit_id.upper())
+    for neris_id, cad in _neris_unit_map.items():
+        if cad == canonical:
+            return neris_id
+    return None
+
+
+def _build_location(doc: IncidentDocument) -> dict:
+    """Build NERIS location from IncidentDocument address fields."""
+    loc: dict = {
+        "incorporated_municipality": doc.city or None,
+        "state": doc.state or None,
+        "postal_code": doc.zip_code or None,
+        "county": doc.county or None,
+    }
+    if doc.address:
+        parts = doc.address.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            loc["complete_number"] = parts[0]
+            loc["street"] = parts[1]
+        else:
+            loc["street"] = doc.address
+    return {k: v for k, v in loc.items() if v is not None}
+
+
+def _find_first_arrival(doc: IncidentDocument) -> str:
+    """Find earliest on_scene from units, or fallback to first dispatch/cancel/clear."""
+    arrivals = [u.on_scene for u in doc.units if u.on_scene]
+    if arrivals:
+        return to_utc_iso(min(arrivals))
+    # No on-scene → use first cancel, clear, or dispatch time
+    fallbacks = [ts for u in doc.units for ts in (u.canceled, u.cleared, u.dispatch) if ts]
+    if fallbacks:
+        return to_utc_iso(min(fallbacks))
+    # Last resort: use incident_clear or psap_answer
+    return to_utc_iso(doc.timestamps.get("incident_clear", doc.timestamps.get("psap_answer", "")))
+
+
+def _build_unit_response_for_creation(unit: UnitAssignment) -> dict:
+    """Build a NERIS unit response entry for incident creation."""
+    canonical = _normalize_unit_id(unit.unit_id)
+    neris_uid = _resolve_local_to_neris_id(canonical)
+    resp: dict = {"reported_unit_id": canonical}
+    if neris_uid:
+        resp["unit_neris_id"] = neris_uid
+    if unit.response_mode:
+        resp["response_mode"] = unit.response_mode
+    for local_field, neris_field in (
+        ("dispatch", "dispatch"),
+        ("enroute", "enroute_to_scene"),
+        ("staged", "staging"),
+        ("on_scene", "on_scene"),
+        ("cleared", "unit_clear"),
+        ("canceled", "canceled_enroute"),
+    ):
+        val = getattr(unit, local_field, "")
+        if val:
+            resp[neris_field] = to_utc_iso(val)
+    if unit.personnel:
+        resp["staffing"] = len(unit.personnel)
+    return resp
+
+
+def _build_dispatch_comments(doc: IncidentDocument) -> list[dict] | None:
+    """Build NERIS dispatch comments from dispatch_notes or dispatch_comments."""
+    notes = doc.dispatch_notes
+    if not notes and doc.dispatch_comments:
+        from sjifire.ops.incidents.tools import _parse_cad_comments
+
+        call_ts = doc.timestamps.get("psap_answer", "")
+        notes = _parse_cad_comments(doc.dispatch_comments, call_ts=call_ts)
+    if not notes:
+        return None
+    return [
+        {
+            "comment": _sanitize_for_neris(f"[{n.unit}] {n.text}" if n.unit else n.text),
+            **({"timestamp": to_utc_iso(n.timestamp)} if n.timestamp else {}),
+        }
+        for n in notes
+    ]
+
+
+def _build_neris_creation_payload(doc: IncidentDocument) -> dict:
+    """Convert an IncidentDocument into a NERIS creation payload dict."""
+    org = get_org_config()
+    location = _build_location(doc)
+
+    # ── Incident types (required) ──
+    incident_types = []
+    if doc.incident_type:
+        incident_types.append({"type": doc.incident_type, "primary": True})
+    incident_types.extend({"type": t, "primary": False} for t in doc.additional_incident_types)
+
+    # ── Base section ──
+    base: dict = {
+        "department_neris_id": org.neris_entity_id,
+        "incident_number": doc.incident_number,
+        "location": location or None,
+        "outcome_narrative": _sanitize_for_neris(doc.narrative) if doc.narrative else None,
+        "people_present": doc.people_present,
+        "displacement_count": doc.displaced_count,
+    }
+    if doc.location_use:
+        base["location_use"] = {"use_type": doc.location_use}
+    base = {k: v for k, v in base.items() if v is not None}
+
+    # ── Dispatch section (required) ──
+    dispatch: dict = {
+        "incident_number": doc.incident_number,
+        "determinant_code": doc.incident_number.replace("-", "")[:8] or None,
+        "location": location or None,
+        "call_create": to_utc_iso(doc.timestamps.get("psap_answer", "")) or None,
+        "call_answered": to_utc_iso(doc.timestamps.get("psap_answer", "")) or None,
+        "call_arrival": _find_first_arrival(doc) or None,
+        "incident_clear": to_utc_iso(doc.timestamps.get("incident_clear", "")) or None,
+        "automatic_alarm": doc.automatic_alarm,
+        "unit_responses": [_build_unit_response_for_creation(u) for u in doc.units],
+    }
+    comments = _build_dispatch_comments(doc)
+    if comments:
+        dispatch["comments"] = comments
+    dispatch = {k: v for k, v in dispatch.items() if v is not None}
+
+    payload: dict = {
+        "base": base,
+        "dispatch": dispatch,
+        "incident_types": incident_types,
+    }
+
+    # ── Actions/Tactics (optional) ──
+    if doc.action_taken == "ACTION":
+        payload["actions_tactics"] = {
+            "action_noaction": {"type": "ACTION", "actions": doc.action_codes or None}
+        }
+    elif doc.action_taken == "NOACTION" and doc.noaction_reason:
+        payload["actions_tactics"] = {
+            "action_noaction": {"type": "NOACTION", "noaction_type": doc.noaction_reason}
+        }
+
+    # ── Fire detail (optional) ──
+    fd = doc.fire_detail
+    if fd:
+        fire_detail: dict = {}
+        location_detail: dict = {}
+
+        if doc.arrival_conditions:
+            location_detail["arrival_condition"] = doc.arrival_conditions
+
+        for model_key, neris_key in (
+            ("fire_bldg_damage", "damage_type"),
+            ("room_of_origin", "room_of_origin_type"),
+            ("floor_of_origin", "floor_of_origin"),
+            ("fire_cause_in", "cause"),
+            ("fire_progression_evident", "progression_evident"),
+        ):
+            val = getattr(fd, model_key, None)
+            if val is not None:
+                location_detail[neris_key] = val
+
+        # Outside fire fields
+        if doc.outside_fire_cause:
+            location_detail["cause"] = doc.outside_fire_cause
+            location_detail["type"] = "OUTSIDE"
+        if doc.outside_fire_acres is not None:
+            location_detail["acres_burned"] = doc.outside_fire_acres
+            location_detail["type"] = "OUTSIDE"
+
+        if location_detail and "type" not in location_detail:
+            location_detail["type"] = "STRUCTURE"
+
+        if location_detail:
+            fire_detail["location_detail"] = location_detail
+
+        for model_key, neris_key in (
+            ("water_supply", "water_supply"),
+            ("fire_investigation", "investigation_needed"),
+            ("fire_investigation_types", "investigation_types"),
+            ("suppression_appliances", "suppression_appliances"),
+        ):
+            val = getattr(fd, model_key, None)
+            if val:
+                fire_detail[neris_key] = val
+
+        if fire_detail:
+            payload["fire_detail"] = fire_detail
+
+    # ── Alarm info (optional) ──
+    ai = doc.alarm_info
+    if ai:
+        for alarm_field, neris_attr in (
+            ("smoke_alarm_presence", "smoke_alarm"),
+            ("fire_alarm_presence", "fire_alarm"),
+            ("sprinkler_presence", "fire_suppression"),
+        ):
+            val = getattr(ai, alarm_field, None)
+            if val:
+                presence: dict = {"type": val}
+                if neris_attr == "smoke_alarm" and val == "PRESENT":
+                    if ai.smoke_alarm_types:
+                        presence["alarm_types"] = ai.smoke_alarm_types
+                    if ai.smoke_alarm_operation:
+                        presence["operation"] = {
+                            "alerted_failed_other": {"type": ai.smoke_alarm_operation}
+                        }
+                        if ai.smoke_alarm_occupant_action:
+                            presence["operation"]["alerted_failed_other"]["occupant_action"] = (
+                                ai.smoke_alarm_occupant_action
+                            )
+                payload[neris_attr] = {"presence": presence}
+
+    # ── Hazard info (optional) ──
+    hi = doc.hazard_info
+    if hi:
+        if hi.electric_hazards:
+            payload["electric_hazards"] = [{"type": t} for t in hi.electric_hazards]
+
+        powergen = []
+        for field_name, pv_type in (
+            ("solar_present", "PV_SOLAR"),
+            ("battery_ess_present", "BATTERY_ESS"),
+            ("generator_present", "GENERATOR"),
+        ):
+            val = getattr(hi, field_name, None)
+            if val and val != "NO":
+                powergen.append({"pv_other": {"type": pv_type}})
+        if hi.powergen_type:
+            powergen.append({"pv_other": {"type": hi.powergen_type}})
+        if powergen:
+            payload["powergen_hazards"] = powergen
+
+        if hi.csst_present:
+            csst: dict = {}
+            if hi.csst_present == "YES":
+                csst["ignition_source"] = True
+            elif hi.csst_present == "NO":
+                csst["ignition_source"] = False
+            if hi.csst_lightning_suspected and hi.csst_lightning_suspected != "UNKNOWN":
+                csst["lightning_suspected"] = hi.csst_lightning_suspected
+            if hi.csst_grounded is not None:
+                csst["grounded"] = hi.csst_grounded
+            if csst:
+                payload["csst_hazard"] = csst
+
+    # ── Tactic timestamps (optional) ──
+    tactic_ts: dict = {}
+    for ts_key in _TACTIC_TS_KEYS:
+        val = doc.timestamps.get(ts_key, "")
+        if val:
+            tactic_ts[ts_key] = to_utc_iso(val)
+    if tactic_ts:
+        payload["tactic_timestamps"] = tactic_ts
+
+    # ── Medical details from extras (optional) ──
+    extras = doc.extras
+    if extras.get("patient_count"):
+        medical_details = []
+        count = extras["patient_count"]
+        for i in range(count):
+            prefix = "" if count == 1 else f"patient_{i + 1}_"
+            med: dict = {}
+            if extras.get(f"{prefix}care_disposition"):
+                med["patient_care_evaluation"] = extras[f"{prefix}care_disposition"]
+            if extras.get(f"{prefix}transport_disposition"):
+                med["transport_disposition"] = extras[f"{prefix}transport_disposition"]
+            if extras.get(f"{prefix}patient_status"):
+                med["patient_status"] = extras[f"{prefix}patient_status"]
+            if med:
+                medical_details.append(med)
+        if medical_details:
+            payload["medical_details"] = medical_details
+
+    # ── Casualty/rescues from extras (optional) ──
+    if extras.get("casualty_rescues"):
+        payload["casualty_rescues"] = extras["casualty_rescues"]
+
+    # ── Non-FD aids from extras (optional) ──
+    if extras.get("nonfd_aids"):
+        payload["nonfd_aids"] = [{"type": t} for t in extras["nonfd_aids"]]
+
+    return payload
 
 
 def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
@@ -980,6 +1272,111 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
 # ---------------------------------------------------------------------------
 # Public MCP tools
 # ---------------------------------------------------------------------------
+
+
+async def submit_to_neris(incident_id: str, *, dry_run: bool = False) -> dict:
+    """Push the local incident report to NERIS — creates or updates as needed.
+
+    If the incident already has a ``neris_incident_id``, diffs the local data
+    against the NERIS record and patches only fields that differ (same behavior
+    as ``update_neris_incident``).  If no NERIS ID exists, builds a creation
+    payload and POSTs a new record to NERIS, storing the returned ID.
+
+    Does **not** lock the report — use ``finalize_incident`` to lock.
+    Editors only.
+
+    Args:
+        incident_id: Local incident document ID (UUID)
+        dry_run: If True, return a preview of the payload without submitting
+
+    Returns:
+        Result dict with NERIS ID on success, or an error
+    """
+    user = get_current_user()
+
+    if not await check_is_editor(user.user_id, fallback=user.is_editor, email=user.email):
+        group = get_org_config().editor_group_name
+        return {
+            "error": "You are not authorized to submit to NERIS. "
+            f"Ask an administrator to add you to the {group} group in Entra ID."
+        }
+
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+    if doc is None:
+        return {"error": "Incident not found"}
+
+    # ── Update path: existing NERIS record ──
+    if doc.neris_incident_id:
+        return await update_neris_incident(incident_id, dry_run=dry_run)
+
+    # ── Create path: validate minimum required fields ──
+    missing: list[str] = []
+    if not doc.incident_type:
+        missing.append("incident_type")
+    if not doc.timestamps.get("psap_answer"):
+        missing.append("timestamps.psap_answer")
+    if not doc.units:
+        missing.append("units (at least one unit required)")
+    if not doc.address:
+        missing.append("address")
+    if missing:
+        return {
+            "error": "Cannot submit to NERIS — required fields are missing.",
+            "missing_fields": missing,
+            "hint": "Fill in the missing fields and try again.",
+        }
+
+    # Build the creation payload
+    payload = _build_neris_creation_payload(doc)
+
+    if dry_run:
+        return {
+            "status": "dry_run",
+            "message": "Preview of the NERIS creation payload (not submitted).",
+            "payload": payload,
+        }
+
+    # Submit to NERIS
+    try:
+        result = await asyncio.to_thread(_submit_to_neris, payload)
+    except Exception as exc:
+        logger.exception("Failed to submit incident %s to NERIS", incident_id)
+        return {"error": f"NERIS submission failed: {exc}"}
+
+    if "error" in result:
+        return result
+
+    neris_id = result.get("neris_id", "")
+
+    # Store the returned NERIS ID on the document
+    doc.neris_incident_id = neris_id
+    doc.updated_at = datetime.now(UTC)
+    doc.edit_history.append(
+        EditEntry(
+            editor_email=user.email,
+            editor_name=user.name,
+            fields_changed=["neris_submit_created"],
+        )
+    )
+
+    async with IncidentStore() as store:
+        await store.update(doc)
+
+    logger.info(
+        "User %s created NERIS record %s for incident %s",
+        user.email,
+        neris_id,
+        incident_id,
+    )
+
+    return {
+        "status": "created",
+        "neris_id": neris_id,
+        "incident_id": incident_id,
+        "message": f"NERIS record created: {neris_id}",
+    }
 
 
 async def list_neris_incidents() -> dict:
@@ -1672,13 +2069,14 @@ async def update_neris_incident(
 
 
 async def finalize_incident(incident_id: str, *, skip_neris: bool = False) -> dict:
-    """Lock an incident report.
+    """Lock an incident report, optionally pushing to NERIS first.
 
-    When the incident has a ``neris_incident_id``, fetches the current NERIS
-    record status and sets the local incident to ``submitted``.
+    When ``skip_neris`` is False (the default), calls ``submit_to_neris``
+    before locking — this creates a new NERIS record if none exists, or
+    updates the existing one with local corrections.
 
-    When ``skip_neris`` is True (or the incident has no NERIS ID), locks the
-    report locally without NERIS and records that the export was declined.
+    When ``skip_neris`` is True, locks the report locally without NERIS
+    and records that the export was declined.
 
     Only editors can finalize incidents.
 
@@ -1702,38 +2100,34 @@ async def finalize_incident(incident_id: str, *, skip_neris: bool = False) -> di
     async with IncidentStore() as store:
         doc = await store.get_by_id(incident_id)
 
+    if doc is None:
+        return {"error": "Incident not found"}
+
+    if doc.status in _LOCKED_STATUSES:
+        return {
+            "error": f"Incident is already {doc.status} and locked. "
+            "No further changes can be made locally."
+        }
+
+    neris_result = None
+
+    if skip_neris:
+        finalize_note = "finalized_no_neris"
+    else:
+        # Push to NERIS first (create or update)
+        neris_result = await submit_to_neris(incident_id)
+        if isinstance(neris_result, dict) and "error" in neris_result:
+            return neris_result  # Don't lock if NERIS push failed
+        finalize_note = "finalized"
+
+    # Re-fetch the doc in case submit_to_neris updated it (e.g. set neris_incident_id)
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
         if doc is None:
             return {"error": "Incident not found"}
 
-        if doc.status in _LOCKED_STATUSES:
-            return {
-                "error": f"Incident is already {doc.status} and locked. "
-                "No further changes can be made locally."
-            }
-
-        neris_status = ""
-
-        if skip_neris or not doc.neris_incident_id:
-            # Close without NERIS export
+        if skip_neris:
             doc.extras = {**doc.extras, "neris_export_declined": True}
-            finalize_note = "finalized_no_neris"
-        else:
-            # Fetch current NERIS status
-            try:
-                neris_record = await asyncio.to_thread(_get_neris_incident, doc.neris_incident_id)
-            except Exception:
-                logger.warning(
-                    "Failed to fetch NERIS status for %s",
-                    doc.neris_incident_id,
-                    exc_info=True,
-                )
-                return {"error": "Failed to fetch NERIS status. Try again later."}
-
-            if not neris_record:
-                return {"error": f"NERIS record not found: {doc.neris_incident_id}"}
-
-            neris_status = (neris_record.get("incident_status") or {}).get("status", "")
-            finalize_note = "finalized"
 
         doc.status = "submitted"
         doc.updated_at = datetime.now(UTC)
@@ -1747,11 +2141,15 @@ async def finalize_incident(incident_id: str, *, skip_neris: bool = False) -> di
 
         updated = await store.update(doc)
 
+    neris_id = updated.neris_incident_id or "n/a"
     logger.info(
-        "User %s finalized incident %s → submitted (NERIS status: %s, skip_neris: %s)",
+        "User %s finalized incident %s → submitted (neris_id: %s, skip_neris: %s)",
         user.email,
         incident_id,
-        neris_status or "n/a",
+        neris_id,
         skip_neris,
     )
-    return updated.model_dump(mode="json")
+    result = updated.model_dump(mode="json")
+    if neris_result:
+        result["neris_result"] = neris_result
+    return result

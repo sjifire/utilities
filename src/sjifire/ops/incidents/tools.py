@@ -1176,9 +1176,9 @@ async def update_incident(
 async def submit_incident(incident_id: str) -> dict:
     """Validate and submit an incident to NERIS.
 
-    Only officers can submit incidents. The incident must be in
-    "ready_review" status. This validates the data with NERIS first,
-    then submits if validation passes.
+    .. deprecated::
+        Use ``submit_to_neris`` instead, which transparently creates or
+        updates the NERIS record.  This shim delegates to it.
 
     Args:
         incident_id: The incident document ID
@@ -1187,28 +1187,9 @@ async def submit_incident(incident_id: str) -> dict:
         Submission result with NERIS incident ID on success, or
         validation errors if the data doesn't pass NERIS checks
     """
-    user = get_current_user()
+    from sjifire.ops.incidents import neris as _neris
 
-    if not await check_is_editor(user.user_id, fallback=user.is_editor, email=user.email):
-        group = get_org_config().editor_group_name
-        return {
-            "error": "You are not authorized to submit incidents to NERIS. "
-            f"Ask an administrator to add you to the {group} group in Entra ID."
-        }
-
-    # NERIS submission is not yet enabled — district entity ID and API
-    # credentials are pending vendor enrollment. Remove this guard once
-    # NERIS_ENTITY_ID and NERIS_CLIENT_ID/SECRET are configured.
-    return {
-        "status": "not_available",
-        "message": (
-            "NERIS submission is not yet enabled. The incident report has been "
-            "saved locally and can be submitted once NERIS API credentials are "
-            "configured. Contact the system administrator to complete NERIS "
-            "vendor enrollment."
-        ),
-        "incident_id": incident_id,
-    }
+    return await _neris.submit_to_neris(incident_id)
 
 
 async def reset_incident(incident_id: str) -> dict:
@@ -1430,6 +1411,7 @@ def _overlay_crew_from_schedule(
 # server.py registers MCP tools as incident_tools.import_from_neris etc.
 from sjifire.ops.incidents.neris import (  # noqa: E402, F401
     _address_from_neris_location,
+    _build_neris_creation_payload,
     _build_neris_diff,
     _build_neris_patch,
     _get_neris_incident,
@@ -1445,5 +1427,6 @@ from sjifire.ops.incidents.neris import (  # noqa: E402, F401
     get_neris_incident,
     import_from_neris,
     list_neris_incidents,
+    submit_to_neris,
     update_neris_incident,
 )

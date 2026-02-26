@@ -259,11 +259,32 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
+        "name": "submit_to_neris",
+        "description": (
+            "Push the local incident report to NERIS. Creates a new NERIS record "
+            "if none exists, or updates the existing one with local corrections. "
+            "Does NOT lock the report — use finalize_incident to lock."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Preview what would be sent without submitting",
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
         "name": "finalize_incident",
         "description": (
-            "Lock an incident report. If the incident has a NERIS ID, fetches the "
-            "current NERIS status and locks accordingly. If skip_neris is true (or "
-            "no NERIS ID exists), locks the report locally without NERIS export."
+            "Lock an incident report. Pushes to NERIS first (create or update) "
+            "unless skip_neris is true, then locks the report as submitted."
         ),
         "input_schema": {
             "type": "object",
@@ -657,6 +678,12 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
             )
             return summary
         return result
+
+    if name == "submit_to_neris":
+        return await incident_tools.submit_to_neris(
+            tool_input["incident_id"],
+            dry_run=tool_input.get("dry_run", False),
+        )
 
     if name == "finalize_incident":
         return await incident_tools.finalize_incident(
