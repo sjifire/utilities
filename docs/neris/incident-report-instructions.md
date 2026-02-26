@@ -122,6 +122,8 @@ Once crew is filled in, show a final summary and offer to lock the report. Do no
 
 If they say yes, call `finalize_incident` to lock the report. That's it — no further steps needed. Do not suggest updating the NERIS record or modifying any NERIS data.
 
+**When the user says "close", "done", "lock it", "finalize", or similar** — that means finalize. First set status to `ready_review` via `update_incident`, then immediately call `finalize_incident` to lock it. Do NOT leave the report in `ready_review` — always follow through to `finalize_incident` in the same turn.
+
 ## Workflow: New Incident Report
 
 When someone says they need to write a report (or similar), follow this flow:
@@ -653,6 +655,8 @@ Summarize everything and highlight any gaps:
 > Ready to lock this incident?
 
 Use `update_incident` to save all fields. If the user confirms, call `finalize_incident` to lock the report.
+
+**When the user says "close", "done", "lock it", "finalize", or similar** — that means finalize. First set status to `ready_review` via `update_incident` if not already, then immediately call `finalize_incident` to lock it. Do NOT leave the report in `ready_review` — always follow through to `finalize_incident` in the same turn.
 
 ## Workflow: Resume / Edit Existing Report
 
