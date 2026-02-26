@@ -132,6 +132,19 @@ class UnitAssignment(BaseModel):
     comment: str = ""
 
 
+class DispatchNote(BaseModel):
+    """Individual dispatch radio log note (NOTE status from CAD).
+
+    Each note corresponds to a single line from the dispatch radio log,
+    with a timestamp and the unit that entered it.  Used to populate
+    NERIS ``dispatch.comments`` line-by-line.
+    """
+
+    timestamp: str = ""  # ISO 8601, local timezone (from iSpyFire)
+    unit: str = ""
+    text: str = ""
+
+
 class EditEntry(BaseModel):
     """A single edit to the incident report for audit tracking."""
 
@@ -196,6 +209,7 @@ class IncidentDocument(BaseModel):
 
     # Dispatch
     dispatch_comments: str = Field(default="", max_length=MAX_NARRATIVE_LENGTH)
+    dispatch_notes: list[DispatchNote] = Field(default_factory=list)
 
     # Tracking
     contributed_by: list[str] = Field(default_factory=list)

@@ -36,6 +36,7 @@ from sjifire.ops.incidents.tools import (
     _build_import_comparison,
     _check_edit_access,
     _check_view_access,
+    _extract_dispatch_notes,
     _extract_timestamps,
     _prefill_from_dispatch,
     create_incident,
@@ -728,6 +729,111 @@ class TestPrefillFromDispatch:
 
         result = await _prefill_from_dispatch("26-000944")
         assert result == {}
+
+
+# ── Dispatch notes extraction ──
+class TestExtractDispatchNotes:
+    def test_extracts_note_entries(self):
+        details = [
+            {"status": "ENRT", "time_of_status_change": "2026-02-07T13:48:30", "unit": "E31", "radio_log": "Enroute"},
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:48:35", "unit": "E31", "radio_log": "w/4"},
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:54:05", "unit": "OPS31", "radio_log": "Fire confined to chimney"},
+            {"status": "ARRVD", "time_of_status_change": "2026-02-07T14:00:10", "unit": "E31", "radio_log": "On scene"},
+        ]
+        notes = _extract_dispatch_notes(details)
+        assert len(notes) == 2
+        assert notes[0].unit == "E31"
+        assert notes[0].text == "w/4"
+        assert notes[1].unit == "OPS31"
+        assert notes[1].text == "Fire confined to chimney"
+
+    def test_merges_continuation_lines(self):
+        details = [
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:54:05", "unit": "OPS31", "radio_log": "Fire is confined to the chimney,"},
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:54:05", "unit": "OPS31", "radio_log": "+ will be checking upstairs"},
+        ]
+        notes = _extract_dispatch_notes(details)
+        assert len(notes) == 1
+        assert "chimney," in notes[0].text
+        assert "checking upstairs" in notes[0].text
+
+    def test_sorts_chronologically(self):
+        details = [
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T14:20:01", "unit": "OPS31", "radio_log": "Fire ext"},
+            {"status": "NOTE", "time_of_status_change": "2026-02-07T13:48:35", "unit": "E31", "radio_log": "w/4"},
+        ]
+        notes = _extract_dispatch_notes(details)
+        assert len(notes) == 2
+        assert notes[0].unit == "E31"
+        assert notes[1].unit == "OPS31"
+
+    def test_empty_details_returns_empty(self):
+        assert _extract_dispatch_notes([]) == []
+
+    def test_no_notes_returns_empty(self):
+        details = [
+            {"status": "ENRT", "time_of_status_change": "2026-02-07T13:48:30", "unit": "E31", "radio_log": "Enroute"},
+        ]
+        assert _extract_dispatch_notes(details) == []
+
+
+class TestPrefillDispatchNotes:
+    @patch("sjifire.ops.dispatch.store.DispatchStore")
+    async def test_includes_dispatch_notes_from_cad(self, mock_store_cls):
+        from sjifire.ops.dispatch.models import DispatchCallDocument
+
+        dispatch = DispatchCallDocument(
+            id="uuid-notes",
+            year="2026",
+            long_term_call_id="26-001927",
+            nature="Chimney Fire",
+            address="105 Petrich",
+            agency_code="SJF",
+            cad_comments="Possible chimney fire, advised by deputy on duty.",
+            time_reported=datetime(2026, 2, 7, 13, 45, 45),
+            responder_details=[
+                {"status": "NOTE", "time_of_status_change": "2026-02-07T13:48:35", "unit": "E31", "radio_log": "w/4"},
+                {"status": "NOTE", "time_of_status_change": "2026-02-07T14:09:29", "unit": "BN31", "radio_log": "has command"},
+            ],
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_dispatch_id = AsyncMock(return_value=dispatch)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await _prefill_from_dispatch("26-001927")
+
+        notes = result["dispatch_notes"]
+        # First note is the caller narrative (DISPATCH)
+        assert notes[0].unit == "DISPATCH"
+        assert "chimney fire" in notes[0].text.lower()
+        # Followed by individual CAD notes
+        assert notes[1].unit == "E31"
+        assert notes[1].text == "w/4"
+        assert notes[2].unit == "BN31"
+        assert notes[2].text == "has command"
+
+    @patch("sjifire.ops.dispatch.store.DispatchStore")
+    async def test_no_notes_when_no_cad_comments_or_notes(self, mock_store_cls):
+        from sjifire.ops.dispatch.models import DispatchCallDocument
+
+        dispatch = DispatchCallDocument(
+            id="uuid-empty",
+            year="2026",
+            long_term_call_id="26-001928",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get_by_dispatch_id = AsyncMock(return_value=dispatch)
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        result = await _prefill_from_dispatch("26-001928")
+        assert "dispatch_notes" not in result
 
 
 # ── NERIS address helper ──

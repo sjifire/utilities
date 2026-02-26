@@ -14,6 +14,7 @@ from sjifire.core.config import get_org_config, get_timezone, to_utc_iso
 from sjifire.ops.auth import check_is_editor, get_current_user
 from sjifire.ops.incidents.models import (
     AlarmInfo,
+    DispatchNote,
     EditEntry,
     FireDetail,
     HazardInfo,
@@ -285,6 +286,18 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
             prefill["units"] = [_build_unit_from_neris(u) for u in sorted_units]
         if dispatch.automatic_alarm is not None:
             prefill["automatic_alarm"] = dispatch.automatic_alarm
+
+        # Parse NERIS dispatch.comments → dispatch_notes
+        neris_comments = (record.get("dispatch") or {}).get("comments") or []
+        if neris_comments:
+            notes = []
+            for c in neris_comments:
+                text = c.get("comment", "").strip()
+                ts = c.get("timestamp") or ""
+                if text:
+                    notes.append(DispatchNote(timestamp=str(ts), text=text))
+            if notes:
+                prefill["dispatch_notes"] = notes
         if dispatch.call_create:
             timestamps["psap_answer"] = dispatch.call_create
         if dispatch.incident_clear:
@@ -652,6 +665,24 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
     if doc.automatic_alarm is not None and doc.automatic_alarm != neris_auto_alarm:
         diff["automatic_alarm"] = {"local": doc.automatic_alarm, "neris": neris_auto_alarm}
 
+    # Dispatch comments — find local notes not yet in NERIS
+    if doc.dispatch_notes:
+        neris_comments = dispatch.get("comments") or []
+        neris_comment_texts = {c.get("comment", "").strip().lower() for c in neris_comments}
+
+        new_notes = []
+        for note in doc.dispatch_notes:
+            # Match by text content (case-insensitive) — timestamp format may differ
+            note_text = f"[{note.unit}] {note.text}" if note.unit else note.text
+            if note_text.strip().lower() not in neris_comment_texts:
+                new_notes.append(note)
+
+        if new_notes:
+            diff["dispatch_comments"] = {
+                "local": new_notes,
+                "neris": neris_comments,
+            }
+
     return diff
 
 
@@ -810,6 +841,19 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
 
         if unit_actions:
             dispatch_props["unit_responses"] = unit_actions
+
+    # Dispatch comments — append new notes as individual NERIS comments
+    if "dispatch_comments" in diff:
+        comment_actions = []
+        for note in diff["dispatch_comments"]["local"]:
+            # Format: "[UNIT] text" with unit prefix, UTC timestamp
+            comment_text = f"[{note.unit}] {note.text}" if note.unit else note.text
+            comment_payload: dict = {"comment": comment_text}
+            if note.timestamp:
+                comment_payload["timestamp"] = to_utc_iso(note.timestamp)
+            comment_actions.append({"action": "append", "value": comment_payload})
+        if comment_actions:
+            dispatch_props["comments"] = comment_actions
 
     if dispatch_props:
         dispatch_action: dict = {"action": "patch", "properties": dispatch_props}
@@ -1138,10 +1182,16 @@ async def _apply_neris_import_to_existing(
         doc.timestamps = merged_ts
         fields_changed.append("timestamps")
 
-    # Dispatch comments
+    # Dispatch comments (joined blob)
     if "dispatch_comments" in dispatch_prefill and not doc.dispatch_comments:
         doc.dispatch_comments = dispatch_prefill["dispatch_comments"]
         fields_changed.append("dispatch_comments")
+
+    # Dispatch notes (individual timestamped entries for NERIS comments)
+    notes_source = dispatch_prefill.get("dispatch_notes") or neris_prefill.get("dispatch_notes")
+    if notes_source and not doc.dispatch_notes:
+        doc.dispatch_notes = notes_source
+        fields_changed.append("dispatch_notes")
 
     # Typed sub-models (fire detail, alarm info, hazard info)
     for field_name, cls in (
@@ -1272,6 +1322,10 @@ async def _create_incident_from_neris(
     if "units" not in merged and "units" in neris_prefill:
         merged["units"] = neris_prefill["units"]
 
+    # Dispatch notes: prefer dispatch (individual CAD notes), fall back to NERIS
+    if "dispatch_notes" not in merged and "dispatch_notes" in neris_prefill:
+        merged["dispatch_notes"] = neris_prefill["dispatch_notes"]
+
     units = merged.get("units", [])
 
     # Overlay crew from schedule
@@ -1304,6 +1358,7 @@ async def _create_incident_from_neris(
         timestamps=merged.get("timestamps", {}),
         narrative=merged.get("narrative", ""),
         dispatch_comments=merged.get("dispatch_comments", ""),
+        dispatch_notes=merged.get("dispatch_notes", []),
         neris_incident_id=merged.get("neris_incident_id"),
         action_taken=merged.get("action_taken"),
         noaction_reason=merged.get("noaction_reason"),

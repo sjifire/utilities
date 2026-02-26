@@ -22,6 +22,7 @@ from sjifire.ops.incidents.models import (
     FIRE_DETAIL_KEYS,
     HAZARD_INFO_KEYS,
     AlarmInfo,
+    DispatchNote,
     EditEntry,
     FireDetail,
     HazardInfo,
@@ -125,6 +126,43 @@ def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, st
     return unit_times
 
 
+def _extract_dispatch_notes(responder_details: list[dict]) -> list[DispatchNote]:
+    """Extract individual NOTE entries from dispatch responder details.
+
+    Filters to ``NOTE`` status entries and merges continuation lines
+    (lines starting with ``+ ``) into the previous note's text.
+
+    Args:
+        responder_details: List of responder status dicts from dispatch
+
+    Returns:
+        List of DispatchNote objects sorted chronologically (earliest first)
+    """
+    raw_notes: list[dict] = []
+    for detail in responder_details:
+        if detail.get("status") != "NOTE":
+            continue
+        text = detail.get("radio_log", "").strip()
+        ts = detail.get("time_of_status_change", "")
+        unit = detail.get("unit", "")
+        if text:
+            raw_notes.append({"timestamp": str(ts), "unit": unit, "text": text})
+
+    # Sort chronologically (earliest first)
+    raw_notes.sort(key=lambda n: n["timestamp"])
+
+    # Merge continuation lines (text starting with "+ ")
+    merged: list[DispatchNote] = []
+    for note in raw_notes:
+        if note["text"].startswith("+ ") and merged:
+            # Append continuation text to previous note (strip the "+ " prefix)
+            merged[-1].text += " " + note["text"][2:].strip()
+        else:
+            merged.append(DispatchNote(**note))
+
+    return merged
+
+
 async def _prefill_from_dispatch(incident_number: str) -> dict:
     """Look up dispatch data and return pre-fill fields for an incident.
 
@@ -187,6 +225,27 @@ async def _prefill_from_dispatch(incident_number: str) -> dict:
     # Snapshot dispatch comments (plain string from iSpyFire JoinedComments)
     if dispatch.cad_comments:
         prefill["dispatch_comments"] = dispatch.cad_comments
+
+    # Extract individual NOTE entries for NERIS dispatch.comments
+    notes = _extract_dispatch_notes(dispatch.responder_details)
+
+    # Prepend the caller narrative (cad_comments) as the first note
+    # using the call reported time as timestamp
+    if dispatch.cad_comments:
+        caller_ts = ""
+        if dispatch.time_reported:
+            caller_ts = dispatch.time_reported.isoformat()
+        notes.insert(
+            0,
+            DispatchNote(
+                timestamp=caller_ts,
+                unit="DISPATCH",
+                text=dispatch.cad_comments.replace("\n", " ").strip(),
+            ),
+        )
+
+    if notes:
+        prefill["dispatch_notes"] = notes
 
     return prefill
 
@@ -627,6 +686,7 @@ async def create_incident(
         timestamps=prefill.get("timestamps", {}),
         narrative=prefill.get("narrative", ""),
         dispatch_comments=prefill.get("dispatch_comments", ""),
+        dispatch_notes=prefill.get("dispatch_notes", []),
         neris_incident_id=prefill.get("neris_incident_id"),
         station=station,
         created_by=user.email,
@@ -1144,6 +1204,7 @@ async def reset_incident(incident_id: str) -> dict:
         doc.longitude = prefill.get("longitude")
         doc.timestamps = prefill.get("timestamps", {})
         doc.dispatch_comments = prefill.get("dispatch_comments", "")
+        doc.dispatch_notes = prefill.get("dispatch_notes", [])
 
         # Reset status to draft
         doc.status = "draft"

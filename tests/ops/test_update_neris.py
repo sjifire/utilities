@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from sjifire.ops.auth import UserContext, set_current_user
-from sjifire.ops.incidents.models import IncidentDocument, UnitAssignment
+from sjifire.ops.incidents.models import DispatchNote, IncidentDocument, UnitAssignment
 from sjifire.ops.incidents.neris import (
     _build_neris_diff,
     _build_neris_patch,
@@ -836,3 +836,131 @@ class TestNerisSnapshotStore:
         async with NerisSnapshotStore() as store:
             result = await store.get_by_id("nonexistent", "2026")
             assert result is None
+
+
+# ── Dispatch comments in NERIS diff/patch ──
+
+
+class TestDispatchCommentsDiff:
+    """Tests for dispatch_notes → NERIS dispatch.comments diffing."""
+
+    def test_detects_new_notes_not_in_neris(self):
+        doc = IncidentDocument(
+            id="doc-comments-1",
+            incident_number="26-001927",
+            incident_datetime=datetime(2026, 2, 7, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26001927|1770500761",
+            dispatch_notes=[
+                DispatchNote(timestamp="2026-02-07T13:45:45", unit="DISPATCH", text="Possible chimney fire"),
+                DispatchNote(timestamp="2026-02-07T13:48:35", unit="E31", text="w/4"),
+            ],
+        )
+        neris_record = {
+            "base": {},
+            "dispatch": {"comments": [], "unit_responses": []},
+            "incident_types": [],
+        }
+        diff = _build_neris_diff(doc, neris_record)
+        assert "dispatch_comments" in diff
+        assert len(diff["dispatch_comments"]["local"]) == 2
+
+    def test_skips_notes_already_in_neris(self):
+        doc = IncidentDocument(
+            id="doc-comments-2",
+            incident_number="26-001927",
+            incident_datetime=datetime(2026, 2, 7, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26001927|1770500761",
+            dispatch_notes=[
+                DispatchNote(timestamp="2026-02-07T13:48:35", unit="E31", text="w/4"),
+            ],
+        )
+        neris_record = {
+            "base": {},
+            "dispatch": {
+                "comments": [{"comment": "[E31] w/4", "timestamp": "2026-02-07T21:48:35+00:00"}],
+                "unit_responses": [],
+            },
+            "incident_types": [],
+        }
+        diff = _build_neris_diff(doc, neris_record)
+        assert "dispatch_comments" not in diff
+
+    def test_no_diff_when_no_local_notes(self):
+        doc = IncidentDocument(
+            id="doc-comments-3",
+            incident_number="26-001927",
+            incident_datetime=datetime(2026, 2, 7, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26001927|1770500761",
+        )
+        neris_record = {
+            "base": {},
+            "dispatch": {"comments": [], "unit_responses": []},
+            "incident_types": [],
+        }
+        diff = _build_neris_diff(doc, neris_record)
+        assert "dispatch_comments" not in diff
+
+
+class TestDispatchCommentsPatch:
+    """Tests for dispatch_notes → NERIS dispatch.comments patching."""
+
+    def test_builds_append_actions(self):
+        diff = {
+            "dispatch_comments": {
+                "local": [
+                    DispatchNote(timestamp="2026-02-07T13:48:35", unit="E31", text="w/4"),
+                    DispatchNote(timestamp="2026-02-07T14:09:29", unit="BN31", text="has command"),
+                ],
+                "neris": [],
+            }
+        }
+        neris_record = {"base": {}, "dispatch": {"neris_uid": 6255423}}
+        patch = _build_neris_patch(diff, neris_record)
+
+        assert "dispatch" in patch
+        dispatch_props = patch["dispatch"]["properties"]
+        comments = dispatch_props["comments"]
+        assert len(comments) == 2
+        assert comments[0]["action"] == "append"
+        assert comments[0]["value"]["comment"] == "[E31] w/4"
+        assert comments[1]["value"]["comment"] == "[BN31] has command"
+
+    def test_converts_timestamps_to_utc(self):
+        diff = {
+            "dispatch_comments": {
+                "local": [
+                    DispatchNote(timestamp="2026-02-07T13:48:35", unit="E31", text="w/4"),
+                ],
+                "neris": [],
+            }
+        }
+        neris_record = {"base": {}, "dispatch": {"neris_uid": 6255423}}
+        patch = _build_neris_patch(diff, neris_record)
+
+        comment = patch["dispatch"]["properties"]["comments"][0]["value"]
+        # Naive Pacific 13:48 → UTC 21:48
+        assert "+00:00" in comment["timestamp"]
+
+    def test_no_dispatch_section_without_comments(self):
+        diff = {}
+        neris_record = {"base": {}, "dispatch": {"neris_uid": 6255423}}
+        patch = _build_neris_patch(diff, neris_record)
+        assert "dispatch" not in patch
+
+    def test_comment_without_unit_has_no_prefix(self):
+        diff = {
+            "dispatch_comments": {
+                "local": [
+                    DispatchNote(timestamp="2026-02-07T13:45:00", unit="", text="Caller report"),
+                ],
+                "neris": [],
+            }
+        }
+        neris_record = {"base": {}, "dispatch": {"neris_uid": 6255423}}
+        patch = _build_neris_patch(diff, neris_record)
+        comment_text = patch["dispatch"]["properties"]["comments"][0]["value"]["comment"]
+        assert comment_text == "Caller report"
+        assert not comment_text.startswith("[")
