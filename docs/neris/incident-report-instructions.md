@@ -128,7 +128,9 @@ Once crew is filled in, show a final summary and offer to lock the report. Do no
 >
 > Ready to lock this incident?
 
-If they say yes, call `finalize_incident` to lock the report. That's it — no further steps needed. Do not suggest updating the NERIS record or modifying any NERIS data.
+**Before locking**, check for corrections to push to NERIS: call `update_neris_incident(incident_id, dry_run=true)` to see if our local data differs from the NERIS record. If there are differences (timestamps, dispatch number, comments, etc.), present them and offer to push the corrections. Our dispatch/CAD data is usually more accurate. If they confirm, call `update_neris_incident(incident_id)` to push the changes, then finalize.
+
+If they say yes to locking (and no NERIS corrections needed), call `finalize_incident` to lock the report.
 
 **When the user says "close", "done", "lock it", "finalize", or similar** — that means finalize. First set status to `ready_review` via `update_incident`, then immediately call `finalize_incident` to lock it. Do NOT leave the report in `ready_review` — always follow through to `finalize_incident` in the same turn.
 
@@ -259,9 +261,10 @@ Only ask the user about gaps if the CAD comments don't explain them. If you can'
 Save unit times via `update_incident(unit_responses=[...])` and the incident-level timestamps (earliest dispatched, first enroute, first on scene, last cleared) via `update_incident(timestamps={...})`.
 
 **Response Mode** — Set each unit's response mode based on the incident type:
-- **Emergent** (default for): `FIRE||`, `MEDICAL||ILLNESS||CARDIAC_ARREST`, `MEDICAL||ILLNESS||BREATHING_PROBLEMS`, `MEDICAL||ILLNESS||CHEST_PAIN_NON_TRAUMA`, `MEDICAL||ILLNESS||STROKE_CVA`, `RESCUE||`
-- **Non-emergent** (default for): `PUBSERV||`, `NOEMERG||`
+- **Emergent** (default for): `FIRE||` (structure fires), `MEDICAL||ILLNESS||CARDIAC_ARREST`, `MEDICAL||ILLNESS||BREATHING_PROBLEMS`, `MEDICAL||ILLNESS||CHEST_PAIN_NON_TRAUMA`, `MEDICAL||ILLNESS||STROKE_CVA`, `RESCUE||`
+- **Non-emergent** (default for): `FIRE||ALARM||` (fire alarms), `PUBSERV||`, `NOEMERG||`, automatic alarms
 - **Ask** for everything else
+- **IMPORTANT**: Do NOT assume EMERGENT. If the response mode is unknown, leave it empty rather than guessing.
 
 Present: "I've set all units to **Emergent** response based on the incident type. Any units respond non-emergent?" (or vice versa). Save via `update_incident(unit_responses=[{unit_id: "E31", response_mode: "EMERGENT", ...}])`.
 
@@ -662,7 +665,11 @@ Summarize everything and highlight any gaps:
 >
 > Ready to lock this incident?
 
-Use `update_incident` to save all fields. If the user confirms, call `finalize_incident` to lock the report.
+Use `update_incident` to save all fields.
+
+**Before locking**, if the report has a NERIS ID, check for corrections to push: call `update_neris_incident(incident_id, dry_run=true)` to compare local data against the NERIS record. If there are differences (timestamps, dispatch incident number, comments, etc.), present them and offer to push corrections — our dispatch/CAD data is usually more precise. If they confirm, call `update_neris_incident(incident_id)` to push the changes, then finalize.
+
+If the user confirms locking (and no NERIS corrections needed or corrections already pushed), call `finalize_incident` to lock the report.
 
 **When the user says "close", "done", "lock it", "finalize", or similar** — that means finalize. First set status to `ready_review` via `update_incident` if not already, then immediately call `finalize_incident` to lock it. Do NOT leave the report in `ready_review` — always follow through to `finalize_incident` in the same turn.
 

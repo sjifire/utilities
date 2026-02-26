@@ -71,7 +71,10 @@ TOOL_SCHEMAS: list[dict] = [
                             },
                             "response_mode": {
                                 "type": "string",
-                                "description": "EMERGENT or NON_EMERGENT",
+                                "description": (
+                                    "EMERGENT or NON_EMERGENT. Leave empty unless known. "
+                                    "Fire alarms default to NON_EMERGENT."
+                                ),
                             },
                             "personnel": {
                                 "type": "array",

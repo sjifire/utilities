@@ -788,7 +788,12 @@ async def get_incident(incident_id: str) -> dict:
     if not await _check_view_access(doc, user.email, user.is_editor):
         return {"error": "You don't have access to this incident"}
 
-    return doc.model_dump(mode="json")
+    result = doc.model_dump(mode="json")
+    # Suppress raw dispatch_comments blob when parsed dispatch_notes exist
+    # to avoid showing duplicate information to the chat assistant.
+    if result.get("dispatch_notes") and "dispatch_comments" in result:
+        del result["dispatch_comments"]
+    return result
 
 
 async def list_incidents(

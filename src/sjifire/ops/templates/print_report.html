@@ -726,7 +726,20 @@
     {% endif %}
 
     <!-- ── Dispatch Comments ── -->
-    {% if doc.dispatch_comments %}
+    {% if doc.dispatch_notes %}
+    <div class="section">
+      <div class="section-header">Dispatch Comments</div>
+      <div class="section-body">
+        {% for note in doc.dispatch_notes %}
+        <div style="margin-bottom:6px{% if not loop.last %};padding-bottom:6px;border-bottom:1px solid #f3f4f6{% endif %}">
+          <span style="font-family:monospace;font-size:11px;color:#6b7280">{{ note.timestamp | fmt_dt if note.timestamp else "--" }}</span>
+          {% if note.unit %}<span style="font-weight:600;font-size:11px;color:#4b5563">[{{ note.unit }}]</span>{% endif %}
+          <span style="font-size:13px">{{ note.text }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% elif doc.dispatch_comments %}
     <div class="section">
       <div class="section-header">Dispatch Comments</div>
       <div class="section-body">
