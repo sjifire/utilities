@@ -44,6 +44,7 @@ from sjifire.ops.chat.routes import (
     debug_context,
     general_chat_history,
     print_report,
+    reopen_report,
 )
 from sjifire.ops.dispatch import tools as dispatch_tools
 from sjifire.ops.incidents import tools as incident_tools
@@ -364,6 +365,7 @@ app = mcp.streamable_http_app()
 app.routes.insert(0, Route("/reports/{incident_id}/debug-context", debug_context))
 app.routes.insert(0, Route("/reports/{incident_id}/conversation", conversation_history))
 app.routes.insert(0, Route("/reports/{incident_id}/print", print_report))
+app.routes.insert(0, Route("/reports/{incident_id}/reopen", reopen_report, methods=["POST"]))
 app.routes.insert(0, Route("/reports/{incident_id}", chat_page))
 app.routes.insert(0, Route("/reports/new", create_report, methods=["GET", "POST"]))
 

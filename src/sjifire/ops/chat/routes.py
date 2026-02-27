@@ -5,6 +5,7 @@ Routes:
 - GET  /reports/{incident_id}              → Chat page (HTML)
 - GET  /reports/{incident_id}/conversation → Conversation history (JSON)
 - GET  /reports/{incident_id}/print        → Print report (HTML)
+- POST /reports/{incident_id}/reopen       → Reopen locked report (JSON)
 - GET  /chat/history                       → Dashboard chat history (JSON)
 
 Chat message sending is handled via Centrifugo RPC proxy (see centrifugo.py).
@@ -437,6 +438,28 @@ async def conversation_history(request: Request) -> Response:
             "total_output_tokens": conversation.total_output_tokens,
         }
     )
+
+
+async def reopen_report(request: Request) -> Response:
+    """Reopen a submitted/approved incident, returning it to draft.
+
+    POST /reports/{incident_id}/reopen
+    """
+    user = _get_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    set_current_user(user)
+
+    from sjifire.ops.incidents import tools as incident_tools
+
+    incident_id = request.path_params["incident_id"]
+    result = await incident_tools.reopen_incident(incident_id)
+
+    if isinstance(result, dict) and "error" in result:
+        return JSONResponse(result, status_code=400)
+
+    return JSONResponse(result)
 
 
 async def general_chat_history(request: Request) -> Response:

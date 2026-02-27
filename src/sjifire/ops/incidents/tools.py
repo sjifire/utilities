@@ -89,10 +89,15 @@ def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
 def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, str]]:
     """Extract per-unit timestamps from dispatch responder details.
 
+    Only includes units belonging to our agency (matched by
+    ``dispatch_agency_code`` from organization.json). Other-agency
+    units (mutual aid, etc.) are excluded from the unit log by default.
+
     Timestamps are converted to UTC ISO format at extraction time.
 
     Returns a dict of unit_id → {dispatch, enroute, on_scene, cleared, ...}.
     """
+    our_agency = get_org_config().dispatch_agency_code.upper()
     unit_times: dict[str, dict[str, str]] = {}
     status_map = {
         "PAGED": "dispatch",
@@ -110,7 +115,13 @@ def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, st
         time_str = detail.get("time_of_status_change", "")
         if not unit or not status or not time_str:
             continue
-        # Skip agency paging units
+
+        # Filter by agency — only include our units
+        agency = detail.get("agency_code", "").upper()
+        if our_agency and agency and agency != our_agency:
+            continue
+
+        # Skip agency paging units (these are the agency itself, not apparatus)
         if unit in ("SJF3", "SJF2"):
             continue
 

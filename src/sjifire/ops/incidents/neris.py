@@ -32,6 +32,74 @@ logger = logging.getLogger(__name__)
 
 _LOCKED_STATUSES = {"submitted", "approved"}
 
+
+def _to_local_display(val: str) -> str:
+    """Convert a UTC/aware ISO timestamp to local time for display.
+
+    Returns a human-friendly string like '2026-02-21 09:16:12 PST'.
+    Non-parseable or empty strings pass through unchanged.
+    """
+    if not val:
+        return val
+    try:
+        dt = datetime.fromisoformat(val)
+    except (ValueError, TypeError):
+        return val
+    local_dt = dt.astimezone(get_timezone())
+    # Short timezone abbreviation (e.g. PST, PDT)
+    tz_abbr = local_dt.strftime("%Z")
+    return f"{local_dt.strftime('%Y-%m-%d %H:%M:%S')} {tz_abbr}"
+
+
+def _localize_diff_timestamps(diff: dict) -> dict:
+    """Convert all timestamp values in a NERIS diff to local time for display."""
+    result = {}
+    for key, val in diff.items():
+        if key in ("timestamps", "units"):
+            # These have nested local/neris dicts of timestamps
+            localized: dict = {
+                k: v for k, v in val.items() if k not in ("local", "neris")
+            }
+            for side in ("local", "neris"):
+                if side in val:
+                    localized[side] = {
+                        k: _to_local_display(v) if isinstance(v, str) else v
+                        for k, v in val[side].items()
+                    }
+            result[key] = localized
+        else:
+            result[key] = val
+    return result
+
+
+_DISPATCH_TS_KEYS = frozenset({
+    "call_create", "call_answered", "call_arrival", "incident_clear",
+    "first_unit_dispatched",
+})
+_UNIT_TS_KEYS = frozenset({
+    "dispatch", "enroute_to_scene", "staging", "on_scene",
+    "unit_clear", "canceled_enroute",
+})
+
+
+def _localize_creation_payload(payload: dict) -> dict:
+    """Convert UTC timestamps in a NERIS creation payload to local time for display."""
+    import copy
+
+    p = copy.deepcopy(payload)
+    dispatch = p.get("dispatch", {})
+    for key in _DISPATCH_TS_KEYS:
+        if key in dispatch and isinstance(dispatch[key], str):
+            dispatch[key] = _to_local_display(dispatch[key])
+    for unit_resp in dispatch.get("unit_responses", []):
+        for key in _UNIT_TS_KEYS:
+            if key in unit_resp and isinstance(unit_resp[key], str):
+                unit_resp[key] = _to_local_display(unit_resp[key])
+    for comment in dispatch.get("comments", []):
+        if "timestamp" in comment and isinstance(comment["timestamp"], str):
+            comment["timestamp"] = _to_local_display(comment["timestamp"])
+    return p
+
 # Ephemeral cache: NERIS unit ID → local CAD designation (e.g. FD53055879S001U000 → E31).
 # Rebuilt from NERIS entity API on first use; lost on restart (acceptable).
 _neris_unit_map: dict[str, str] = {}
@@ -608,7 +676,7 @@ def _submit_to_neris(payload: dict) -> dict:  # pragma: no cover
     try:
         with NerisClient() as client:
             result = client.api.create_incident(
-                neris_id_entity=client.entity_id,
+                neris_id=client.entity_id,
                 body=payload,
             )
             # The upstream library returns a raw Response on HTTP errors
@@ -651,19 +719,6 @@ def _build_location(doc: IncidentDocument) -> dict:
         else:
             loc["street"] = doc.address
     return {k: v for k, v in loc.items() if v is not None}
-
-
-def _find_first_arrival(doc: IncidentDocument) -> str:
-    """Find earliest on_scene from units, or fallback to first dispatch/cancel/clear."""
-    arrivals = [u.on_scene for u in doc.units if u.on_scene]
-    if arrivals:
-        return to_utc_iso(min(arrivals))
-    # No on-scene → use first cancel, clear, or dispatch time
-    fallbacks = [ts for u in doc.units for ts in (u.canceled, u.cleared, u.dispatch) if ts]
-    if fallbacks:
-        return to_utc_iso(min(fallbacks))
-    # Last resort: use incident_clear or psap_answer
-    return to_utc_iso(doc.timestamps.get("incident_clear", doc.timestamps.get("psap_answer", "")))
 
 
 def _build_unit_response_for_creation(unit: UnitAssignment) -> dict:
@@ -741,7 +796,7 @@ def _build_neris_creation_payload(doc: IncidentDocument) -> dict:
         "location": location or None,
         "call_create": to_utc_iso(doc.timestamps.get("psap_answer", "")) or None,
         "call_answered": to_utc_iso(doc.timestamps.get("psap_answer", "")) or None,
-        "call_arrival": _find_first_arrival(doc) or None,
+        "call_arrival": to_utc_iso(doc.timestamps.get("psap_answer", "")) or None,
         "incident_clear": to_utc_iso(doc.timestamps.get("incident_clear", "")) or None,
         "automatic_alarm": doc.automatic_alarm,
         "unit_responses": [_build_unit_response_for_creation(u) for u in doc.units],
@@ -1335,7 +1390,7 @@ async def submit_to_neris(incident_id: str, *, dry_run: bool = False) -> dict:
         return {
             "status": "dry_run",
             "message": "Preview of the NERIS creation payload (not submitted).",
-            "payload": payload,
+            "payload": _localize_creation_payload(payload),
         }
 
     # Submit to NERIS
@@ -1984,7 +2039,7 @@ async def update_neris_incident(
             "status": "dry_run",
             "neris_id": doc.neris_incident_id,
             "neris_status": neris_status,
-            "diff": diff,
+            "diff": _localize_diff_timestamps(diff),
             "fields_available": list(diff.keys()),
             "message": f"{len(diff)} field(s) differ between local and NERIS.{approved_warning}",
         }

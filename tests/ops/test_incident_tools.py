@@ -22,11 +22,13 @@ from sjifire.ops.incidents.neris import (
     _build_neris_patch,
     _build_unit_from_neris,
     _getattr_path,
+    _localize_diff_timestamps,
     _merge_sub_model,
     _neris_dispatch_to_cad_number,
     _parse_neris_record,
     _parse_timestamp,
     _prefill_from_neris,
+    _to_local_display,
     finalize_incident,
     get_neris_incident,
     import_from_neris,
@@ -3296,6 +3298,173 @@ class TestBuildNerisCreationPayload:
         assert "fire_detail" in payload
         assert payload["fire_detail"]["water_supply"] == "MUNICIPAL"
 
+    def test_call_arrival_equals_psap_answer(self):
+        """call_arrival is the PSAP call arrival time, NOT the first unit on-scene."""
+        doc = IncidentDocument(
+            id="doc-payload-arrival",
+            incident_number="26-002584",
+            incident_datetime=datetime(2026, 2, 21, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            incident_type="MEDICAL||ILLNESS||HEART_PROBLEMS",
+            address="8248 Cattle Point Rd",
+            city="Friday Harbor",
+            state="WA",
+            timestamps={"psap_answer": "2026-02-21T09:16:12-08:00"},
+            units=[
+                UnitAssignment(
+                    unit_id="BN31",
+                    dispatch="2026-02-21T09:20:24-08:00",
+                    enroute="2026-02-21T09:22:18-08:00",
+                    on_scene="2026-02-21T09:30:00-08:00",
+                ),
+            ],
+        )
+
+        payload = _build_neris_creation_payload(doc)
+        dispatch = payload["dispatch"]
+        # call_arrival = when the 911 call arrives at PSAP, same as call_create
+        assert dispatch["call_arrival"] == dispatch["call_create"]
+        # And it should be the PSAP answer time (converted to UTC)
+        assert dispatch["call_arrival"] == to_utc_iso("2026-02-21T09:16:12-08:00")
+
+    def test_call_arrival_without_on_scene(self):
+        """Cancelled calls (no on_scene) still get correct call_arrival from psap_answer."""
+        doc = IncidentDocument(
+            id="doc-payload-cancelled",
+            incident_number="26-002584",
+            incident_datetime=datetime(2026, 2, 21, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            incident_type="MEDICAL||ILLNESS||HEART_PROBLEMS",
+            address="8248 Cattle Point Rd",
+            action_taken="NOACTION",
+            noaction_reason="CANCELLED",
+            timestamps={"psap_answer": "2026-02-21T09:16:12-08:00"},
+            units=[
+                UnitAssignment(
+                    unit_id="BN31",
+                    dispatch="2026-02-21T09:20:24-08:00",
+                    enroute="2026-02-21T09:22:18-08:00",
+                    cleared="2026-02-21T09:31:55-08:00",
+                ),
+                UnitAssignment(
+                    unit_id="R31",
+                    dispatch="2026-02-21T09:20:24-08:00",
+                    enroute="2026-02-21T09:22:18-08:00",
+                    cleared="2026-02-21T09:31:55-08:00",
+                ),
+            ],
+        )
+
+        payload = _build_neris_creation_payload(doc)
+        dispatch = payload["dispatch"]
+        # Even with no on_scene, call_arrival should be psap_answer
+        assert dispatch["call_arrival"] == dispatch["call_create"]
+        # Unit responses should have unit_clear but no on_scene
+        for unit_resp in dispatch["unit_responses"]:
+            assert "on_scene" not in unit_resp
+            assert "unit_clear" in unit_resp
+
+    def test_location_includes_zip_and_county(self):
+        """Postal code and county included in location when available."""
+        doc = IncidentDocument(
+            id="doc-payload-loc",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            incident_type="EMS||MEDICAL",
+            address="100 Spring St",
+            city="Friday Harbor",
+            state="WA",
+            zip_code="98250",
+            county="San Juan",
+            timestamps={"psap_answer": "2026-02-12T18:00:00+00:00"},
+            units=[UnitAssignment(unit_id="E31")],
+        )
+
+        payload = _build_neris_creation_payload(doc)
+        loc = payload["base"]["location"]
+        assert loc["postal_code"] == "98250"
+        assert loc["county"] == "San Juan"
+        assert loc["incorporated_municipality"] == "Friday Harbor"
+
+    def test_dispatch_comments_included(self):
+        """Dispatch notes are included as comments in dispatch section."""
+        from sjifire.ops.incidents.models import DispatchNote
+
+        doc = IncidentDocument(
+            id="doc-payload-comments",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            incident_type="EMS||MEDICAL",
+            address="100 Spring St",
+            timestamps={"psap_answer": "2026-02-12T18:00:00+00:00"},
+            units=[UnitAssignment(unit_id="E31")],
+            dispatch_notes=[
+                DispatchNote(text="Patient is conscious", timestamp="2026-02-12T18:01:00+00:00"),
+                DispatchNote(
+                    text="On scene",
+                    unit="E31",
+                    timestamp="2026-02-12T18:05:00+00:00",
+                ),
+            ],
+        )
+
+        payload = _build_neris_creation_payload(doc)
+        comments = payload["dispatch"]["comments"]
+        assert len(comments) == 2
+        assert comments[0]["comment"] == "Patient is conscious"
+        assert "[E31]" in comments[1]["comment"]
+
+    def test_unit_timestamps_converted_to_utc(self):
+        """Unit timestamps are converted from local timezone to UTC."""
+        doc = IncidentDocument(
+            id="doc-payload-tz",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            incident_type="EMS||MEDICAL",
+            address="100 Spring St",
+            timestamps={"psap_answer": "2026-02-12T10:00:00-08:00"},
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    dispatch="2026-02-12T10:01:00-08:00",
+                    enroute="2026-02-12T10:02:00-08:00",
+                    on_scene="2026-02-12T10:05:00-08:00",
+                    cleared="2026-02-12T10:30:00-08:00",
+                ),
+            ],
+        )
+
+        payload = _build_neris_creation_payload(doc)
+        unit = payload["dispatch"]["unit_responses"][0]
+        # 10:01 PST = 18:01 UTC
+        assert unit["dispatch"] == "2026-02-12T18:01:00+00:00"
+        assert unit["enroute_to_scene"] == "2026-02-12T18:02:00+00:00"
+        assert unit["on_scene"] == "2026-02-12T18:05:00+00:00"
+        assert unit["unit_clear"] == "2026-02-12T18:30:00+00:00"
+
+    def test_action_codes_included(self):
+        """ACTION with action_codes generates correct actions_tactics section."""
+        doc = IncidentDocument(
+            id="doc-payload-action",
+            incident_number="26-000944",
+            incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            incident_type="EMS||MEDICAL",
+            address="100 Spring St",
+            action_taken="ACTION",
+            action_codes=["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT"],
+            timestamps={"psap_answer": "2026-02-12T18:00:00+00:00"},
+            units=[UnitAssignment(unit_id="E31")],
+        )
+
+        payload = _build_neris_creation_payload(doc)
+        at = payload["actions_tactics"]["action_noaction"]
+        assert at["type"] == "ACTION"
+        assert at["actions"] == ["EMERGENCY_MEDICAL_CARE||PATIENT_ASSESSMENT"]
+
 
 class TestFinalizeIncident:
     @patch("sjifire.ops.incidents.neris.submit_to_neris")
@@ -3569,6 +3738,53 @@ class TestBuildNerisPatchTimezoneConversion:
         val = unit_actions[0]["value"]
         dt = datetime.fromisoformat(val["dispatch"])
         assert dt.hour == 21  # 13 + 8
+
+
+class TestLocalTimeDisplay:
+    """Tests that timestamps are converted to local time for display."""
+
+    def test_to_local_display_utc(self):
+        """UTC timestamp converts to Pacific local time."""
+        result = _to_local_display("2026-02-21T17:16:12+00:00")
+        # 17:16 UTC = 09:16 PST
+        assert "09:16:12" in result
+        assert "2026-02-21" in result
+        assert "PST" in result or "PDT" in result
+
+    def test_to_local_display_empty(self):
+        assert _to_local_display("") == ""
+
+    def test_to_local_display_unparseable(self):
+        assert _to_local_display("not-a-date") == "not-a-date"
+
+    def test_localize_diff_timestamps(self):
+        """Diff timestamps are converted to local time in both local and neris sides."""
+        diff = {
+            "narrative": {"local": "foo", "neris": "bar"},
+            "timestamps": {
+                "local": {"psap_answer": "2026-02-21T17:16:12+00:00"},
+                "neris": {"call_create": "2026-02-21T17:16:12+00:00"},
+            },
+            "units": {
+                "local": {"BN31.dispatch": "2026-02-21T17:20:24+00:00"},
+                "neris": {"BN31.dispatch": "2026-02-21T17:20:24+00:00"},
+                "neris_uids": {"BN31": "uid-1"},
+            },
+        }
+        localized = _localize_diff_timestamps(diff)
+
+        # Non-timestamp fields pass through unchanged
+        assert localized["narrative"] == {"local": "foo", "neris": "bar"}
+
+        # Timestamps are converted to local display
+        assert "09:16:12" in localized["timestamps"]["local"]["psap_answer"]
+        assert "09:16:12" in localized["timestamps"]["neris"]["call_create"]
+
+        # Unit timestamps converted
+        assert "09:20:24" in localized["units"]["local"]["BN31.dispatch"]
+
+        # neris_uids preserved
+        assert localized["units"]["neris_uids"] == {"BN31": "uid-1"}
 
 
 class TestUnitOrdering:

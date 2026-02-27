@@ -169,6 +169,8 @@ create_incident(
 - CAD comments (joined blob for reference)
 - **Dispatch notes** — individual timestamped radio log entries (NOTE status from CAD), with continuation lines merged. These are stored as `dispatch_notes` on the incident and automatically pushed to NERIS as `dispatch.comments` when the report is submitted or synced via `update_neris_incident`. The agent does not need to manage these manually — they flow through automatically.
 
+**Two parts of the CAD record:** The dispatch data has two distinct parts: (1) the **unit times table** — structured timestamps for every unit (dispatch, enroute, staged, on_scene, cleared), stored in the `units` array; and (2) the **radio log** — timestamped text entries (dispatch_notes). Not every unit has radio log entries — a unit can have real dispatch/cleared times in the unit times table without any radio log text. When the user asks to "see the dispatch log" or "show all CAD entries," show BOTH the unit times table AND the radio log entries so they get the complete picture.
+
 Present what you've pre-filled. Put each field on its own line with a bold label — never run them together as a paragraph:
 
 > I pulled the dispatch data and crew schedule. Here's what I have so far:

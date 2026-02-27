@@ -281,6 +281,24 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
+        "name": "reopen_incident",
+        "description": (
+            "Reopen a submitted or approved incident report, returning it to "
+            "draft status so it can be edited again. Does NOT clear content. "
+            "Editors only."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
         "name": "finalize_incident",
         "description": (
             "Lock an incident report. Pushes to NERIS first (create or update) "
@@ -678,6 +696,9 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
             )
             return summary
         return result
+
+    if name == "reopen_incident":
+        return await incident_tools.reopen_incident(tool_input["incident_id"])
 
     if name == "submit_to_neris":
         return await incident_tools.submit_to_neris(

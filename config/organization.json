@@ -28,6 +28,7 @@
   ],
   "chief_unit_prefixes": ["BN", "CH", "OPS"],
   "neris_entity_id": "FD53055879",
+  "dispatch_agency_code": "SJF3",
   "default_city": "Friday Harbor",
   "default_state": "WA",
   "editor_group_name": "Incident Report Editors",

@@ -162,6 +162,7 @@ class OrgConfig:
     marine_positions: frozenset[str] = field(default_factory=frozenset)
     chief_unit_prefixes: frozenset[str] = field(default_factory=frozenset)
     neris_entity_id: str = ""
+    dispatch_agency_code: str = ""
     default_city: str = ""
     default_state: str = ""
     editor_group_name: str = ""
@@ -242,6 +243,7 @@ def load_org_config() -> OrgConfig:
         marine_positions=frozenset(config_data.get("marine_positions", ())),
         chief_unit_prefixes=frozenset(config_data.get("chief_unit_prefixes", ())),
         neris_entity_id=config_data.get("neris_entity_id", ""),
+        dispatch_agency_code=config_data.get("dispatch_agency_code", ""),
         default_city=config_data.get("default_city", ""),
         default_state=config_data.get("default_state", ""),
         editor_group_name=config_data.get("editor_group_name", ""),

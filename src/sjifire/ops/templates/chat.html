@@ -704,6 +704,8 @@
         </div>
       </div>
       <a href="/reports/{{ incident_id }}/print" target="_blank" class="print-link">Print Report</a>
+      <button class="print-link" style="cursor:pointer" @click="reopenReport()" x-show="!reopening" title="Reopen this report for editing">Reopen</button>
+      <span x-show="reopening" style="font-size:12px;color:var(--text-dim)">Reopening&hellip;</span>
     </div>
   </div>
 
@@ -933,10 +935,10 @@
       <div class="section-header">Dispatch Comments</div>
       <div class="section-body">
         {% for note in doc.dispatch_notes %}
-        <div style="margin-bottom:6px{% if not loop.last %};padding-bottom:6px;border-bottom:1px solid #f3f4f6{% endif %}">
-          <span style="font-family:monospace;font-size:11px;color:#6b7280">{{ note.timestamp | fmt_dt if note.timestamp else "--" }}</span>
-          {% if note.unit %}<span style="font-weight:600;font-size:11px;color:#4b5563">[{{ note.unit }}]</span>{% endif %}
-          <span>{{ note.text }}</span>
+        <div style="margin-bottom:6px{% if not loop.last %};padding-bottom:6px;border-bottom:1px solid var(--border-subtle){% endif %}">
+          <span style="font-family:monospace;font-size:11px;color:var(--text-dim)">{{ note.timestamp | fmt_dt if note.timestamp else "--" }}</span>
+          {% if note.unit %}<span style="font-weight:600;font-size:11px;color:var(--text-dim)">[{{ note.unit }}]</span>{% endif %}
+          <span style="font-size:13px;color:var(--text-muted)">{{ note.text }}</span>
         </div>
         {% endfor %}
       </div>
@@ -1232,7 +1234,7 @@
   </div>
 
   <!-- Messages -->
-  <div class="messages" x-ref="messages" @scroll="_onMessagesScroll()" @wheel="_onUserScroll()" @touchmove="_onUserScroll()">
+  <div class="messages" x-ref="messages" @wheel="_onWheel($event)" @touchstart="_onTouchStart($event)" @touchmove="_onTouchMove($event)">
     <!-- Message list -->
     <template x-for="(msg, i) in messages" :key="i">
       <div>
@@ -1277,8 +1279,7 @@
 
     <!-- Streaming assistant message (overflow:visible so flex layout tracks growing height) -->
     <template x-if="streaming && currentText">
-      <div class="msg assistant streaming-msg" x-ref="streamingMsg" x-html="renderMarkdown(currentText, true)"
-           x-effect="if (!_userScrolledAway) { _programmaticScroll = true; $el.scrollIntoView({block: 'end', behavior: 'instant'}); requestAnimationFrame(() => { _programmaticScroll = false; }); }"></div>
+      <div class="msg assistant streaming-msg" x-ref="streamingMsg" x-html="renderMarkdown(currentText, true)"></div>
     </template>
 
     <!-- Queued user messages (shown below streaming, sent after current turn) -->
@@ -1356,6 +1357,7 @@ function lockedApp() {
     loading: true,
     drawerOpen: false,
     showInternal: false,
+    reopening: false,
     lightbox: { open: false, items: [], index: 0 },
     incidentId: '{{ incident_id }}',
 
@@ -1461,6 +1463,25 @@ function lockedApp() {
     lightboxNext() {
       this.lightbox.index = (this.lightbox.index + 1) % this.lightbox.items.length;
     },
+
+    async reopenReport() {
+      if (!confirm('Reopen this report for editing? It will return to draft status.')) return;
+      this.reopening = true;
+      try {
+        const res = await authFetch(`/reports/${this.incidentId}/reopen`, {method: 'POST'});
+        if (res.ok) {
+          window.location.reload();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Failed to reopen report');
+          this.reopening = false;
+        }
+      } catch (e) {
+        console.error('Reopen error:', e);
+        alert('Failed to reopen report');
+        this.reopening = false;
+      }
+    },
   };
 }
 {% else %}
@@ -1498,7 +1519,7 @@ function chatApp() {
     pendingImages: [],
     lightbox: { open: false, items: [], index: 0 },
     _userScrolledAway: false,
-    _programmaticScroll: false,
+    _lastTouchY: 0,
     _centrifuge: null,
     _subscription: null,
     _messageQueue: [],
@@ -1915,32 +1936,45 @@ function chatApp() {
       }
       const el = this.$refs.messages;
       if (!el) return;
-      this._programmaticScroll = true;
       requestAnimationFrame(() => {
         el.scrollTop = el.scrollHeight;
-        // Clear flag after the scroll event fires
-        requestAnimationFrame(() => { this._programmaticScroll = false; });
       });
     },
 
-    _onMessagesScroll() {
-      // Ignore scroll events caused by our own scrollToBottom / scrollIntoView
-      if (this._programmaticScroll) return;
-      const el = this.$refs.messages;
-      if (!el) return;
-      // "Near bottom" = within 150px of the end
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
-      this._userScrolledAway = !nearBottom;
+    _onWheel(e) {
+      // Scrolling up → immediately lock (no rAF delay — prevents race
+      // with scrollToBottom which can sneak in before the next frame)
+      if (e.deltaY < 0) {
+        this._userScrolledAway = true;
+        return;
+      }
+      // Scrolling down → check if we've reached the bottom (defer to
+      // after the browser applies the scroll delta)
+      requestAnimationFrame(() => {
+        const el = this.$refs.messages;
+        if (!el) return;
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        if (nearBottom) this._userScrolledAway = false;
+      });
     },
 
-    _onUserScroll() {
-      // Wheel/touch events are always user-initiated — check position
-      const el = this.$refs.messages;
-      if (!el) return;
-      // Defer to after the scroll actually moves the element
+    _onTouchStart(e) {
+      this._lastTouchY = e.touches[0]?.clientY ?? 0;
+    },
+
+    _onTouchMove(e) {
+      const y = e.touches[0]?.clientY ?? 0;
+      // Finger moving down on screen = scrolling up through content
+      if (y > this._lastTouchY) {
+        this._userScrolledAway = true;
+      }
+      this._lastTouchY = y;
+      // Scrolling toward bottom — check position after move
       requestAnimationFrame(() => {
-        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
-        this._userScrolledAway = !nearBottom;
+        const el = this.$refs.messages;
+        if (!el) return;
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        if (nearBottom) this._userScrolledAway = false;
       });
     },
 
