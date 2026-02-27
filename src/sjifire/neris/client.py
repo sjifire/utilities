@@ -1,8 +1,10 @@
 """NERIS API client wrapper."""
 
+import json
 import logging
 import os
-from typing import Self
+import re
+from typing import Any, Self
 
 from neris_api_client import Config, GrantType, NerisApiClient
 
@@ -11,6 +13,10 @@ from sjifire.core.config import get_org_config
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.neris.fsri.org/v1"
+
+# Patterns to redact from logged headers/params
+_REDACT_RE = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
+_REDACT_KEYS = frozenset({"authorization", "cookie", "set-cookie"})
 
 
 def get_neris_credentials() -> tuple[str, str]:
@@ -31,6 +37,61 @@ def get_neris_credentials() -> tuple[str, str]:
         )
 
     return client_id, client_secret
+
+
+def _redact_headers(headers: Any) -> dict[str, str]:
+    """Return a copy of headers with tokens/secrets replaced by [REDACTED]."""
+    safe: dict[str, str] = {}
+    for key, value in (headers or {}).items():
+        if key.lower() in _REDACT_KEYS:
+            safe[key] = _REDACT_RE.sub(r"\1[REDACTED]", str(value))
+        else:
+            safe[key] = str(value)
+    return safe
+
+
+def _install_logging_hook(client: NerisApiClient) -> None:
+    """Monkey-patch _call on *client* to log every NERIS request/response."""
+    original_call = client._call
+
+    def _logged_call(
+        method: str,
+        path: str,
+        data: Any = None,
+        params: Any = None,
+        model: Any = None,
+    ):
+        url = f"{client.config.base_url}{path}"
+        logger.info(
+            "NERIS request: %s %s\n  headers: %s\n  params: %s\n  body: %s",
+            method.upper(),
+            url,
+            json.dumps(_redact_headers(client._session.headers)),
+            json.dumps(params, default=str) if params else None,
+            json.dumps(data, default=str) if data else None,
+        )
+
+        result = original_call(method, path, data, params, model)
+
+        # result is either parsed JSON (dict/list/str) or a requests.Response
+        # on HTTP error
+        if hasattr(result, "status_code"):
+            # Error response — log raw body
+            logger.info(
+                "NERIS response: HTTP %s\n  headers: %s\n  body: %s",
+                result.status_code,
+                json.dumps(_redact_headers(result.headers)),
+                result.text,
+            )
+        else:
+            logger.info(
+                "NERIS response: OK\n  body: %s",
+                json.dumps(result, default=str),
+            )
+
+        return result
+
+    client._call = _logged_call
 
 
 class NerisClient:
@@ -62,6 +123,7 @@ class NerisClient:
                 client_secret=client_secret,
             )
         )
+        _install_logging_hook(self._client)
         logger.info("Connected to NERIS API")
         return self
 
