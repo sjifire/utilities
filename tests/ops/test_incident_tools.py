@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from sjifire.core.config import to_utc_iso
+from sjifire.core.config import to_local_display, to_utc_iso
 from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.incidents.models import (
     AlarmInfo,
@@ -16,7 +16,6 @@ from sjifire.ops.incidents.models import (
     PersonnelAssignment,
     UnitAssignment,
 )
-from sjifire.core.config import to_local_display
 from sjifire.ops.incidents.neris import (
     _address_from_neris_location,
     _build_neris_creation_payload,
