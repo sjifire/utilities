@@ -4,7 +4,7 @@ import os
 
 from anthropic import AsyncAnthropic
 
-MODEL = "claude-opus-4-6"
+MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 _client: AsyncAnthropic | None = None
 
