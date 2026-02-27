@@ -138,6 +138,8 @@ class TestBuildNerisDiff:
 
     def test_no_diff_when_matching(self, neris_record):
         """When local matches NERIS, diff should be empty for those fields."""
+        # psap_answer maps to NERIS call_arrival, alarm_time maps to call_create
+        neris_record["dispatch"]["call_arrival"] = "2026-02-20T10:29:00Z"
         doc = IncidentDocument(
             id="doc-match",
             incident_number="26-002358",
@@ -150,6 +152,7 @@ class TestBuildNerisDiff:
             zip_code="98250",
             timestamps={
                 "psap_answer": "2026-02-20T10:29:00Z",
+                "alarm_time": "2026-02-20T10:29:00Z",
                 "incident_clear": "2026-02-20T11:14:00Z",
             },
         )
@@ -237,9 +240,10 @@ class TestTimestampsEqual:
 
     def test_dispatch_level_no_false_diff(self, neris_record):
         """Local timestamps in Pacific should NOT produce a diff when they match NERIS UTC."""
-        # Set local timestamps as naive Pacific time matching the NERIS UTC values
+        # psap_answer maps to NERIS call_arrival, alarm_time maps to call_create
         # NERIS has call_create=2026-02-20T10:29:00Z, incident_clear=2026-02-20T11:14:00Z
         # Pacific (PST = UTC-8): 02:29 and 03:14
+        neris_record["dispatch"]["call_arrival"] = "2026-02-20T10:29:00Z"
         doc = IncidentDocument(
             id="tz-test",
             incident_number="26-002358",
@@ -248,6 +252,7 @@ class TestTimestampsEqual:
             neris_incident_id="FD53055879|26SJ0020|1770457554",
             timestamps={
                 "psap_answer": "2026-02-20T02:29:00",
+                "alarm_time": "2026-02-20T02:29:00",
                 "incident_clear": "2026-02-20T03:14:00",
             },
         )
@@ -317,12 +322,17 @@ class TestBuildNerisPatch:
         diff = {
             "timestamps": {
                 "local": {"psap_answer": "2026-02-20T10:30:00Z"},
-                "neris": {"call_create": "2026-02-20T10:29:00Z"},
+                "neris": {"call_arrival": "2026-02-20T10:29:00Z"},
             }
         }
         patch = _build_neris_patch(diff)
         assert patch["dispatch"]["action"] == "patch"
-        assert patch["dispatch"]["properties"]["call_create"] == {
+        # psap_answer patches both call_arrival and call_answered
+        assert patch["dispatch"]["properties"]["call_arrival"] == {
+            "action": "set",
+            "value": "2026-02-20T10:30:00+00:00",
+        }
+        assert patch["dispatch"]["properties"]["call_answered"] == {
             "action": "set",
             "value": "2026-02-20T10:30:00+00:00",
         }
@@ -555,6 +565,7 @@ class TestUpdateNerisIncident:
             zip_code="98250",
             timestamps={
                 "psap_answer": "2026-02-20T10:29:00Z",
+                "alarm_time": "2026-02-20T10:29:00Z",
                 "incident_clear": "2026-02-20T11:14:00Z",
             },
         )
@@ -571,6 +582,7 @@ class TestUpdateNerisIncident:
             },
             "dispatch": {
                 "incident_number": "26002358",
+                "call_arrival": "2026-02-20T10:29:00Z",
                 "call_create": "2026-02-20T10:29:00Z",
                 "incident_clear": "2026-02-20T11:14:00Z",
                 "unit_responses": [],
