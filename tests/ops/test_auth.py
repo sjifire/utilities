@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import sjifire.ops.auth as _auth_mod
 from sjifire.ops.auth import (
     EntraTokenValidator,
     UserContext,
@@ -22,11 +23,9 @@ from sjifire.ops.auth import (
 @pytest.fixture(autouse=True)
 def _clear_caches():
     """Clear module-level caches between tests."""
-    import sjifire.ops.auth
-
-    sjifire.ops.auth._EDITOR_GROUP_ID = None
+    _auth_mod._EDITOR_GROUP_ID = None
     yield
-    sjifire.ops.auth._EDITOR_GROUP_ID = None
+    _auth_mod._EDITOR_GROUP_ID = None
 
 
 class TestUserContext:
@@ -94,9 +93,7 @@ class TestCheckIsEditor:
 
     def setup_method(self):
         """Clear the editor cache between tests."""
-        import sjifire.ops.auth
-
-        sjifire.ops.auth._editor_cache.clear()
+        _auth_mod._editor_cache.clear()
 
     async def test_returns_false_when_no_group_configured(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -364,9 +361,7 @@ class TestCheckDocViewAccess:
 
     def setup_method(self):
         """Clear caches and user context between tests."""
-        import sjifire.ops.auth
-
-        sjifire.ops.auth._editor_cache.clear()
+        _auth_mod._editor_cache.clear()
         set_current_user(None)
 
     async def test_creator_can_view(self):
@@ -433,9 +428,7 @@ class TestCheckDocEditAccess:
 
     def setup_method(self):
         """Clear caches and user context between tests."""
-        import sjifire.ops.auth
-
-        sjifire.ops.auth._editor_cache.clear()
+        _auth_mod._editor_cache.clear()
         set_current_user(None)
 
     async def test_creator_can_edit(self):

@@ -973,7 +973,7 @@ async def _run_chat_loop(
                                 conversation.messages.append(stripped)
                             logger.info("Cleared conversation history after reset_incident")
                     except (json.JSONDecodeError, KeyError):
-                        pass
+                        pass  # Malformed tool result — skip reset logic
 
                 # After update_incident, emit live status update for the client
                 if tc["name"] == "update_incident":

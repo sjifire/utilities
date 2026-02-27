@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import sjifire.ops.auth as _auth_mod
 from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.incidents.models import DispatchNote, IncidentDocument, UnitAssignment
 from sjifire.ops.incidents.neris import (
@@ -20,16 +21,14 @@ from sjifire.ops.incidents.neris import (
 @pytest.fixture(autouse=True)
 def _editor_group_env():
     """Set the editor group ID for all tests."""
-    import sjifire.ops.auth
-
-    sjifire.ops.auth._EDITOR_GROUP_ID = None
-    sjifire.ops.auth._editor_cache.clear()
-    sjifire.ops.auth._user_id_cache.clear()
+    _auth_mod._EDITOR_GROUP_ID = None
+    _auth_mod._editor_cache.clear()
+    _auth_mod._user_id_cache.clear()
     with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "officer-group"}):
         yield
-    sjifire.ops.auth._EDITOR_GROUP_ID = None
-    sjifire.ops.auth._editor_cache.clear()
-    sjifire.ops.auth._user_id_cache.clear()
+    _auth_mod._EDITOR_GROUP_ID = None
+    _auth_mod._editor_cache.clear()
+    _auth_mod._user_id_cache.clear()
 
 
 @pytest.fixture

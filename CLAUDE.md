@@ -151,6 +151,8 @@ src/sjifire/
 │   │   └── routes.py      # HTTP routes for browser upload/download
 │   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
 │   │   ├── models.py      # IncidentDocument, CrewAssignment (Pydantic)
+│   │   ├── neris_models.py # Pydantic input models for NERIS API records
+│   │   ├── neris.py       # NERIS import, diff, patch, and field mapping
 │   │   ├── store.py       # Cosmos DB CRUD with in-memory fallback
 │   │   └── tools.py       # MCP tools with role-based access control
 │   ├── neris/tools.py     # NERIS value set lookup tools
@@ -180,11 +182,12 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 - Editor group (`Incident Report Editors`) gates: submit incidents, view all incidents. Membership is checked live via Graph API on every request (no cache — works across multiple container replicas)
 - All other tools (dispatch, schedule, personnel) are open to any authenticated user
 
-**MCP tools registered** (25 tools):
+**MCP tools registered** (27 tools):
 - `start_session` (text summary + browser dashboard URL + session bootstrap)
 - `refresh_dashboard` (refreshes data, returns updated summary + new URL)
 - `get_dashboard` (raw data: on-duty crew, recent calls, report status)
-- `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `submit_incident`, `reset_incident`, `import_from_neris`, `finalize_incident`
+- `create_incident`, `get_incident`, `list_incidents`, `update_incident`, `reset_incident`, `reopen_incident`, `import_from_neris`, `finalize_incident`
+- `submit_to_neris`, `update_neris_incident` (push local data to NERIS, diff and patch)
 - `upload_attachment`, `list_attachments`, `get_attachment`, `delete_attachment`
 - `list_neris_incidents`, `get_neris_incident` (NERIS federal reporting records)
 - `get_personnel`

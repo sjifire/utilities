@@ -53,7 +53,7 @@ async def _noop_container(name):
 @pytest.fixture(autouse=True)
 def _clear_memory_and_env(monkeypatch):
     """Reset all in-memory stores and patch Cosmos/external deps."""
-    import sjifire.ops.chat.engine as engine_mod
+    from sjifire.ops.chat import engine as engine_mod
 
     ConversationStore._memory.clear()
     BudgetStore._memory.clear()

@@ -491,32 +491,17 @@ async def debug_context(request: Request) -> Response:
     if os.getenv("ENTRA_MCP_API_CLIENT_ID"):
         return JSONResponse({"error": "Not available"}, status_code=404)
 
+    # This endpoint is dev-only (guarded by ENTRA_MCP_API_CLIENT_ID above),
+    # so no further auth checks needed.
     user = _get_user(request)
-
-    is_dev = True
-
-    if not user and not is_dev:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    is_editor = is_dev or (
-        user is not None
-        and await check_is_editor(
-            user.user_id,
-            fallback=user.is_editor,
-            email=user.email,
-        )
-    )
-    if not is_editor:
-        return JSONResponse({"error": "Forbidden"}, status_code=403)
-
-    incident_id = request.path_params["incident_id"]
-
-    from sjifire.ops.chat.engine import _build_context_message, _build_system_prompt, _fetch_context
-
     if not user:
         from sjifire.ops.auth import _current_user
 
         user = _current_user.get()
+
+    incident_id = request.path_params["incident_id"]
+
+    from sjifire.ops.chat.engine import _build_context_message, _build_system_prompt, _fetch_context
 
     (
         incident_json,
