@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -103,6 +104,108 @@ def _user_error(category: str, exc: Exception) -> str:
     logger.error("Chat error [%s] %s: %s: %s", error_id, category, type(exc).__name__, exc)
     friendly = _ERROR_MESSAGES.get(category, "Something went wrong.")
     return f"{friendly} (ref: {error_id})"
+
+
+class _BudgetOrLoadError(Exception):
+    """Raised by _check_budget_and_load when an error event has already been published."""
+
+
+async def _check_budget_and_load(
+    user: UserContext,
+    conversation_id: str,
+    channel: str,
+) -> tuple[ConversationDocument | None, bool]:
+    """Check budget and load conversation in parallel.
+
+    Returns ``(conversation_or_new_doc, is_new)``.
+    On budget exceeded or load failure, publishes an error event and raises
+    ``_BudgetOrLoadError`` so callers can bail out immediately.
+    """
+
+    async def _load_conv():
+        async with ConversationStore() as store:
+            return await store.get_by_incident(conversation_id)
+
+    budget_result, conv_result = await asyncio.gather(
+        check_budget(user.email),
+        _load_conv(),
+        return_exceptions=True,
+    )
+
+    if isinstance(budget_result, Exception):
+        await publish(channel, "error", {"message": _user_error("budget", budget_result)})
+        raise _BudgetOrLoadError()
+    if not budget_result.allowed:
+        await publish(channel, "error", {"message": budget_result.reason})
+        raise _BudgetOrLoadError()
+    if isinstance(conv_result, Exception):
+        await publish(channel, "error", {"message": _user_error("conversation", conv_result)})
+        raise _BudgetOrLoadError()
+
+    return conv_result, conv_result is None
+
+
+async def _finish_turn(
+    conversation: ConversationDocument,
+    user: UserContext,
+    channel: str,
+    *,
+    is_new: bool,
+    stream_error: bool,
+    turn_limit_key: str = "turn_limit",
+    include_user_in_done: bool = False,
+) -> None:
+    """Post-loop bookkeeping shared by both chat paths.
+
+    * Count tokens from this turn's assistant messages.
+    * Increment turn count and persist conversation.
+    * Record budget usage.
+    * Publish ``done`` event.
+    """
+    total_input = 0
+    total_output = 0
+
+    turn_messages = [
+        m
+        for m in conversation.messages
+        if m.role == "assistant" and (m.input_tokens > 0 or m.output_tokens > 0)
+    ]
+    for m in turn_messages[-5:]:  # last few are from this turn
+        total_input += m.input_tokens
+        total_output += m.output_tokens
+
+    # Persist full turn (assistant response + token counts).
+    # Runs even after stream errors so partial responses aren't lost.
+    conversation.turn_count += 1
+    conversation.total_input_tokens += total_input
+    conversation.total_output_tokens += total_output
+    conversation.updated_at = datetime.now(UTC)
+
+    try:
+        async with ConversationStore() as store:
+            if is_new:
+                await store.create(conversation)
+            else:
+                await store.update(conversation)
+    except Exception as exc:
+        await publish(channel, "error", {"message": _user_error("save", exc)})
+        return
+
+    if stream_error:
+        return
+
+    # Record budget usage
+    try:
+        if total_input > 0 or total_output > 0:
+            await record_usage(user.email, total_input, total_output)
+    except Exception as exc:
+        logger.warning("Failed to record budget usage: %s", exc)
+
+    done_data: dict = {"input_tokens": total_input, "output_tokens": total_output}
+    if include_user_in_done:
+        done_data["user_email"] = user.email
+        done_data["user_name"] = user.name
+    await publish(channel, "done", done_data)
 
 
 def _load_doc(name: str) -> str:
@@ -514,31 +617,12 @@ async def run_chat(
     )
 
     # Phase 1: budget + conversation (both fast Cosmos reads, ~50ms)
-    async def _load_conversation():
-        async with ConversationStore() as store:
-            return await store.get_by_incident(incident_id)
-
-    budget_result, conv_result = await asyncio.gather(
-        check_budget(user.email),
-        _load_conversation(),
-        return_exceptions=True,
-    )
-
-    # Check phase-1 results for errors
-    if isinstance(budget_result, Exception):
+    try:
+        conversation, is_new = await _check_budget_and_load(user, incident_id, channel)
+    except _BudgetOrLoadError:
         await _release_turn_lock(incident_id, user.email)
-        await publish(channel, "error", {"message": _user_error("budget", budget_result)})
-        return
-    if not budget_result.allowed:
-        await _release_turn_lock(incident_id, user.email)
-        await publish(channel, "error", {"message": budget_result.reason})
-        return
-    if isinstance(conv_result, Exception):
-        await _release_turn_lock(incident_id, user.email)
-        await publish(channel, "error", {"message": _user_error("conversation", conv_result)})
         return
 
-    conversation = conv_result
     snapshot = conversation.context_snapshot if conversation else None
     logger.info(
         "Context snapshot: %s (conversation=%s)",
@@ -575,7 +659,6 @@ async def run_chat(
 
     # Everything below must release the turn lock on exit
     try:
-        is_new = conversation is None
         if is_new:
             conversation = ConversationDocument(
                 incident_id=incident_id,
@@ -679,74 +762,41 @@ async def run_chat(
             task.add_done_callback(_background_tasks.discard)
 
         # Streaming loop (handles tool calls)
-        total_input = 0
-        total_output = 0
-
         client = get_client()
 
         stream_error = False
         try:
-            await _run_loop(
-                client, system_prompt, api_messages, conversation, user, channel=channel
+            await _run_chat_loop(
+                client,
+                system_prompt,
+                api_messages,
+                conversation,
+                user,
+                channel=channel,
+                tool_schemas=TOOL_SCHEMAS,
+                tool_executor=execute_tool,
+                incident_hooks=True,
             )
 
         except Exception as exc:
             await publish(channel, "error", {"message": _user_error("stream", exc)})
             stream_error = True
 
-        # Calculate total tokens from this turn's messages
-        turn_messages = [
-            m
-            for m in conversation.messages
-            if m.role == "assistant" and (m.input_tokens > 0 or m.output_tokens > 0)
-        ]
-        for m in turn_messages[-5:]:  # last few are from this turn
-            total_input += m.input_tokens
-            total_output += m.output_tokens
-
-        # Persist full turn (assistant response + token counts).
-        # Runs even after stream errors so partial responses aren't lost.
-        conversation.turn_count += 1
-        conversation.total_input_tokens += total_input
-        conversation.total_output_tokens += total_output
-        conversation.updated_at = datetime.now(UTC)
-
-        try:
-            async with ConversationStore() as store:
-                if is_new:
-                    await store.create(conversation)
-                else:
-                    await store.update(conversation)
-        except Exception as exc:
-            await publish(channel, "error", {"message": _user_error("save", exc)})
-            return
-
-        if stream_error:
-            return
-
-        # Record budget usage
-        try:
-            if total_input > 0 or total_output > 0:
-                await record_usage(user.email, total_input, total_output)
-        except Exception as exc:
-            logger.warning("Failed to record budget usage: %s", exc)
-
-        await publish(
+        await _finish_turn(
+            conversation,
+            user,
             channel,
-            "done",
-            {
-                "input_tokens": total_input,
-                "output_tokens": total_output,
-                "user_email": user.email,
-                "user_name": user.name,
-            },
+            is_new=is_new,
+            stream_error=stream_error,
+            turn_limit_key="turn_limit",
+            include_user_in_done=True,
         )
     finally:
         # Always release the turn lock so other users can proceed
         await _release_turn_lock(incident_id, user.email)
 
 
-async def _run_loop(
+async def _run_chat_loop(
     client: AsyncAnthropic,
     system_prompt: str,
     api_messages: list[dict],
@@ -754,8 +804,17 @@ async def _run_loop(
     user: UserContext,
     *,
     channel: str,
+    tool_schemas: list[dict],
+    tool_executor: Callable,
+    incident_hooks: bool = False,
 ) -> None:
-    """Run the Claude streaming loop, handling tool calls recursively."""
+    """Run the Claude streaming loop, handling tool calls.
+
+    Unified loop for both incident and general chat.  The three
+    incident-specific post-processing blocks (``get_attachment`` thumbnail
+    extraction, ``reset_incident`` history clearing, ``update_incident``
+    status event + image content blocks) are gated behind *incident_hooks*.
+    """
     max_tool_rounds = 10  # Safety limit on tool call loops
 
     for _ in range(max_tool_rounds):
@@ -772,7 +831,7 @@ async def _run_loop(
                     max_tokens=MAX_RESPONSE_TOKENS,
                     system=cached_system(system_prompt),
                     messages=api_messages,
-                    tools=TOOL_SCHEMAS,
+                    tools=tool_schemas,
                 ) as stream:
                     async for event in stream:
                         if (
@@ -854,7 +913,7 @@ async def _run_loop(
             await publish(channel, "tool_call", {"name": tc["name"], "input": tc["input"]})
 
         result_strs = await asyncio.gather(
-            *(execute_tool(tc["name"], tc["input"], user) for tc in tool_calls)
+            *(tool_executor(tc["name"], tc["input"], user) for tc in tool_calls)
         )
 
         # Build full results for current API round and summaries for history
@@ -869,8 +928,10 @@ async def _run_loop(
 
             is_error = summary.startswith("Error")
             evt: dict = {"name": tc["name"], "summary": summary, "is_error": is_error}
+
+            # --- Incident-specific post-processing ---
             # Include image URL and title so the chat UI can render inline thumbnails
-            if tc["name"] == "get_attachment" and not is_error:
+            if incident_hooks and tc["name"] == "get_attachment" and not is_error:
                 aid = tc["input"].get("attachment_id", "")
                 if aid:
                     evt["image_url"] = f"/reports/{conversation.incident_id}/attachments/{aid}"
@@ -880,77 +941,80 @@ async def _run_loop(
                         evt["image_title"] = rd["title"]
                     if rd.get("description"):
                         evt["image_desc"] = rd["description"]
+
             await publish(channel, "tool_result", evt)
 
-            # After reset_incident, clear pre-reset conversation history.
-            # The reset deletes the Cosmos document; when the engine saves
-            # via upsert it re-creates it.  By truncating here we ensure
-            # only the post-reset exchange is persisted, giving a clean
-            # slate on page reload while keeping current-turn context.
-            # Re-add the current assistant message so subsequent tool_result
-            # messages still have a matching tool_use block in the history.
-            if tc["name"] == "reset_incident":
-                try:
-                    rd = json.loads(result_str)
-                    if isinstance(rd, dict) and "error" not in rd:
-                        # Snapshot the current assistant message before clearing
-                        current_assistant_msg = (
-                            conversation.messages[-1] if conversation.messages else None
-                        )
-                        conversation.messages.clear()
-                        conversation.context_snapshot = None
-                        conversation.turn_count = 0
-                        conversation.total_input_tokens = 0
-                        conversation.total_output_tokens = 0
-                        # Re-add so tool_results have a matching tool_use.
-                        # Strip text content — it was already streamed to the
-                        # client and would appear twice on history reload.
-                        if current_assistant_msg and current_assistant_msg.role == "assistant":
-                            stripped = current_assistant_msg.model_copy(update={"content": ""})
-                            conversation.messages.append(stripped)
-                        logger.info("Cleared conversation history after reset_incident")
-                except (json.JSONDecodeError, KeyError):
-                    pass
+            if incident_hooks:
+                # After reset_incident, clear pre-reset conversation history.
+                # The reset deletes the Cosmos document; when the engine saves
+                # via upsert it re-creates it.  By truncating here we ensure
+                # only the post-reset exchange is persisted, giving a clean
+                # slate on page reload while keeping current-turn context.
+                # Re-add the current assistant message so subsequent tool_result
+                # messages still have a matching tool_use block in the history.
+                if tc["name"] == "reset_incident":
+                    try:
+                        rd = json.loads(result_str)
+                        if isinstance(rd, dict) and "error" not in rd:
+                            # Snapshot the current assistant message before clearing
+                            current_assistant_msg = (
+                                conversation.messages[-1] if conversation.messages else None
+                            )
+                            conversation.messages.clear()
+                            conversation.context_snapshot = None
+                            conversation.turn_count = 0
+                            conversation.total_input_tokens = 0
+                            conversation.total_output_tokens = 0
+                            # Re-add so tool_results have a matching tool_use.
+                            # Strip text content — it was already streamed to the
+                            # client and would appear twice on history reload.
+                            if current_assistant_msg and current_assistant_msg.role == "assistant":
+                                stripped = current_assistant_msg.model_copy(update={"content": ""})
+                                conversation.messages.append(stripped)
+                            logger.info("Cleared conversation history after reset_incident")
+                    except (json.JSONDecodeError, KeyError):
+                        pass
 
-            # After update_incident, emit live status update for the client
-            if tc["name"] == "update_incident":
-                result_data_raw = _try_parse_json(result_str)
-                try:
-                    if isinstance(result_data_raw, dict) and "error" not in result_data_raw:
-                        from sjifire.ops.incidents.models import IncidentDocument
+                # After update_incident, emit live status update for the client
+                if tc["name"] == "update_incident":
+                    result_data_raw = _try_parse_json(result_str)
+                    try:
+                        if isinstance(result_data_raw, dict) and "error" not in result_data_raw:
+                            from sjifire.ops.incidents.models import IncidentDocument
 
-                        doc = IncidentDocument.from_cosmos(result_data_raw)
-                        await publish(
-                            channel,
-                            "status_update",
-                            {
-                                "status": doc.status,
-                                "completeness": doc.completeness(),
-                            },
-                        )
-                except Exception:
-                    logger.debug("Failed to emit status_update", exc_info=True)
+                            doc = IncidentDocument.from_cosmos(result_data_raw)
+                            await publish(
+                                channel,
+                                "status_update",
+                                {
+                                    "status": doc.status,
+                                    "completeness": doc.completeness(),
+                                },
+                            )
+                    except Exception:
+                        logger.debug("Failed to emit status_update", exc_info=True)
 
             # Build the full tool result for the current API round.
             # For get_attachment with image_data, use a multi-block content
             # array so Claude can see the image via vision.
             tool_result_content: str | list[dict] = result_str
-            result_parsed = _try_parse_json(result_str)
-            if isinstance(result_parsed, dict):
-                image_info = result_parsed.get("image_data")
-                if image_info and isinstance(image_info, dict):
-                    slim = {k: v for k, v in result_parsed.items() if k != "image_data"}
-                    tool_result_content = [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": image_info["media_type"],
-                                "data": image_info["base64"],
+            if incident_hooks:
+                result_parsed = _try_parse_json(result_str)
+                if isinstance(result_parsed, dict):
+                    image_info = result_parsed.get("image_data")
+                    if image_info and isinstance(image_info, dict):
+                        slim = {k: v for k, v in result_parsed.items() if k != "image_data"}
+                        tool_result_content = [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": image_info["media_type"],
+                                    "data": image_info["base64"],
+                                },
                             },
-                        },
-                        {"type": "text", "text": json.dumps(slim, default=str)},
-                    ]
+                            {"type": "text", "text": json.dumps(slim, default=str)},
+                        ]
 
             full_tool_results.append(
                 {
@@ -991,7 +1055,7 @@ async def _run_loop(
         api_messages.append({"role": "user", "content": full_tool_results})
 
     # If we exhausted tool rounds, notify the user
-    logger.warning("Chat hit max tool rounds for incident %s", conversation.incident_id)
+    logger.warning("Chat hit max tool rounds for %s", conversation.incident_id)
     await publish(
         channel,
         "text",
@@ -1151,30 +1215,12 @@ async def run_general_chat(
     """
     conversation_key = f"{_GENERAL_CONVERSATION_PREFIX}{user.email}"
 
-    # Run budget check and conversation load in parallel
-    async def _load_conv():
-        async with ConversationStore() as store:
-            return await store.get_by_incident(conversation_key)
-
-    budget_result, conv_result = await asyncio.gather(
-        check_budget(user.email),
-        _load_conv(),
-        return_exceptions=True,
-    )
-
-    if isinstance(budget_result, Exception):
-        await publish(channel, "error", {"message": _user_error("budget", budget_result)})
-        return
-    if not budget_result.allowed:
-        await publish(channel, "error", {"message": budget_result.reason})
-        return
-    if isinstance(conv_result, Exception):
-        await publish(channel, "error", {"message": _user_error("conversation", conv_result)})
+    # Budget check + conversation load (parallel Cosmos reads)
+    try:
+        conversation, is_new = await _check_budget_and_load(user, conversation_key, channel)
+    except _BudgetOrLoadError:
         return
 
-    conversation = conv_result
-
-    is_new = conversation is None
     if is_new:
         conversation = ConversationDocument(
             incident_id=conversation_key,
@@ -1221,213 +1267,32 @@ async def run_general_chat(
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
 
-    total_input = 0
-    total_output = 0
-
     client = get_client()
 
     stream_error = False
     try:
-        await _run_general_loop(
-            client, system_prompt, api_messages, conversation, user, channel=channel
+        await _run_chat_loop(
+            client,
+            system_prompt,
+            api_messages,
+            conversation,
+            user,
+            channel=channel,
+            tool_schemas=GENERAL_TOOL_SCHEMAS,
+            tool_executor=execute_general_tool,
         )
 
     except Exception as exc:
         await publish(channel, "error", {"message": _user_error("stream", exc)})
         stream_error = True
 
-    turn_messages = [
-        m
-        for m in conversation.messages
-        if m.role == "assistant" and (m.input_tokens > 0 or m.output_tokens > 0)
-    ]
-    for m in turn_messages[-5:]:
-        total_input += m.input_tokens
-        total_output += m.output_tokens
-
-    conversation.turn_count += 1
-    conversation.total_input_tokens += total_input
-    conversation.total_output_tokens += total_output
-    conversation.updated_at = datetime.now(UTC)
-
-    try:
-        async with ConversationStore() as store:
-            if is_new:
-                await store.create(conversation)
-            else:
-                await store.update(conversation)
-    except Exception as exc:
-        await publish(channel, "error", {"message": _user_error("save", exc)})
-        return
-
-    if stream_error:
-        return
-
-    if total_input > 0 or total_output > 0:
-        await record_usage(user.email, total_input, total_output)
-
-    await publish(channel, "done", {"input_tokens": total_input, "output_tokens": total_output})
-
-
-async def _run_general_loop(
-    client: AsyncAnthropic,
-    system_prompt: str,
-    api_messages: list[dict],
-    conversation: ConversationDocument,
-    user: UserContext,
-    *,
-    channel: str,
-) -> None:
-    """Run the Claude streaming loop for general assistant, handling tool calls."""
-    max_tool_rounds = 10
-
-    for _ in range(max_tool_rounds):
-        assistant_text = ""
-        tool_calls: list[dict] = []
-        input_tokens = 0
-        output_tokens = 0
-
-        # Retry loop for rate limit errors
-        for attempt in range(RATE_LIMIT_MAX_RETRIES):
-            try:
-                async with client.messages.stream(
-                    model=MODEL,
-                    max_tokens=MAX_RESPONSE_TOKENS,
-                    system=cached_system(system_prompt),
-                    messages=api_messages,
-                    tools=GENERAL_TOOL_SCHEMAS,
-                ) as stream:
-                    async for event in stream:
-                        if (
-                            event.type == "content_block_start"
-                            and hasattr(event.content_block, "type")
-                            and event.content_block.type == "tool_use"
-                        ):
-                            tool_calls.append(
-                                {
-                                    "type": "tool_use",
-                                    "id": event.content_block.id,
-                                    "name": event.content_block.name,
-                                    "input": {},
-                                }
-                            )
-
-                        elif event.type == "content_block_delta":
-                            if hasattr(event.delta, "text"):
-                                assistant_text += event.delta.text
-                                await publish(channel, "text", {"content": event.delta.text})
-                            elif hasattr(event.delta, "partial_json") and tool_calls:
-                                tc = tool_calls[-1]
-                                tc.setdefault("_partial", "")
-                                tc["_partial"] += event.delta.partial_json
-
-                        elif (
-                            event.type == "content_block_stop"
-                            and tool_calls
-                            and "_partial" in tool_calls[-1]
-                        ):
-                            tc = tool_calls[-1]
-                            try:
-                                tc["input"] = json.loads(tc.pop("_partial"))
-                            except json.JSONDecodeError:
-                                tc.pop("_partial", None)
-
-                    final_message = await stream.get_final_message()
-                    if final_message.usage:
-                        input_tokens = final_message.usage.input_tokens
-                        output_tokens = final_message.usage.output_tokens
-                        _log_cache_stats(final_message.usage)
-                break  # Success — exit retry loop
-            except RateLimitError:
-                if attempt < RATE_LIMIT_MAX_RETRIES - 1:
-                    delay = RATE_LIMIT_BASE_DELAY * (attempt + 1)
-                    logger.warning(
-                        "General chat rate limited (attempt %d/%d), waiting %ds",
-                        attempt + 1,
-                        RATE_LIMIT_MAX_RETRIES,
-                        delay,
-                    )
-                    msg = f"\n\n*Rate limited — retrying in {delay}s...*\n\n"
-                    await publish(channel, "text", {"content": msg})
-                    await asyncio.sleep(delay)
-                    assistant_text = ""
-                    tool_calls = []
-                else:
-                    raise
-
-        conversation.messages.append(
-            ConversationMessage(
-                role="assistant",
-                content=assistant_text,
-                tool_use=tool_calls if tool_calls else None,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
-        )
-
-        if not tool_calls:
-            return
-
-        for tc in tool_calls:
-            await publish(channel, "tool_call", {"name": tc["name"], "input": tc["input"]})
-
-        result_strs = await asyncio.gather(
-            *(execute_general_tool(tc["name"], tc["input"], user) for tc in tool_calls)
-        )
-
-        full_tool_results: list[dict] = []
-        summary_tool_results: list[dict] = []
-        for tc, result_str in zip(tool_calls, result_strs, strict=True):
-            result_data = _try_parse_json(result_str)
-            if result_data is not None:
-                summary = _summarize_tool_result(tc["name"], result_data)
-            else:
-                summary = result_str[:200]
-
-            is_error = summary.startswith("Error")
-            evt = {"name": tc["name"], "summary": summary, "is_error": is_error}
-            await publish(channel, "tool_result", evt)
-
-            full_tool_results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": tc["id"],
-                    "content": result_str,
-                }
-            )
-            summary_tool_results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": tc["id"],
-                    "content": summary,
-                }
-            )
-
-        # Store summaries in conversation history (future turns get slim results)
-        conversation.messages.append(
-            ConversationMessage(
-                role="user",
-                content="",
-                tool_results=summary_tool_results,
-            )
-        )
-
-        assistant_content: list[dict] = []
-        if assistant_text:
-            assistant_content.append({"type": "text", "text": assistant_text})
-        assistant_content.extend(
-            {"type": "tool_use", "id": tc["id"], "name": tc["name"], "input": tc["input"]}
-            for tc in tool_calls
-        )
-        api_messages.append({"role": "assistant", "content": assistant_content})
-        # Current turn uses full results for accurate tool-use reasoning
-        api_messages.append({"role": "user", "content": full_tool_results})
-
-    logger.warning("General chat hit max tool rounds for %s", user.email)
-    await publish(
+    await _finish_turn(
+        conversation,
+        user,
         channel,
-        "text",
-        {"content": "\n\n*Tool call limit reached. Send another message to continue.*\n\n"},
+        is_new=is_new,
+        stream_error=stream_error,
+        turn_limit_key="turn_limit_general",
     )
 
 

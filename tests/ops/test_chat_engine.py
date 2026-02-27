@@ -433,7 +433,7 @@ class TestBuildGeneralSystemPrompt:
 
 
 class TestParallelToolExecution:
-    """Verify that tool calls within _run_loop execute concurrently."""
+    """Verify that tool calls within _run_chat_loop execute concurrently."""
 
     async def test_multiple_tools_run_in_parallel(self):
         """When Claude returns multiple tool_use blocks, they should run concurrently."""
@@ -449,7 +449,7 @@ class TestParallelToolExecution:
             return json.dumps({"status": "ok"})
 
         with patch("sjifire.ops.chat.engine.execute_tool", side_effect=slow_tool):
-            # Simulate what _run_loop does with parallel tool calls
+            # Simulate what _run_chat_loop does with parallel tool calls
             tool_calls = [
                 {"id": "t1", "name": "get_incident", "input": {"incident_id": "abc"}},
                 {"id": "t2", "name": "get_neris_values", "input": {"value_set": "incident"}},
@@ -783,7 +783,7 @@ class TestImageContentBlocks:
         captured_messages: list = []
 
         # Mock _run_loop to capture the api_messages it receives
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             captured_messages.extend(api_messages)
 
         with (
@@ -792,7 +792,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -819,7 +819,7 @@ class TestImageContentBlocks:
 
         captured_messages: list = []
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             captured_messages.extend(api_messages)
 
         with (
@@ -828,7 +828,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -852,7 +852,7 @@ class TestImageContentBlocks:
 
         captured_messages: list = []
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             captured_messages.extend(api_messages)
 
         with (
@@ -861,7 +861,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -880,7 +880,7 @@ class TestImageContentBlocks:
 
         saved_conv = None
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             nonlocal saved_conv
             saved_conv = conv
 
@@ -890,7 +890,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -912,7 +912,7 @@ class TestImageContentBlocks:
 
         saved_conv = None
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             nonlocal saved_conv
             saved_conv = conv
 
@@ -924,7 +924,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -950,7 +950,7 @@ class TestImageContentBlocks:
 
         saved_conv = None
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             nonlocal saved_conv
             saved_conv = conv
 
@@ -960,7 +960,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -976,7 +976,7 @@ class TestImageContentBlocks:
 
         captured_system: list = []
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             captured_system.append(system)
 
         with (
@@ -985,7 +985,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=('{"incident_number": "26-UNIQUE"}', "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -1226,7 +1226,7 @@ class TestImageContentBlockEdgeCases:
     """Verify image content block logic handles edge cases."""
 
     def _extract_tool_result_content(self, result_str: str) -> str | list[dict]:
-        """Apply the same image_data extraction logic used in _run_loop."""
+        """Apply the same image_data extraction logic used in _run_chat_loop."""
         tool_result_content: str | list[dict] = result_str
         try:
             result_parsed = json.loads(result_str)
@@ -1292,12 +1292,13 @@ class TestImageContentBlockEdgeCases:
 
 
 class TestRunLoopImageToolResults:
-    """Integration test: _run_loop builds image content blocks for get_attachment."""
+    """Integration test: _run_chat_loop builds image content blocks for get_attachment."""
 
     async def test_get_attachment_image_in_run_loop(self):
-        """_run_loop builds image content blocks for get_attachment results."""
-        from sjifire.ops.chat.engine import _run_loop
+        """_run_chat_loop builds image content blocks for get_attachment results."""
+        from sjifire.ops.chat.engine import _run_chat_loop
         from sjifire.ops.chat.models import ConversationDocument
+        from sjifire.ops.chat.tools import TOOL_SCHEMAS
 
         conversation = ConversationDocument(
             incident_id="inc-img-loop",
@@ -1390,17 +1391,17 @@ class TestRunLoopImageToolResults:
         class FakeClient:
             messages = FakeMessages()
 
-        with (
-            patch("sjifire.ops.chat.engine.execute_tool", side_effect=mock_execute),
-            patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
-        ):
-            await _run_loop(
+        with patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish):
+            await _run_chat_loop(
                 FakeClient(),
                 "system prompt",
                 api_messages,
                 conversation,
                 _TEST_USER,
                 channel="test",
+                tool_schemas=TOOL_SCHEMAS,
+                tool_executor=mock_execute,
+                incident_hooks=True,
             )
 
         # The tool result message sent to the API should have image blocks

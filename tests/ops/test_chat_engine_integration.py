@@ -1,9 +1,9 @@
 """Integration tests for the chat engine pipeline.
 
-Exercise the full engine pipeline — run_chat → _run_loop → Claude streaming →
+Exercise the full engine pipeline — run_chat → _run_chat_loop → Claude streaming →
 tool execution → conversation persistence — with only the Claude API and
 external services stubbed.  Catches bugs that unit tests miss because they
-mock _run_loop entirely (e.g. orphaned tool_results, reset race conditions).
+mock _run_chat_loop entirely (e.g. orphaned tool_results, reset race conditions).
 """
 
 import base64
