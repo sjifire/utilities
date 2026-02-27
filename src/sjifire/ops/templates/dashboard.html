@@ -886,7 +886,7 @@
             <template x-for="(msg, i) in chatMessages" :key="i">
               <div>
                 <template x-if="msg.type === 'message'">
-                  <div class="chat-msg" :class="msg.role" x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content"></div>
+                  <div class="chat-msg" :class="msg.role" x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : DOMPurify.sanitize(msg.content)"></div>
                 </template>
                 <template x-if="msg.type === 'tool_call'">
                   <div class="chat-tool-indicator">

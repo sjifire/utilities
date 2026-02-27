@@ -517,13 +517,16 @@ async def debug_context(request: Request) -> Response:
     """Return the context that would be sent to Claude for an incident.
 
     Shows the system prompt, context preamble, and individual components
-    with character counts. Useful for debugging token usage and bloat.
+    with character counts. Only available in local dev (no ENTRA_MCP_API_CLIENT_ID).
     """
-    user = _get_user(request)
-
     import os
 
-    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+    if os.getenv("ENTRA_MCP_API_CLIENT_ID"):
+        return JSONResponse({"error": "Not available"}, status_code=404)
+
+    user = _get_user(request)
+
+    is_dev = True
 
     if not user and not is_dev:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)

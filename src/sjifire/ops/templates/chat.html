@@ -1150,7 +1150,7 @@
                   <img :src="img" @click="openLightbox(msg.images, j)">
                 </template>
               </div>
-              <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content"></div>
+              <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : DOMPurify.sanitize(msg.content)"></div>
             </div>
           </template>
           <template x-if="msg.type === 'tool'">
@@ -1249,7 +1249,7 @@
                 <img :src="img" @click="openLightbox(msg.images, j)">
               </template>
             </div>
-            <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content, false, i) : msg.content"></div>
+            <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content, false, i) : DOMPurify.sanitize(msg.content)"></div>
           </div>
         </template>
         <!-- Tool indicator (morphs from spinner → result) -->
