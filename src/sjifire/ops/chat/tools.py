@@ -302,7 +302,10 @@ TOOL_SCHEMAS: list[dict] = [
         "name": "finalize_incident",
         "description": (
             "Lock an incident report. Pushes to NERIS first (create or update) "
-            "unless skip_neris is true, then locks the report as submitted."
+            "unless skip_neris is true, then locks the report as submitted. "
+            "IMPORTANT: If this incident has a NERIS ID (neris_incident_id), "
+            "you MUST call update_neris_incident with dry_run=true FIRST to "
+            "check for diffs and present them to the user before calling this."
         ),
         "input_schema": {
             "type": "object",
@@ -689,9 +692,10 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
                 "Present a summary of what was imported and highlight any "
                 "discrepancies between NERIS, dispatch, and crew data. "
                 "Walk through crew assignments and corrections with the user. "
-                "When the report is complete, call update_neris_incident with "
+                "MANDATORY BEFORE LOCKING: call update_neris_incident with "
                 "dry_run=true to check what local corrections differ from NERIS "
-                "and present the diff to the user. If there are changes, ask "
+                "and present the diff to the user. NEVER call finalize_incident "
+                "without doing this diff check first. If there are changes, ask "
                 "whether to push them before locking."
             )
             return summary

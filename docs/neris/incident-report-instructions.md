@@ -128,7 +128,7 @@ Once crew is filled in, show a final summary and offer to lock the report. Do no
 >
 > Ready to lock this incident?
 
-**Before locking**, check for corrections to push to NERIS: call `update_neris_incident(incident_id, dry_run=true)` to see if our local data differs from the NERIS record. If there are differences (timestamps, dispatch number, comments, etc.), present them and offer to push the corrections. Our dispatch/CAD data is usually more accurate. If they confirm, call `update_neris_incident(incident_id)` to push the changes, then finalize.
+**MANDATORY before locking** — NEVER skip this step: call `update_neris_incident(incident_id, dry_run=true)` to see if our local data differs from the NERIS record. If there are differences (timestamps, dispatch number, comments, etc.), present them and offer to push the corrections. Our dispatch/CAD data is usually more accurate. If they confirm, call `update_neris_incident(incident_id)` to push the changes, then finalize. NEVER call `finalize_incident` without running this diff check first.
 
 If they say yes to locking (and no NERIS corrections needed), call `finalize_incident` to lock the report.
 
@@ -669,7 +669,7 @@ Summarize everything and highlight any gaps:
 
 Use `update_incident` to save all fields.
 
-**Before locking**, if the report has a NERIS ID, check for corrections to push: call `update_neris_incident(incident_id, dry_run=true)` to compare local data against the NERIS record. If there are differences (timestamps, dispatch incident number, comments, etc.), present them and offer to push corrections — our dispatch/CAD data is usually more precise. If they confirm, call `update_neris_incident(incident_id)` to push the changes, then finalize.
+**MANDATORY before locking** — NEVER skip this step: if the report has a NERIS ID, call `update_neris_incident(incident_id, dry_run=true)` to compare local data against the NERIS record. If there are differences (timestamps, dispatch incident number, comments, etc.), present them and offer to push corrections — our dispatch/CAD data is usually more precise. If they confirm, call `update_neris_incident(incident_id)` to push the changes, then finalize. NEVER call `finalize_incident` without running this diff check first.
 
 If the user confirms locking (and no NERIS corrections needed or corrections already pushed), call `finalize_incident` to lock the report.
 
