@@ -12,6 +12,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+import markupsafe
 from anthropic import AsyncAnthropic, RateLimitError
 
 from sjifire.core.anthropic import MODEL, cached_system, get_client
@@ -627,9 +628,14 @@ async def run_chat(
             api_messages.append({"role": "user", "content": prefixed_message})
         api_messages = _trim_messages(api_messages)
 
+        # HTML-escape user message for storage and broadcast (defense-in-depth
+        # against stored XSS). The raw text is still used for the Claude API call
+        # above so the model sees the original user intent.
+        safe_message = str(markupsafe.escape(user_message))
+
         # Record user message with image references (attachment IDs for blob-backed display)
         conversation.messages.append(
-            ConversationMessage(role="user", content=user_message, images=image_refs)
+            ConversationMessage(role="user", content=safe_message, images=image_refs)
         )
 
         # Broadcast user message to other subscribers (multi-user awareness).
@@ -637,7 +643,7 @@ async def run_chat(
         await publish(
             channel,
             "user_message",
-            {"content": user_message, "user_email": user.email, "user_name": user.name},
+            {"content": safe_message, "user_email": user.email, "user_name": user.name},
         )
 
         # Persist user message — must await create (so subsequent saves are
@@ -1186,7 +1192,9 @@ async def run_general_chat(
     api_messages.append({"role": "user", "content": user_message})
     api_messages = _trim_messages(api_messages)
 
-    conversation.messages.append(ConversationMessage(role="user", content=user_message))
+    # HTML-escape for storage (defense-in-depth against stored XSS)
+    safe_message = str(markupsafe.escape(user_message))
+    conversation.messages.append(ConversationMessage(role="user", content=safe_message))
 
     # Persist user message — must await create (so subsequent saves are
     # updates, not conflicts), but updates can run in background.

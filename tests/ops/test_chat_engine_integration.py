@@ -300,6 +300,35 @@ class TestSendMessageTextResponseSavesConversation:
         assert conv.messages[1].role == "assistant"
         assert conv.messages[1].content == "Summary of the incident."
 
+    async def test_html_escaped_in_stored_message(self):
+        """User messages with HTML are escaped before storage (XSS defense-in-depth)."""
+        from sjifire.ops.chat.engine import run_chat
+
+        await seed_incident("inc-xss-1")
+
+        fake_publish, events = make_event_capturer()
+        client = make_fake_client([FakeStream(text_events("Got it."))])
+
+        xss_message = '<script>alert("xss")</script> & normal text'
+
+        with _integration_patches(client, fake_publish):
+            await run_chat("inc-xss-1", xss_message, TEST_USER, channel="ch")
+
+        # Verify stored message is HTML-escaped
+        async with ConversationStore() as store:
+            conv = await store.get_by_incident("inc-xss-1")
+        assert conv is not None
+        stored = conv.messages[0].content
+        assert "<script>" not in stored
+        assert "&lt;script&gt;" in stored
+        assert "&amp; normal text" in stored
+
+        # Verify broadcast event is also escaped
+        user_msg_events = [(ch, typ, data) for ch, typ, data in events if typ == "user_message"]
+        assert len(user_msg_events) == 1
+        assert "<script>" not in user_msg_events[0][2]["content"]
+        assert "&lt;script&gt;" in user_msg_events[0][2]["content"]
+
 
 class TestToolUseRoundTrip:
     """Claude calls get_incident, engine executes against in-memory store, Claude responds."""
