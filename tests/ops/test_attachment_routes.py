@@ -216,8 +216,15 @@ _TEST_B64INFO = base64.b64encode(
 ).decode()
 
 
+class _FakeClient:
+    host = "127.0.0.1"
+    port = 0
+
+
 class _RpcRequest:
     """Minimal request stand-in for RPC proxy tests."""
+
+    client = _FakeClient()
 
     def __init__(self, body: dict):
         self._body = body

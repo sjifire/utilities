@@ -141,6 +141,24 @@ async def websocket_proxy(ws: WebSocket) -> None:
 # Centrifugo proxy auth: connect + subscribe callbacks
 # ---------------------------------------------------------------------------
 
+_LOCALHOST = frozenset(("127.0.0.1", "::1"))
+
+
+def _is_from_centrifugo(request: Request) -> bool:
+    """Check that the request originated from the Centrifugo sidecar.
+
+    In Azure Container Apps, sidecar containers share a network namespace
+    with the main container.  Centrifugo's proxy calls hit localhost:8000,
+    so ``request.client.host`` is ``127.0.0.1``.  External requests arrive
+    through the ACA Envoy ingress and have a non-localhost peer address.
+
+    NOTE: uvicorn must NOT be configured with ``--proxy-headers`` or
+    ``ProxyHeadersMiddleware``, which would replace ``request.client``
+    with the ``X-Forwarded-For`` value (spoofable).
+    """
+    client = request.client
+    return client is not None and client.host in _LOCALHOST
+
 
 def _get_user(request: Request):
     """Extract user from EasyAuth headers, falling back to dev user."""
@@ -162,6 +180,10 @@ async def connect_proxy(request: Request) -> Response:
 
     POST /centrifugo/connect
     """
+    if not _is_from_centrifugo(request):
+        logger.warning("Connect proxy: rejected non-localhost origin %s", request.client)
+        return JSONResponse({"error": {"code": 403, "message": "Forbidden"}}, status_code=403)
+
     user = _get_user(request)
     if user is None:
         # Log which headers Centrifugo actually forwarded for debugging
@@ -201,6 +223,10 @@ async def subscribe_proxy(request: Request) -> Response:
 
     POST /centrifugo/subscribe
     """
+    if not _is_from_centrifugo(request):
+        logger.warning("Subscribe proxy: rejected non-localhost origin %s", request.client)
+        return JSONResponse({"error": {"code": 403, "message": "Forbidden"}}, status_code=403)
+
     try:
         body = await request.json()
     except Exception:
@@ -265,6 +291,10 @@ async def rpc_proxy(request: Request) -> Response:
 
     POST /centrifugo/rpc
     """
+    if not _is_from_centrifugo(request):
+        logger.warning("RPC proxy: rejected non-localhost origin %s", request.client)
+        return JSONResponse({"error": {"code": 403, "message": "Forbidden"}}, status_code=403)
+
     try:
         body = await request.json()
     except Exception:

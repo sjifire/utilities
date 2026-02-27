@@ -33,8 +33,17 @@ _B64INFO = base64.b64encode(
 ).decode()
 
 
+class _FakeClient:
+    """Simulate localhost origin (Centrifugo sidecar)."""
+
+    host = "127.0.0.1"
+    port = 0
+
+
 class _FakeRequest:
     """Minimal Starlette Request stand-in for testing routes."""
+
+    client = _FakeClient()
 
     def __init__(self, body: dict, *, method: str = "POST"):
         self._body = body

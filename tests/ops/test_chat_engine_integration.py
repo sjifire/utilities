@@ -443,6 +443,7 @@ class TestTurnLock409ViaRpcProxy:
             "method": "POST",
             "path": "/centrifugo/rpc",
             "headers": [],
+            "client": ("127.0.0.1", 0),
         }
         body = json.dumps(
             {
@@ -670,7 +671,13 @@ class TestTurnEventsIncludeUserAttribution:
             ).encode()
         ).decode()
 
-        scope = {"type": "http", "method": "POST", "path": "/centrifugo/rpc", "headers": []}
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/centrifugo/rpc",
+            "headers": [],
+            "client": ("127.0.0.1", 0),
+        }
         body = json.dumps(
             {
                 "method": "send_message",
