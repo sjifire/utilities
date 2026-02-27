@@ -347,6 +347,18 @@
       </div>
     </div>
 
+    <!-- ── Narrative ── -->
+    {% if doc.narrative %}
+    <div class="section">
+      <div class="section-header">Narrative</div>
+      <div class="section-body">
+        <div class="narrative-text">
+          <div class="narrative-block">{{ doc.narrative }}</div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
     <!-- ── Fire Details ── -->
     {% set fd = doc.fire_detail %}
     {% set has_fire = doc.outside_fire_cause or doc.outside_fire_acres or (fd and (fd.fire_cause_in or fd.water_supply or fd.fire_bldg_damage or fd.room_of_origin or fd.floor_of_origin is not none or fd.fire_investigation or fd.suppression_appliances or fd.fire_progression_evident is not none)) %}
@@ -744,18 +756,6 @@
       <div class="section-header">Dispatch Comments</div>
       <div class="section-body">
         <div class="narrative-block">{{ doc.dispatch_comments }}</div>
-      </div>
-    </div>
-    {% endif %}
-
-    <!-- ── Narrative ── -->
-    {% if doc.narrative %}
-    <div class="section">
-      <div class="section-header">Narrative</div>
-      <div class="section-body">
-        <div class="narrative-text">
-          <div class="narrative-block">{{ doc.narrative }}</div>
-        </div>
       </div>
     </div>
     {% endif %}
