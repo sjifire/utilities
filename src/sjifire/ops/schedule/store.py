@@ -6,16 +6,15 @@ for local development and testing with ``mcp dev``.
 
 import logging
 from datetime import date, datetime, timedelta
-from typing import ClassVar, Self
+from typing import ClassVar
 
-from sjifire.core.config import get_cosmos_container
+from sjifire.ops.cosmos import CosmosStore
 from sjifire.ops.schedule.models import DayScheduleCache, ScheduleEntryCache
 
 logger = logging.getLogger(__name__)
-CONTAINER_NAME = "schedules"
 
 
-class ScheduleStore:
+class ScheduleStore(CosmosStore):
     """Async read/write for cached schedule data in Cosmos DB.
 
     Falls back to in-memory storage when Cosmos DB is not configured.
@@ -27,24 +26,10 @@ class ScheduleStore:
             await store.upsert(day_cache)
     """
 
+    _container_name: ClassVar[str] = "schedules"
+
     # Shared in-memory cache across instances (persists for server lifetime)
     _memory: ClassVar[dict[str, dict]] = {}
-
-    def __init__(self) -> None:
-        """Initialize store. Call ``__aenter__`` to connect."""
-        self._container = None
-        self._in_memory = False
-
-    async def __aenter__(self) -> Self:
-        """Get a container client from the shared Cosmos connection pool."""
-        self._container = await get_cosmos_container(CONTAINER_NAME)
-        if self._container is None:
-            self._in_memory = True
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """No-op — shared Cosmos client stays alive."""
-        self._container = None
 
     async def get(self, date_str: str) -> DayScheduleCache | None:
         """Get cached schedule for a date.

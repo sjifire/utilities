@@ -17,7 +17,7 @@ def _clear_memory_and_env(monkeypatch):
     BudgetStore._memory.clear()
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
-    monkeypatch.setattr("sjifire.ops.chat.store.get_cosmos_container", _noop_container)
+    monkeypatch.setattr("sjifire.ops.cosmos.get_cosmos_container", _noop_container)
     yield
     ConversationStore._memory.clear()
     BudgetStore._memory.clear()

@@ -16,18 +16,16 @@ import asyncio
 import logging
 import re
 from datetime import UTC, datetime
-from typing import ClassVar, Self
+from typing import ClassVar
 
-from sjifire.core.config import get_cosmos_container
 from sjifire.ispyfire.models import DispatchCall
+from sjifire.ops.cosmos import CosmosStore
 from sjifire.ops.dispatch.models import DispatchCallDocument
 
 logger = logging.getLogger(__name__)
 
-CONTAINER_NAME = "dispatch-calls"
 
-
-class DispatchStore:
+class DispatchStore(CosmosStore):
     """Async CRUD for dispatch call documents in Cosmos DB.
 
     Falls back to in-memory storage when Cosmos DB is not configured,
@@ -40,24 +38,10 @@ class DispatchStore:
             await store.upsert(doc)
     """
 
+    _container_name: ClassVar[str] = "dispatch-calls"
+
     # Shared in-memory store across instances (persists for server lifetime)
     _memory: ClassVar[dict[str, dict]] = {}
-
-    def __init__(self) -> None:
-        """Initialize store. Call ``__aenter__`` to connect."""
-        self._container = None
-        self._in_memory = False
-
-    async def __aenter__(self) -> Self:
-        """Get a container client from the shared Cosmos connection pool."""
-        self._container = await get_cosmos_container(CONTAINER_NAME)
-        if self._container is None:
-            self._in_memory = True
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """No-op — shared Cosmos client stays alive."""
-        self._container = None
 
     # ------------------------------------------------------------------
     # Core CRUD
@@ -114,17 +98,12 @@ class DispatchStore:
         parameters: list[dict] = [{"name": "@dispatch_id", "value": dispatch_id}]
 
         # Single-partition query if we can derive the year
-        partition_key = year if year else None
-
-        async for item in self._container.query_items(
-            query=query,
-            parameters=parameters,
-            partition_key=partition_key,
-            max_item_count=1,
-        ):
-            return DispatchCallDocument.from_cosmos(item)
-
-        return None
+        return await self._query_one(
+            query,
+            parameters,
+            DispatchCallDocument,
+            partition_key=year if year else None,
+        )
 
     async def upsert(self, doc: DispatchCallDocument) -> DispatchCallDocument:
         """Write or update a dispatch call document.
@@ -191,17 +170,12 @@ class DispatchStore:
             {"name": "@end", "value": end_date + "~"},
         ]
 
-        items = []
-        async for item in self._container.query_items(
-            query=query,
-            parameters=parameters,
-            max_item_count=max_items,
-        ):
-            items.append(DispatchCallDocument.from_cosmos(item))
-            if len(items) >= max_items:
-                break
-
-        return items
+        return await self._query_many(
+            query,
+            parameters,
+            DispatchCallDocument,
+            max_items=max_items,
+        )
 
     async def list_by_address(
         self,
@@ -242,17 +216,12 @@ class DispatchStore:
             {"name": "@exclude_id", "value": exclude_id},
         ]
 
-        items = []
-        async for item in self._container.query_items(
-            query=query,
-            parameters=parameters,
-            max_item_count=max_items,
-        ):
-            items.append(DispatchCallDocument.from_cosmos(item))
-            if len(items) >= max_items:
-                break
-
-        return items
+        return await self._query_many(
+            query,
+            parameters,
+            DispatchCallDocument,
+            max_items=max_items,
+        )
 
     async def list_recent(self, *, limit: int = 15) -> list[DispatchCallDocument]:
         """List the most recent dispatch calls.
@@ -274,16 +243,12 @@ class DispatchStore:
         query = "SELECT TOP @limit * FROM c ORDER BY c.time_reported DESC"
         parameters: list[dict] = [{"name": "@limit", "value": limit}]
 
-        items = []
-        async for item in self._container.query_items(
-            query=query,
-            parameters=parameters,
-        ):
-            items.append(DispatchCallDocument.from_cosmos(item))
-            if len(items) >= limit:
-                break
-
-        return items
+        return await self._query_many(
+            query,
+            parameters,
+            DispatchCallDocument,
+            max_items=limit,
+        )
 
     async def list_all(self, *, max_items: int = 2000) -> list[DispatchCallDocument]:
         """List all dispatch calls across all partitions.
@@ -307,16 +272,12 @@ class DispatchStore:
 
         query = "SELECT * FROM c ORDER BY c.time_reported DESC"
 
-        items = []
-        async for item in self._container.query_items(
-            query=query,
-            max_item_count=max_items,
-        ):
-            items.append(DispatchCallDocument.from_cosmos(item))
-            if len(items) >= max_items:
-                break
-
-        return items
+        return await self._query_many(
+            query,
+            None,
+            DispatchCallDocument,
+            max_items=max_items,
+        )
 
     async def get_existing_ids(self, ids: list[str]) -> set[str]:
         """Check which call UUIDs already exist in the store.

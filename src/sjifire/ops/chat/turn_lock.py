@@ -11,13 +11,12 @@ locks from crashed replicas are cleaned up automatically.
 
 import logging
 from datetime import UTC, datetime
-from typing import ClassVar, Self
+from typing import ClassVar
 
-from sjifire.core.config import get_cosmos_container
+from sjifire.ops.cosmos import CosmosStore
 
 logger = logging.getLogger(__name__)
 
-CONTAINER_NAME = "conversations"  # Reuses existing container (TTL enabled)
 LOCK_DOC_ID = "turn-lock"
 LOCK_TTL_SECONDS = 120  # Auto-expire after 2 minutes
 
@@ -44,7 +43,7 @@ class TurnLock:
         return self.holder_email == email
 
 
-class TurnLockStore:
+class TurnLockStore(CosmosStore):
     """Distributed turn lock using Cosmos DB conditional writes.
 
     Each incident has at most one lock document (``id="turn-lock"``)
@@ -62,20 +61,8 @@ class TurnLockStore:
                 existing = await store.get("incident-123")
     """
 
+    _container_name: ClassVar[str] = "conversations"  # Reuses existing container (TTL enabled)
     _memory: ClassVar[dict[str, dict]] = {}
-
-    def __init__(self) -> None:  # noqa: D107
-        self._container = None
-        self._in_memory = False
-
-    async def __aenter__(self) -> Self:  # noqa: D105
-        self._container = await get_cosmos_container(CONTAINER_NAME)
-        if self._container is None:
-            self._in_memory = True
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # noqa: D105
-        self._container = None
 
     def _lock_doc(self, incident_id: str, email: str, name: str) -> dict:
         """Build a lock document for Cosmos DB."""

@@ -66,7 +66,7 @@ def _clear_memory(monkeypatch):
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
     monkeypatch.delenv("ENTRA_MCP_API_CLIENT_ID", raising=False)
-    monkeypatch.setattr("sjifire.ops.chat.turn_lock.get_cosmos_container", _noop_container)
+    monkeypatch.setattr("sjifire.ops.cosmos.get_cosmos_container", _noop_container)
     yield
     TurnLockStore._memory.clear()
 

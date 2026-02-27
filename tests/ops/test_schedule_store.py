@@ -18,7 +18,7 @@ def _clear_memory_and_env(monkeypatch):
     ScheduleStore._memory.clear()
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
-    monkeypatch.setattr("sjifire.ops.schedule.store.get_cosmos_container", _noop_container)
+    monkeypatch.setattr("sjifire.ops.cosmos.get_cosmos_container", _noop_container)
     yield
     ScheduleStore._memory.clear()
 
