@@ -79,8 +79,11 @@ class ConversationStore(CosmosStore):
         # Exclude turn-lock documents which share this container/partition.
         # ORDER BY _ts DESC ensures we get the most recently updated
         # conversation when duplicates exist from race conditions.
+        query = (
+            "SELECT * FROM c WHERE c.incident_id = @iid AND c.id != 'turn-lock' ORDER BY c._ts DESC"
+        )
         return await self._query_one(
-            "SELECT * FROM c WHERE c.incident_id = @iid AND c.id != 'turn-lock' ORDER BY c._ts DESC",
+            query,
             [{"name": "@iid", "value": incident_id}],
             ConversationDocument,
             partition_key=incident_id,

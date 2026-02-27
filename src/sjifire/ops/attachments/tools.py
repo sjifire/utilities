@@ -166,7 +166,13 @@ async def list_attachments(incident_id: str) -> dict:
         return {"error": "Incident not found"}
 
     # View access: editor, creator, or personnel
-    if not await check_doc_view_access(doc.created_by, doc.personnel_emails(), user.email, user.is_editor):
+    can_view = await check_doc_view_access(
+        doc.created_by,
+        doc.personnel_emails(),
+        user.email,
+        user.is_editor,
+    )
+    if not can_view:
         return {"error": "You don't have access to this incident"}
 
     return {
@@ -200,7 +206,13 @@ async def get_attachment(
     if doc is None:
         return {"error": "Incident not found"}
 
-    if not await check_doc_view_access(doc.created_by, doc.personnel_emails(), user.email, user.is_editor):
+    can_view = await check_doc_view_access(
+        doc.created_by,
+        doc.personnel_emails(),
+        user.email,
+        user.is_editor,
+    )
+    if not can_view:
         return {"error": "You don't have access to this incident"}
 
     meta = next((a for a in doc.attachments if a.id == attachment_id), None)
