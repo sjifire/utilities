@@ -57,9 +57,7 @@ def _localize_diff_timestamps(diff: dict) -> dict:
     for key, val in diff.items():
         if key in ("timestamps", "units"):
             # These have nested local/neris dicts of timestamps
-            localized: dict = {
-                k: v for k, v in val.items() if k not in ("local", "neris")
-            }
+            localized: dict = {k: v for k, v in val.items() if k not in ("local", "neris")}
             for side in ("local", "neris"):
                 if side in val:
                     localized[side] = {
@@ -72,14 +70,25 @@ def _localize_diff_timestamps(diff: dict) -> dict:
     return result
 
 
-_DISPATCH_TS_KEYS = frozenset({
-    "call_create", "call_answered", "call_arrival", "incident_clear",
-    "first_unit_dispatched",
-})
-_UNIT_TS_KEYS = frozenset({
-    "dispatch", "enroute_to_scene", "staging", "on_scene",
-    "unit_clear", "canceled_enroute",
-})
+_DISPATCH_TS_KEYS = frozenset(
+    {
+        "call_create",
+        "call_answered",
+        "call_arrival",
+        "incident_clear",
+        "first_unit_dispatched",
+    }
+)
+_UNIT_TS_KEYS = frozenset(
+    {
+        "dispatch",
+        "enroute_to_scene",
+        "staging",
+        "on_scene",
+        "unit_clear",
+        "canceled_enroute",
+    }
+)
 
 
 def _localize_creation_payload(payload: dict) -> dict:
@@ -99,6 +108,7 @@ def _localize_creation_payload(payload: dict) -> dict:
         if "timestamp" in comment and isinstance(comment["timestamp"], str):
             comment["timestamp"] = _to_local_display(comment["timestamp"])
     return p
+
 
 # Ephemeral cache: NERIS unit ID → local CAD designation (e.g. FD53055879S001U000 → E31).
 # Rebuilt from NERIS entity API on first use; lost on restart (acceptable).
@@ -801,7 +811,9 @@ def _build_neris_creation_payload(doc: IncidentDocument) -> dict:
         "incident_number": doc.incident_number,
         "determinant_code": doc.incident_number.replace("-", "")[:8] or None,
         "location": location or None,
-        "call_create": to_utc_iso(doc.timestamps.get("psap_answer", "")) or None,
+        "call_create": to_utc_iso(doc.timestamps.get("alarm_time", ""))
+        or to_utc_iso(doc.timestamps.get("psap_answer", ""))
+        or None,
         "call_answered": to_utc_iso(doc.timestamps.get("psap_answer", "")) or None,
         "call_arrival": to_utc_iso(doc.timestamps.get("psap_answer", "")) or None,
         "incident_clear": to_utc_iso(doc.timestamps.get("incident_clear", "")) or None,
@@ -1029,8 +1041,11 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
             }
 
     # Dispatch-level timestamps
+    # call_arrival = when 911 call arrives at PSAP (earliest timestamp)
+    # call_create = when the CAD incident is created (alarm/page time)
     ts_map = {
-        "psap_answer": ("call_create", dispatch),
+        "psap_answer": ("call_arrival", dispatch),
+        "alarm_time": ("call_create", dispatch),
         "first_unit_dispatched": ("first_unit_dispatched", dispatch),
         "incident_clear": ("incident_clear", dispatch),
     }
@@ -1224,9 +1239,20 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
     if "timestamps" in diff:
         ts_local = diff["timestamps"]["local"]
         if "psap_answer" in ts_local:
-            dispatch_props["call_create"] = {
+            # psap_answer → call_arrival (when 911 call arrives at PSAP)
+            dispatch_props["call_arrival"] = {
                 "action": "set",
                 "value": to_utc_iso(ts_local["psap_answer"]),
+            }
+            dispatch_props["call_answered"] = {
+                "action": "set",
+                "value": to_utc_iso(ts_local["psap_answer"]),
+            }
+        if "alarm_time" in ts_local:
+            # alarm_time → call_create (when CAD incident is created)
+            dispatch_props["call_create"] = {
+                "action": "set",
+                "value": to_utc_iso(ts_local["alarm_time"]),
             }
         # first_unit_dispatched is a read-only computed field in NERIS
         # (derived from earliest unit dispatch time) — not patchable.

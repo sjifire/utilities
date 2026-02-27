@@ -3664,10 +3664,12 @@ class TestBuildNerisPatchTimezoneConversion:
             "timestamps": {
                 "local": {
                     "psap_answer": "2026-02-07T13:46:01",  # 1:46 PM Pacific
+                    "alarm_time": "2026-02-07T13:47:30",  # 1:47 PM Pacific
                     "incident_clear": "2026-02-07T15:30:00",  # 3:30 PM Pacific
                 },
                 "neris": {
-                    "call_create": "2026-02-07T21:46:01+00:00",
+                    "call_arrival": "2026-02-07T21:46:01+00:00",
+                    "call_create": "2026-02-07T21:47:30+00:00",
                     "incident_clear": "",
                 },
             }
@@ -3677,10 +3679,15 @@ class TestBuildNerisPatchTimezoneConversion:
 
         dispatch_props = patch["dispatch"]["properties"]
 
-        # psap_answer → call_create should be UTC
-        call_create = dispatch_props["call_create"]["value"]
-        dt = datetime.fromisoformat(call_create)
+        # psap_answer → call_arrival should be UTC
+        call_arrival = dispatch_props["call_arrival"]["value"]
+        dt = datetime.fromisoformat(call_arrival)
         assert dt.hour == 21  # 13 + 8
+
+        # alarm_time → call_create should be UTC
+        call_create = dispatch_props["call_create"]["value"]
+        dt_cc = datetime.fromisoformat(call_create)
+        assert dt_cc.hour == 21  # 13 + 8
 
         # incident_clear should also be UTC
         inc_clear = dispatch_props["incident_clear"]["value"]
