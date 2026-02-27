@@ -42,6 +42,7 @@ from sjifire.ops.incidents.tools import (
     _check_view_access,
     _extract_dispatch_notes,
     _extract_timestamps,
+    _extract_unit_times,
     _prefill_from_dispatch,
     create_incident,
     get_incident,
@@ -703,6 +704,194 @@ class TestExtractTimestamps:
             {"status": "", "time_of_status_change": "2026-02-12T14:30:15"},
         ]
         assert _extract_timestamps(details) == {}
+
+
+class TestExtractUnitTimes:
+    """Tests for _extract_unit_times — per-unit timestamp extraction."""
+
+    def test_keeps_earliest_arrvd_for_duplicate_entries(self):
+        """BN31 has two ARRVD entries: 22:19:21 (arrival) and 22:22:51 (command note).
+
+        Must keep the earliest (22:19:21), not the first-encountered.
+        Responder details here are in reverse-chronological order
+        (as iSpyFire sometimes returns them).
+        """
+        details = [
+            # Later ARRVD first (reverse chrono) — "note has command"
+            {
+                "unit_number": "BN31",
+                "agency_code": "SJF3",
+                "status": "ARRVD",
+                "time_of_status_change": "2026-02-08T22:22:51",
+            },
+            # Earlier ARRVD — actual arrival on scene
+            {
+                "unit_number": "BN31",
+                "agency_code": "SJF3",
+                "status": "ARRVD",
+                "time_of_status_change": "2026-02-08T22:19:21",
+            },
+            {
+                "unit_number": "BN31",
+                "agency_code": "SJF3",
+                "status": "ENRT",
+                "time_of_status_change": "2026-02-08T22:09:50",
+            },
+        ]
+        result = _extract_unit_times(details)
+        # Should pick the earlier arrival (22:19:21), not the command note (22:22:51)
+        assert result["BN31"]["on_scene"] == "2026-02-09T06:19:21+00:00"
+
+    def test_keeps_earliest_when_chronological_order(self):
+        """When entries are in chronological order, still keeps earliest."""
+        details = [
+            {
+                "unit_number": "E31",
+                "agency_code": "SJF3",
+                "status": "ARRVD",
+                "time_of_status_change": "2026-02-08T22:19:00",
+            },
+            {
+                "unit_number": "E31",
+                "agency_code": "SJF3",
+                "status": "ARRVD",
+                "time_of_status_change": "2026-02-08T22:25:00",
+            },
+        ]
+        result = _extract_unit_times(details)
+        assert result["E31"]["on_scene"] == "2026-02-09T06:19:00+00:00"
+
+    def test_filters_by_agency(self):
+        """Units from other agencies are excluded."""
+        details = [
+            {
+                "unit_number": "E31",
+                "agency_code": "SJF3",
+                "status": "ENRT",
+                "time_of_status_change": "2026-02-08T14:30:00",
+            },
+            {
+                "unit_number": "EMS12",
+                "agency_code": "SJEM",
+                "status": "ENRT",
+                "time_of_status_change": "2026-02-08T14:30:00",
+            },
+        ]
+        result = _extract_unit_times(details)
+        assert "E31" in result
+        assert "EMS12" not in result
+
+    def test_skips_agency_paging_units(self):
+        """SJF3 and SJF2 agency units are excluded (page markers, not apparatus)."""
+        details = [
+            {
+                "unit_number": "SJF3",
+                "agency_code": "SJF3",
+                "status": "PAGED",
+                "time_of_status_change": "2026-02-08T14:30:00",
+            },
+            {
+                "unit_number": "E31",
+                "agency_code": "SJF3",
+                "status": "PAGED",
+                "time_of_status_change": "2026-02-08T14:30:15",
+            },
+        ]
+        result = _extract_unit_times(details)
+        assert "SJF3" not in result
+        assert "E31" in result
+
+    def test_maps_all_status_codes(self):
+        """All status codes map to the correct fields."""
+        details = [
+            {
+                "unit_number": "E31",
+                "agency_code": "SJF3",
+                "status": "PAGED",
+                "time_of_status_change": "2026-02-08T14:30:00",
+            },
+            {
+                "unit_number": "E31",
+                "agency_code": "SJF3",
+                "status": "ENRT",
+                "time_of_status_change": "2026-02-08T14:32:00",
+            },
+            {
+                "unit_number": "E31",
+                "agency_code": "SJF3",
+                "status": "ARRVD",
+                "time_of_status_change": "2026-02-08T14:40:00",
+            },
+            {
+                "unit_number": "E31",
+                "agency_code": "SJF3",
+                "status": "CMPLT",
+                "time_of_status_change": "2026-02-08T16:00:00",
+            },
+        ]
+        result = _extract_unit_times(details)
+        assert "dispatch" in result["E31"]
+        assert "enroute" in result["E31"]
+        assert "on_scene" in result["E31"]
+        assert "cleared" in result["E31"]
+
+
+class TestExtractTimestampsEarliestTime:
+    """Tests for _extract_timestamps keeping earliest across duplicate entries."""
+
+    def test_keeps_earliest_arrived_across_units(self):
+        """When two units have ARRVD, keeps the global earliest."""
+        details = [
+            # Later arrival first (reverse chrono)
+            {
+                "unit_number": "E31",
+                "status": "ARRVD",
+                "time_of_status_change": "2026-02-08T22:25:00",
+            },
+            # Earlier arrival
+            {
+                "unit_number": "BN31",
+                "status": "ARRVD",
+                "time_of_status_change": "2026-02-08T22:19:21",
+            },
+        ]
+        result = _extract_timestamps(details)
+        # Should have the earlier one (22:19:21)
+        assert result["first_unit_arrived"] == "2026-02-09T06:19:21+00:00"
+
+    def test_keeps_earliest_enroute_across_units(self):
+        """When two units have ENRT, keeps the global earliest."""
+        details = [
+            {
+                "unit_number": "M31",
+                "status": "ENRT",
+                "time_of_status_change": "2026-02-08T14:35:00",
+            },
+            {
+                "unit_number": "E31",
+                "status": "ENRT",
+                "time_of_status_change": "2026-02-08T14:32:00",
+            },
+        ]
+        result = _extract_timestamps(details)
+        assert result["first_unit_enroute"] == "2026-02-08T22:32:00+00:00"
+
+    def test_keeps_earliest_alarm_time(self):
+        """When SJF3 has multiple PAGED entries, keeps the earliest."""
+        details = [
+            {
+                "unit_number": "SJF3",
+                "status": "PAGED",
+                "time_of_status_change": "2026-02-08T14:35:00",
+            },
+            {
+                "unit_number": "SJF3",
+                "status": "PAGED",
+                "time_of_status_change": "2026-02-08T14:30:15",
+            },
+        ]
+        result = _extract_timestamps(details)
+        assert result["alarm_time"] == "2026-02-08T22:30:15+00:00"
 
 
 class TestPrefillFromDispatch:
