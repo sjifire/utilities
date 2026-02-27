@@ -425,8 +425,15 @@ def _parse_neris_record(record: dict, neris_id: str) -> dict:
                     notes.append(DispatchNote(timestamp=str(ts), text=text))
             if notes:
                 prefill["dispatch_notes"] = notes
-        if dispatch.call_create:
+        # call_arrival = when 911 call arrives at PSAP (earliest)
+        # call_create = when the CAD incident is created (later)
+        # Use call_arrival as psap_answer; fall back to call_create
+        if dispatch.call_arrival:
+            timestamps["psap_answer"] = dispatch.call_arrival
+        elif dispatch.call_create:
             timestamps["psap_answer"] = dispatch.call_create
+        if dispatch.call_create:
+            timestamps["alarm_time"] = dispatch.call_create
         if dispatch.incident_clear:
             timestamps["incident_clear"] = dispatch.incident_clear
 

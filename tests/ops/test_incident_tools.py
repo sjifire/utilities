@@ -1710,16 +1710,17 @@ class TestResetIncident:
         assert "permission" in result["error"].lower()
 
     @patch("sjifire.ops.incidents.tools.IncidentStore")
-    async def test_cannot_reset_ready_review(self, mock_store_cls, regular_user, sample_doc):
+    async def test_can_reset_ready_review(self, mock_store_cls, regular_user, sample_doc):
         sample_doc.status = "ready_review"
         mock_store = AsyncMock()
         mock_store.get_by_id = AsyncMock(return_value=sample_doc)
+        mock_store.update = AsyncMock(side_effect=lambda doc: doc)
         mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
         mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
         result = await reset_incident("doc-123")
-        assert "error" in result
-        assert "ready_review" in result["error"]
+        assert "error" not in result
+        assert result["status"] == "draft"
 
     @patch("sjifire.ops.incidents.tools.IncidentStore")
     async def test_cannot_reset_submitted(self, mock_store_cls, regular_user, sample_doc):
@@ -1983,10 +1984,10 @@ class TestImportFromNeris:
         assert addr_disc[0]["neris"] == "94 Zepher Ln"
         assert addr_disc[0]["dispatch"] == "200 Spring St"
 
-        # alarm_time only in dispatch → gap filled
+        # alarm_time now comes from NERIS call_create AND dispatch, so it's
+        # not a gap fill — both sources have it (within 60s → no discrepancy either)
         alarm_gaps = [g for g in comp["gaps_filled"] if g["field"] == "alarm_time"]
-        assert len(alarm_gaps) == 1
-        assert alarm_gaps[0]["source"] == "dispatch"
+        assert len(alarm_gaps) == 0
 
         # Crew on duty included
         assert len(comp["crew_on_duty"]) == 1

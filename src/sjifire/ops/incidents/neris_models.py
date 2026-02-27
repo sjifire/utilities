@@ -140,6 +140,8 @@ class NerisDispatch(BaseModel):
     incident_number: str | None = None
     determinant_code: str | None = None
     dispatch_incident_number: str | None = None
+    call_arrival: str | None = None
+    call_answered: str | None = None
     call_create: str | None = None
     incident_clear: str | None = None
     automatic_alarm: bool | None = None

@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 _EDITABLE_STATUSES = {"draft", "in_progress", "ready_review"}
 _LOCKED_STATUSES = {"submitted", "approved"}
-_RESETTABLE_STATUSES = {"draft", "in_progress"}
+_RESETTABLE_STATUSES = {"draft", "in_progress", "ready_review"}
 
 
 def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
