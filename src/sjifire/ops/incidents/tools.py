@@ -729,11 +729,11 @@ async def create_incident(
             crew_by_unit.setdefault(unit_id, []).append(p)
 
         # Assign personnel to existing units or create new ones
-        existing_unit_ids = {u.unit_id for u in units}
+        existing_unit_ids = {u.unit_id.upper() for u in units}
         for unit_id, personnel in crew_by_unit.items():
-            if unit_id in existing_unit_ids:
+            if unit_id.upper() in existing_unit_ids:
                 for u in units:
-                    if u.unit_id == unit_id:
+                    if u.unit_id.upper() == unit_id.upper():
                         u.personnel = personnel
                         break
             elif unit_id:
@@ -1023,11 +1023,11 @@ async def update_incident(
                 crew_by_unit.setdefault(unit_id, []).append(p)
 
             # Update existing units' personnel, create new units if needed
-            existing_ids = {u.unit_id for u in doc.units}
+            existing_ids = {u.unit_id.upper() for u in doc.units}
             for unit_id, personnel in crew_by_unit.items():
-                if unit_id in existing_ids:
+                if unit_id.upper() in existing_ids:
                     for u in doc.units:
-                        if u.unit_id == unit_id:
+                        if u.unit_id.upper() == unit_id.upper():
                             u.personnel = personnel
                             break
                 elif unit_id:

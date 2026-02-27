@@ -305,6 +305,41 @@ class TestTimestampsEqual:
         # E33 has no neris_uid — not in neris_uids map
         assert "E33" not in diff["units"]["neris_uids"]
 
+    def test_case_insensitive_unit_matching(self, neris_record):
+        """Local 'OPS31' should match NERIS 'OP31' case-insensitively when NERIS uses different casing."""
+        # NERIS has 'e31' (lowercase) but local has 'E31' (uppercase)
+        neris_record["dispatch"]["unit_responses"] = [
+            {
+                "neris_uid": 101,
+                "reported_unit_id": "e31",
+                "dispatch": "2026-02-20T10:30:00Z",
+                "enroute_to_scene": "2026-02-20T10:32:00Z",
+            },
+        ]
+        doc = IncidentDocument(
+            id="case-test",
+            incident_number="26-002358",
+            incident_datetime=datetime(2026, 2, 20, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26SJ0020|1770457554",
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    dispatch="2026-02-20T10:31:00Z",
+                    enroute="2026-02-20T10:32:00Z",
+                ),
+            ],
+        )
+        diff = _build_neris_diff(doc, neris_record)
+        assert "units" in diff
+        # Should match despite case difference — neris_uid captured
+        assert diff["units"]["neris_uids"]["E31"] == 101
+        # NERIS reported_unit_id preserved for patch
+        assert diff["units"]["reported_unit_ids"]["E31"] == "e31"
+        # Only dispatch differs (enroute matches)
+        assert "E31.dispatch" in diff["units"]["local"]
+        assert "E31.enroute" not in diff["units"]["local"]
+
 
 class TestBuildNerisPatch:
     """Tests for _build_neris_patch."""
@@ -459,6 +494,27 @@ class TestBuildNerisPatch:
         # E33 should be an append action (no neris_uid)
         e33_action = next(a for a in actions if a.get("action") == "append")
         assert e33_action["value"]["reported_unit_id"] == "E33"
+
+    def test_unit_append_uses_neris_reported_id(self):
+        """Append should use the NERIS reported_unit_id when available (preserves NERIS casing)."""
+        diff = {
+            "units": {
+                "local": {
+                    "OPS31.dispatch": "2026-02-20T10:31:00Z",
+                },
+                "neris": {
+                    "OPS31.dispatch": "",
+                },
+                "neris_uids": {},
+                "reported_unit_ids": {"OPS31": "OP31"},
+            }
+        }
+        result = _build_neris_patch(diff)
+        actions = result["dispatch"]["properties"]["unit_responses"]
+        assert len(actions) == 1
+        assert actions[0]["action"] == "append"
+        # Should use NERIS's reported_unit_id 'OP31', not local 'OPS31'
+        assert actions[0]["value"]["reported_unit_id"] == "OP31"
 
     def test_dispatch_incident_number_patch(self):
         """dispatch_incident_number diff patches NERIS 'incident_number' field."""

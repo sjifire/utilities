@@ -307,7 +307,7 @@ def _build_unit_from_neris(u: NerisUnitResponse) -> UnitAssignment:
     """Convert a NERIS unit response to a local UnitAssignment."""
     raw_id = u.reported_unit_id or _resolve_neris_unit_id(u.unit_neris_id or "")
     unit = UnitAssignment(
-        unit_id=_normalize_unit_id(raw_id),
+        unit_id=raw_id,
         response_mode=u.response_mode or "",
         dispatch=u.dispatch or "",
         enroute=u.enroute_to_scene or "",
@@ -331,7 +331,7 @@ def _dedup_units(units: list[UnitAssignment]) -> list[UnitAssignment]:
     seen: dict[str, UnitAssignment] = {}
     ts_fields = ("dispatch", "enroute", "staged", "on_scene", "cleared", "canceled")
     for unit in units:
-        key = unit.unit_id
+        key = unit.unit_id.upper()
         if key not in seen:
             seen[key] = unit
             continue
@@ -713,9 +713,9 @@ def _submit_to_neris(payload: dict) -> dict:  # pragma: no cover
 def _resolve_local_to_neris_id(unit_id: str) -> str | None:
     """Map local unit ID (e.g. 'E31') to NERIS unit ID (e.g. 'FD53055879S001U000')."""
     _load_neris_unit_maps()
-    canonical = _cad_canonical.get(unit_id.lower(), unit_id.upper())
+    uid_upper = unit_id.upper()
     for neris_id, cad in _neris_unit_map.items():
-        if cad == canonical:
+        if cad.upper() == uid_upper:
             return neris_id
     return None
 
@@ -740,9 +740,8 @@ def _build_location(doc: IncidentDocument) -> dict:
 
 def _build_unit_response_for_creation(unit: UnitAssignment) -> dict:
     """Build a NERIS unit response entry for incident creation."""
-    canonical = _normalize_unit_id(unit.unit_id)
-    neris_uid = _resolve_local_to_neris_id(canonical)
-    resp: dict = {"reported_unit_id": canonical}
+    neris_uid = _resolve_local_to_neris_id(unit.unit_id)
+    resp: dict = {"reported_unit_id": unit.unit_id}
     if neris_uid:
         resp["unit_neris_id"] = neris_uid
     if unit.response_mode:
@@ -1059,13 +1058,12 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
 
     # Unit-level timestamps
     neris_units = dispatch.get("unit_responses") or []
+    # Key by uppercase for case-insensitive matching; store NERIS reported_unit_id
     neris_unit_map_local: dict[str, dict] = {}
     for nu in neris_units:
-        uid = _normalize_unit_id(
-            nu.get("reported_unit_id") or _resolve_neris_unit_id(nu.get("unit_neris_id", ""))
-        )
+        uid = nu.get("reported_unit_id") or _resolve_neris_unit_id(nu.get("unit_neris_id", ""))
         if uid:
-            neris_unit_map_local[uid] = nu
+            neris_unit_map_local[uid.upper()] = nu
 
     field_map = {
         "dispatch": "dispatch",
@@ -1076,18 +1074,24 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
         "canceled": "canceled_enroute",
     }
     for unit in doc.units:
-        neris_unit = neris_unit_map_local.get(unit.unit_id, {})
+        neris_unit = neris_unit_map_local.get(unit.unit_id.upper(), {})
         neris_uid = neris_unit.get("neris_uid")  # NERIS internal ID for patching
+        neris_reported_id = neris_unit.get("reported_unit_id", "")
         for local_field, neris_field in field_map.items():
             local_val = getattr(unit, local_field, "")
             neris_val = neris_unit.get(neris_field) or ""
             if local_val and not _timestamps_equal(local_val, neris_val):
-                diff.setdefault("units", {"local": {}, "neris": {}, "neris_uids": {}})
+                diff.setdefault(
+                    "units",
+                    {"local": {}, "neris": {}, "neris_uids": {}, "reported_unit_ids": {}},
+                )
                 key = f"{unit.unit_id}.{local_field}"
                 diff["units"]["local"][key] = local_val
                 diff["units"]["neris"][key] = neris_val
                 if neris_uid is not None:
                     diff["units"]["neris_uids"][unit.unit_id] = neris_uid
+                if neris_reported_id:
+                    diff["units"]["reported_unit_ids"][unit.unit_id] = neris_reported_id
 
     # Incident type
     types = neris_record.get("incident_types") or []
@@ -1280,6 +1284,7 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
         # of PatchDispatchUnitResponseAction (existing units with neris_uid)
         # or AppendDispatchUnitResponseAction (new units not yet in NERIS).
         neris_uids = diff["units"].get("neris_uids", {})
+        reported_ids = diff["units"].get("reported_unit_ids", {})
 
         # Group local diffs by unit_id
         per_unit: dict[str, dict] = {}
@@ -1312,8 +1317,11 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
                     }
                 )
             else:
-                # New unit not in NERIS — append with full payload
-                payload = {"reported_unit_id": unit_id}
+                # New unit not in NERIS — append with full payload.
+                # Use the NERIS reported_unit_id if available (preserves NERIS casing),
+                # otherwise fall back to local unit_id.
+                append_id = reported_ids.get(unit_id, unit_id)
+                payload = {"reported_unit_id": append_id}
                 for k, v in fields.items():
                     payload[k] = to_utc_iso(v)
                 unit_actions.append(
