@@ -1486,6 +1486,10 @@ function lockedApp() {
 }
 {% else %}
 function chatApp() {
+  // How long (ms) to wait with no streaming events before polling the server.
+  // Covers silent WS drops where the done event is lost.
+  const STREAMING_WATCHDOG_MS = 30_000;
+
   // Stable color palette for presence avatars
   const _avatarColors = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981','#06b6d4','#f97316','#6366f1'];
   let _colorIdx = 0;
@@ -1531,6 +1535,7 @@ function chatApp() {
     turnHolder: null,    // {email, name} — who has the current turn
     _blockedMessage: null, // Message blocked by 409, auto-retry after done
     _localTurnActive: false, // True when this session initiated an RPC turn
+    _streamingWatchdog: null, // Safety timer: polls server if no events arrive
 
     get presenceLabel() {
       const names = Object.values(this.presenceUsers).map(u => u.name.split(' ')[0]);
@@ -2041,6 +2046,7 @@ function chatApp() {
       this.currentText = '';
       this._localTurnActive = true;
       this._setTurnActive(true);
+      this._startStreamingWatchdog();
 
       const payload = {
         incident_id: this.incidentId,
@@ -2082,8 +2088,28 @@ function chatApp() {
       }
     },
 
+    _startStreamingWatchdog() {
+      // Safety net: if streaming stalls (no events within timeout), poll server.
+      // Covers cases where the done event is lost (WS silent drop, etc.)
+      this._resetStreamingWatchdog();
+      this._streamingWatchdog = setTimeout(() => {
+        if (this.streaming) {
+          console.warn(`Streaming watchdog fired — no events for ${STREAMING_WATCHDOG_MS/1000}s, polling for recovery`);
+          this._pollForRecovery();
+        }
+      }, STREAMING_WATCHDOG_MS);
+    },
+
+    _resetStreamingWatchdog() {
+      if (this._streamingWatchdog) {
+        clearTimeout(this._streamingWatchdog);
+        this._streamingWatchdog = null;
+      }
+    },
+
     async _pollForRecovery() {
-      // Poll server to recover from missed events after reconnection
+      // Poll server to recover from missed events (reconnection or watchdog)
+      this._resetStreamingWatchdog();
       if (!this.streaming) return;
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
@@ -2128,14 +2154,32 @@ function chatApp() {
           this._turnCount = serverTurnCount;
           if (data.status) this.status = data.status;
           this.streaming = false;
+          this._localTurnActive = false;
           this._setTurnActive(false);
           this.turnHolder = null;
           this.scrollToBottom(true);
-          this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+          // Process queued messages after recovery (same as done handler)
+          if (this._messageQueue.length) {
+            const queued = this._messageQueue.shift();
+            const msgObj = {type: 'message', role: 'user', content: queued.displayText};
+            if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
+            this.messages.push(msgObj);
+            this.$nextTick(() => {
+              this.scrollToBottom(true);
+              this._sendViaRPC(queued.displayText, queued.images);
+            });
+          } else if (this._blockedMessage) {
+            const blocked = this._blockedMessage;
+            this._blockedMessage = null;
+            this.$nextTick(() => this._sendViaRPC(blocked.displayText, blocked.images));
+          } else {
+            this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+          }
         } else if (this._localTurnActive) {
           // Local RPC turn in flight — don't kill the spinner.
-          // The done/error event will handle cleanup.
-          console.log('No new server turn but local turn active — keeping spinner');
+          // Re-arm watchdog so we poll again if still no response.
+          console.log('No new server turn but local turn active — re-arming watchdog');
+          this._startStreamingWatchdog();
         } else {
           // Server has no new turn and no local turn — stop the spinner.
           // This handles stale page-load recovery (e.g. tab was closed
@@ -2160,6 +2204,7 @@ function chatApp() {
         if (data.user_email !== this.currentUserEmail) {
           this.streaming = true;
           this.currentText = '';
+          this._startStreamingWatchdog();
         }
         return;
       }
@@ -2178,6 +2223,9 @@ function chatApp() {
         }
         return;
       }
+
+      // Any streaming event proves the connection is alive — reset watchdog
+      if (this.streaming) this._startStreamingWatchdog();
 
       if (type === 'text') {
         this.currentText += data.content || '';
@@ -2260,6 +2308,7 @@ function chatApp() {
           this.status = data.status;
         }
       } else if (type === 'done') {
+        this._resetStreamingWatchdog();
         // Finalize any partial streaming message
         if (this.currentText) {
           this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
@@ -2297,6 +2346,7 @@ function chatApp() {
         }
         this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
       } else if (type === 'error') {
+        this._resetStreamingWatchdog();
         console.error('Chat error:', data);
         if (this.currentText) {
           this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
