@@ -23,6 +23,14 @@ class ConversationMessage(BaseModel):
     output_tokens: int = 0
 
 
+class ContextSnapshot(BaseModel):
+    """Cached context from first turn — avoids redundant API calls."""
+
+    dispatch_json: str = "{}"
+    crew_json: str = "[]"
+    personnel_json: str = "[]"
+
+
 class ConversationDocument(BaseModel):
     """Chat conversation document stored in Cosmos DB.
 
@@ -37,6 +45,7 @@ class ConversationDocument(BaseModel):
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     turn_count: int = 0
+    context_snapshot: ContextSnapshot | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
 

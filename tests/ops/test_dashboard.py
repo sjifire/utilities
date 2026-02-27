@@ -121,7 +121,7 @@ def sample_incident():
         ],
         created_by="ff@sjifire.org",
         status="in_progress",
-        extras={"station": "S31"},
+        station="S31",
     )
 
 
@@ -253,7 +253,7 @@ class TestGetDashboard:
         assert call_1["report"] is not None
         assert call_1["report"]["source"] == "local"
         assert call_1["report"]["status"] == "in_progress"
-        assert call_1["report"]["completeness"]["filled"] == 4
+        assert call_1["report"]["completeness"]["filled"] == 5
 
         # Second call has no report
         call_2 = result["recent_calls"][1]
@@ -694,7 +694,7 @@ class TestFetchIncidents:
         assert result["26-001678"]["status"] == "in_progress"
         assert result["26-001678"]["source"] == "local"
         assert result["26-001678"]["incident_id"] == "inc-uuid-1"
-        mock_store.list_by_status.assert_called_once_with(exclude_status="submitted", max_items=50)
+        mock_store.list_by_status.assert_called_once_with(max_items=50)
 
     @patch("sjifire.ops.dashboard.IncidentStore")
     async def test_regular_user_queries_own(self, mock_store_cls, regular_user, sample_incident):
@@ -706,9 +706,7 @@ class TestFetchIncidents:
         result = await _fetch_incidents("ff@sjifire.org", is_editor=False)
 
         assert "26-001678" in result
-        mock_store.list_for_user.assert_called_once_with(
-            "ff@sjifire.org", exclude_status="submitted", max_items=50
-        )
+        mock_store.list_for_user.assert_called_once_with("ff@sjifire.org", max_items=50)
 
     @patch("sjifire.ops.dashboard.IncidentStore")
     async def test_completeness_included_in_lookup(
@@ -722,8 +720,8 @@ class TestFetchIncidents:
         result = await _fetch_incidents("ff@sjifire.org", is_editor=False)
 
         comp = result["26-001678"]["completeness"]
-        assert comp["filled"] == 4  # incident_type + address + units + personnel
-        assert comp["total"] == 7
+        assert comp["filled"] == 5  # station + incident_type + address + units + personnel
+        assert comp["total"] == 8
 
     @patch("sjifire.ops.dashboard.IncidentStore")
     async def test_empty_store_returns_empty_lookup(self, mock_store_cls, regular_user):
@@ -803,7 +801,7 @@ class TestDashboardIntegration:
         assert call_1["report"]["source"] == "local"
         assert call_1["report"]["status"] == "in_progress"
         assert call_1["report"]["incident_id"] == "inc-uuid-1"
-        assert call_1["report"]["completeness"]["filled"] == 4
+        assert call_1["report"]["completeness"]["filled"] == 5
 
         call_2 = result["recent_calls"][1]
         assert call_2["dispatch_id"] == "26-001650"
@@ -829,10 +827,10 @@ class TestDashboardIntegration:
 
     @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
-    async def test_submitted_incidents_excluded(
+    async def test_submitted_incidents_visible_on_dashboard(
         self, mock_schedule, mock_neris, regular_user, schedule_result
     ):
-        """Submitted incidents don't appear on the dashboard."""
+        """Submitted incidents appear on the dashboard with locked status."""
         mock_schedule.return_value = schedule_result
         mock_neris.return_value = _EMPTY_NERIS
 
@@ -852,7 +850,7 @@ class TestDashboardIntegration:
             incident_datetime=datetime(2026, 2, 10, tzinfo=UTC),
             created_by="ff@sjifire.org",
             status="submitted",
-            extras={"station": "S31"},
+            station="S31",
         )
 
         async with DispatchStore() as store:
@@ -863,7 +861,10 @@ class TestDashboardIntegration:
         result = await get_dashboard()
 
         assert result["call_count"] == 1
-        assert result["recent_calls"][0]["report"] is None
+        report = result["recent_calls"][0]["report"]
+        assert report is not None
+        assert report["source"] == "local"
+        assert report["status"] == "submitted"
 
     @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
@@ -895,7 +896,7 @@ class TestDashboardIntegration:
                 incident_type="MEDICAL" if i == 0 else None,
                 created_by="chief@sjifire.org",
                 status=["in_progress", "draft"][i],
-                extras={"station": "S31"},
+                station="S31",
             )
             for i in range(2)
         ]
@@ -945,7 +946,7 @@ class TestDashboardIntegration:
             incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="chief@sjifire.org",
             status="in_progress",
-            extras={"station": "S31"},
+            station="S31",
         )
 
         async with DispatchStore() as store:
@@ -983,7 +984,7 @@ class TestDashboardIntegration:
             incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
             created_by="ff@sjifire.org",
             status="draft",
-            extras={"station": "S31"},
+            station="S31",
         )
 
         async with DispatchStore() as store:
@@ -1032,7 +1033,7 @@ class TestDashboardIntegration:
             timestamps={"dispatch": "2026-02-12T10:00:00"},
             created_by="ff@sjifire.org",
             status="ready_review",
-            extras={"station": "S31"},
+            station="S31",
         )
 
         async with DispatchStore() as store:
@@ -1045,9 +1046,9 @@ class TestDashboardIntegration:
         report = result["recent_calls"][0]["report"]
         assert report["status"] == "ready_review"
         assert (
-            report["completeness"]["filled"] == 6
-        )  # type + address + units + personnel + narrative + timestamps
-        assert report["completeness"]["total"] == 7
+            report["completeness"]["filled"] == 7
+        )  # station + type + address + units + personnel + narrative + timestamps
+        assert report["completeness"]["total"] == 8
 
     @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
     @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
@@ -1473,3 +1474,238 @@ class TestKioskRecentlyCompleted:
 
         # Open (not completed) calls are excluded from archived
         assert len(result["calls"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: locked status + finalize label (Phase 2)
+# ---------------------------------------------------------------------------
+
+
+class TestLockedStatusDashboard:
+    """Verify submitted/approved incidents appear on dashboard with correct labels."""
+
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
+    async def test_approved_incident_visible_on_dashboard(
+        self, mock_schedule, mock_neris, regular_user, schedule_result
+    ):
+        """Approved incidents appear on the dashboard with locked status."""
+        mock_schedule.return_value = schedule_result
+        mock_neris.return_value = _EMPTY_NERIS
+
+        call_doc = DispatchCallDocument(
+            id="call-appr",
+            year="2026",
+            long_term_call_id="26-005000",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+            time_reported=datetime(2026, 2, 10, 10, 0, tzinfo=UTC),
+            is_completed=True,
+        )
+        incident = IncidentDocument(
+            id="inc-approved",
+            incident_number="26-005000",
+            incident_datetime=datetime(2026, 2, 10, tzinfo=UTC),
+            created_by="ff@sjifire.org",
+            status="approved",
+            station="S31",
+        )
+
+        async with DispatchStore() as store:
+            await store.upsert(call_doc)
+        async with IncidentStore() as store:
+            await store.create(incident)
+
+        result = await get_dashboard()
+
+        assert result["call_count"] == 1
+        report = result["recent_calls"][0]["report"]
+        assert report is not None
+        assert report["source"] == "local"
+        assert report["status"] == "approved"
+
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
+    async def test_neris_status_propagated_to_template(
+        self,
+        mock_calls,
+        mock_incidents,
+        mock_schedule,
+        mock_neris,
+        regular_user,
+        schedule_result,
+    ):
+        """neris_status and is_locked are propagated to template context."""
+        # Use a dispatch call that matches the NERIS report so it has an address
+        call = DispatchCallDocument(
+            id="call-neris-match",
+            year="2026",
+            long_term_call_id="26-001500",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+            time_reported=datetime(2026, 2, 9, 6, 7, tzinfo=UTC),
+            is_completed=True,
+        )
+        mock_calls.return_value = [call]
+        mock_schedule.return_value = schedule_result
+        mock_incidents.return_value = {}
+        neris_summary = {
+            "source": "neris",
+            "neris_id": "FD53055879|26001500|100",
+            "incident_number": "26001500",
+            "status": "APPROVED",
+            "incident_type": "MEDICAL",
+            "call_create": "2026-02-09T06:07:17+00:00",
+        }
+        mock_neris.return_value = {
+            "lookup": {"26001500": neris_summary},
+            "reports": [neris_summary],
+        }
+
+        result = await get_dashboard()
+        ctx = _build_template_context(result, {"incidents": []})
+
+        # Find the entry by dispatch ID
+        entry = [c for c in ctx["recent_calls"] if c["id"] == "26-001500"]
+        assert len(entry) == 1
+        assert entry[0]["neris_status"] == "APPROVED"
+        assert entry[0]["report_label"] == "Finalize from NERIS"
+
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
+    async def test_pending_neris_shows_import_label(
+        self,
+        mock_calls,
+        mock_incidents,
+        mock_schedule,
+        mock_neris,
+        regular_user,
+        schedule_result,
+    ):
+        """Non-APPROVED NERIS records show 'Import from NERIS' label."""
+        call = DispatchCallDocument(
+            id="call-neris-pend",
+            year="2026",
+            long_term_call_id="26-001600",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+            time_reported=datetime(2026, 2, 10, 10, 0, tzinfo=UTC),
+            is_completed=True,
+        )
+        mock_calls.return_value = [call]
+        mock_schedule.return_value = schedule_result
+        mock_incidents.return_value = {}
+        neris_summary = {
+            "source": "neris",
+            "neris_id": "FD53055879|26001600|200",
+            "incident_number": "26001600",
+            "status": "PENDING_APPROVAL",
+            "incident_type": "FIRE",
+            "call_create": "2026-02-10T10:00:00+00:00",
+        }
+        mock_neris.return_value = {
+            "lookup": {"26001600": neris_summary},
+            "reports": [neris_summary],
+        }
+
+        result = await get_dashboard()
+        ctx = _build_template_context(result, {"incidents": []})
+
+        entry = [c for c in ctx["recent_calls"] if c["id"] == "26-001600"]
+        assert len(entry) == 1
+        assert entry[0]["report_label"] == "Import from NERIS"
+
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
+    async def test_locked_local_shows_view_label(
+        self,
+        mock_calls,
+        mock_incidents,
+        mock_schedule,
+        mock_neris,
+        regular_user,
+        schedule_result,
+    ):
+        """Locked local (submitted/approved) reports show 'View Report' label."""
+        call = DispatchCallDocument(
+            id="call-locked",
+            year="2026",
+            long_term_call_id="26-006000",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+            time_reported=datetime(2026, 2, 12, 14, 30, tzinfo=UTC),
+            is_completed=True,
+        )
+        mock_calls.return_value = [call]
+        mock_schedule.return_value = schedule_result
+        mock_incidents.return_value = {
+            "26-006000": {
+                "source": "local",
+                "status": "submitted",
+                "completeness": {"filled": 5, "total": 7, "sections": {}},
+                "incident_id": "inc-locked",
+            },
+        }
+        mock_neris.return_value = _EMPTY_NERIS
+
+        result = await get_dashboard()
+        ctx = _build_template_context(result, {"incidents": []})
+
+        entry = [c for c in ctx["recent_calls"] if c["id"] == "26-006000"]
+        assert len(entry) == 1
+        assert entry[0]["is_locked"] is True
+        assert entry[0]["report_label"] == "View Report"
+
+    @patch("sjifire.ops.dashboard._read_neris_cache", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_schedule", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_incidents", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_recent_calls", new_callable=AsyncMock)
+    async def test_editable_local_shows_edit_label(
+        self,
+        mock_calls,
+        mock_incidents,
+        mock_schedule,
+        mock_neris,
+        regular_user,
+        schedule_result,
+    ):
+        """Editable local reports show 'Edit Report' label."""
+        call = DispatchCallDocument(
+            id="call-edit",
+            year="2026",
+            long_term_call_id="26-007000",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+            time_reported=datetime(2026, 2, 12, 10, 0, tzinfo=UTC),
+            is_completed=True,
+        )
+        mock_calls.return_value = [call]
+        mock_schedule.return_value = schedule_result
+        mock_incidents.return_value = {
+            "26-007000": {
+                "source": "local",
+                "status": "in_progress",
+                "completeness": {"filled": 3, "total": 7, "sections": {}},
+                "incident_id": "inc-edit",
+            },
+        }
+        mock_neris.return_value = _EMPTY_NERIS
+
+        result = await get_dashboard()
+        ctx = _build_template_context(result, {"incidents": []})
+
+        entry = [c for c in ctx["recent_calls"] if c["id"] == "26-007000"]
+        assert len(entry) == 1
+        assert entry[0]["is_locked"] is False
+        assert entry[0]["report_label"] == "Edit Report"

@@ -15,7 +15,7 @@ def _clear_memory_and_env(monkeypatch):
     TurnLockStore._memory.clear()
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
-    monkeypatch.setattr("sjifire.ops.chat.turn_lock.get_cosmos_container", _noop_container)
+    monkeypatch.setattr("sjifire.ops.cosmos.get_cosmos_container", _noop_container)
     yield
     TurnLockStore._memory.clear()
 
@@ -35,13 +35,13 @@ class TestTurnLockAcquire:
             lock = await store.acquire("inc-1", "bob@sjifire.org", "Bob")
         assert lock is None
 
-    async def test_acquire_refreshes_for_same_user(self):
+    async def test_acquire_rejected_for_same_user(self):
+        """Same user cannot re-acquire — prevents concurrent engine tasks."""
         async with TurnLockStore() as store:
             lock1 = await store.acquire("inc-1", "alice@sjifire.org", "Alice")
             lock2 = await store.acquire("inc-1", "alice@sjifire.org", "Alice")
         assert lock1 is not None
-        assert lock2 is not None
-        assert lock2.holder_email == "alice@sjifire.org"
+        assert lock2 is None
 
     async def test_different_incidents_independent(self):
         async with TurnLockStore() as store:

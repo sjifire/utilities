@@ -340,6 +340,10 @@ if should_run 2; then
     info "Creating container 'neris-reports'..."
     create_container "neris-reports" "/year"
 
+    # Container: neris-snapshots (partition key: /year, 30-day TTL)
+    info "Creating container 'neris-snapshots'..."
+    create_container "neris-snapshots" "/year" --ttl 2592000
+
     # Container: oauth-tokens (partition key: /token_type, per-document TTL)
     info "Creating container 'oauth-tokens'..."
     create_container "oauth-tokens" "/token_type" --ttl -1

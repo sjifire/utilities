@@ -23,16 +23,16 @@ from sjifire.ops.attachments.models import (
     build_blob_path,
 )
 from sjifire.ops.attachments.store import AttachmentBlobStore
-from sjifire.ops.auth import get_current_user
+from sjifire.ops.auth import check_doc_edit_access, check_doc_view_access, get_current_user
 from sjifire.ops.incidents.models import EditEntry
 from sjifire.ops.incidents.store import IncidentStore
 
 logger = logging.getLogger(__name__)
 
 
-def _check_edit_access(doc, user_email: str, is_editor: bool) -> bool:
+async def _check_edit_access(doc, user_email: str, is_editor: bool) -> bool:
     """Check if user can edit (attach to) this incident."""
-    return is_editor or doc.created_by == user_email
+    return await check_doc_edit_access(doc.created_by, user_email, is_editor)
 
 
 async def upload_attachment(
@@ -88,7 +88,7 @@ async def upload_attachment(
         if doc is None:
             return {"error": "Incident not found"}
 
-        if not _check_edit_access(doc, user.email, user.is_editor):
+        if not await _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to add attachments to this incident"}
 
         if doc.status == "submitted":
@@ -166,7 +166,13 @@ async def list_attachments(incident_id: str) -> dict:
         return {"error": "Incident not found"}
 
     # View access: editor, creator, or personnel
-    if not (user.is_editor or doc.created_by == user.email or user.email in doc.personnel_emails()):
+    can_view = await check_doc_view_access(
+        doc.created_by,
+        doc.personnel_emails(),
+        user.email,
+        user.is_editor,
+    )
+    if not can_view:
         return {"error": "You don't have access to this incident"}
 
     return {
@@ -200,7 +206,13 @@ async def get_attachment(
     if doc is None:
         return {"error": "Incident not found"}
 
-    if not (user.is_editor or doc.created_by == user.email or user.email in doc.personnel_emails()):
+    can_view = await check_doc_view_access(
+        doc.created_by,
+        doc.personnel_emails(),
+        user.email,
+        user.is_editor,
+    )
+    if not can_view:
         return {"error": "You don't have access to this incident"}
 
     meta = next((a for a in doc.attachments if a.id == attachment_id), None)
@@ -247,7 +259,7 @@ async def update_attachment(
         if doc is None:
             return {"error": "Incident not found"}
 
-        if not _check_edit_access(doc, user.email, user.is_editor):
+        if not await _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to update attachments"}
 
         meta = next((a for a in doc.attachments if a.id == attachment_id), None)
@@ -285,7 +297,7 @@ async def delete_attachment(incident_id: str, attachment_id: str) -> dict:
         if doc is None:
             return {"error": "Incident not found"}
 
-        if not _check_edit_access(doc, user.email, user.is_editor):
+        if not await _check_edit_access(doc, user.email, user.is_editor):
             return {"error": "You don't have permission to delete attachments"}
 
         if doc.status == "submitted":

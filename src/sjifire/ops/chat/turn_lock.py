@@ -11,13 +11,12 @@ locks from crashed replicas are cleaned up automatically.
 
 import logging
 from datetime import UTC, datetime
-from typing import ClassVar, Self
+from typing import ClassVar
 
-from sjifire.core.config import get_cosmos_container
+from sjifire.ops.cosmos import CosmosStore
 
 logger = logging.getLogger(__name__)
 
-CONTAINER_NAME = "conversations"  # Reuses existing container (TTL enabled)
 LOCK_DOC_ID = "turn-lock"
 LOCK_TTL_SECONDS = 120  # Auto-expire after 2 minutes
 
@@ -44,7 +43,7 @@ class TurnLock:
         return self.holder_email == email
 
 
-class TurnLockStore:
+class TurnLockStore(CosmosStore):
     """Distributed turn lock using Cosmos DB conditional writes.
 
     Each incident has at most one lock document (``id="turn-lock"``)
@@ -62,20 +61,8 @@ class TurnLockStore:
                 existing = await store.get("incident-123")
     """
 
+    _container_name: ClassVar[str] = "conversations"  # Reuses existing container (TTL enabled)
     _memory: ClassVar[dict[str, dict]] = {}
-
-    def __init__(self) -> None:  # noqa: D107
-        self._container = None
-        self._in_memory = False
-
-    async def __aenter__(self) -> Self:  # noqa: D105
-        self._container = await get_cosmos_container(CONTAINER_NAME)
-        if self._container is None:
-            self._in_memory = True
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # noqa: D105
-        self._container = None
 
     def _lock_doc(self, incident_id: str, email: str, name: str) -> dict:
         """Build a lock document for Cosmos DB."""
@@ -92,15 +79,16 @@ class TurnLockStore:
         """Try to acquire the turn lock for an incident.
 
         Returns the ``TurnLock`` on success, or ``None`` if the lock
-        is already held by another user. If the same user already holds
-        the lock, it is refreshed (TTL reset).
+        is already held (even by the same user). This prevents
+        concurrent engine tasks for the same incident — the client
+        should queue the message and retry after the current turn.
         """
         doc = self._lock_doc(incident_id, email, name)
 
         if self._in_memory:
             key = f"turn-lock:{incident_id}"
             existing = self._memory.get(key)
-            if existing and existing["holder_email"] != email:
+            if existing:
                 return None
             self._memory[key] = doc
             logger.info("Acquired turn lock for %s by %s (in-memory)", incident_id, email)
@@ -114,28 +102,8 @@ class TurnLockStore:
             return TurnLock(incident_id, email, name, doc["acquired_at"], etag=etag)
         except Exception as exc:
             if _is_conflict(exc):
-                # Lock exists — check if it's ours (same user, refresh TTL)
-                existing = await self.get(incident_id)
-                if existing and existing.is_held_by(email):
-                    return await self._refresh(incident_id, email, name, existing.etag)
                 return None
             raise
-
-    async def _refresh(self, incident_id: str, email: str, name: str, etag: str) -> TurnLock | None:
-        """Refresh an existing lock held by the same user (reset TTL)."""
-        doc = self._lock_doc(incident_id, email, name)
-        try:
-            result = await self._container.replace_item(
-                item=LOCK_DOC_ID,
-                body=doc,
-                if_match=etag,
-            )
-            new_etag = result.get("_etag", "")
-            logger.info("Refreshed turn lock for %s by %s", incident_id, email)
-            return TurnLock(incident_id, email, name, doc["acquired_at"], etag=new_etag)
-        except Exception:
-            logger.warning("Failed to refresh turn lock for %s", incident_id, exc_info=True)
-            return None
 
     async def release(self, incident_id: str, email: str) -> bool:
         """Release the turn lock if held by the given user.

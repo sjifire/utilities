@@ -1,5 +1,6 @@
 """Tests for attachment HTTP routes."""
 
+import base64
 import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -206,26 +207,50 @@ class TestDeleteRoute:
         assert resp.status_code == 401
 
 
-# -- Chat route auto-save ---------------------------------------------------
+# -- RPC proxy auto-save (moved from chat_stream to centrifugo.rpc_proxy) ----
+
+_TEST_B64INFO = base64.b64encode(
+    json.dumps(
+        {"user_id": "test-uid", "name": "Test User", "email": "firefighter@sjifire.org"}
+    ).encode()
+).decode()
 
 
-class _ChatRequest:
-    """Minimal request for chat_stream tests with path_params and json body."""
+class _FakeClient:
+    host = "127.0.0.1"
+    port = 0
+
+
+class _RpcRequest:
+    """Minimal request stand-in for RPC proxy tests."""
+
+    client = _FakeClient()
 
     def __init__(self, body: dict):
-        self.path_params = {"incident_id": "inc-test"}
         self._body = body
 
     async def json(self):
         return self._body
 
 
+def _rpc_req(images_data: dict) -> _RpcRequest:
+    """Build a fake Centrifugo RPC proxy request with send_message method."""
+    return _RpcRequest(
+        {
+            "method": "send_message",
+            "data": {"incident_id": "inc-test", **images_data},
+            "user": "firefighter@sjifire.org",
+            "b64info": _TEST_B64INFO,
+        }
+    )
+
+
 class TestChatImageAutoSave:
-    """Test that images sent through chat are auto-saved as attachments."""
+    """Test that images sent through RPC chat are auto-saved as attachments."""
 
     async def test_images_auto_saved_without_title(self):
         """Auto-saved chat images should have no title (LLM assigns later)."""
-        from sjifire.ops.chat.routes import chat_stream
+        from sjifire.ops.chat.centrifugo import rpc_proxy
 
         saved_calls = []
 
@@ -239,7 +264,7 @@ class TestChatImageAutoSave:
         mock_lock.__aenter__ = AsyncMock(return_value=mock_lock)
         mock_lock.__aexit__ = AsyncMock(return_value=False)
 
-        req = _ChatRequest(
+        req = _rpc_req(
             {
                 "message": "Check this run sheet",
                 "images": [{"data": "abc123", "media_type": "image/jpeg"}],
@@ -247,17 +272,18 @@ class TestChatImageAutoSave:
         )
 
         with (
-            patch("sjifire.ops.chat.routes.run_chat", new_callable=AsyncMock),
+            patch("sjifire.ops.chat.engine.run_chat", new_callable=AsyncMock),
             patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload),
-            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
-            patch("sjifire.ops.chat.routes.TurnLockStore", return_value=mock_lock),
+            patch("sjifire.ops.chat.centrifugo.check_is_editor", AsyncMock(return_value=True)),
+            patch("sjifire.ops.chat.turn_lock.TurnLockStore", return_value=mock_lock),
         ):
-            resp = await chat_stream(req)
+            resp = await rpc_proxy(req)
             import asyncio
 
             await asyncio.sleep(0)
 
-        assert resp.status_code == 202
+        body = json.loads(resp.body)
+        assert body["result"]["data"]["status"] == "accepted"
         assert len(saved_calls) == 1
         assert saved_calls[0]["filename"] == "chat-photo-1.jpg"
         assert "title" not in saved_calls[0]  # No title kwarg
@@ -265,7 +291,7 @@ class TestChatImageAutoSave:
 
     async def test_auto_save_failure_does_not_block_chat(self):
         """If auto-save fails, chat should still proceed."""
-        from sjifire.ops.chat.routes import chat_stream
+        from sjifire.ops.chat.centrifugo import rpc_proxy
 
         async def mock_upload_fail(**kwargs):
             raise RuntimeError("Blob storage unavailable")
@@ -277,7 +303,7 @@ class TestChatImageAutoSave:
         mock_lock.__aenter__ = AsyncMock(return_value=mock_lock)
         mock_lock.__aexit__ = AsyncMock(return_value=False)
 
-        req = _ChatRequest(
+        req = _rpc_req(
             {
                 "message": "Photo attached",
                 "images": [{"data": "abc", "media_type": "image/png"}],
@@ -285,22 +311,23 @@ class TestChatImageAutoSave:
         )
 
         with (
-            patch("sjifire.ops.chat.routes.run_chat", run_chat_mock),
+            patch("sjifire.ops.chat.engine.run_chat", run_chat_mock),
             patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload_fail),
-            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
-            patch("sjifire.ops.chat.routes.TurnLockStore", return_value=mock_lock),
+            patch("sjifire.ops.chat.centrifugo.check_is_editor", AsyncMock(return_value=True)),
+            patch("sjifire.ops.chat.turn_lock.TurnLockStore", return_value=mock_lock),
         ):
-            resp = await chat_stream(req)
+            resp = await rpc_proxy(req)
             import asyncio
 
             await asyncio.sleep(0)
 
-        assert resp.status_code == 202  # Chat proceeded despite upload failure
+        body = json.loads(resp.body)
+        assert body["result"]["data"]["status"] == "accepted"
         run_chat_mock.assert_called_once()
 
     async def test_multiple_images_get_numbered_filenames(self):
         """Multiple images get chat-photo-1, chat-photo-2, etc."""
-        from sjifire.ops.chat.routes import chat_stream
+        from sjifire.ops.chat.centrifugo import rpc_proxy
 
         saved_calls = []
 
@@ -314,7 +341,7 @@ class TestChatImageAutoSave:
         mock_lock.__aenter__ = AsyncMock(return_value=mock_lock)
         mock_lock.__aexit__ = AsyncMock(return_value=False)
 
-        req = _ChatRequest(
+        req = _rpc_req(
             {
                 "message": "Multiple photos",
                 "images": [
@@ -326,17 +353,18 @@ class TestChatImageAutoSave:
         )
 
         with (
-            patch("sjifire.ops.chat.routes.run_chat", new_callable=AsyncMock),
+            patch("sjifire.ops.chat.engine.run_chat", new_callable=AsyncMock),
             patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload),
-            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
-            patch("sjifire.ops.chat.routes.TurnLockStore", return_value=mock_lock),
+            patch("sjifire.ops.chat.centrifugo.check_is_editor", AsyncMock(return_value=True)),
+            patch("sjifire.ops.chat.turn_lock.TurnLockStore", return_value=mock_lock),
         ):
-            resp = await chat_stream(req)
+            resp = await rpc_proxy(req)
             import asyncio
 
             await asyncio.sleep(0)
 
-        assert resp.status_code == 202
+        body = json.loads(resp.body)
+        assert body["result"]["data"]["status"] == "accepted"
         assert len(saved_calls) == 3
         assert saved_calls[0]["filename"] == "chat-photo-1.jpg"
         assert saved_calls[1]["filename"] == "chat-photo-2.png"
@@ -346,7 +374,7 @@ class TestChatImageAutoSave:
         """Successful auto-save should pass image_refs to run_chat."""
         import asyncio
 
-        from sjifire.ops.chat.routes import chat_stream
+        from sjifire.ops.chat.centrifugo import rpc_proxy
 
         captured_kwargs = {}
 
@@ -362,7 +390,7 @@ class TestChatImageAutoSave:
         mock_lock.__aenter__ = AsyncMock(return_value=mock_lock)
         mock_lock.__aexit__ = AsyncMock(return_value=False)
 
-        req = _ChatRequest(
+        req = _rpc_req(
             {
                 "message": "Check this photo",
                 "images": [{"data": "abc123", "media_type": "image/jpeg"}],
@@ -370,15 +398,16 @@ class TestChatImageAutoSave:
         )
 
         with (
-            patch("sjifire.ops.chat.routes.run_chat", side_effect=fake_run_chat),
+            patch("sjifire.ops.chat.engine.run_chat", side_effect=fake_run_chat),
             patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload),
-            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
-            patch("sjifire.ops.chat.routes.TurnLockStore", return_value=mock_lock),
+            patch("sjifire.ops.chat.centrifugo.check_is_editor", AsyncMock(return_value=True)),
+            patch("sjifire.ops.chat.turn_lock.TurnLockStore", return_value=mock_lock),
         ):
-            resp = await chat_stream(req)
+            resp = await rpc_proxy(req)
             await asyncio.sleep(0)
 
-        assert resp.status_code == 202
+        body = json.loads(resp.body)
+        assert body["result"]["data"]["status"] == "accepted"
         assert captured_kwargs["image_refs"] == [
             {"attachment_id": "att-saved-1", "content_type": "image/jpeg"}
         ]
@@ -387,7 +416,7 @@ class TestChatImageAutoSave:
         """When auto-save fails, image_refs should be None."""
         import asyncio
 
-        from sjifire.ops.chat.routes import chat_stream
+        from sjifire.ops.chat.centrifugo import rpc_proxy
 
         captured_kwargs = {}
 
@@ -403,7 +432,7 @@ class TestChatImageAutoSave:
         mock_lock.__aenter__ = AsyncMock(return_value=mock_lock)
         mock_lock.__aexit__ = AsyncMock(return_value=False)
 
-        req = _ChatRequest(
+        req = _rpc_req(
             {
                 "message": "Photo here",
                 "images": [{"data": "abc", "media_type": "image/png"}],
@@ -411,15 +440,16 @@ class TestChatImageAutoSave:
         )
 
         with (
-            patch("sjifire.ops.chat.routes.run_chat", side_effect=fake_run_chat),
+            patch("sjifire.ops.chat.engine.run_chat", side_effect=fake_run_chat),
             patch("sjifire.ops.attachments.tools.upload_attachment", mock_upload_fail),
-            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
-            patch("sjifire.ops.chat.routes.TurnLockStore", return_value=mock_lock),
+            patch("sjifire.ops.chat.centrifugo.check_is_editor", AsyncMock(return_value=True)),
+            patch("sjifire.ops.chat.turn_lock.TurnLockStore", return_value=mock_lock),
         ):
-            resp = await chat_stream(req)
+            resp = await rpc_proxy(req)
             await asyncio.sleep(0)
 
-        assert resp.status_code == 202
+        body = json.loads(resp.body)
+        assert body["result"]["data"]["status"] == "accepted"
         assert captured_kwargs["image_refs"] is None
 
 

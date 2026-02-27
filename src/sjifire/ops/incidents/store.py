@@ -8,16 +8,15 @@ for local development and testing with ``mcp dev``.
 """
 
 import logging
-from typing import ClassVar, Self
+from typing import ClassVar
 
-from sjifire.core.config import get_cosmos_container
+from sjifire.ops.cosmos import CosmosStore
 from sjifire.ops.incidents.models import IncidentDocument
 
 logger = logging.getLogger(__name__)
-CONTAINER_NAME = "incidents"
 
 
-class IncidentStore:
+class IncidentStore(CosmosStore):
     """Async CRUD operations for incident documents in Cosmos DB.
 
     Falls back to in-memory storage when Cosmos DB is not configured,
@@ -30,24 +29,10 @@ class IncidentStore:
             incidents = await store.list_by_status("draft")
     """
 
+    _container_name: ClassVar[str] = "incidents"
+
     # Shared in-memory store across instances (persists for server lifetime)
     _memory: ClassVar[dict[str, dict]] = {}
-
-    def __init__(self) -> None:
-        """Initialize store. Call ``__aenter__`` to connect."""
-        self._container = None
-        self._in_memory = False
-
-    async def __aenter__(self) -> Self:
-        """Get a container client from the shared Cosmos connection pool."""
-        self._container = await get_cosmos_container(CONTAINER_NAME)
-        if self._container is None:
-            self._in_memory = True
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """No-op — shared Cosmos client stays alive."""
-        self._container = None
 
     async def create(self, doc: IncidentDocument) -> IncidentDocument:
         """Create a new incident document.
@@ -109,17 +94,11 @@ class IncidentStore:
             data = self._memory.get(incident_id)
             return IncidentDocument.from_cosmos(data) if data else None
 
-        query = "SELECT * FROM c WHERE c.id = @id"
-        parameters: list[dict] = [{"name": "@id", "value": incident_id}]
-
-        async for item in self._container.query_items(
-            query=query,
-            parameters=parameters,
-            max_item_count=1,
-        ):
-            return IncidentDocument.from_cosmos(item)
-
-        return None
+        return await self._query_one(
+            "SELECT * FROM c WHERE c.id = @id",
+            [{"name": "@id", "value": incident_id}],
+            IncidentDocument,
+        )
 
     async def get_by_number(self, incident_number: str) -> IncidentDocument | None:
         """Find an incident by incident number (cross-partition).
@@ -136,17 +115,11 @@ class IncidentStore:
                     return IncidentDocument.from_cosmos(data)
             return None
 
-        query = "SELECT * FROM c WHERE c.incident_number = @num"
-        parameters: list[dict] = [{"name": "@num", "value": incident_number}]
-
-        async for item in self._container.query_items(
-            query=query,
-            parameters=parameters,
-            max_item_count=1,
-        ):
-            return IncidentDocument.from_cosmos(item)
-
-        return None
+        return await self._query_one(
+            "SELECT * FROM c WHERE c.incident_number = @num",
+            [{"name": "@num", "value": incident_number}],
+            IncidentDocument,
+        )
 
     async def get_by_neris_id(self, neris_incident_id: str) -> IncidentDocument | None:
         """Find an incident by its NERIS incident ID (cross-partition).
@@ -163,17 +136,11 @@ class IncidentStore:
                     return IncidentDocument.from_cosmos(data)
             return None
 
-        query = "SELECT * FROM c WHERE c.neris_incident_id = @nid"
-        parameters: list[dict] = [{"name": "@nid", "value": neris_incident_id}]
-
-        async for item in self._container.query_items(
-            query=query,
-            parameters=parameters,
-            max_item_count=1,
-        ):
-            return IncidentDocument.from_cosmos(item)
-
-        return None
+        return await self._query_one(
+            "SELECT * FROM c WHERE c.neris_incident_id = @nid",
+            [{"name": "@nid", "value": neris_incident_id}],
+            IncidentDocument,
+        )
 
     async def update(self, doc: IncidentDocument) -> IncidentDocument:
         """Update an existing incident document.
@@ -249,17 +216,12 @@ class IncidentStore:
         where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         query = f"SELECT * FROM c{where_clause} ORDER BY c.incident_datetime ASC"
 
-        items = []
-        async for item in self._container.query_items(
-            query=query,
-            parameters=parameters or None,
-            max_item_count=max_items,
-        ):
-            items.append(IncidentDocument.from_cosmos(item))
-            if len(items) >= max_items:
-                break
-
-        return items
+        return await self._query_many(
+            query,
+            parameters or None,
+            IncidentDocument,
+            max_items=max_items,
+        )
 
     async def list_for_user(
         self,
@@ -307,17 +269,12 @@ class IncidentStore:
         where_clause = f" WHERE {' AND '.join(conditions)}"
         query = f"SELECT * FROM c{where_clause} ORDER BY c.incident_datetime ASC"
 
-        items = []
-        async for item in self._container.query_items(
-            query=query,
-            parameters=parameters,
-            max_item_count=max_items,
-        ):
-            items.append(IncidentDocument.from_cosmos(item))
-            if len(items) >= max_items:
-                break
-
-        return items
+        return await self._query_many(
+            query,
+            parameters,
+            IncidentDocument,
+            max_items=max_items,
+        )
 
     async def list_all(self, *, max_items: int = 500) -> list[IncidentDocument]:
         """List all incidents across all partitions.
@@ -337,16 +294,12 @@ class IncidentStore:
 
         query = "SELECT * FROM c ORDER BY c.incident_datetime ASC"
 
-        items = []
-        async for item in self._container.query_items(
-            query=query,
-            max_item_count=max_items,
-        ):
-            items.append(IncidentDocument.from_cosmos(item))
-            if len(items) >= max_items:
-                break
-
-        return items
+        return await self._query_many(
+            query,
+            None,
+            IncidentDocument,
+            max_items=max_items,
+        )
 
     def _filter_memory(
         self,

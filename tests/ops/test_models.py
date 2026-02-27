@@ -3,6 +3,9 @@
 from datetime import UTC, datetime
 
 from sjifire.ops.incidents.models import (
+    AlarmInfo,
+    FireDetail,
+    HazardInfo,
     IncidentDocument,
     PersonnelAssignment,
     UnitAssignment,
@@ -94,15 +97,15 @@ class TestIncidentDocument:
             narrative="Fire contained",
             incident_type="111",
             address="100 Spring St",
-            extras={"station": "S31"},
+            station="S31",
         )
         cosmos_dict = doc.to_cosmos()
         assert isinstance(cosmos_dict, dict)
-        assert cosmos_dict["extras"]["station"] == "S31"
+        assert cosmos_dict["station"] == "S31"
         assert cosmos_dict["units"][0]["personnel"][0]["name"] == "Jane Doe"
 
         restored = IncidentDocument.from_cosmos(cosmos_dict)
-        assert restored.extras.get("station") == doc.extras.get("station")
+        assert restored.station == doc.station
         assert restored.incident_number == doc.incident_number
         assert restored.units[0].personnel[0].email == "jane@sjifire.org"
 
@@ -132,7 +135,7 @@ class TestIncidentDocument:
         doc = self._make_doc()
         result = doc.completeness()
         assert result["filled"] == 0
-        assert result["total"] == 7
+        assert result["total"] == 8
         assert not any(result["sections"].values())
 
     def test_completeness_partial(self):
@@ -148,7 +151,7 @@ class TestIncidentDocument:
         )
         result = doc.completeness()
         assert result["filled"] == 4
-        assert result["total"] == 7
+        assert result["total"] == 8
         assert result["sections"]["incident_type"] is True
         assert result["sections"]["units"] is True
         assert result["sections"]["address"] is True
@@ -160,6 +163,7 @@ class TestIncidentDocument:
     def test_completeness_full(self):
         doc = self._make_doc(
             incident_type="111",
+            station="S31",
             address="100 Spring St",
             units=[
                 UnitAssignment(
@@ -173,8 +177,8 @@ class TestIncidentDocument:
             timestamps={"dispatch": "2026-02-12T10:00:00"},
         )
         result = doc.completeness()
-        assert result["filled"] == 7
-        assert result["total"] == 7
+        assert result["filled"] == 8
+        assert result["total"] == 8
         assert all(result["sections"].values())
 
     def test_completeness_narrative_only(self):
@@ -251,3 +255,146 @@ class TestIncidentDocument:
         original = doc.completeness()
         restored = IncidentDocument.from_cosmos(doc.to_cosmos())
         assert restored.completeness() == original
+
+    # ── Typed sub-models ──
+
+    def test_sub_models_default_none(self):
+        doc = self._make_doc()
+        assert doc.fire_detail is None
+        assert doc.alarm_info is None
+        assert doc.hazard_info is None
+
+    def test_sub_models_set_directly(self):
+        doc = self._make_doc(
+            fire_detail=FireDetail(fire_cause_in="ELECTRICAL", floor_of_origin=2),
+            alarm_info=AlarmInfo(smoke_alarm_presence="PRESENT"),
+            hazard_info=HazardInfo(solar_present="YES"),
+        )
+        assert doc.fire_detail.fire_cause_in == "ELECTRICAL"
+        assert doc.fire_detail.floor_of_origin == 2
+        assert doc.alarm_info.smoke_alarm_presence == "PRESENT"
+        assert doc.hazard_info.solar_present == "YES"
+
+    def test_sub_models_cosmos_roundtrip(self):
+        """Sub-models survive Cosmos serialization roundtrip."""
+        doc = self._make_doc(
+            fire_detail=FireDetail(
+                fire_cause_in="COOKING",
+                water_supply="HYDRANT_LESS_500",
+                suppression_appliances=["FIRE_EXTINGUISHER"],
+            ),
+            alarm_info=AlarmInfo(
+                smoke_alarm_presence="PRESENT",
+                smoke_alarm_types=["PHOTOELECTRIC"],
+            ),
+            hazard_info=HazardInfo(
+                electric_hazards=["DOWNED_LINES"],
+                csst_present="UNKNOWN",
+                csst_grounded=False,
+            ),
+        )
+        cosmos_dict = doc.to_cosmos()
+        assert "fire_detail" in cosmos_dict
+        assert cosmos_dict["fire_detail"]["fire_cause_in"] == "COOKING"
+
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.fire_detail is not None
+        assert restored.fire_detail.fire_cause_in == "COOKING"
+        assert restored.fire_detail.suppression_appliances == ["FIRE_EXTINGUISHER"]
+        assert restored.alarm_info is not None
+        assert restored.alarm_info.smoke_alarm_presence == "PRESENT"
+        assert restored.alarm_info.smoke_alarm_types == ["PHOTOELECTRIC"]
+        assert restored.hazard_info is not None
+        assert restored.hazard_info.electric_hazards == ["DOWNED_LINES"]
+        assert restored.hazard_info.csst_present == "UNKNOWN"
+        assert restored.hazard_info.csst_grounded is False
+
+    def test_from_cosmos_migrates_extras_to_fire_detail(self):
+        """Old docs with fire keys in extras get migrated to fire_detail."""
+        cosmos_dict = self._make_doc().to_cosmos()
+        cosmos_dict["extras"] = {
+            "fire_cause_in": "ELECTRICAL",
+            "water_supply": "NONE",
+            "floor_of_origin": 1,
+            "patient_count": 2,  # Not a fire key — stays in extras
+        }
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.fire_detail is not None
+        assert restored.fire_detail.fire_cause_in == "ELECTRICAL"
+        assert restored.fire_detail.water_supply == "NONE"
+        assert restored.fire_detail.floor_of_origin == 1
+        # Non-fire keys stay in extras
+        assert restored.extras.get("patient_count") == 2
+        assert "fire_cause_in" not in restored.extras
+
+    def test_from_cosmos_migrates_extras_to_alarm_info(self):
+        """Old docs with alarm keys in extras get migrated to alarm_info."""
+        cosmos_dict = self._make_doc().to_cosmos()
+        cosmos_dict["extras"] = {
+            "smoke_alarm_presence": "PRESENT",
+            "fire_alarm_presence": "NOT_APPLICABLE",
+            "impediment_narrative": "test",
+        }
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.alarm_info is not None
+        assert restored.alarm_info.smoke_alarm_presence == "PRESENT"
+        assert restored.alarm_info.fire_alarm_presence == "NOT_APPLICABLE"
+        assert restored.extras.get("impediment_narrative") == "test"
+        assert "smoke_alarm_presence" not in restored.extras
+
+    def test_from_cosmos_migrates_extras_to_hazard_info(self):
+        """Old docs with hazard keys in extras get migrated to hazard_info."""
+        cosmos_dict = self._make_doc().to_cosmos()
+        cosmos_dict["extras"] = {
+            "csst_present": "YES",
+            "solar_present": "YES",
+            "electric_hazards": ["DOWNED_LINES"],
+        }
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.hazard_info is not None
+        assert restored.hazard_info.csst_present == "YES"
+        assert restored.hazard_info.solar_present == "YES"
+        assert restored.hazard_info.electric_hazards == ["DOWNED_LINES"]
+        assert "csst_present" not in restored.extras
+
+    def test_from_cosmos_no_migration_when_sub_model_exists(self):
+        """If sub-model already exists in cosmos doc, don't overwrite from extras."""
+        cosmos_dict = self._make_doc().to_cosmos()
+        cosmos_dict["fire_detail"] = {"fire_cause_in": "COOKING"}
+        cosmos_dict["extras"] = {"fire_cause_in": "ELECTRICAL"}  # stale extra
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.fire_detail.fire_cause_in == "COOKING"
+        # Stale key stays in extras (not migrated since sub-model exists)
+        assert restored.extras.get("fire_cause_in") == "ELECTRICAL"
+
+    def test_sub_models_none_after_roundtrip(self):
+        """Sub-models that are None stay None after roundtrip."""
+        doc = self._make_doc()
+        cosmos_dict = doc.to_cosmos()
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.fire_detail is None
+        assert restored.alarm_info is None
+        assert restored.hazard_info is None
+
+    # ── Location field coercion ──
+
+    def test_from_cosmos_coerces_int_zip_code_to_string(self):
+        """zip_code stored as int (e.g. from NERIS) is coerced to string."""
+        cosmos_dict = self._make_doc().to_cosmos()
+        cosmos_dict["zip_code"] = 98250
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.zip_code == "98250"
+        assert isinstance(restored.zip_code, str)
+
+    def test_from_cosmos_coerces_null_location_fields(self):
+        """None values in location string fields are coerced to empty string."""
+        cosmos_dict = self._make_doc().to_cosmos()
+        cosmos_dict["city"] = None
+        cosmos_dict["state"] = None
+        cosmos_dict["zip_code"] = None
+        cosmos_dict["county"] = None
+        restored = IncidentDocument.from_cosmos(cosmos_dict)
+        assert restored.city == "Friday Harbor"  # default from org config
+        assert restored.state == "WA"  # default from org config
+        assert restored.zip_code == ""
+        assert restored.county == ""

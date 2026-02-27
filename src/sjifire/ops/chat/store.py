@@ -5,18 +5,15 @@ for local development and testing with ``mcp dev``.
 """
 
 import logging
-from typing import ClassVar, Self
+from typing import ClassVar
 
-from sjifire.core.config import get_cosmos_container
 from sjifire.ops.chat.models import ConversationDocument, UserBudget
+from sjifire.ops.cosmos import CosmosStore
 
 logger = logging.getLogger(__name__)
 
-CONVERSATIONS_CONTAINER = "conversations"
-BUDGETS_CONTAINER = "budgets"
 
-
-class ConversationStore:
+class ConversationStore(CosmosStore):
     """Async CRUD for chat conversation documents in Cosmos DB.
 
     Falls back to in-memory storage when Cosmos DB is not configured.
@@ -27,23 +24,8 @@ class ConversationStore:
             conv = await store.create(doc)
     """
 
+    _container_name: ClassVar[str] = "conversations"
     _memory: ClassVar[dict[str, dict]] = {}
-
-    def __init__(self) -> None:
-        """Initialize store. Call ``__aenter__`` to connect."""
-        self._container = None
-        self._in_memory = False
-
-    async def __aenter__(self) -> Self:
-        """Get a container client from the shared Cosmos connection pool."""
-        self._container = await get_cosmos_container(CONVERSATIONS_CONTAINER)
-        if self._container is None:
-            self._in_memory = True
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """No-op — shared Cosmos client stays alive."""
-        self._container = None
 
     async def create(self, doc: ConversationDocument) -> ConversationDocument:
         """Create a new conversation document."""
@@ -75,38 +57,50 @@ class ConversationStore:
             return None
 
     async def get_by_incident(self, incident_id: str) -> ConversationDocument | None:
-        """Get the conversation for an incident (at most one per incident)."""
+        """Get the conversation for an incident (at most one per incident).
+
+        When multiple conversations exist (e.g. from a race condition),
+        returns the most recently updated one so recovery polling finds
+        the conversation that the engine actually completed.
+        """
         if self._in_memory:
-            for data in self._memory.values():
-                if data.get("incident_id") == incident_id:
-                    return ConversationDocument.from_cosmos(data)
-            return None
+            candidates = [
+                data for data in self._memory.values() if data.get("incident_id") == incident_id
+            ]
+            if not candidates:
+                return None
+            # Return the most recently updated conversation
+            candidates.sort(
+                key=lambda d: d.get("updated_at") or d.get("created_at", ""),
+                reverse=True,
+            )
+            return ConversationDocument.from_cosmos(candidates[0])
 
-        # Exclude turn-lock documents which share this container/partition
-        query = "SELECT * FROM c WHERE c.incident_id = @iid AND c.id != 'turn-lock'"
-        parameters: list[dict] = [{"name": "@iid", "value": incident_id}]
-
-        async for item in self._container.query_items(
-            query=query,
-            parameters=parameters,
+        # Exclude turn-lock documents which share this container/partition.
+        # ORDER BY _ts DESC ensures we get the most recently updated
+        # conversation when duplicates exist from race conditions.
+        query = (
+            "SELECT * FROM c WHERE c.incident_id = @iid AND c.id != 'turn-lock' ORDER BY c._ts DESC"
+        )
+        return await self._query_one(
+            query,
+            [{"name": "@iid", "value": incident_id}],
+            ConversationDocument,
             partition_key=incident_id,
-            max_item_count=1,
-        ):
-            return ConversationDocument.from_cosmos(item)
-
-        return None
+        )
 
     async def update(self, doc: ConversationDocument) -> ConversationDocument:
-        """Update an existing conversation document."""
+        """Update (or re-create) a conversation document.
+
+        Uses ``upsert_item`` so that a mid-turn reset (which deletes the
+        document) doesn't cause the engine's final save to fail.
+        """
         if self._in_memory:
             self._memory[doc.id] = doc.to_cosmos()
             logger.info("Updated conversation %s (in-memory)", doc.id)
             return doc
 
-        result = await self._container.replace_item(
-            item=doc.id,
-            body=doc.to_cosmos(),
-        )
+        result = await self._container.upsert_item(body=doc.to_cosmos())
         logger.info("Updated conversation %s", doc.id)
         return ConversationDocument.from_cosmos(result)
 
@@ -126,7 +120,7 @@ class ConversationStore:
         return True
 
 
-class BudgetStore:
+class BudgetStore(CosmosStore):
     """Async CRUD for user budget documents in Cosmos DB.
 
     Falls back to in-memory storage when Cosmos DB is not configured.
@@ -137,23 +131,8 @@ class BudgetStore:
             budget = await store.get_or_create("user@sjifire.org", "2026-02")
     """
 
+    _container_name: ClassVar[str] = "budgets"
     _memory: ClassVar[dict[str, dict]] = {}
-
-    def __init__(self) -> None:
-        """Initialize store. Call ``__aenter__`` to connect."""
-        self._container = None
-        self._in_memory = False
-
-    async def __aenter__(self) -> Self:
-        """Get a container client from the shared Cosmos connection pool."""
-        self._container = await get_cosmos_container(BUDGETS_CONTAINER)
-        if self._container is None:
-            self._in_memory = True
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """No-op — shared Cosmos client stays alive."""
-        self._container = None
 
     async def get_or_create(self, user_email: str, month: str) -> UserBudget:
         """Get the budget for a user+month, creating if it doesn't exist."""

@@ -130,7 +130,11 @@ async def get_operational_personnel() -> list[dict[str, str]]:
         ext = u.on_premises_extension_attributes
         positions = ext.extension_attribute3 if ext else None
         if positions:  # Has scheduling positions = operational
-            personnel.append({"name": u.display_name or "", "email": email})
+            rank = (ext.extension_attribute1 or "") if ext else ""
+            entry: dict[str, str] = {"name": u.display_name or "", "email": email}
+            if rank:
+                entry["rank"] = rank
+            personnel.append(entry)
 
     personnel.sort(key=lambda p: p["name"])
     _operational_cache = personnel

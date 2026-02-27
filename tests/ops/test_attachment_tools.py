@@ -35,6 +35,16 @@ def _editor_group_env():
 
 
 @pytest.fixture(autouse=True)
+def _clear_user_context():
+    """Clear user context and editor cache between tests to avoid leaks."""
+    _auth_mod.set_current_user(None)
+    _auth_mod._editor_cache.clear()
+    yield
+    _auth_mod.set_current_user(None)
+    _auth_mod._editor_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _clear_blob_memory():
     AttachmentBlobStore._memory.clear()
     yield
@@ -77,7 +87,7 @@ def sample_doc():
         incident_number="26-000944",
         incident_datetime=datetime(2026, 2, 12, tzinfo=UTC),
         created_by="ff@sjifire.org",
-        extras={"station": "S31"},
+        station="S31",
         units=[
             UnitAssignment(
                 unit_id="E31",
@@ -112,17 +122,17 @@ def _mock_store(doc):
 
 
 class TestCheckEditAccess:
-    def test_creator_can_edit(self, sample_doc):
-        assert _check_edit_access(sample_doc, "ff@sjifire.org", is_editor=False)
+    async def test_creator_can_edit(self, sample_doc):
+        assert await _check_edit_access(sample_doc, "ff@sjifire.org", is_editor=False)
 
-    def test_editor_can_edit(self, sample_doc):
-        assert _check_edit_access(sample_doc, "random@sjifire.org", is_editor=True)
+    async def test_editor_can_edit(self, sample_doc):
+        assert await _check_edit_access(sample_doc, "random@sjifire.org", is_editor=True)
 
-    def test_crew_cannot_edit(self, sample_doc):
-        assert not _check_edit_access(sample_doc, "crew1@sjifire.org", is_editor=False)
+    async def test_crew_cannot_edit(self, sample_doc):
+        assert not await _check_edit_access(sample_doc, "crew1@sjifire.org", is_editor=False)
 
-    def test_stranger_cannot_edit(self, sample_doc):
-        assert not _check_edit_access(sample_doc, "stranger@sjifire.org", is_editor=False)
+    async def test_stranger_cannot_edit(self, sample_doc):
+        assert not await _check_edit_access(sample_doc, "stranger@sjifire.org", is_editor=False)
 
 
 # -- Upload ------------------------------------------------------------------

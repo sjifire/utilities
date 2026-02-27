@@ -71,7 +71,10 @@ TOOL_SCHEMAS: list[dict] = [
                             },
                             "response_mode": {
                                 "type": "string",
-                                "description": "EMERGENT or NON_EMERGENT",
+                                "description": (
+                                    "EMERGENT or NON_EMERGENT. Leave empty unless known. "
+                                    "Fire alarms default to NON_EMERGENT."
+                                ),
                             },
                             "personnel": {
                                 "type": "array",
@@ -166,10 +169,37 @@ TOOL_SCHEMAS: list[dict] = [
                     "type": "integer",
                     "description": "Number of people displaced",
                 },
+                "fire_detail": {
+                    "type": "object",
+                    "description": (
+                        "Fire detail fields: fire_cause_in, fire_bldg_damage, room_of_origin, "
+                        "floor_of_origin (int), fire_progression_evident (bool), water_supply, "
+                        "fire_investigation, fire_investigation_types (list), "
+                        "suppression_appliances (list)"
+                    ),
+                },
+                "alarm_info": {
+                    "type": "object",
+                    "description": (
+                        "Alarm info fields: smoke_alarm_presence, smoke_alarm_types (list), "
+                        "smoke_alarm_operation, smoke_alarm_occupant_action, "
+                        "fire_alarm_presence, sprinkler_presence"
+                    ),
+                },
+                "hazard_info": {
+                    "type": "object",
+                    "description": (
+                        "Hazard info fields: electric_hazards (list), csst_present, "
+                        "csst_lightning_suspected, csst_grounded (bool), solar_present, "
+                        "battery_ess_present, generator_present, powergen_type"
+                    ),
+                },
                 "extras": {
                     "type": "object",
                     "description": (
-                        "Additional NERIS fields merged into existing extras. Use snake_case keys."
+                        "Additional NERIS fields for medical, casualty, and other sections. "
+                        "Use snake_case keys. Fire/alarm/hazard keys are auto-routed to "
+                        "their typed sub-models."
                     ),
                 },
             },
@@ -210,7 +240,118 @@ TOOL_SCHEMAS: list[dict] = [
                 },
                 "neris_id": {
                     "type": "string",
-                    "description": "NERIS compound ID (optional if already set on incident)",
+                    "description": (
+                        "NERIS compound ID or dispatch number (e.g. '26-002548'). "
+                        "Optional if already set on the incident — will auto-resolve "
+                        "from the incident's dispatch number."
+                    ),
+                },
+                "incident_number": {
+                    "type": "string",
+                    "description": (
+                        "Override for dispatch incident number (e.g. '26-002358'). "
+                        "Use when NERIS doesn't store our CAD number in its dispatch "
+                        "section and auto-detection returns a NERIS internal ID."
+                    ),
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
+        "name": "submit_to_neris",
+        "description": (
+            "Push the local incident report to NERIS. Creates a new NERIS record "
+            "if none exists, or updates the existing one with local corrections. "
+            "Does NOT lock the report — use finalize_incident to lock."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Preview what would be sent without submitting",
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
+        "name": "reopen_incident",
+        "description": (
+            "Reopen a submitted or approved incident report, returning it to "
+            "draft status so it can be edited again. Does NOT clear content. "
+            "Editors only."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
+        "name": "finalize_incident",
+        "description": (
+            "Lock an incident report. Pushes to NERIS first (create or update) "
+            "unless skip_neris is true, then locks the report as submitted."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "The incident document ID (UUID)",
+                },
+                "skip_neris": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, close the report without NERIS export. "
+                        "The user must explicitly confirm they don't want NERIS export."
+                    ),
+                    "default": False,
+                },
+            },
+            "required": ["incident_id"],
+        },
+    },
+    {
+        "name": "update_neris_incident",
+        "description": (
+            "Push corrections from the local incident report to NERIS. Takes a snapshot "
+            "of the NERIS record first. Only updates fields where local data differs "
+            "from NERIS. Editors only."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "Local incident document ID",
+                },
+                "fields": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional: specific fields to update "
+                        "(e.g. ['narrative', 'timestamps']). "
+                        "If omitted, updates all differing fields."
+                    ),
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, return the diff without applying changes. "
+                        "Use before locking to check what would be pushed."
+                    ),
                 },
             },
             "required": ["incident_id"],
@@ -259,7 +400,8 @@ TOOL_SCHEMAS: list[dict] = [
         "description": (
             "Get the crew on duty for a specific date and time. Uses shift-change "
             "logic: if target_hour is before the shift change (e.g. 18:00), returns "
-            "the previous day's crew who were still on duty."
+            "the previous day's crew who were still on duty. Pass include_admin=true "
+            "when the user asks about admin or office staff."
         ),
         "input_schema": {
             "type": "object",
@@ -271,6 +413,11 @@ TOOL_SCHEMAS: list[dict] = [
                 "target_hour": {
                     "type": "integer",
                     "description": "Hour of day (0-23) for shift-change-aware lookup",
+                },
+                "include_admin": {
+                    "type": "boolean",
+                    "description": "Include admin/office staff (default false)",
+                    "default": False,
                 },
             },
         },
@@ -482,12 +629,94 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         return await incident_tools.update_incident(incident_id, **kwargs)
 
     if name == "reset_incident":
-        return await incident_tools.reset_incident(tool_input["incident_id"])
+        result = await incident_tools.reset_incident(tool_input["incident_id"])
+        # Auto-import from NERIS if the incident has a linked NERIS record
+        if isinstance(result, dict) and result.get("_reimport_available"):
+            neris_id = result.get("neris_incident_id")
+            if neris_id:
+                import_result = await incident_tools.import_from_neris(
+                    neris_id, incident_id=tool_input["incident_id"]
+                )
+                result["_neris_reimported"] = True
+                result["_import_result"] = import_result
+        return result
 
     if name == "import_from_neris":
-        return await incident_tools.import_from_neris(
+        neris_id = tool_input.get("neris_id")
+        incident_id = tool_input["incident_id"]
+        if not neris_id:
+            # Resolve neris_id from the existing incident document,
+            # falling back to the dispatch number (e.g. "26-002548")
+            # which the NERIS client can search by automatically.
+            inc = await incident_tools.get_incident(incident_id)
+            if isinstance(inc, dict) and not inc.get("error"):
+                neris_id = inc.get("neris_incident_id") or inc.get("incident_number")
+        if not neris_id:
+            return {
+                "error": "Could not determine NERIS ID or dispatch number. "
+                "Provide a neris_id or ensure the incident has an incident_number."
+            }
+        result = await incident_tools.import_from_neris(
+            neris_id,
+            incident_id=incident_id,
+            incident_number=tool_input.get("incident_number"),
+        )
+        if isinstance(result, dict) and "error" not in result:
+            # Return a concise summary instead of the full document dump
+            comparison = result.get("import_comparison", {})
+            units = result.get("units", [])
+            summary: dict = {
+                "status": "success",
+                "incident_number": result.get("incident_number"),
+                "neris_incident_id": result.get("neris_incident_id"),
+                "incident_type": result.get("incident_type"),
+                "address": result.get("address"),
+                "units": [u.get("unit_id") for u in units],
+                "personnel_count": sum(len(u.get("personnel", [])) for u in units),
+                "narrative_length": len(result.get("narrative") or ""),
+                "extras_keys": list(result.get("extras", {}).keys()),
+            }
+            if comparison.get("discrepancies"):
+                summary["discrepancies"] = comparison["discrepancies"]
+            if comparison.get("gaps_filled"):
+                summary["gaps_filled"] = comparison["gaps_filled"]
+            if comparison.get("sources"):
+                summary["data_sources"] = comparison["sources"]
+            if comparison.get("crew_on_duty"):
+                summary["crew_on_duty"] = comparison["crew_on_duty"]
+            summary["next_step"] = (
+                "This report was imported from NERIS (already reviewed there). "
+                "Present a summary of what was imported and highlight any "
+                "discrepancies between NERIS, dispatch, and crew data. "
+                "Walk through crew assignments and corrections with the user. "
+                "When the report is complete, call update_neris_incident with "
+                "dry_run=true to check what local corrections differ from NERIS "
+                "and present the diff to the user. If there are changes, ask "
+                "whether to push them before locking."
+            )
+            return summary
+        return result
+
+    if name == "reopen_incident":
+        return await incident_tools.reopen_incident(tool_input["incident_id"])
+
+    if name == "submit_to_neris":
+        return await incident_tools.submit_to_neris(
             tool_input["incident_id"],
-            neris_id=tool_input.get("neris_id"),
+            dry_run=tool_input.get("dry_run", False),
+        )
+
+    if name == "finalize_incident":
+        return await incident_tools.finalize_incident(
+            tool_input["incident_id"],
+            skip_neris=tool_input.get("skip_neris", False),
+        )
+
+    if name == "update_neris_incident":
+        return await incident_tools.update_neris_incident(
+            tool_input["incident_id"],
+            fields=tool_input.get("fields"),
+            dry_run=tool_input.get("dry_run", False),
         )
 
     if name == "get_dispatch_call":
@@ -504,6 +733,7 @@ async def _dispatch(name: str, tool_input: dict) -> dict:
         return await schedule_tools.get_on_duty_crew(
             target_date=tool_input.get("target_date"),
             target_hour=tool_input.get("target_hour"),
+            include_admin=tool_input.get("include_admin", False),
         )
 
     if name == "get_neris_values":
@@ -634,7 +864,8 @@ GENERAL_TOOL_SCHEMAS: list[dict] = [
         "description": (
             "Get the crew on duty for a specific date and time. Uses shift-change "
             "logic: if target_hour is before the shift change (e.g. 18:00), returns "
-            "the previous day's crew who were still on duty."
+            "the previous day's crew who were still on duty. Pass include_admin=true "
+            "when the user asks about admin or office staff."
         ),
         "input_schema": {
             "type": "object",
@@ -646,6 +877,11 @@ GENERAL_TOOL_SCHEMAS: list[dict] = [
                 "target_hour": {
                     "type": "integer",
                     "description": "Hour of day (0-23) for shift-change-aware lookup",
+                },
+                "include_admin": {
+                    "type": "boolean",
+                    "description": "Include admin/office staff (default false)",
+                    "default": False,
                 },
             },
         },
@@ -765,6 +1001,7 @@ async def _dispatch_general(name: str, tool_input: dict) -> dict:
         return await schedule_tools.get_on_duty_crew(
             target_date=tool_input.get("target_date"),
             target_hour=tool_input.get("target_hour"),
+            include_admin=tool_input.get("include_admin", False),
         )
 
     if name == "get_neris_values":

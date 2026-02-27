@@ -68,19 +68,33 @@ class UserContext:
 # ---------------------------------------------------------------------------
 
 
-async def check_is_editor(user_id: str, *, fallback: bool = False) -> bool:
+async def check_is_editor(user_id: str, *, fallback: bool = False, email: str = "") -> bool:
     """Check group membership via Graph API (cached for 60s).
 
     Falls back to the token-based ``is_editor`` property if the Graph API
     call fails (e.g., missing credentials in dev mode).
 
+    When ``user_id`` is empty (e.g., stale Centrifugo connections pre-dating
+    the user_id field), resolves the object ID from ``email`` via Graph API.
+
     Args:
         user_id: Entra object ID of the user
         fallback: Value of ``user.is_editor`` to use if Graph API fails
+        email: User email, used to resolve user_id when empty
     """
     group_id = _get_editor_group_id()
     if not group_id:
         return False
+
+    # Resolve user_id from email if missing (stale connections)
+    if not user_id and email:
+        user_id = await _resolve_user_id(email)
+        if not user_id:
+            logger.warning("Cannot resolve user_id for %s, using fallback=%s", email, fallback)
+            return fallback
+
+    if not user_id:
+        return fallback
 
     # Check cache first
     cached = _editor_cache.get(user_id)
@@ -90,10 +104,47 @@ async def check_is_editor(user_id: str, *, fallback: bool = False) -> bool:
     try:
         result = await _check_member_groups(user_id, group_id)
         _editor_cache[user_id] = (result, time.monotonic() + _EDITOR_CACHE_TTL)
+        logger.info("Editor check for %s: %s (via Graph API)", user_id, result)
         return result
     except Exception:
-        logger.debug("Graph API group check failed for %s, using fallback", user_id, exc_info=True)
+        logger.warning(
+            "Graph API group check failed for %s, using fallback=%s",
+            user_id,
+            fallback,
+            exc_info=True,
+        )
         return fallback
+
+
+# Cache resolved user_id by email: {email: (user_id, expires_at)}
+_user_id_cache: dict[str, tuple[str, float]] = {}
+
+
+async def _resolve_user_id(email: str) -> str:
+    """Resolve Entra object ID from email via Graph API (cached)."""
+    cached = _user_id_cache.get(email)
+    if cached and cached[1] > time.monotonic():
+        return cached[0]
+
+    try:
+        import httpx
+
+        access_token = await _get_graph_app_token()
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://graph.microsoft.com/v1.0/users/{email}",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"$select": "id"},
+            )
+            resp.raise_for_status()
+            user_id = resp.json().get("id", "")
+            if user_id:
+                _user_id_cache[email] = (user_id, time.monotonic() + _EDITOR_CACHE_TTL)
+                logger.info("Resolved user_id for %s: %s", email, user_id)
+            return user_id
+    except Exception:
+        logger.warning("Failed to resolve user_id for %s", email, exc_info=True)
+        return ""
 
 
 async def _get_graph_app_token() -> str:
@@ -146,6 +197,37 @@ async def _check_member_groups(user_id: str, group_id: str) -> bool:
         )
         resp.raise_for_status()
         return group_id in resp.json().get("value", [])
+
+
+async def check_doc_view_access(
+    doc_created_by: str,
+    personnel_emails: frozenset[str],
+    user_email: str,
+    is_editor: bool,
+) -> bool:
+    """Check if user can view a document (creator, personnel, or editor)."""
+    if user_email == doc_created_by or user_email in personnel_emails:
+        return True
+    try:
+        user = get_current_user()
+        return await check_is_editor(user.user_id, fallback=is_editor)
+    except RuntimeError:
+        return is_editor
+
+
+async def check_doc_edit_access(
+    doc_created_by: str,
+    user_email: str,
+    is_editor: bool,
+) -> bool:
+    """Check if user can edit a document (creator or editor)."""
+    if user_email == doc_created_by:
+        return True
+    try:
+        user = get_current_user()
+        return await check_is_editor(user.user_id, fallback=is_editor)
+    except RuntimeError:
+        return is_editor
 
 
 def get_current_user() -> UserContext:

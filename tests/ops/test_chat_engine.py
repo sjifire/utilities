@@ -38,10 +38,7 @@ def _clear_memory_and_env(monkeypatch):
     TurnLockStore._memory.clear()
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("COSMOS_KEY", raising=False)
-    monkeypatch.setattr("sjifire.ops.chat.store.get_cosmos_container", _noop_container)
-    monkeypatch.setattr("sjifire.ops.incidents.store.get_cosmos_container", _noop_container)
-    monkeypatch.setattr("sjifire.ops.dispatch.store.get_cosmos_container", _noop_container)
-    monkeypatch.setattr("sjifire.ops.chat.turn_lock.get_cosmos_container", _noop_container)
+    monkeypatch.setattr("sjifire.ops.cosmos.get_cosmos_container", _noop_container)
     yield
     ConversationStore._memory.clear()
     BudgetStore._memory.clear()
@@ -77,32 +74,49 @@ class TestBuildSystemPrompt:
         assert "Jordan Pollack" in prompt
         assert "jpollack@sjifire.org" in prompt
 
-    def test_does_not_include_dynamic_data(self):
-        """System prompt should not contain incident/dispatch/crew section headers."""
+    def test_includes_department_knowledge(self):
+        """System prompt should include department-specific knowledge."""
         prompt = _build_system_prompt("Test User", "test@sjifire.org")
+        assert "DEPARTMENT-SPECIFIC" in prompt
+        assert "chimney" in prompt.lower()
+        assert "propane" in prompt.lower()
+        assert "PeaceHealth" in prompt
+
+    def test_includes_stable_incident_data(self):
+        """System prompt should include dispatch/crew/personnel (cached per incident)."""
+        prompt = _build_system_prompt(
+            "Test User",
+            "test@sjifire.org",
+            dispatch_json='{"nature":"FIRE"}',
+            crew_json="[]",
+            personnel_json="[]",
+        )
+        assert "DISPATCH DATA" in prompt
+        assert "CREW ON DUTY" in prompt
+        assert "PERSONNEL ROSTER" in prompt
+        assert "FIRE" in prompt
+        # Incident state is NOT in system prompt (changes between turns)
         assert "CURRENT INCIDENT STATE:\n" not in prompt
-        assert "DISPATCH DATA:\n" not in prompt
-        assert "CREW ON DUTY:\n" not in prompt
 
 
 class TestBuildContextMessage:
     def test_includes_incident_data(self):
-        msg = _build_context_message('{"incident_number": "26-001234"}', "{}", "[]", "[]")
+        msg = _build_context_message('{"incident_number": "26-001234"}')
         assert "26-001234" in msg
         assert "CURRENT INCIDENT STATE" in msg
 
-    def test_includes_all_sections(self):
-        msg = _build_context_message("{}", "{}", "[]", "[]")
+    def test_only_incident_and_attachments(self):
+        msg = _build_context_message("{}")
         assert "CURRENT INCIDENT STATE" in msg
-        assert "DISPATCH DATA" in msg
-        assert "CREW ON DUTY" in msg
-        assert "PERSONNEL ROSTER" in msg
+        # Stable data is in the system prompt now, not the context preamble
+        assert "DISPATCH DATA" not in msg
+        assert "CREW ON DUTY" not in msg
+        assert "PERSONNEL ROSTER" not in msg
 
-    def test_includes_personnel_roster(self):
-        roster = '[{"name": "Jane Doe", "email": "jdoe@sjifire.org"}]'
-        msg = _build_context_message("{}", "{}", "[]", roster)
-        assert "Jane Doe" in msg
-        assert "PERSONNEL ROSTER" in msg
+    def test_includes_attachments_when_present(self):
+        msg = _build_context_message("{}", attachments_summary="- photo.jpg (id: abc)")
+        assert "ATTACHMENTS ON FILE" in msg
+        assert "photo.jpg" in msg
 
 
 class TestTrimMessages:
@@ -419,7 +433,7 @@ class TestBuildGeneralSystemPrompt:
 
 
 class TestParallelToolExecution:
-    """Verify that tool calls within _run_loop execute concurrently."""
+    """Verify that tool calls within _run_chat_loop execute concurrently."""
 
     async def test_multiple_tools_run_in_parallel(self):
         """When Claude returns multiple tool_use blocks, they should run concurrently."""
@@ -435,7 +449,7 @@ class TestParallelToolExecution:
             return json.dumps({"status": "ok"})
 
         with patch("sjifire.ops.chat.engine.execute_tool", side_effect=slow_tool):
-            # Simulate what _run_loop does with parallel tool calls
+            # Simulate what _run_chat_loop does with parallel tool calls
             tool_calls = [
                 {"id": "t1", "name": "get_incident", "input": {"incident_id": "abc"}},
                 {"id": "t2", "name": "get_neris_values", "input": {"value_set": "incident"}},
@@ -540,7 +554,7 @@ class TestSlimDispatchContext:
             incident_number="26-009999",
             incident_datetime="2026-02-15T00:00:00+00:00",
             created_by="test@sjifire.org",
-            extras={"station": "S31"},
+            station="S31",
         )
         async with IncidentStore() as store:
             await store.create(incident)
@@ -769,7 +783,7 @@ class TestImageContentBlocks:
         captured_messages: list = []
 
         # Mock _run_loop to capture the api_messages it receives
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             captured_messages.extend(api_messages)
 
         with (
@@ -778,7 +792,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -805,7 +819,7 @@ class TestImageContentBlocks:
 
         captured_messages: list = []
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             captured_messages.extend(api_messages)
 
         with (
@@ -814,7 +828,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -838,7 +852,7 @@ class TestImageContentBlocks:
 
         captured_messages: list = []
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             captured_messages.extend(api_messages)
 
         with (
@@ -847,7 +861,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -866,7 +880,7 @@ class TestImageContentBlocks:
 
         saved_conv = None
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             nonlocal saved_conv
             saved_conv = conv
 
@@ -876,7 +890,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -898,7 +912,7 @@ class TestImageContentBlocks:
 
         saved_conv = None
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             nonlocal saved_conv
             saved_conv = conv
 
@@ -910,7 +924,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -936,7 +950,7 @@ class TestImageContentBlocks:
 
         saved_conv = None
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             nonlocal saved_conv
             saved_conv = conv
 
@@ -946,7 +960,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=("{}", "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -962,7 +976,7 @@ class TestImageContentBlocks:
 
         captured_system: list = []
 
-        async def fake_run_loop(client, system, api_messages, conv, user, *, channel):
+        async def fake_run_loop(client, system, api_messages, conv, user, *, channel, **kw):
             captured_system.append(system)
 
         with (
@@ -971,7 +985,7 @@ class TestImageContentBlocks:
                 "sjifire.ops.chat.engine._fetch_context",
                 return_value=('{"incident_number": "26-UNIQUE"}', "{}", "[]", "[]", ""),
             ),
-            patch("sjifire.ops.chat.engine._run_loop", side_effect=fake_run_loop),
+            patch("sjifire.ops.chat.engine._run_chat_loop", side_effect=fake_run_loop),
             patch("sjifire.ops.chat.engine.get_client"),
             patch("sjifire.ops.chat.engine.publish"),
         ):
@@ -987,13 +1001,13 @@ class TestAttachmentsSummary:
 
     def test_context_message_includes_attachments_section(self):
         summary = "- Scene photo (id: att-123, image/jpeg, 150KB)"
-        msg = _build_context_message("{}", "{}", "[]", "[]", summary)
+        msg = _build_context_message("{}", attachments_summary=summary)
         assert "ATTACHMENTS ON FILE:" in msg
         assert "att-123" in msg
         assert "Scene photo" in msg
 
     def test_context_message_omits_attachments_when_empty(self):
-        msg = _build_context_message("{}", "{}", "[]", "[]", "")
+        msg = _build_context_message("{}", attachments_summary="")
         assert "ATTACHMENTS ON FILE" not in msg
 
     async def test_fetch_context_includes_attachment_ids(self):
@@ -1015,7 +1029,7 @@ class TestAttachmentsSummary:
             incident_number="26-009000",
             incident_datetime="2026-02-15T00:00:00+00:00",
             created_by="ff@sjifire.org",
-            extras={"station": "S31"},
+            station="S31",
             attachments=[meta],
         )
         async with IncidentStore() as store:
@@ -1047,7 +1061,7 @@ class TestFetchContextAttachmentEdgeCases:
             incident_number="26-009100",
             incident_datetime="2026-02-15T00:00:00+00:00",
             created_by="ff@sjifire.org",
-            extras={"station": "S31"},
+            station="S31",
             attachments=attachments or [],
         )
         async with IncidentStore() as store:
@@ -1212,7 +1226,7 @@ class TestImageContentBlockEdgeCases:
     """Verify image content block logic handles edge cases."""
 
     def _extract_tool_result_content(self, result_str: str) -> str | list[dict]:
-        """Apply the same image_data extraction logic used in _run_loop."""
+        """Apply the same image_data extraction logic used in _run_chat_loop."""
         tool_result_content: str | list[dict] = result_str
         try:
             result_parsed = json.loads(result_str)
@@ -1278,12 +1292,13 @@ class TestImageContentBlockEdgeCases:
 
 
 class TestRunLoopImageToolResults:
-    """Integration test: _run_loop builds image content blocks for get_attachment."""
+    """Integration test: _run_chat_loop builds image content blocks for get_attachment."""
 
     async def test_get_attachment_image_in_run_loop(self):
-        """_run_loop builds image content blocks for get_attachment results."""
-        from sjifire.ops.chat.engine import _run_loop
+        """_run_chat_loop builds image content blocks for get_attachment results."""
+        from sjifire.ops.chat.engine import _run_chat_loop
         from sjifire.ops.chat.models import ConversationDocument
+        from sjifire.ops.chat.tools import TOOL_SCHEMAS
 
         conversation = ConversationDocument(
             incident_id="inc-img-loop",
@@ -1376,17 +1391,17 @@ class TestRunLoopImageToolResults:
         class FakeClient:
             messages = FakeMessages()
 
-        with (
-            patch("sjifire.ops.chat.engine.execute_tool", side_effect=mock_execute),
-            patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish),
-        ):
-            await _run_loop(
+        with patch("sjifire.ops.chat.engine.publish", side_effect=fake_publish):
+            await _run_chat_loop(
                 FakeClient(),
                 "system prompt",
                 api_messages,
                 conversation,
                 _TEST_USER,
                 channel="test",
+                tool_schemas=TOOL_SCHEMAS,
+                tool_executor=mock_execute,
+                incident_hooks=True,
             )
 
         # The tool result message sent to the API should have image blocks

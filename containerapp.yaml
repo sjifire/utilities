@@ -98,13 +98,21 @@ properties:
           - name: CENTRIFUGO_CLIENT_PROXY_CONNECT_ENDPOINT
             value: http://localhost:8000/centrifugo/connect
           - name: CENTRIFUGO_CLIENT_PROXY_CONNECT_HTTP_HEADERS
-            value: '["Cookie","X-Ms-Client-Principal","X-Ms-Client-Principal-Id","X-Ms-Client-Principal-Name"]'
+            value: "Cookie X-Ms-Client-Principal X-Ms-Client-Principal-Id X-Ms-Client-Principal-Name"
           - name: CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_ENDPOINT
             value: http://localhost:8000/centrifugo/subscribe
           - name: CENTRIFUGO_HTTP_API_KEY
             secretRef: centrifugo-api-key
           - name: CENTRIFUGO_CLIENT_ALLOWED_ORIGINS
             value: https://ops.sjifire.org
+          - name: CENTRIFUGO_HEALTH_ENABLED
+            value: "true"
+          - name: CENTRIFUGO_RPC_PROXY_ENDPOINT
+            value: http://localhost:8000/centrifugo/rpc
+          - name: CENTRIFUGO_RPC_WITHOUT_NAMESPACE_PROXY_ENABLED
+            value: "true"
+          - name: CENTRIFUGO_CLIENT_MESSAGE_SIZE_LIMIT
+            value: "5242880"
           - name: CENTRIFUGO_CHANNEL_NAMESPACES
             value: '[{"name":"chat","history_size":100,"history_ttl":"5m","force_recovery":true,"subscribe_proxy_enabled":true,"presence":true,"join_leave":true,"force_push_join_leave":true}]'
         # No liveness probe — Container Apps probes on sidecar containers

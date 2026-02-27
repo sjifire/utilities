@@ -333,10 +333,43 @@ _housekeeping_easyauth() {
 _housekeeping_job() {
     CA_JOB="sjifire-ops-tasks"
     if az containerapp job show --name "$CA_JOB" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+        # Ensure all secrets exist on the job (Key Vault references)
+        az containerapp job secret set \
+            --name "$CA_JOB" \
+            --resource-group "$RESOURCE_GROUP" \
+            --secrets \
+                "cosmos-key=keyvaultref:${VAULT_URL}/secrets/COSMOS-KEY,identityref:system" \
+                "ms-graph-client-secret=keyvaultref:${VAULT_URL}/secrets/MS-GRAPH-CLIENT-SECRET,identityref:system" \
+                "neris-client-id=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-ID,identityref:system" \
+                "neris-client-secret=keyvaultref:${VAULT_URL}/secrets/NERIS-CLIENT-SECRET,identityref:system" \
+                "ispyfire-url=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-URL,identityref:system" \
+                "ispyfire-username=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-USERNAME,identityref:system" \
+                "ispyfire-password=keyvaultref:${VAULT_URL}/secrets/ISPYFIRE-PASSWORD,identityref:system" \
+                "anthropic-api-key=keyvaultref:${VAULT_URL}/secrets/ANTHROPIC-API-KEY,identityref:system" \
+                "aladtec-username=keyvaultref:${VAULT_URL}/secrets/ALADTEC-USERNAME,identityref:system" \
+                "aladtec-password=keyvaultref:${VAULT_URL}/secrets/ALADTEC-PASSWORD,identityref:system" \
+            --output none 2>/dev/null || true
+
+        # Update image + all env vars (keeps job in sync with Container App)
         az containerapp job update \
             --name "$CA_JOB" \
             --resource-group "$RESOURCE_GROUP" \
             --image "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${TAG}" \
+            --set-env-vars \
+                "COSMOS_ENDPOINT=${COSMOS_ENDPOINT}" \
+                "COSMOS_KEY=secretref:cosmos-key" \
+                "MS_GRAPH_TENANT_ID=${MS_GRAPH_TENANT_ID}" \
+                "MS_GRAPH_CLIENT_ID=${MS_GRAPH_CLIENT_ID}" \
+                "MS_GRAPH_CLIENT_SECRET=secretref:ms-graph-client-secret" \
+                "NERIS_CLIENT_ID=secretref:neris-client-id" \
+                "NERIS_CLIENT_SECRET=secretref:neris-client-secret" \
+                "ISPYFIRE_URL=secretref:ispyfire-url" \
+                "ISPYFIRE_USERNAME=secretref:ispyfire-username" \
+                "ISPYFIRE_PASSWORD=secretref:ispyfire-password" \
+                "ANTHROPIC_API_KEY=secretref:anthropic-api-key" \
+                "ALADTEC_URL=${ALADTEC_URL}" \
+                "ALADTEC_USERNAME=secretref:aladtec-username" \
+                "ALADTEC_PASSWORD=secretref:aladtec-password" \
             --output none 2>/dev/null || true
         echo "ok" > "$TMPDIR/hk-job"
     else

@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -162,6 +162,7 @@ class OrgConfig:
     marine_positions: frozenset[str] = field(default_factory=frozenset)
     chief_unit_prefixes: frozenset[str] = field(default_factory=frozenset)
     neris_entity_id: str = ""
+    dispatch_agency_code: str = ""
     default_city: str = ""
     default_state: str = ""
     editor_group_name: str = ""
@@ -242,6 +243,7 @@ def load_org_config() -> OrgConfig:
         marine_positions=frozenset(config_data.get("marine_positions", ())),
         chief_unit_prefixes=frozenset(config_data.get("chief_unit_prefixes", ())),
         neris_entity_id=config_data.get("neris_entity_id", ""),
+        dispatch_agency_code=config_data.get("dispatch_agency_code", ""),
         default_city=config_data.get("default_city", ""),
         default_state=config_data.get("default_state", ""),
         editor_group_name=config_data.get("editor_group_name", ""),
@@ -374,3 +376,42 @@ def local_now() -> datetime:
     date/time after 4 PM Pacific.
     """
     return datetime.now(get_timezone())
+
+
+def to_utc_iso(val: str) -> str:
+    """Convert a timestamp string to UTC ISO format.
+
+    iSpyFire dispatch timestamps are naive strings in the org's local
+    timezone (e.g. ``"2026-02-07T13:46:01"`` for 1:46 PM Pacific).
+    NERIS and other external systems interpret bare timestamps as UTC,
+    so we must convert before sending.
+
+    - Naive timestamps → treated as local timezone → converted to UTC
+    - Already-aware timestamps → converted to UTC
+    - Empty or unparseable strings → returned as-is
+    """
+    if not val:
+        return val
+    try:
+        dt = datetime.fromisoformat(val)
+    except (ValueError, TypeError):
+        return val
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=get_timezone())
+    return dt.astimezone(UTC).isoformat()
+
+
+def to_local_display(val: str) -> str:
+    """Convert a UTC/aware ISO timestamp to local display string.
+
+    Returns e.g. '2026-02-21 09:16:12 PST'. Empty/unparseable strings
+    pass through unchanged.
+    """
+    if not val:
+        return val
+    try:
+        dt = datetime.fromisoformat(val)
+    except (ValueError, TypeError):
+        return val
+    local_dt = dt.astimezone(get_timezone())
+    return f"{local_dt.strftime('%Y-%m-%d %H:%M:%S')} {local_dt.strftime('%Z')}"
