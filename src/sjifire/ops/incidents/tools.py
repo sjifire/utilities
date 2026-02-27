@@ -75,13 +75,18 @@ def _extract_timestamps(responder_details: list[dict]) -> dict[str, str]:
 
         # Agency page (SJF3 or SJF2 paged) → alarm_time
         if status == "PAGED" and unit in ("SJF3", "SJF2"):
-            if "alarm_time" not in timestamps:
-                timestamps["alarm_time"] = to_utc_iso(str(time_str))
+            utc_val = to_utc_iso(str(time_str))
+            existing = timestamps.get("alarm_time", "")
+            if not existing or (utc_val and utc_val < existing):
+                timestamps["alarm_time"] = utc_val
             continue
 
         neris_field = status_map.get(status)
-        if neris_field and neris_field not in timestamps:
-            timestamps[neris_field] = to_utc_iso(str(time_str))
+        if neris_field:
+            utc_val = to_utc_iso(str(time_str))
+            existing = timestamps.get(neris_field, "")
+            if not existing or (utc_val and utc_val < existing):
+                timestamps[neris_field] = utc_val
 
     return timestamps
 
@@ -131,9 +136,12 @@ def _extract_unit_times(responder_details: list[dict]) -> dict[str, dict[str, st
 
         if unit not in unit_times:
             unit_times[unit] = {}
-        # Keep earliest time for each field
-        if field not in unit_times[unit]:
-            unit_times[unit][field] = to_utc_iso(str(time_str))
+        # Keep earliest time for each field (responder_details may be
+        # reverse-chronological, and units can have duplicate ARRVD entries)
+        utc_val = to_utc_iso(str(time_str))
+        existing = unit_times[unit].get(field, "")
+        if not existing or (utc_val and utc_val < existing):
+            unit_times[unit][field] = utc_val
 
     return unit_times
 
