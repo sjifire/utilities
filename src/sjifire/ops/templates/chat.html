@@ -2081,7 +2081,12 @@ function chatApp() {
           return;
         }
         console.error('Chat RPC error:', err);
-        this.messages.push({type: 'error', content: err.message || 'Failed to send message. Please try again.'});
+        // Remove the user message that was optimistically added (unsent)
+        const lastMsg = this.messages[this.messages.length - 1];
+        if (lastMsg && lastMsg.role === 'user') this.messages.pop();
+        this.messages.push({type: 'error', content: 'Message failed to send — please try again. (' + (err.message || 'connection error') + ')'});
+        // Restore the text so the user doesn't have to retype
+        this.inputText = lastMsg?.content || '';
         this.streaming = false;
         this._localTurnActive = false;
         this._setTurnActive(false);
