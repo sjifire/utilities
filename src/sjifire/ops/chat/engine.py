@@ -56,7 +56,33 @@ _ERROR_MESSAGES = {
     "context": "Unable to load incident data. Please try again.",
     "stream": "Something went wrong. Please try again.",
     "save": "Unable to save conversation. Your message was processed but may not appear on reload.",
+    "turn_limit": (
+        "This conversation has reached its limit. Please start a new session to continue."
+    ),
+    "turn_limit_general": (
+        "This conversation has reached its limit. Please refresh to start a new session."
+    ),
 }
+
+
+def _extract_time(iso: str) -> str:
+    """Extract HH:MM:SS from an ISO timestamp, or '--' if empty."""
+    if not iso:
+        return "--"
+    if "T" in iso:
+        iso = iso.split("T", 1)[1]
+    for sep in ("+", "Z"):
+        if sep in iso:
+            iso = iso.split(sep, 1)[0]
+    return iso[:8]
+
+
+def _try_parse_json(text: str) -> dict | list | None:
+    """Parse JSON or return None on failure."""
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 async def _release_turn_lock(incident_id: str, email: str) -> None:
@@ -173,17 +199,6 @@ def _format_unit_times_table(
     # Default dispatch time: alarm (page) time, or call received time
     default_dispatched = alarm_time or time_reported
 
-    def _time(iso: str) -> str:
-        """Extract HH:MM:SS from an ISO timestamp, or '--' if empty."""
-        if not iso:
-            return "--"
-        if "T" in iso:
-            iso = iso.split("T", 1)[1]
-        for sep in ("+", "Z"):
-            if sep in iso:
-                iso = iso.split(sep, 1)[0]
-        return iso[:8]
-
     def _earliest(field: str) -> str:
         """Find the earliest non-empty value for a field across all units."""
         values = [ut.get(field, "") for ut in unit_times if ut.get(field)]
@@ -198,12 +213,12 @@ def _format_unit_times_table(
     dispatched = _earliest("paged") or default_dispatched
     lines = [
         "INCIDENT TIMESTAMPS (save via timestamps={...}):",
-        f"  Call Received (psap_answer):       {_time(time_reported)}",
-        f"  First Dispatched (first_unit_dispatched): {_time(dispatched)}",
-        f"  First Enroute (first_unit_enroute):    {_time(_earliest('enroute'))}",
-        f"  First On Scene (first_unit_arrived):   {_time(_earliest('arrived'))}",
-        f"  Last Unit Cleared (last_unit_cleared):  {_time(_latest('completed'))}",
-        f"  Last In Quarters (last_unit_in_quarters): {_time(_latest('in_quarters'))}",
+        f"  Call Received (psap_answer):       {_extract_time(time_reported)}",
+        f"  First Dispatched (first_unit_dispatched): {_extract_time(dispatched)}",
+        f"  First Enroute (first_unit_enroute):    {_extract_time(_earliest('enroute'))}",
+        f"  First On Scene (first_unit_arrived):   {_extract_time(_earliest('arrived'))}",
+        f"  Last Unit Cleared (last_unit_cleared):  {_extract_time(_latest('completed'))}",
+        f"  Last In Quarters (last_unit_in_quarters): {_extract_time(_latest('in_quarters'))}",
     ]
 
     # --- Per-unit times (→ update_incident units=[]) ---
@@ -217,12 +232,12 @@ def _format_unit_times_table(
     lines.extend([header, divider])
     for ut in unit_times:
         unit = (ut.get("unit") or "?").ljust(8)
-        paged = _time(ut.get("paged") or default_dispatched).ljust(10)
-        enroute = _time(ut.get("enroute", "")).ljust(8)
-        staged = _time(ut.get("staged", "")).ljust(8)
-        arrived = _time(ut.get("arrived", "")).ljust(8)
-        completed = _time(ut.get("completed", "")).ljust(8)
-        in_quarters = _time(ut.get("in_quarters", ""))
+        paged = _extract_time(ut.get("paged") or default_dispatched).ljust(10)
+        enroute = _extract_time(ut.get("enroute", "")).ljust(8)
+        staged = _extract_time(ut.get("staged", "")).ljust(8)
+        arrived = _extract_time(ut.get("arrived", "")).ljust(8)
+        completed = _extract_time(ut.get("completed", "")).ljust(8)
+        in_quarters = _extract_time(ut.get("in_quarters", ""))
         row = f"{unit} | {paged} | {enroute} | {staged} | {arrived} | {completed} | {in_quarters}"
         lines.append(row)
 
@@ -575,10 +590,7 @@ async def run_chat(
             await publish(
                 channel,
                 "error",
-                {
-                    "message": "This conversation has reached its limit. "
-                    "Please start a new session to continue."
-                },
+                {"message": _ERROR_MESSAGES["turn_limit"]},
             )
             return
 
@@ -849,10 +861,10 @@ async def _run_loop(
         full_tool_results: list[dict] = []
         summary_tool_results: list[dict] = []
         for tc, result_str in zip(tool_calls, result_strs, strict=True):
-            try:
-                result_data = json.loads(result_str)
+            result_data = _try_parse_json(result_str)
+            if result_data is not None:
                 summary = _summarize_tool_result(tc["name"], result_data)
-            except json.JSONDecodeError:
+            else:
                 summary = result_str[:200]
 
             is_error = summary.startswith("Error")
@@ -862,14 +874,12 @@ async def _run_loop(
                 aid = tc["input"].get("attachment_id", "")
                 if aid:
                     evt["image_url"] = f"/reports/{conversation.incident_id}/attachments/{aid}"
-                try:
-                    rd = json.loads(result_str)
+                rd = _try_parse_json(result_str)
+                if isinstance(rd, dict):
                     if rd.get("title"):
                         evt["image_title"] = rd["title"]
                     if rd.get("description"):
                         evt["image_desc"] = rd["description"]
-                except (json.JSONDecodeError, KeyError):
-                    pass  # Title/desc are optional UI enhancements; skip if unparseable
             await publish(channel, "tool_result", evt)
 
             # After reset_incident, clear pre-reset conversation history.
@@ -904,9 +914,9 @@ async def _run_loop(
 
             # After update_incident, emit live status update for the client
             if tc["name"] == "update_incident":
+                result_data_raw = _try_parse_json(result_str)
                 try:
-                    result_data_raw = json.loads(result_str)
-                    if "error" not in result_data_raw:
+                    if isinstance(result_data_raw, dict) and "error" not in result_data_raw:
                         from sjifire.ops.incidents.models import IncidentDocument
 
                         doc = IncidentDocument.from_cosmos(result_data_raw)
@@ -925,8 +935,8 @@ async def _run_loop(
             # For get_attachment with image_data, use a multi-block content
             # array so Claude can see the image via vision.
             tool_result_content: str | list[dict] = result_str
-            try:
-                result_parsed = json.loads(result_str)
+            result_parsed = _try_parse_json(result_str)
+            if isinstance(result_parsed, dict):
                 image_info = result_parsed.get("image_data")
                 if image_info and isinstance(image_info, dict):
                     slim = {k: v for k, v in result_parsed.items() if k != "image_data"}
@@ -941,8 +951,6 @@ async def _run_loop(
                         },
                         {"type": "text", "text": json.dumps(slim, default=str)},
                     ]
-            except (json.JSONDecodeError, KeyError):
-                pass  # Non-image tool result — use raw string as-is
 
             full_tool_results.append(
                 {
@@ -1177,10 +1185,7 @@ async def run_general_chat(
         await publish(
             channel,
             "error",
-            {
-                "message": "This conversation has reached its limit. "
-                "Please refresh to start a new session."
-            },
+            {"message": _ERROR_MESSAGES["turn_limit_general"]},
         )
         return
 
@@ -1373,10 +1378,10 @@ async def _run_general_loop(
         full_tool_results: list[dict] = []
         summary_tool_results: list[dict] = []
         for tc, result_str in zip(tool_calls, result_strs, strict=True):
-            try:
-                result_data = json.loads(result_str)
+            result_data = _try_parse_json(result_str)
+            if result_data is not None:
                 summary = _summarize_tool_result(tc["name"], result_data)
-            except json.JSONDecodeError:
+            else:
                 summary = result_str[:200]
 
             is_error = summary.startswith("Error")

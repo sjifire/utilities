@@ -11,7 +11,7 @@ import html
 import logging
 from datetime import UTC, datetime
 
-from sjifire.core.config import get_org_config, get_timezone, to_utc_iso
+from sjifire.core.config import get_org_config, get_timezone, to_local_display, to_utc_iso
 from sjifire.ops.auth import check_is_editor, get_current_user
 from sjifire.ops.incidents.models import (
     AlarmInfo,
@@ -33,22 +33,9 @@ logger = logging.getLogger(__name__)
 _LOCKED_STATUSES = {"submitted", "approved"}
 
 
-def _to_local_display(val: str) -> str:
-    """Convert a UTC/aware ISO timestamp to local time for display.
-
-    Returns a human-friendly string like '2026-02-21 09:16:12 PST'.
-    Non-parseable or empty strings pass through unchanged.
-    """
-    if not val:
-        return val
-    try:
-        dt = datetime.fromisoformat(val)
-    except (ValueError, TypeError):
-        return val
-    local_dt = dt.astimezone(get_timezone())
-    # Short timezone abbreviation (e.g. PST, PDT)
-    tz_abbr = local_dt.strftime("%Z")
-    return f"{local_dt.strftime('%Y-%m-%d %H:%M:%S')} {tz_abbr}"
+# ---------------------------------------------------------------------------
+# Constants & display formatting
+# ---------------------------------------------------------------------------
 
 
 def _localize_diff_timestamps(diff: dict) -> dict:
@@ -61,7 +48,7 @@ def _localize_diff_timestamps(diff: dict) -> dict:
             for side in ("local", "neris"):
                 if side in val:
                     localized[side] = {
-                        k: _to_local_display(v) if isinstance(v, str) else v
+                        k: to_local_display(v) if isinstance(v, str) else v
                         for k, v in val[side].items()
                     }
             result[key] = localized
@@ -99,14 +86,14 @@ def _localize_creation_payload(payload: dict) -> dict:
     dispatch = p.get("dispatch", {})
     for key in _DISPATCH_TS_KEYS:
         if key in dispatch and isinstance(dispatch[key], str):
-            dispatch[key] = _to_local_display(dispatch[key])
+            dispatch[key] = to_local_display(dispatch[key])
     for unit_resp in dispatch.get("unit_responses", []):
         for key in _UNIT_TS_KEYS:
             if key in unit_resp and isinstance(unit_resp[key], str):
-                unit_resp[key] = _to_local_display(unit_resp[key])
+                unit_resp[key] = to_local_display(unit_resp[key])
     for comment in dispatch.get("comments", []):
         if "timestamp" in comment and isinstance(comment["timestamp"], str):
-            comment["timestamp"] = _to_local_display(comment["timestamp"])
+            comment["timestamp"] = to_local_display(comment["timestamp"])
     return p
 
 
@@ -117,6 +104,11 @@ _neris_unit_map: dict[str, str] = {}
 # Built from the NERIS entity's cad_designation_1 values so that "Ops31"
 # and "OPS31" both resolve to the same canonical name without hardcoding.
 _cad_canonical: dict[str, str] = {}
+
+
+# ---------------------------------------------------------------------------
+# Unit ID resolution & normalization
+# ---------------------------------------------------------------------------
 
 
 def _load_neris_unit_maps() -> None:
@@ -163,6 +155,11 @@ def _normalize_unit_id(unit_id: str) -> str:
         return unit_id
     _load_neris_unit_maps()
     return _cad_canonical.get(unit_id.lower(), unit_id.upper())
+
+
+# ---------------------------------------------------------------------------
+# Timestamp & data parsing
+# ---------------------------------------------------------------------------
 
 
 def _neris_dispatch_to_cad_number(neris_dispatch: dict) -> str:
@@ -303,6 +300,11 @@ _TACTIC_TS_KEYS: tuple[str, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Unit & record conversion
+# ---------------------------------------------------------------------------
+
+
 def _build_unit_from_neris(u: NerisUnitResponse) -> UnitAssignment:
     """Convert a NERIS unit response to a local UnitAssignment."""
     raw_id = u.reported_unit_id or _resolve_neris_unit_id(u.unit_neris_id or "")
@@ -346,6 +348,11 @@ def _dedup_units(units: list[UnitAssignment]) -> list[UnitAssignment]:
         if not existing.comment and unit.comment:
             existing.comment = unit.comment
     return list(seen.values())
+
+
+# ---------------------------------------------------------------------------
+# NERIS record parsing & import prefill
+# ---------------------------------------------------------------------------
 
 
 def _parse_neris_record(record: dict, neris_id: str) -> dict:
@@ -642,6 +649,11 @@ async def _prefill_from_neris(neris_id: str) -> dict:
     return _parse_neris_record(record, neris_id)
 
 
+# ---------------------------------------------------------------------------
+# NERIS API wrappers (blocking, run via asyncio.to_thread)
+# ---------------------------------------------------------------------------
+
+
 def _get_neris_incident(neris_incident_id: str) -> dict | None:
     """Fetch a single incident from NERIS (blocking, for thread pool)."""
     from sjifire.neris.client import NerisClient
@@ -708,6 +720,11 @@ def _submit_to_neris(payload: dict) -> dict:  # pragma: no cover
     except Exception as e:
         logger.exception("NERIS submission failed")
         return {"error": f"NERIS submission failed: {e}", "details": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Creation payload construction
+# ---------------------------------------------------------------------------
 
 
 def _resolve_local_to_neris_id(unit_id: str) -> str | None:
@@ -981,6 +998,11 @@ def _build_neris_creation_payload(doc: IncidentDocument) -> dict:
         payload["nonfd_aids"] = [{"type": t} for t in extras["nonfd_aids"]]
 
     return payload
+
+
+# ---------------------------------------------------------------------------
+# Diff & patch construction
+# ---------------------------------------------------------------------------
 
 
 def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
@@ -1673,6 +1695,11 @@ async def import_from_neris(
             station,
             user,
         )
+
+
+# ---------------------------------------------------------------------------
+# Import & merge helpers
+# ---------------------------------------------------------------------------
 
 
 def _merge_sub_model(doc, field_name: str, model_class, data: dict, *, force: bool = False) -> None:

@@ -16,6 +16,7 @@ from sjifire.ops.incidents.models import (
     PersonnelAssignment,
     UnitAssignment,
 )
+from sjifire.core.config import to_local_display
 from sjifire.ops.incidents.neris import (
     _address_from_neris_location,
     _build_neris_creation_payload,
@@ -28,7 +29,6 @@ from sjifire.ops.incidents.neris import (
     _parse_neris_record,
     _parse_timestamp,
     _prefill_from_neris,
-    _to_local_display,
     finalize_incident,
     get_neris_incident,
     import_from_neris,
@@ -3942,17 +3942,17 @@ class TestLocalTimeDisplay:
 
     def test_to_local_display_utc(self):
         """UTC timestamp converts to Pacific local time."""
-        result = _to_local_display("2026-02-21T17:16:12+00:00")
+        result = to_local_display("2026-02-21T17:16:12+00:00")
         # 17:16 UTC = 09:16 PST
         assert "09:16:12" in result
         assert "2026-02-21" in result
         assert "PST" in result or "PDT" in result
 
     def test_to_local_display_empty(self):
-        assert _to_local_display("") == ""
+        assert to_local_display("") == ""
 
     def test_to_local_display_unparseable(self):
-        assert _to_local_display("not-a-date") == "not-a-date"
+        assert to_local_display("not-a-date") == "not-a-date"
 
     def test_localize_diff_timestamps(self):
         """Diff timestamps are converted to local time in both local and neris sides."""

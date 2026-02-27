@@ -17,7 +17,7 @@ import logging
 import re
 from datetime import UTC, datetime
 
-from sjifire.core.config import get_org_config, get_timezone, to_utc_iso
+from sjifire.core.config import get_org_config, get_timezone, to_local_display, to_utc_iso
 from sjifire.ops.auth import check_is_editor, get_current_user
 from sjifire.ops.incidents.models import (
     ALARM_INFO_KEYS,
@@ -412,18 +412,14 @@ def _build_import_comparison(
 
     # Compare timestamps between NERIS and dispatch.
     # Convert both to local time for display so discrepancies are obvious.
-    local_tz = get_timezone()
 
-    def _to_local(iso_str: str) -> tuple[datetime | None, str]:
-        """Parse ISO timestamp and return (aware datetime, local display string)."""
+    def _parse_aware(iso_str: str) -> datetime | None:
+        """Parse ISO timestamp into a timezone-aware datetime, or None."""
         try:
             dt = datetime.fromisoformat(iso_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=UTC)
-            local_dt = dt.astimezone(local_tz)
-            return local_dt, local_dt.strftime("%H:%M:%S %Z")
+            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
         except (ValueError, TypeError):
-            return None, iso_str
+            return None
 
     for ts_key, label in [
         ("psap_answer", "PSAP answer / call creation"),
@@ -436,8 +432,10 @@ def _build_import_comparison(
         dispatch_val = dispatch_ts.get(ts_key)
 
         if neris_val and dispatch_val:
-            neris_dt, neris_disp = _to_local(neris_val)
-            dispatch_dt, dispatch_disp = _to_local(dispatch_val)
+            neris_dt = _parse_aware(neris_val)
+            dispatch_dt = _parse_aware(dispatch_val)
+            neris_disp = to_local_display(neris_val)
+            dispatch_disp = to_local_display(dispatch_val)
             # Compare actual times (>60s difference = discrepancy)
             if neris_dt and dispatch_dt:
                 diff_s = abs((neris_dt - dispatch_dt).total_seconds())
@@ -463,11 +461,23 @@ def _build_import_comparison(
                     }
                 )
         elif dispatch_val and not neris_val:
-            _, disp = _to_local(dispatch_val)
-            gaps.append({"field": ts_key, "label": label, "source": "dispatch", "time": disp})
+            gaps.append(
+                {
+                    "field": ts_key,
+                    "label": label,
+                    "source": "dispatch",
+                    "time": to_local_display(dispatch_val),
+                }
+            )
         elif neris_val and not dispatch_val:
-            _, disp = _to_local(neris_val)
-            gaps.append({"field": ts_key, "label": label, "source": "neris", "time": disp})
+            gaps.append(
+                {
+                    "field": ts_key,
+                    "label": label,
+                    "source": "neris",
+                    "time": to_local_display(neris_val),
+                }
+            )
 
     # Compare addresses
     neris_addr = neris_prefill.get("address", "")

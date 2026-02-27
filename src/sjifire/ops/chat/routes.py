@@ -13,6 +13,7 @@ Chat message sending is handled via Centrifugo RPC proxy (see centrifugo.py).
 
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -21,7 +22,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from sjifire.core.config import get_timezone, local_now
-from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user, set_current_user
+from sjifire.ops.auth import (
+    UserContext,
+    _current_user,
+    check_is_editor,
+    get_easyauth_user,
+    set_current_user,
+)
 from sjifire.ops.chat.store import ConversationStore
 from sjifire.ops.dispatch.store import DispatchStore
 from sjifire.ops.incidents.store import IncidentStore
@@ -183,36 +190,54 @@ def _get_user(request: Request) -> UserContext | None:
     return user
 
 
+async def _require_auth(
+    request: Request,
+    *,
+    editor: bool = False,
+    html: bool = False,
+) -> UserContext | Response:
+    """Authenticate request; optionally require editor role.
+
+    Returns UserContext on success, or an error Response on failure.
+    html=True returns redirect/HTML-forbidden; html=False returns JSON errors.
+    """
+    user = _get_user(request)
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        if html:
+            return RedirectResponse(
+                "/.auth/login/aad?post_login_redirect_uri=" + str(request.url.path)
+            )
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    if editor:
+        is_editor = is_dev or (
+            user is not None
+            and await check_is_editor(user.user_id, fallback=user.is_editor, email=user.email)
+        )
+        if not is_editor:
+            if html:
+                return _forbidden_page()
+            return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+    if not user and is_dev:
+        user = _current_user.get()
+
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    return user
+
+
 async def create_report(request: Request) -> Response:
     """Create a new incident and redirect to the chat UI."""
     if request.method == "GET":
         return RedirectResponse("/dashboard#reports", status_code=303)
 
-    user = _get_user(request)
-
-    import os
-
-    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
-
-    if not user and not is_dev:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    # In dev mode, user may be set by middleware
-    if not user:
-        from sjifire.ops.auth import _current_user
-
-        user = _current_user.get()
-    if not user:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    # Only editors (or dev mode) can create reports
-    is_editor = await check_is_editor(
-        user.user_id,
-        fallback=user.is_editor,
-        email=user.email,
-    )
-    if not is_dev and not is_editor:
-        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    result = await _require_auth(request, editor=True)
+    if isinstance(result, Response):
+        return result
 
     try:
         form = await request.form()
@@ -248,29 +273,14 @@ async def create_report(request: Request) -> Response:
 
 async def print_report(request: Request) -> Response:
     """Serve a print-optimized incident report."""
-    user = _get_user(request)
-
-    import os
-
-    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
-
-    if not user and not is_dev:
-        return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=" + str(request.url.path))
-
-    is_editor = is_dev or (
-        user is not None
-        and await check_is_editor(
-            user.user_id,
-            fallback=user.is_editor,
-            email=user.email,
-        )
-    )
-    if not is_editor:
-        return _forbidden_page()
+    result = await _require_auth(request, editor=True, html=True)
+    if isinstance(result, Response):
+        return result
+    user = result
 
     incident_id = request.path_params["incident_id"]
 
-    set_current_user(user) if user else None
+    set_current_user(user)
     async with IncidentStore() as store:
         doc = await store.get_by_id(incident_id)
 
@@ -302,32 +312,15 @@ async def print_report(request: Request) -> Response:
 
 async def chat_page(request: Request) -> Response:
     """Serve the chat UI page for an incident."""
-    user = _get_user(request)
-
-    # Check if we're in dev mode (no EasyAuth)
-    import os
-
-    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
-
-    if not user and not is_dev:
-        return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=" + str(request.url.path))
-
-    # Only editors (or dev mode) can access reports
-    is_editor = is_dev or (
-        user is not None
-        and await check_is_editor(
-            user.user_id,
-            fallback=user.is_editor,
-            email=user.email,
-        )
-    )
-    if not is_editor:
-        return _forbidden_page()
+    result = await _require_auth(request, editor=True, html=True)
+    if isinstance(result, Response):
+        return result
+    user = result
 
     incident_id = request.path_params["incident_id"]
 
     # Verify incident exists and user has access
-    set_current_user(user) if user else None
+    set_current_user(user)
     async with IncidentStore() as store:
         doc = await store.get_by_id(incident_id)
 
@@ -379,25 +372,9 @@ async def chat_page(request: Request) -> Response:
 
 async def conversation_history(request: Request) -> Response:
     """Return the conversation history as JSON."""
-    user = _get_user(request)
-
-    import os
-
-    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
-
-    if not user and not is_dev:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    is_editor = is_dev or (
-        user is not None
-        and await check_is_editor(
-            user.user_id,
-            fallback=user.is_editor,
-            email=user.email,
-        )
-    )
-    if not is_editor:
-        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    result = await _require_auth(request, editor=True)
+    if isinstance(result, Response):
+        return result
 
     incident_id = request.path_params["incident_id"]
 
@@ -445,9 +422,10 @@ async def reopen_report(request: Request) -> Response:
 
     POST /reports/{incident_id}/reopen
     """
-    user = _get_user(request)
-    if not user:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    result = await _require_auth(request)
+    if isinstance(result, Response):
+        return result
+    user = result
 
     set_current_user(user)
 
@@ -464,21 +442,10 @@ async def reopen_report(request: Request) -> Response:
 
 async def general_chat_history(request: Request) -> Response:
     """Return the general conversation history as JSON."""
-    user = _get_user(request)
-
-    import os
-
-    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
-
-    if not user and not is_dev:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    if not user:
-        from sjifire.ops.auth import _current_user
-
-        user = _current_user.get()
-    if not user:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    result = await _require_auth(request)
+    if isinstance(result, Response):
+        return result
+    user = result
 
     conversation_key = f"general:{user.email}"
 

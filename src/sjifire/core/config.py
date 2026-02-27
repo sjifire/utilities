@@ -399,3 +399,19 @@ def to_utc_iso(val: str) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=get_timezone())
     return dt.astimezone(UTC).isoformat()
+
+
+def to_local_display(val: str) -> str:
+    """Convert a UTC/aware ISO timestamp to local display string.
+
+    Returns e.g. '2026-02-21 09:16:12 PST'. Empty/unparseable strings
+    pass through unchanged.
+    """
+    if not val:
+        return val
+    try:
+        dt = datetime.fromisoformat(val)
+    except (ValueError, TypeError):
+        return val
+    local_dt = dt.astimezone(get_timezone())
+    return f"{local_dt.strftime('%Y-%m-%d %H:%M:%S')} {local_dt.strftime('%Z')}"
