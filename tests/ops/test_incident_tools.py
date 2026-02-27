@@ -70,6 +70,18 @@ def _editor_group_env():
     sjifire.ops.auth._user_id_cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _clear_user_context():
+    """Clear user context and editor cache between tests to avoid leaks."""
+    import sjifire.ops.auth
+
+    set_current_user(None)
+    sjifire.ops.auth._editor_cache.clear()
+    yield
+    set_current_user(None)
+    sjifire.ops.auth._editor_cache.clear()
+
+
 @pytest.fixture
 def regular_user():
     user = UserContext(

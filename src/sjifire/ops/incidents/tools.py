@@ -18,7 +18,7 @@ import re
 from datetime import UTC, datetime
 
 from sjifire.core.config import get_org_config, get_timezone, to_local_display, to_utc_iso
-from sjifire.ops.auth import check_is_editor, get_current_user
+from sjifire.ops.auth import check_doc_edit_access, check_doc_view_access, get_current_user
 from sjifire.ops.incidents.models import (
     ALARM_INFO_KEYS,
     FIRE_DETAIL_KEYS,
@@ -580,25 +580,15 @@ def _build_import_comparison(
 
 
 async def _check_view_access(doc: IncidentDocument, user_email: str, is_editor: bool) -> bool:
-    """Check if user can view this incident (live Graph API editor check)."""
-    if doc.created_by == user_email or user_email in doc.personnel_emails():
-        return True
-    try:
-        user = get_current_user()
-        return await check_is_editor(user.user_id, fallback=is_editor, email=user.email)
-    except RuntimeError:
-        return is_editor
+    """Check if user can view this incident."""
+    return await check_doc_view_access(
+        doc.created_by, doc.personnel_emails(), user_email, is_editor
+    )
 
 
 async def _check_edit_access(doc: IncidentDocument, user_email: str, is_editor: bool) -> bool:
-    """Check if user can edit this incident (live Graph API editor check)."""
-    if doc.created_by == user_email:
-        return True
-    try:
-        user = get_current_user()
-        return await check_is_editor(user.user_id, fallback=is_editor, email=user.email)
-    except RuntimeError:
-        return is_editor
+    """Check if user can edit this incident."""
+    return await check_doc_edit_access(doc.created_by, user_email, is_editor)
 
 
 def _parse_units(raw: list[dict]) -> list[UnitAssignment]:

@@ -199,6 +199,37 @@ async def _check_member_groups(user_id: str, group_id: str) -> bool:
         return group_id in resp.json().get("value", [])
 
 
+async def check_doc_view_access(
+    doc_created_by: str,
+    personnel_emails: frozenset[str],
+    user_email: str,
+    is_editor: bool,
+) -> bool:
+    """Check if user can view a document (creator, personnel, or editor)."""
+    if user_email == doc_created_by or user_email in personnel_emails:
+        return True
+    try:
+        user = get_current_user()
+        return await check_is_editor(user.user_id, fallback=is_editor)
+    except RuntimeError:
+        return is_editor
+
+
+async def check_doc_edit_access(
+    doc_created_by: str,
+    user_email: str,
+    is_editor: bool,
+) -> bool:
+    """Check if user can edit a document (creator or editor)."""
+    if user_email == doc_created_by:
+        return True
+    try:
+        user = get_current_user()
+        return await check_is_editor(user.user_id, fallback=is_editor)
+    except RuntimeError:
+        return is_editor
+
+
 def get_current_user() -> UserContext:
     """Get the authenticated user for the current request.
 

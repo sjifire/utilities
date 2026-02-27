@@ -10,6 +10,8 @@ import pytest
 from sjifire.ops.auth import (
     EntraTokenValidator,
     UserContext,
+    check_doc_edit_access,
+    check_doc_view_access,
     check_is_editor,
     get_current_user,
     get_easyauth_user,
@@ -350,3 +352,160 @@ class TestEntraTokenValidator:
             user = v.validate_token("token")
 
         assert user.groups == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# Document access checks
+# ---------------------------------------------------------------------------
+
+
+class TestCheckDocViewAccess:
+    """Tests for the consolidated document view access check."""
+
+    def setup_method(self):
+        """Clear caches and user context between tests."""
+        import sjifire.ops.auth
+
+        sjifire.ops.auth._editor_cache.clear()
+        set_current_user(None)
+
+    async def test_creator_can_view(self):
+        result = await check_doc_view_access(
+            doc_created_by="ff@sjifire.org",
+            personnel_emails=frozenset(),
+            user_email="ff@sjifire.org",
+            is_editor=False,
+        )
+        assert result is True
+
+    async def test_personnel_can_view(self):
+        result = await check_doc_view_access(
+            doc_created_by="ff@sjifire.org",
+            personnel_emails=frozenset(["crew1@sjifire.org"]),
+            user_email="crew1@sjifire.org",
+            is_editor=False,
+        )
+        assert result is True
+
+    async def test_editor_fallback_can_view(self):
+        """When no current user context, falls back to is_editor flag."""
+        set_current_user(None)
+        result = await check_doc_view_access(
+            doc_created_by="ff@sjifire.org",
+            personnel_emails=frozenset(),
+            user_email="random@sjifire.org",
+            is_editor=True,
+        )
+        assert result is True
+
+    async def test_stranger_cannot_view(self):
+        set_current_user(None)
+        result = await check_doc_view_access(
+            doc_created_by="ff@sjifire.org",
+            personnel_emails=frozenset(["crew1@sjifire.org"]),
+            user_email="stranger@sjifire.org",
+            is_editor=False,
+        )
+        assert result is False
+
+    @patch("sjifire.ops.auth._check_member_groups", new_callable=AsyncMock)
+    async def test_uses_live_graph_check(self, mock_check):
+        """When current user is set, uses live Graph API check."""
+        mock_check.return_value = True
+        user = UserContext(email="random@sjifire.org", name="R", user_id="u-1")
+        set_current_user(user)
+
+        with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "grp-1"}):
+            result = await check_doc_view_access(
+                doc_created_by="ff@sjifire.org",
+                personnel_emails=frozenset(),
+                user_email="random@sjifire.org",
+                is_editor=False,
+            )
+
+        assert result is True
+        mock_check.assert_called_once_with("u-1", "grp-1")
+        set_current_user(None)
+
+
+class TestCheckDocEditAccess:
+    """Tests for the consolidated document edit access check."""
+
+    def setup_method(self):
+        """Clear caches and user context between tests."""
+        import sjifire.ops.auth
+
+        sjifire.ops.auth._editor_cache.clear()
+        set_current_user(None)
+
+    async def test_creator_can_edit(self):
+        result = await check_doc_edit_access(
+            doc_created_by="ff@sjifire.org",
+            user_email="ff@sjifire.org",
+            is_editor=False,
+        )
+        assert result is True
+
+    async def test_editor_fallback_can_edit(self):
+        """When no current user context, falls back to is_editor flag."""
+        set_current_user(None)
+        result = await check_doc_edit_access(
+            doc_created_by="ff@sjifire.org",
+            user_email="random@sjifire.org",
+            is_editor=True,
+        )
+        assert result is True
+
+    async def test_crew_cannot_edit(self):
+        set_current_user(None)
+        result = await check_doc_edit_access(
+            doc_created_by="ff@sjifire.org",
+            user_email="crew1@sjifire.org",
+            is_editor=False,
+        )
+        assert result is False
+
+    async def test_stranger_cannot_edit(self):
+        set_current_user(None)
+        result = await check_doc_edit_access(
+            doc_created_by="ff@sjifire.org",
+            user_email="stranger@sjifire.org",
+            is_editor=False,
+        )
+        assert result is False
+
+    @patch("sjifire.ops.auth._check_member_groups", new_callable=AsyncMock)
+    async def test_creator_skips_graph_check(self, mock_check):
+        """Creator check short-circuits before Graph API is called."""
+        mock_check.return_value = True
+        user = UserContext(email="ff@sjifire.org", name="FF", user_id="u-1")
+        set_current_user(user)
+
+        with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "grp-1"}):
+            result = await check_doc_edit_access(
+                doc_created_by="ff@sjifire.org",
+                user_email="ff@sjifire.org",
+                is_editor=False,
+            )
+
+        assert result is True
+        mock_check.assert_not_called()
+        set_current_user(None)
+
+    @patch("sjifire.ops.auth._check_member_groups", new_callable=AsyncMock)
+    async def test_non_creator_uses_live_graph_check(self, mock_check):
+        """Non-creator triggers live Graph API check for editor status."""
+        mock_check.return_value = True
+        user = UserContext(email="chief@sjifire.org", name="Chief", user_id="u-2")
+        set_current_user(user)
+
+        with patch.dict(os.environ, {"ENTRA_REPORT_EDITORS_GROUP_ID": "grp-1"}):
+            result = await check_doc_edit_access(
+                doc_created_by="ff@sjifire.org",
+                user_email="chief@sjifire.org",
+                is_editor=False,
+            )
+
+        assert result is True
+        mock_check.assert_called_once_with("u-2", "grp-1")
+        set_current_user(None)
