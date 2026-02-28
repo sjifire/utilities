@@ -24,8 +24,9 @@ Timeline (repeating every 180 seconds):
   T+110   BN31 note: fire is out, overhaul mode
   T+120   L31 on scene
   T+135   Overhaul complete, command terminated, units returning
-  T+170   Call clears
-  T+173   Cycle restarts (brief idle, then new call at T+3)
+  T+150   Call clears → amber "CLEARED" badge (just_cleared=True)
+  T+170   Idle (cleared badge gone — brief pause before restart)
+  T+175   Cycle restarts (brief idle, then new call at T+3)
 """
 
 import time
@@ -90,11 +91,19 @@ def _build_calls(t: float) -> list[dict]:
     """Build the list of active calls for elapsed seconds ``t``."""
     calls: list[dict] = []
 
-    # ── T+0 to T+5: All Clear (idle) ──────────────────────────
+    # ── T+0 to T+3: All Clear (idle) ──────────────────────────
 
-    # ── Structure Fire (T+3 to T+170) ─────────────────────────
-    if 3 <= t < 170:
+    # ── Structure Fire (T+3 to T+150): active call ────────────
+    if 3 <= t < 150:
         c = _structure_fire_call(t)
+        calls.append(c)
+
+    # ── T+150 to T+170: CLEARED badge ────────────────────────
+    # Call left the open list — show amber "CLEARED" for 20s
+    if 150 <= t < 170:
+        c = _structure_fire_call(150)  # final state
+        c["just_cleared"] = True
+        c["cleared_at"] = datetime.now(UTC).isoformat()
         calls.append(c)
 
     return calls
