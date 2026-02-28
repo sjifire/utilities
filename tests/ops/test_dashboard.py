@@ -12,12 +12,14 @@ from sjifire.ops.auth import UserContext, set_current_user
 from sjifire.ops.dashboard import (
     _build_template_context,
     _call_first_seen,
+    _enrich_doc_for_kiosk,
     _fetch_incidents,
     _fetch_kiosk_data,
     _fetch_open_docs_cached,
     _fetch_recent_calls,
     _normalize_incident_number,
     _open_calls_ttl,
+    _recently_cleared,
     get_dashboard,
     get_open_calls_cached,
 )
@@ -1123,12 +1125,14 @@ def _reset_open_calls_cache():
     dashboard_mod._kiosk_cache = None
     dashboard_mod._kiosk_cache_ts = 0
     _call_first_seen.clear()
+    _recently_cleared.clear()
     yield
     dashboard_mod._open_docs_cache = None
     dashboard_mod._open_docs_ts = 0
     dashboard_mod._kiosk_cache = None
     dashboard_mod._kiosk_cache_ts = 0
     _call_first_seen.clear()
+    _recently_cleared.clear()
 
 
 class TestOpenCallsTTL:
@@ -1709,3 +1713,570 @@ class TestLockedStatusDashboard:
         assert len(entry) == 1
         assert entry[0]["is_locked"] is False
         assert entry[0]["report_label"] == "Edit Report"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _enrich_doc_for_kiosk shared helper
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichDocForKiosk:
+    """Verify the shared enrichment helper adds geo, severity, icon fields."""
+
+    def test_adds_dispatch_id_and_severity(self):
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001000",
+            nature="Medical Aid",
+            address="100 Main St",
+            agency_code="SJF",
+        )
+        result = _enrich_doc_for_kiosk(doc, doc.to_dict())
+
+        assert result["dispatch_id"] == "26-001000"
+        assert result["severity"] == "low"
+        assert result["icon"] != ""
+
+    def test_parses_geo_location(self):
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001000",
+            nature="Fire Alarm",
+            address="100 Main St",
+            agency_code="SJF",
+            geo_location="48.5326, -123.0281",
+        )
+        result = _enrich_doc_for_kiosk(doc, doc.to_dict())
+
+        assert result["latitude"] == pytest.approx(48.5326)
+        assert result["longitude"] == pytest.approx(-123.0281)
+
+    def test_no_geo_location_sets_none(self):
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001000",
+            nature="Fire Alarm",
+            address="100 Main St",
+            agency_code="SJF",
+        )
+        result = _enrich_doc_for_kiosk(doc, doc.to_dict())
+
+        assert result["latitude"] is None
+        assert result["longitude"] is None
+
+    def test_normalizes_unit_call_sign(self):
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001000",
+            nature="Fire Alarm",
+            address="100 Main St",
+            agency_code="SJF",
+            responder_details=[
+                {"unit_number": "E31", "status": "Enroute"},
+            ],
+        )
+        result = _enrich_doc_for_kiosk(doc, doc.to_dict())
+
+        assert result["responder_details"][0]["unit_call_sign"] == "E31"
+
+    def test_high_severity_for_cpr(self):
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001000",
+            nature="CPR in Progress",
+            address="100 Main St",
+            agency_code="SJF",
+        )
+        result = _enrich_doc_for_kiosk(doc, doc.to_dict())
+
+        assert result["severity"] == "high"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: departure detection + recently-cleared calls
+# ---------------------------------------------------------------------------
+
+
+class TestDepartureDetection:
+    """Verify that calls leaving the open list are captured in _recently_cleared."""
+
+    @patch("sjifire.ops.dashboard._store_cleared_call", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_departed_call_captured_in_recently_cleared(
+        self, mock_store_cls, mock_store_call
+    ):
+        """When a call disappears from open list, it's added to _recently_cleared."""
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[doc])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # First fetch — call appears
+        await _fetch_open_docs_cached()
+        assert "26-001678" in _call_first_seen
+
+        # Expire cache, then return empty list — call departed
+        dashboard_mod._open_docs_ts = 0
+        mock_store.fetch_open = AsyncMock(return_value=[])
+
+        await _fetch_open_docs_cached()
+
+        assert "26-001678" in _recently_cleared
+        assert _recently_cleared["26-001678"]["doc"].long_term_call_id == "26-001678"
+        assert "cleared_at" in _recently_cleared["26-001678"]
+
+    @patch("sjifire.ops.dashboard._store_cleared_call", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_departed_call_triggers_store_task(self, mock_store_cls, mock_store_call):
+        """Departed call fires _store_cleared_call as a background task."""
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[doc])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        await _fetch_open_docs_cached()
+
+        dashboard_mod._open_docs_ts = 0
+        mock_store.fetch_open = AsyncMock(return_value=[])
+
+        await _fetch_open_docs_cached()
+
+        mock_store_call.assert_called_once()
+
+    @patch("sjifire.ops.dashboard._store_cleared_call", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_recently_cleared_expires_after_timeout(self, mock_store_cls, mock_store_call):
+        """Entries in _recently_cleared are removed after _CLEARED_EXPIRY."""
+        # Manually add an expired entry
+        _recently_cleared["26-OLD"] = {
+            "doc": DispatchCallDocument(
+                id="call-old",
+                year="2026",
+                long_term_call_id="26-OLD",
+                nature="Fire Alarm",
+                address="100 Guard St",
+                agency_code="SJF",
+            ),
+            "cleared_at": time.monotonic() - 200,  # well past 120s expiry
+        }
+
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        await _fetch_open_docs_cached()
+
+        assert "26-OLD" not in _recently_cleared
+
+    @patch("sjifire.ops.dashboard._store_cleared_call", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard.DispatchStore")
+    async def test_departed_call_not_recaptured(self, mock_store_cls, mock_store_call):
+        """A call already in _recently_cleared is not re-added on subsequent polls."""
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+        mock_store = AsyncMock()
+        mock_store.fetch_open = AsyncMock(return_value=[doc])
+        mock_store_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+        mock_store_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # Call appears, then departs
+        await _fetch_open_docs_cached()
+        dashboard_mod._open_docs_ts = 0
+        mock_store.fetch_open = AsyncMock(return_value=[])
+        await _fetch_open_docs_cached()
+
+        assert mock_store_call.call_count == 1
+
+        # Poll again — should not re-capture
+        dashboard_mod._open_docs_ts = 0
+        await _fetch_open_docs_cached()
+
+        # Still only called once
+        assert mock_store_call.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: cleared calls in kiosk data
+# ---------------------------------------------------------------------------
+
+
+class TestKioskClearedCalls:
+    """Verify cleared calls appear in kiosk data with correct flags."""
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_cleared_call_injected_into_kiosk_data(self, mock_open, mock_schedule):
+        """A recently-cleared call appears in kiosk data with just_cleared flag."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+        mock_open.return_value = []
+
+        doc = DispatchCallDocument(
+            id="call-cleared",
+            year="2026",
+            long_term_call_id="26-002000",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+        )
+        _recently_cleared["26-002000"] = {
+            "doc": doc,
+            "cleared_at": time.monotonic(),  # just now
+        }
+
+        result = await _fetch_kiosk_data()
+
+        cleared = [c for c in result["calls"] if c.get("just_cleared")]
+        assert len(cleared) == 1
+        assert cleared[0]["dispatch_id"] == "26-002000"
+        assert cleared[0]["just_cleared"] is True
+        assert "cleared_at" in cleared[0]
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_cleared_call_excluded_after_60s(self, mock_open, mock_schedule):
+        """A cleared call older than 60s is not injected into kiosk data."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+        mock_open.return_value = []
+
+        doc = DispatchCallDocument(
+            id="call-old-cleared",
+            year="2026",
+            long_term_call_id="26-002000",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+        )
+        _recently_cleared["26-002000"] = {
+            "doc": doc,
+            "cleared_at": time.monotonic() - 70,  # 70s ago, past 60s window
+        }
+
+        result = await _fetch_kiosk_data()
+
+        cleared = [c for c in result["calls"] if c.get("just_cleared")]
+        assert len(cleared) == 0
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_cleared_call_alongside_active(self, mock_open, mock_schedule):
+        """Cleared calls appear alongside active calls (not suppressed)."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+        mock_open.return_value = [
+            {
+                "dispatch_id": "26-ACTIVE",
+                "nature": "Medical Aid",
+                "address": "200 Spring St",
+                "severity": "low",
+                "icon": "\U0001f4df",
+            }
+        ]
+
+        doc = DispatchCallDocument(
+            id="call-cleared",
+            year="2026",
+            long_term_call_id="26-002000",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+        )
+        _recently_cleared["26-002000"] = {
+            "doc": doc,
+            "cleared_at": time.monotonic(),
+        }
+
+        result = await _fetch_kiosk_data()
+
+        assert len(result["calls"]) == 2
+        active = [c for c in result["calls"] if c["dispatch_id"] == "26-ACTIVE"]
+        cleared = [c for c in result["calls"] if c.get("just_cleared")]
+        assert len(active) == 1
+        assert len(cleared) == 1
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_cleared_call_not_duplicated_if_still_active(self, mock_open, mock_schedule):
+        """If a call is both in open list and recently_cleared, it's not duplicated."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+        mock_open.return_value = [
+            {
+                "dispatch_id": "26-002000",
+                "nature": "Fire Alarm",
+                "address": "100 Guard St",
+                "severity": "low",
+                "icon": "\U0001f514",
+            }
+        ]
+
+        doc = DispatchCallDocument(
+            id="call-cleared",
+            year="2026",
+            long_term_call_id="26-002000",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+        )
+        _recently_cleared["26-002000"] = {
+            "doc": doc,
+            "cleared_at": time.monotonic(),
+        }
+
+        result = await _fetch_kiosk_data()
+
+        # Only one entry, not duplicated
+        matching = [c for c in result["calls"] if c["dispatch_id"] == "26-002000"]
+        assert len(matching) == 1
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_cleared_only_shows_archived_when_idle(self, mock_open, mock_schedule):
+        """When only cleared calls exist (no active), archived calls also appear."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+        mock_open.return_value = []
+
+        now = datetime.now(UTC)
+
+        # Store an archived call in Cosmos
+        archived_doc = DispatchCallDocument(
+            id="call-archived",
+            year="2026",
+            long_term_call_id="26-001500",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+            time_reported=now - timedelta(hours=3),
+            is_completed=True,
+            stored_at=now - timedelta(hours=2),
+        )
+        async with DispatchStore() as store:
+            await store.upsert(archived_doc)
+
+        # Add a cleared call
+        cleared_doc = DispatchCallDocument(
+            id="call-cleared",
+            year="2026",
+            long_term_call_id="26-002000",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+        )
+        _recently_cleared["26-002000"] = {
+            "doc": cleared_doc,
+            "cleared_at": time.monotonic(),
+        }
+
+        result = await _fetch_kiosk_data()
+
+        # Both cleared and archived should appear (no active calls)
+        cleared = [c for c in result["calls"] if c.get("just_cleared")]
+        archived = [c for c in result["calls"] if c.get("archived")]
+        assert len(cleared) == 1
+        assert len(archived) == 1
+
+    @patch("sjifire.ops.dashboard._fetch_schedule_for_kiosk", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._fetch_open_calls_enriched", new_callable=AsyncMock)
+    async def test_active_with_cleared_excludes_archived(self, mock_open, mock_schedule):
+        """When there are active + cleared calls, archived calls are excluded."""
+        mock_schedule.return_value = {"crew": [], "platoon": "A"}
+        mock_open.return_value = [
+            {
+                "dispatch_id": "26-ACTIVE",
+                "nature": "Medical Aid",
+                "address": "200 Spring St",
+                "severity": "low",
+                "icon": "\U0001f4df",
+            }
+        ]
+
+        now = datetime.now(UTC)
+
+        # Store an archived call
+        archived_doc = DispatchCallDocument(
+            id="call-archived",
+            year="2026",
+            long_term_call_id="26-001500",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+            time_reported=now - timedelta(hours=3),
+            is_completed=True,
+            stored_at=now - timedelta(hours=2),
+        )
+        async with DispatchStore() as store:
+            await store.upsert(archived_doc)
+
+        # Add a cleared call
+        cleared_doc = DispatchCallDocument(
+            id="call-cleared",
+            year="2026",
+            long_term_call_id="26-002000",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+        )
+        _recently_cleared["26-002000"] = {
+            "doc": cleared_doc,
+            "cleared_at": time.monotonic(),
+        }
+
+        result = await _fetch_kiosk_data()
+
+        # Active + cleared shown, but archived excluded (there's an active call)
+        assert len(result["calls"]) == 2
+        ids = {c["dispatch_id"] for c in result["calls"]}
+        assert "26-ACTIVE" in ids
+        assert "26-002000" in ids
+        assert "26-001500" not in ids
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _store_cleared_call
+# ---------------------------------------------------------------------------
+
+
+class TestStoreClearedCall:
+    """Verify fire-and-forget storage of cleared calls."""
+
+    async def test_stores_completed_call_from_ispyfire(self):
+        """When iSpyFire returns the call as completed, get_or_fetch stores it."""
+        from sjifire.ops.dashboard import _store_cleared_call
+
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+
+        completed_doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+            is_completed=True,
+        )
+
+        with patch("sjifire.ops.dashboard.DispatchStore") as mock_cls:
+            mock_store = AsyncMock()
+            mock_store.get_or_fetch = AsyncMock(return_value=completed_doc)
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            await _store_cleared_call(doc)
+
+            mock_store.get_or_fetch.assert_called_once_with("26-001678")
+            # Since get_or_fetch returned a completed doc, upsert should NOT be called
+            mock_store.upsert.assert_not_called()
+
+    async def test_stores_snapshot_when_ispyfire_returns_none(self):
+        """When iSpyFire can't find the call, store the last-seen snapshot."""
+        from sjifire.ops.dashboard import _store_cleared_call
+
+        doc = DispatchCallDocument(
+            id="call-vanished",
+            year="2026",
+            long_term_call_id="26-001999",
+            nature="Fire Alarm",
+            address="100 Guard St",
+            agency_code="SJF",
+            is_completed=False,
+        )
+
+        with patch("sjifire.ops.dashboard.DispatchStore") as mock_cls:
+            mock_store = AsyncMock()
+            mock_store.get_or_fetch = AsyncMock(return_value=None)
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            await _store_cleared_call(doc)
+
+            mock_store.upsert.assert_called_once()
+            stored = mock_store.upsert.call_args[0][0]
+            assert stored.is_completed is True
+            assert stored.long_term_call_id == "26-001999"
+
+    async def test_stores_snapshot_when_ispyfire_returns_open(self):
+        """When iSpyFire returns the call but not completed, store snapshot."""
+        from sjifire.ops.dashboard import _store_cleared_call
+
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+
+        open_doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+            is_completed=False,
+        )
+
+        with patch("sjifire.ops.dashboard.DispatchStore") as mock_cls:
+            mock_store = AsyncMock()
+            mock_store.get_or_fetch = AsyncMock(return_value=open_doc)
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            await _store_cleared_call(doc)
+
+            mock_store.upsert.assert_called_once()
+            stored = mock_store.upsert.call_args[0][0]
+            assert stored.is_completed is True
+
+    async def test_handles_exception_gracefully(self):
+        """_store_cleared_call logs but doesn't raise on failure."""
+        from sjifire.ops.dashboard import _store_cleared_call
+
+        doc = DispatchCallDocument(
+            id="call-1",
+            year="2026",
+            long_term_call_id="26-001678",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF",
+        )
+
+        with patch("sjifire.ops.dashboard.DispatchStore") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(side_effect=RuntimeError("Cosmos down"))
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            # Should not raise
+            await _store_cleared_call(doc)
