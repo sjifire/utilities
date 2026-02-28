@@ -2080,6 +2080,36 @@ function chatApp() {
           }
           return;
         }
+
+        // Transient connection error — wait for reconnect and retry once
+        const isTransient = /connect|closed|transport|disconnect/i.test(err.message || '');
+        if (isTransient) {
+          try {
+            console.log('Chat RPC: transient error, retrying after reconnect…', err.message);
+            await this._waitForConnect();
+            await this._centrifuge.rpc('send_message', payload);
+            return; // retry succeeded
+          } catch (retryErr) {
+            if (retryErr.code === 409) {
+              let holder = 'another user', holderEmail = '';
+              try {
+                const info = JSON.parse(retryErr.message);
+                holder = info.holder_name || holder;
+                holderEmail = info.holder_email || '';
+              } catch {}
+              this.turnHolder = {email: holderEmail, name: holder};
+              this._blockedMessage = {displayText, images};
+              if (holderEmail && holderEmail === this.currentUserEmail) {
+                // streaming stays true
+              } else {
+                this.streaming = false;
+              }
+              return;
+            }
+            err = retryErr; // fall through to error display
+          }
+        }
+
         console.error('Chat RPC error:', err);
         // Remove the user message that was optimistically added (unsent)
         const lastMsg = this.messages[this.messages.length - 1];
