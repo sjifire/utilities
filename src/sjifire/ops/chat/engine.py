@@ -45,6 +45,30 @@ MAX_CONTEXT_MESSAGES = 20  # Keep last N turns to stay under token limits
 RATE_LIMIT_MAX_RETRIES = 3
 RATE_LIMIT_BASE_DELAY = 15  # seconds — generous for token-per-minute limits
 
+
+def _checkpoint_conversation(conversation: ConversationDocument) -> asyncio.Task:
+    """Fire-and-forget Cosmos upsert to persist mid-turn conversation state.
+
+    This saves partial progress (assistant messages + tool results) so that
+    a browser reload mid-stream doesn't lose the response.  The authoritative
+    save in ``_finish_turn`` still runs at the end — this is purely a safety
+    net for crash/reload scenarios.
+    """
+
+    async def _save() -> None:
+        try:
+            async with ConversationStore() as store:
+                await store.update(conversation)
+            logger.debug("Checkpoint saved conversation %s", conversation.id)
+        except Exception:
+            logger.warning("Checkpoint save failed for %s", conversation.id, exc_info=True)
+
+    task = asyncio.create_task(_save())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
 # Path to incident report instructions (system prompt context)
 _SRC_DOCS = Path(__file__).resolve().parents[4] / "docs"
 _APP_DOCS = Path("/app/docs")
@@ -816,6 +840,7 @@ async def _run_chat_loop(
     status event + image content blocks) are gated behind *incident_hooks*.
     """
     max_tool_rounds = 10  # Safety limit on tool call loops
+    _last_checkpoint: asyncio.Task | None = None
 
     for _ in range(max_tool_rounds):
         assistant_text = ""
@@ -906,7 +931,14 @@ async def _run_chat_loop(
 
         # If no tool calls, we're done
         if not tool_calls:
+            # Await any in-flight checkpoint so it doesn't race _finish_turn.
+            if _last_checkpoint is not None:
+                await _last_checkpoint
             return
+
+        # Checkpoint: save assistant message before executing tools.
+        # If the user reloads mid-tool-execution the streamed text survives.
+        _last_checkpoint = _checkpoint_conversation(conversation)
 
         # Execute tool calls in parallel
         for tc in tool_calls:
@@ -1040,6 +1072,9 @@ async def _run_chat_loop(
             )
         )
 
+        # Checkpoint: save tool results before the next streaming round.
+        _last_checkpoint = _checkpoint_conversation(conversation)
+
         # Add to API messages for next round
         # Assistant message with tool use blocks (strip internal keys)
         assistant_content: list[dict] = []
@@ -1053,6 +1088,10 @@ async def _run_chat_loop(
 
         # Current turn uses full results for accurate tool-use reasoning
         api_messages.append({"role": "user", "content": full_tool_results})
+
+    # Await any in-flight checkpoint so it doesn't race _finish_turn.
+    if _last_checkpoint is not None:
+        await _last_checkpoint
 
     # If we exhausted tool rounds, notify the user
     logger.warning("Chat hit max tool rounds for %s", conversation.incident_id)
