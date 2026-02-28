@@ -251,14 +251,11 @@ async def dashboard_logout(request: Request) -> Response:
 @mcp.custom_route("/kiosk", methods=["GET"])
 async def kiosk_page(request: Request) -> Response:
     """Serve the kiosk display page (token-authenticated, no EasyAuth)."""
-    test_mode = request.query_params.get("test_mode", "").lower()
+    from sjifire.ops.kiosk.store import validate_token
 
-    if test_mode not in ("true", "1", "2"):
-        from sjifire.ops.kiosk.store import validate_token
-
-        token = request.query_params.get("token", "")
-        if not token or validate_token(token) is None:
-            return JSONResponse({"error": "Invalid or missing token"}, status_code=401)
+    token = request.query_params.get("token", "")
+    if not token or validate_token(token) is None:
+        return JSONResponse({"error": "Invalid or missing token"}, status_code=401)
 
     html = await dashboard.render_kiosk()
     return Response(html, media_type="text/html")
@@ -271,6 +268,12 @@ async def kiosk_data(request: Request) -> Response:
     test_mode=true or test_mode=1: Synthetic cycling scenario (test_data.py)
     test_mode=2: Real pipeline with iSpyFire fixture data (from files)
     """
+    from sjifire.ops.kiosk.store import validate_token
+
+    token = request.query_params.get("token", "")
+    if not token or validate_token(token) is None:
+        return JSONResponse({"error": "Invalid or missing token"}, status_code=401)
+
     test_mode = request.query_params.get("test_mode", "").lower()
 
     if test_mode in ("true", "1"):
@@ -330,12 +333,6 @@ async def kiosk_data(request: Request) -> Response:
         except Exception:
             logger.debug("Could not overlay real crew in test mode", exc_info=True)
         return JSONResponse(data)
-
-    from sjifire.ops.kiosk.store import validate_token
-
-    token = request.query_params.get("token", "")
-    if not token or validate_token(token) is None:
-        return JSONResponse({"error": "Invalid or missing token"}, status_code=401)
 
     data = await dashboard.get_kiosk_data()
     return JSONResponse(data)

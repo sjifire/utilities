@@ -98,6 +98,12 @@ _open_docs_ts: float = 0
 _open_docs_lock = asyncio.Lock()
 _call_first_seen: dict[str, float] = {}  # dispatch_id -> monotonic ts (adaptive TTL only)
 
+# Recently-cleared calls — calls that left the open list but aren't in Cosmos yet.
+# {long_term_call_id: {"doc": DispatchCallDocument, "cleared_at": monotonic_ts}}
+# Expires after 2 minutes (by then the fire-and-forget store task has finished).
+_recently_cleared: dict[str, dict] = {}
+_CLEARED_EXPIRY = 120.0  # seconds
+
 
 def _open_calls_ttl() -> float:
     """Adaptive TTL based on active call state.
@@ -149,13 +155,96 @@ async def _fetch_open_docs_cached() -> list:
         for call_id in current_ids:
             if call_id not in _call_first_seen:
                 _call_first_seen[call_id] = now_mono
+
+        # Detect departed calls — capture before removing from first-seen
+        departed_ids = {cid for cid in _call_first_seen if cid not in current_ids}
+        if departed_ids and _open_docs_cache is not None:
+            prev_docs_by_id = {d.long_term_call_id: d for d in _open_docs_cache}
+            for dep_id in departed_ids:
+                dep_doc = prev_docs_by_id.get(dep_id)
+                if dep_doc and dep_id not in _recently_cleared:
+                    _recently_cleared[dep_id] = {
+                        "doc": dep_doc,
+                        "cleared_at": now_mono,
+                    }
+                    logger.info("Call %s departed open list", dep_id)
+            _schedule_dispatch_sync()
+
         for old_id in list(_call_first_seen):
             if old_id not in current_ids:
                 del _call_first_seen[old_id]
 
+        # Expire stale entries from _recently_cleared
+        for cid in list(_recently_cleared):
+            if (now_mono - _recently_cleared[cid]["cleared_at"]) > _CLEARED_EXPIRY:
+                del _recently_cleared[cid]
+
         _open_docs_cache = docs
         _open_docs_ts = time.monotonic()
         return docs
+
+
+# Debounce dispatch-sync: avoid multiple concurrent syncs when several
+# calls depart in quick succession (e.g., multi-unit clear).
+_dispatch_sync_scheduled = False
+
+
+def _schedule_dispatch_sync() -> None:
+    """Schedule a debounced dispatch-sync after calls depart the open list.
+
+    Best-effort: fetches recent completed calls from iSpyFire and stores
+    to Cosmos, closing the gap until the 30-minute background job runs.
+    If the process dies, the scheduled job will catch up.
+    """
+    global _dispatch_sync_scheduled
+    if _dispatch_sync_scheduled:
+        return
+    _dispatch_sync_scheduled = True
+    asyncio.get_event_loop().create_task(_run_dispatch_sync())
+
+
+async def _run_dispatch_sync() -> None:
+    """Fire-and-forget dispatch sync — same as the background task."""
+    global _dispatch_sync_scheduled
+    try:
+        # Small delay so multiple departures within the same poll batch
+        # coalesce into a single sync_recent call.
+        await asyncio.sleep(2)
+        async with DispatchStore() as store:
+            count = await store.sync_recent(days=1)
+            if count:
+                logger.info("On-demand dispatch sync stored %d calls", count)
+    except Exception:
+        logger.exception("On-demand dispatch sync failed (background job will retry)")
+    finally:
+        _dispatch_sync_scheduled = False
+
+
+def _enrich_doc_for_kiosk(doc, call_data: dict) -> dict:
+    """Shared enrichment: add geo, severity, icon, and normalize fields.
+
+    Used by both ``_fetch_open_calls_enriched`` and cleared-call injection
+    so enrichment logic isn't duplicated.
+    """
+    lat, lon = None, None
+    geo = doc.geo_location or ""
+    if geo:
+        parts = geo.replace(" ", "").split(",")
+        if len(parts) == 2:
+            with contextlib.suppress(ValueError):
+                lat, lon = float(parts[0]), float(parts[1])
+
+    call_data["dispatch_id"] = doc.long_term_call_id
+    call_data["latitude"] = lat
+    call_data["longitude"] = lon
+    call_data["severity"] = _get_severity(doc.nature)
+    call_data["icon"] = _get_icon(doc.nature)
+
+    # Kiosk frontend uses unit_call_sign; real data has unit_number
+    for rd in call_data.get("responder_details", []):
+        rd.setdefault("unit_call_sign", rd.get("unit_number", ""))
+
+    return call_data
 
 
 async def get_open_calls_cached() -> dict:
@@ -728,29 +817,9 @@ async def _fetch_recently_completed(*, hours: int = 12) -> list[dict]:
         if doc.stored_at < cutoff:
             continue
 
-        # Same enrichment as _fetch_open_calls_enriched(): full to_dict()
-        # plus geo, severity, icon — so the kiosk gets CAD notes, analysis, etc.
-        call_data = doc.to_dict()
-
-        lat, lon = None, None
-        geo = doc.geo_location or ""
-        if geo:
-            parts = geo.replace(" ", "").split(",")
-            if len(parts) == 2:
-                with contextlib.suppress(ValueError):
-                    lat, lon = float(parts[0]), float(parts[1])
-
-        call_data["dispatch_id"] = doc.long_term_call_id
-        call_data["latitude"] = lat
-        call_data["longitude"] = lon
-        call_data["severity"] = _get_severity(doc.nature)
-        call_data["icon"] = _get_icon(doc.nature)
+        call_data = _enrich_doc_for_kiosk(doc, doc.to_dict())
         call_data["archived"] = True
         call_data["completed_at"] = doc.stored_at.isoformat()
-
-        # Kiosk frontend uses unit_call_sign; real data has unit_number
-        for rd in call_data.get("responder_details", []):
-            rd.setdefault("unit_call_sign", rd.get("unit_number", ""))
 
         results.append(call_data)
 
@@ -777,12 +846,34 @@ async def _fetch_kiosk_data() -> dict:
     else:
         result["calls"] = open_calls_result
 
+    # Inject recently-cleared calls (departed open list, not yet in Cosmos)
+    active_ids = {c["dispatch_id"] for c in result["calls"]}
+    now_mono = time.monotonic()
+    for cid, entry in _recently_cleared.items():
+        if cid in active_ids:
+            continue  # still showing as active (shouldn't happen, but guard)
+        age = now_mono - entry["cleared_at"]
+        if age > 60:
+            continue  # only show cleared badge for first 60s
+        doc = entry["doc"]
+        call_data = _enrich_doc_for_kiosk(doc, doc.to_dict())
+        call_data["just_cleared"] = True
+        call_data["cleared_at"] = datetime.now(UTC).isoformat()
+        call_data["site_history"] = []
+        result["calls"].append(call_data)
+        active_ids.add(cid)
+
     # Append archived calls from Cosmos DB (recently completed)
+    # Only shown when no active calls exist (cleared calls don't count as "active"
+    # for this purpose — they appear alongside active calls, but archived only
+    # show when idle).
+    has_active = any(not c.get("archived") and not c.get("just_cleared") for c in result["calls"])
     if isinstance(archived_result, BaseException):
         logger.warning("Kiosk: recently completed fetch failed: %s", archived_result)
-    elif not result["calls"]:
-        # No active calls — show recently completed
-        result["calls"].extend(archived_result)
+    elif not has_active:
+        for ac in archived_result:
+            if ac["dispatch_id"] not in active_ids:
+                result["calls"].append(ac)
 
     # Schedule
     if isinstance(schedule_result, BaseException):
@@ -887,26 +978,7 @@ async def _fetch_open_calls_enriched() -> list[dict]:
     enriched = []
     async with DispatchStore() as store:
         for doc in docs:
-            call_data = doc.to_dict()
-
-            # Parse geo_location into lat/lon
-            lat, lon = None, None
-            geo = doc.geo_location or ""
-            if geo:
-                parts = geo.replace(" ", "").split(",")
-                if len(parts) == 2:
-                    with contextlib.suppress(ValueError):
-                        lat, lon = float(parts[0]), float(parts[1])
-
-            call_data["dispatch_id"] = doc.long_term_call_id
-            call_data["latitude"] = lat
-            call_data["longitude"] = lon
-            call_data["severity"] = _get_severity(doc.nature)
-            call_data["icon"] = _get_icon(doc.nature)
-
-            # Kiosk frontend uses unit_call_sign; real data has unit_number
-            for rd in call_data.get("responder_details", []):
-                rd.setdefault("unit_call_sign", rd.get("unit_number", ""))
+            call_data = _enrich_doc_for_kiosk(doc, doc.to_dict())
 
             # Site history (max 5)
             if doc.address:

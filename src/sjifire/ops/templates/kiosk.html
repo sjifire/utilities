@@ -301,6 +301,40 @@
     color: var(--text-dim);
   }
 
+  /* ── Cleared (just departed) call panel ── */
+  .call-panel.cleared {
+    border: 2px solid rgba(245, 158, 11, .5);
+    animation: glow-amber 2s ease-in-out infinite;
+  }
+  .call-panel.cleared .call-header {
+    background: rgba(245, 158, 11, .10);
+  }
+  .call-panel.cleared .call-nature {
+    color: var(--text-muted);
+  }
+  .cleared-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 6px;
+    background: rgba(245, 158, 11, .12);
+    border: 1px solid rgba(245, 158, 11, .3);
+    color: var(--color-amber);
+    letter-spacing: .02em;
+  }
+  .call-pill.cleared {
+    background: var(--amber-alpha);
+    border-color: rgba(245, 158, 11, .3);
+    color: var(--color-amber);
+  }
+  @keyframes glow-amber {
+    0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, .15); }
+    50% { box-shadow: 0 0 20px rgba(245, 158, 11, .3); }
+  }
+
   /* ── Idle State ── */
   .idle-state {
     flex: 1;
@@ -469,7 +503,7 @@
     <div class="call-strip">
       <template x-for="(call, i) in $store.kiosk.calls" :key="call.dispatch_id">
         <div class="call-pill"
-             :class="[call.archived ? 'archived' : call._severity, i === currentCallIndex ? 'current' : '']"
+             :class="[call.just_cleared ? 'cleared' : call.archived ? 'archived' : call._severity, i === currentCallIndex ? 'current' : '']"
              @click="showCall(i)">
           <span x-text="call.dispatch_id + (call.nature ? ' ' + call.nature : ' Incoming')"></span>
         </div>
@@ -479,19 +513,28 @@
 
   <!-- Active / archived call detail -->
   <template x-if="$store.kiosk.calls.length > 0">
-    <div class="call-panel" :class="{ archived: currentCall.archived }">
+    <div class="call-panel" :class="{ archived: currentCall.archived && !currentCall.just_cleared, cleared: currentCall.just_cleared }">
       <div class="call-header">
         <div>
           <span class="call-nature" x-text="currentCall.nature ? (currentCall.icon + ' ' + currentCall.nature) : 'Incoming Call'"></span>
-          <template x-if="!currentCall.archived">
+          <template x-if="!currentCall.archived && !currentCall.just_cleared">
             <span class="call-reported" x-text="'  Reported ' + relTime(currentCall.time_reported)"></span>
           </template>
-          <template x-if="currentCall.archived">
+          <template x-if="currentCall.just_cleared">
+            <span class="call-reported" x-text="'  Cleared ' + relTime(currentCall.cleared_at)"></span>
+          </template>
+          <template x-if="currentCall.archived && !currentCall.just_cleared">
             <span class="call-reported" x-text="'  Completed ' + relTime(currentCall.completed_at)"></span>
           </template>
         </div>
         <div style="display:flex;align-items:center;gap:12px">
-          <template x-if="currentCall.archived">
+          <template x-if="currentCall.just_cleared">
+            <div class="cleared-badge">
+              <span>&#10005;</span>
+              <span>CLEARED</span>
+            </div>
+          </template>
+          <template x-if="currentCall.archived && !currentCall.just_cleared">
             <div class="archived-badge">
               <span class="check-icon">&#10003;</span>
               <span>COMPLETED</span>
@@ -736,6 +779,8 @@ function kioskHeader() {
 function kioskApp() {
   // Track first-seen time for call priority (5-min window)
   const callFirstSeen = {};
+  // Track when we first saw each cleared call (client-side timer)
+  const clearedFirstSeen = {};
   // Track current map instances for cleanup
   const maps = {};
 
@@ -772,7 +817,20 @@ function kioskApp() {
         // Enrich calls with severity, icon, and first-seen tracking
         const now = Date.now();
         const calls = (data.calls || []).map(c => {
-          if (!c.archived && !callFirstSeen[c.dispatch_id]) callFirstSeen[c.dispatch_id] = now;
+          if (!c.archived && !c.just_cleared && !callFirstSeen[c.dispatch_id]) callFirstSeen[c.dispatch_id] = now;
+
+          // Client-side cleared tracking: remember when we first saw it cleared
+          if (c.just_cleared && !clearedFirstSeen[c.dispatch_id]) {
+            clearedFirstSeen[c.dispatch_id] = now;
+          }
+
+          // After 60s on client side, transition cleared → archived
+          if (c.just_cleared && clearedFirstSeen[c.dispatch_id] && (now - clearedFirstSeen[c.dispatch_id]) > 60000) {
+            c.just_cleared = false;
+            c.archived = true;
+            c.completed_at = c.cleared_at;
+          }
+
           return {
             ...c,
             _severity: c.severity || 'low',
@@ -781,18 +839,23 @@ function kioskApp() {
           };
         });
 
-        // Clean up first-seen for calls no longer active (but not archived)
-        const activeIds = new Set(calls.filter(c => !c.archived).map(c => c.dispatch_id));
+        // Clean up first-seen for calls no longer active (not archived, not cleared)
+        const activeIds = new Set(calls.filter(c => !c.archived && !c.just_cleared).map(c => c.dispatch_id));
         for (const id of Object.keys(callFirstSeen)) {
           if (!activeIds.has(id)) delete callFirstSeen[id];
         }
+        // Clean up cleared tracking for calls no longer present
+        const allIds = new Set(calls.map(c => c.dispatch_id));
+        for (const id of Object.keys(clearedFirstSeen)) {
+          if (!allIds.has(id)) delete clearedFirstSeen[id];
+        }
 
-        // Detect new active (non-archived) calls
-        const oldActiveIds = new Set(this.$store.kiosk.calls.filter(c => !c.archived).map(c => c.dispatch_id));
-        const newCalls = calls.filter(c => !c.archived && !oldActiveIds.has(c.dispatch_id));
+        // Detect new active (non-archived, non-cleared) calls
+        const oldActiveIds = new Set(this.$store.kiosk.calls.filter(c => !c.archived && !c.just_cleared).map(c => c.dispatch_id));
+        const newCalls = calls.filter(c => !c.archived && !c.just_cleared && !oldActiveIds.has(c.dispatch_id));
 
         this.$store.kiosk.calls = calls;
-        this.$store.kiosk.activeCalls = calls.filter(c => !c.archived).length;
+        this.$store.kiosk.activeCalls = calls.filter(c => !c.archived && !c.just_cleared).length;
         this.$store.kiosk.crew = data.crew || [];
         this.$store.kiosk.sections = data.sections || [];
         this.$store.kiosk.platoon = data.platoon || '';
@@ -812,9 +875,9 @@ function kioskApp() {
           }
         }
 
-        // Manage rotation + auto-scroll for archived calls
+        // Manage rotation + auto-scroll for archived/cleared calls
         this.manageRotation();
-        if (this.currentCall.archived) {
+        if (this.currentCall.archived || this.currentCall.just_cleared) {
           // Start auto-scroll if not already running
           if (!autoScrollTimer) this.startAutoScroll();
         } else {
@@ -843,9 +906,9 @@ function kioskApp() {
 
     manageRotation() {
       const calls = this.$store.kiosk.calls;
-      const activeCalls = calls.filter(c => !c.archived);
+      const activeCalls = calls.filter(c => !c.archived && !c.just_cleared);
 
-      // Only rotate among active calls; archived calls don't rotate
+      // Only rotate among active calls; archived/cleared calls don't rotate
       if (activeCalls.length <= 1) {
         this.stopRotation();
         return;
@@ -853,7 +916,7 @@ function kioskApp() {
 
       // Check if current call is still in priority window (< 5 min)
       const current = calls[this.currentCallIndex];
-      if (current && !current.archived) {
+      if (current && !current.archived && !current.just_cleared) {
         const age = Date.now() - (current._firstSeen || 0);
         if (age < 300000) {
           // Still in priority window — don't rotate
@@ -882,11 +945,11 @@ function kioskApp() {
       }
     },
 
-    // Auto-scroll the dispatch log for archived (static) calls
+    // Auto-scroll the dispatch log for archived/cleared (static) calls
     startAutoScroll() {
       this.stopAutoScroll();
       const call = this.currentCall;
-      if (!call.archived) return;
+      if (!call.archived && !call.just_cleared) return;
 
       // Find the .call-log element inside the current panel
       const el = document.querySelector('.call-panel .call-log');
