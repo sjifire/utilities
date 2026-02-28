@@ -167,8 +167,8 @@ async def _fetch_open_docs_cached() -> list:
                         "doc": dep_doc,
                         "cleared_at": now_mono,
                     }
-                    logger.info("Call %s departed open list — queueing store", dep_id)
-                    asyncio.get_event_loop().create_task(_store_cleared_call(dep_doc))
+                    logger.info("Call %s departed open list", dep_id)
+            _schedule_dispatch_sync()
 
         for old_id in list(_call_first_seen):
             if old_id not in current_ids:
@@ -184,36 +184,40 @@ async def _fetch_open_docs_cached() -> list:
         return docs
 
 
-async def _store_cleared_call(doc) -> None:
-    """Fire-and-forget: fetch final version from iSpyFire and store to Cosmos.
+# Debounce dispatch-sync: avoid multiple concurrent syncs when several
+# calls depart in quick succession (e.g., multi-unit clear).
+_dispatch_sync_scheduled = False
 
-    If iSpyFire still has the call, we get the completed version with full
-    data. If it's vanished (canceled), we store the last-seen snapshot.
+
+def _schedule_dispatch_sync() -> None:
+    """Schedule a debounced dispatch-sync after calls depart the open list.
+
+    Best-effort: fetches recent completed calls from iSpyFire and stores
+    to Cosmos, closing the gap until the 30-minute background job runs.
+    If the process dies, the scheduled job will catch up.
     """
+    global _dispatch_sync_scheduled
+    if _dispatch_sync_scheduled:
+        return
+    _dispatch_sync_scheduled = True
+    asyncio.get_event_loop().create_task(_run_dispatch_sync())
+
+
+async def _run_dispatch_sync() -> None:
+    """Fire-and-forget dispatch sync — same as the background task."""
+    global _dispatch_sync_scheduled
     try:
+        # Small delay so multiple departures within the same poll batch
+        # coalesce into a single sync_recent call.
+        await asyncio.sleep(2)
         async with DispatchStore() as store:
-            # Try to get the final version from iSpyFire
-            fetched = await store.get_or_fetch(doc.long_term_call_id)
-            if fetched and fetched.is_completed:
-                logger.info(
-                    "Cleared call %s fetched from iSpyFire — stored to Cosmos",
-                    doc.long_term_call_id,
-                )
-                return
-
-            # iSpyFire didn't return a completed version — store snapshot
-            from sjifire.ops.dispatch.models import DispatchCallDocument
-
-            snapshot = DispatchCallDocument.model_validate(doc.model_dump())
-            snapshot.is_completed = True
-            snapshot.stored_at = datetime.now(UTC)
-            await store.upsert(snapshot)
-            logger.info(
-                "Cleared call %s not found completed in iSpyFire — stored snapshot",
-                doc.long_term_call_id,
-            )
+            count = await store.sync_recent(days=1)
+            if count:
+                logger.info("On-demand dispatch sync stored %d calls", count)
     except Exception:
-        logger.exception("Failed to store cleared call %s", doc.long_term_call_id)
+        logger.exception("On-demand dispatch sync failed (background job will retry)")
+    finally:
+        _dispatch_sync_scheduled = False
 
 
 def _enrich_doc_for_kiosk(doc, call_data: dict) -> dict:

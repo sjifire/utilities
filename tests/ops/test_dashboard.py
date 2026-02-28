@@ -1124,6 +1124,7 @@ def _reset_open_calls_cache():
     dashboard_mod._open_docs_ts = 0
     dashboard_mod._kiosk_cache = None
     dashboard_mod._kiosk_cache_ts = 0
+    dashboard_mod._dispatch_sync_scheduled = False
     _call_first_seen.clear()
     _recently_cleared.clear()
     yield
@@ -1131,6 +1132,7 @@ def _reset_open_calls_cache():
     dashboard_mod._open_docs_ts = 0
     dashboard_mod._kiosk_cache = None
     dashboard_mod._kiosk_cache_ts = 0
+    dashboard_mod._dispatch_sync_scheduled = False
     _call_first_seen.clear()
     _recently_cleared.clear()
 
@@ -1805,11 +1807,9 @@ class TestEnrichDocForKiosk:
 class TestDepartureDetection:
     """Verify that calls leaving the open list are captured in _recently_cleared."""
 
-    @patch("sjifire.ops.dashboard._store_cleared_call", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._schedule_dispatch_sync")
     @patch("sjifire.ops.dashboard.DispatchStore")
-    async def test_departed_call_captured_in_recently_cleared(
-        self, mock_store_cls, mock_store_call
-    ):
+    async def test_departed_call_captured_in_recently_cleared(self, mock_store_cls, mock_schedule):
         """When a call disappears from open list, it's added to _recently_cleared."""
         doc = DispatchCallDocument(
             id="call-1",
@@ -1838,10 +1838,10 @@ class TestDepartureDetection:
         assert _recently_cleared["26-001678"]["doc"].long_term_call_id == "26-001678"
         assert "cleared_at" in _recently_cleared["26-001678"]
 
-    @patch("sjifire.ops.dashboard._store_cleared_call", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._schedule_dispatch_sync")
     @patch("sjifire.ops.dashboard.DispatchStore")
-    async def test_departed_call_triggers_store_task(self, mock_store_cls, mock_store_call):
-        """Departed call fires _store_cleared_call as a background task."""
+    async def test_departed_call_triggers_dispatch_sync(self, mock_store_cls, mock_schedule):
+        """Departed call schedules a dispatch sync."""
         doc = DispatchCallDocument(
             id="call-1",
             year="2026",
@@ -1862,11 +1862,11 @@ class TestDepartureDetection:
 
         await _fetch_open_docs_cached()
 
-        mock_store_call.assert_called_once()
+        mock_schedule.assert_called_once()
 
-    @patch("sjifire.ops.dashboard._store_cleared_call", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._schedule_dispatch_sync")
     @patch("sjifire.ops.dashboard.DispatchStore")
-    async def test_recently_cleared_expires_after_timeout(self, mock_store_cls, mock_store_call):
+    async def test_recently_cleared_expires_after_timeout(self, mock_store_cls, mock_schedule):
         """Entries in _recently_cleared are removed after _CLEARED_EXPIRY."""
         # Manually add an expired entry
         _recently_cleared["26-OLD"] = {
@@ -1890,9 +1890,9 @@ class TestDepartureDetection:
 
         assert "26-OLD" not in _recently_cleared
 
-    @patch("sjifire.ops.dashboard._store_cleared_call", new_callable=AsyncMock)
+    @patch("sjifire.ops.dashboard._schedule_dispatch_sync")
     @patch("sjifire.ops.dashboard.DispatchStore")
-    async def test_departed_call_not_recaptured(self, mock_store_cls, mock_store_call):
+    async def test_departed_call_not_recaptured(self, mock_store_cls, mock_schedule):
         """A call already in _recently_cleared is not re-added on subsequent polls."""
         doc = DispatchCallDocument(
             id="call-1",
@@ -1913,14 +1913,14 @@ class TestDepartureDetection:
         mock_store.fetch_open = AsyncMock(return_value=[])
         await _fetch_open_docs_cached()
 
-        assert mock_store_call.call_count == 1
+        assert mock_schedule.call_count == 1
 
-        # Poll again — should not re-capture
+        # Poll again — should not re-trigger (call already in _recently_cleared)
         dashboard_mod._open_docs_ts = 0
         await _fetch_open_docs_cached()
 
-        # Still only called once
-        assert mock_store_call.call_count == 1
+        # Still only called once (debounce doesn't matter here — no new departures)
+        assert mock_schedule.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -2157,126 +2157,69 @@ class TestKioskClearedCalls:
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: _store_cleared_call
+# Unit tests: _run_dispatch_sync + _schedule_dispatch_sync
 # ---------------------------------------------------------------------------
 
 
-class TestStoreClearedCall:
-    """Verify fire-and-forget storage of cleared calls."""
+class TestDispatchSyncOnDeparture:
+    """Verify on-demand dispatch sync when calls depart."""
 
-    async def test_stores_completed_call_from_ispyfire(self):
-        """When iSpyFire returns the call as completed, get_or_fetch stores it."""
-        from sjifire.ops.dashboard import _store_cleared_call
-
-        doc = DispatchCallDocument(
-            id="call-1",
-            year="2026",
-            long_term_call_id="26-001678",
-            nature="Medical Aid",
-            address="200 Spring St",
-            agency_code="SJF",
-        )
-
-        completed_doc = DispatchCallDocument(
-            id="call-1",
-            year="2026",
-            long_term_call_id="26-001678",
-            nature="Medical Aid",
-            address="200 Spring St",
-            agency_code="SJF",
-            is_completed=True,
-        )
+    async def test_run_dispatch_sync_calls_sync_recent(self):
+        """_run_dispatch_sync calls store.sync_recent(days=1)."""
+        from sjifire.ops.dashboard import _run_dispatch_sync
 
         with patch("sjifire.ops.dashboard.DispatchStore") as mock_cls:
             mock_store = AsyncMock()
-            mock_store.get_or_fetch = AsyncMock(return_value=completed_doc)
+            mock_store.sync_recent = AsyncMock(return_value=1)
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            await _store_cleared_call(doc)
+            with patch("sjifire.ops.dashboard.asyncio.sleep", new_callable=AsyncMock):
+                await _run_dispatch_sync()
 
-            mock_store.get_or_fetch.assert_called_once_with("26-001678")
-            # Since get_or_fetch returned a completed doc, upsert should NOT be called
-            mock_store.upsert.assert_not_called()
+            mock_store.sync_recent.assert_called_once_with(days=1)
 
-    async def test_stores_snapshot_when_ispyfire_returns_none(self):
-        """When iSpyFire can't find the call, store the last-seen snapshot."""
-        from sjifire.ops.dashboard import _store_cleared_call
+    async def test_run_dispatch_sync_resets_flag(self):
+        """_run_dispatch_sync resets _dispatch_sync_scheduled after completion."""
+        from sjifire.ops.dashboard import _run_dispatch_sync
 
-        doc = DispatchCallDocument(
-            id="call-vanished",
-            year="2026",
-            long_term_call_id="26-001999",
-            nature="Fire Alarm",
-            address="100 Guard St",
-            agency_code="SJF",
-            is_completed=False,
-        )
+        dashboard_mod._dispatch_sync_scheduled = True
 
         with patch("sjifire.ops.dashboard.DispatchStore") as mock_cls:
             mock_store = AsyncMock()
-            mock_store.get_or_fetch = AsyncMock(return_value=None)
+            mock_store.sync_recent = AsyncMock(return_value=0)
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            await _store_cleared_call(doc)
+            with patch("sjifire.ops.dashboard.asyncio.sleep", new_callable=AsyncMock):
+                await _run_dispatch_sync()
 
-            mock_store.upsert.assert_called_once()
-            stored = mock_store.upsert.call_args[0][0]
-            assert stored.is_completed is True
-            assert stored.long_term_call_id == "26-001999"
+        assert dashboard_mod._dispatch_sync_scheduled is False
 
-    async def test_stores_snapshot_when_ispyfire_returns_open(self):
-        """When iSpyFire returns the call but not completed, store snapshot."""
-        from sjifire.ops.dashboard import _store_cleared_call
+    async def test_run_dispatch_sync_resets_flag_on_error(self):
+        """_run_dispatch_sync resets flag even on failure."""
+        from sjifire.ops.dashboard import _run_dispatch_sync
 
-        doc = DispatchCallDocument(
-            id="call-1",
-            year="2026",
-            long_term_call_id="26-001678",
-            nature="Medical Aid",
-            address="200 Spring St",
-            agency_code="SJF",
-        )
-
-        open_doc = DispatchCallDocument(
-            id="call-1",
-            year="2026",
-            long_term_call_id="26-001678",
-            nature="Medical Aid",
-            address="200 Spring St",
-            agency_code="SJF",
-            is_completed=False,
-        )
-
-        with patch("sjifire.ops.dashboard.DispatchStore") as mock_cls:
-            mock_store = AsyncMock()
-            mock_store.get_or_fetch = AsyncMock(return_value=open_doc)
-            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_store)
-            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-            await _store_cleared_call(doc)
-
-            mock_store.upsert.assert_called_once()
-            stored = mock_store.upsert.call_args[0][0]
-            assert stored.is_completed is True
-
-    async def test_handles_exception_gracefully(self):
-        """_store_cleared_call logs but doesn't raise on failure."""
-        from sjifire.ops.dashboard import _store_cleared_call
-
-        doc = DispatchCallDocument(
-            id="call-1",
-            year="2026",
-            long_term_call_id="26-001678",
-            nature="Medical Aid",
-            address="200 Spring St",
-            agency_code="SJF",
-        )
+        dashboard_mod._dispatch_sync_scheduled = True
 
         with patch("sjifire.ops.dashboard.DispatchStore") as mock_cls:
             mock_cls.return_value.__aenter__ = AsyncMock(side_effect=RuntimeError("Cosmos down"))
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            # Should not raise
-            await _store_cleared_call(doc)
+            with patch("sjifire.ops.dashboard.asyncio.sleep", new_callable=AsyncMock):
+                await _run_dispatch_sync()
+
+        assert dashboard_mod._dispatch_sync_scheduled is False
+
+    def test_schedule_dispatch_sync_debounces(self):
+        """_schedule_dispatch_sync only schedules one task at a time."""
+        from sjifire.ops.dashboard import _schedule_dispatch_sync
+
+        dashboard_mod._dispatch_sync_scheduled = True
+
+        with patch("sjifire.ops.dashboard.asyncio.get_event_loop") as mock_loop:
+            _schedule_dispatch_sync()
+            # Should not create_task because already scheduled
+            mock_loop.return_value.create_task.assert_not_called()
+
+        dashboard_mod._dispatch_sync_scheduled = False
