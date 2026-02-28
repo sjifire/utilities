@@ -8,14 +8,14 @@ Usage::
     from sjifire.ops.cache import cosmos_cache
 
     # Simple get/set
-    await cosmos_cache.set("training:events", data, ttl=1800)
-    data = await cosmos_cache.get("training:events")
+    await cosmos_cache.set("cal:Training:2026-01-01:2026-03-31", data, ttl=1800)
+    data = await cosmos_cache.get("cal:Training:2026-01-01:2026-03-31")
 
     # Decorator
     from aiocache import cached
     from sjifire.ops.cache import cosmos_cache
 
-    @cached(cache=cosmos_cache, ttl=1800, key="training:events")
+    @cached(cache=cosmos_cache, ttl=1800, key="cal:Training:2026-01-01:2026-03-31")
     async def fetch_events():
         ...
 

@@ -578,8 +578,8 @@
       .help-label { min-width: 0; }
     }
 
-    /* ── Events/Training tab ── */
-    .trn-event-card {
+    /* ── Events tab ── */
+    .evt-event-card {
       background: var(--bg-panel);
       border: 1px solid var(--border-default);
       border-radius: 8px;
@@ -588,25 +588,25 @@
       cursor: pointer;
       transition: border-color .15s, background .15s;
     }
-    .trn-event-card:hover {
+    .evt-event-card:hover {
       border-color: var(--border-strong);
       background: var(--bg-panel-alt);
     }
-    .trn-event-card.trn-expanded {
+    .evt-event-card.evt-expanded {
       border-color: rgba(96, 165, 250, .3);
     }
-    .trn-event-top {
+    .evt-event-top {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
     }
-    .trn-event-subject {
+    .evt-event-subject {
       font-size: 14px;
       font-weight: 600;
       color: var(--text-primary);
     }
-    .trn-event-meta {
+    .evt-event-meta {
       font-size: 12px;
       color: var(--text-muted);
       margin-top: 3px;
@@ -615,18 +615,18 @@
       flex-wrap: wrap;
       align-items: center;
     }
-    .trn-event-meta > :nth-child(n+2)::before {
+    .evt-event-meta > :nth-child(n+2)::before {
       content: '\b7';
       margin-right: 6px;
       color: var(--text-dim);
     }
-    .trn-event-badges {
+    .evt-event-badges {
       display: flex;
       gap: 6px;
       align-items: center;
       flex-shrink: 0;
     }
-    .trn-source-badge {
+    .evt-source-badge {
       font-size: 10px;
       padding: 2px 8px;
       border-radius: 3px;
@@ -634,23 +634,23 @@
       text-transform: uppercase;
       letter-spacing: .06em;
     }
-    .trn-source-badge.training { background: var(--blue-alpha); color: var(--color-blue); }
-    .trn-source-badge.pub-ed   { background: var(--purple-alpha); color: var(--color-purple); }
-    .trn-source-badge.manual   { background: var(--amber-alpha); color: var(--color-amber); }
-    .trn-count-badge {
+    .evt-source-badge.training { background: var(--blue-alpha); color: var(--color-blue); }
+    .evt-source-badge.pub-ed   { background: var(--purple-alpha); color: var(--color-purple); }
+    .evt-source-badge.manual   { background: var(--amber-alpha); color: var(--color-amber); }
+    .evt-count-badge {
       font-size: 10px;
       background: rgba(255,255,255,.08);
       padding: 2px 6px;
       border-radius: 3px;
       color: var(--text-muted);
     }
-    .trn-event-detail {
+    .evt-event-detail {
       margin-top: 12px;
       padding-top: 12px;
       border-top: 1px solid var(--border-subtle);
     }
-    .trn-detail-section { margin-bottom: 14px; }
-    .trn-detail-label {
+    .evt-detail-section { margin-bottom: 14px; }
+    .evt-detail-label {
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: .08em;
@@ -658,8 +658,8 @@
       font-weight: 600;
       margin-bottom: 6px;
     }
-    .trn-attendee-list { display: flex; flex-wrap: wrap; gap: 6px; }
-    .trn-attendee-chip {
+    .evt-attendee-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .evt-attendee-chip {
       font-size: 12px;
       padding: 4px 10px;
       border-radius: 4px;
@@ -668,12 +668,12 @@
       align-items: center;
       gap: 6px;
     }
-    .trn-attendee-chip.matched   { background: var(--green-alpha); color: var(--color-green); }
-    .trn-attendee-chip.unmatched { background: var(--amber-alpha); color: var(--color-amber); }
-    .trn-attendee-chip.uncertain { background: var(--red-alpha); color: var(--color-error); }
-    .trn-remove-btn { cursor: pointer; opacity: .6; font-size: 14px; line-height: 1; }
-    .trn-remove-btn:hover { opacity: 1; }
-    .trn-attachment-item {
+    .evt-attendee-chip.matched   { background: var(--green-alpha); color: var(--color-green); }
+    .evt-attendee-chip.unmatched { background: var(--amber-alpha); color: var(--color-amber); }
+    .evt-attendee-chip.uncertain { background: var(--red-alpha); color: var(--color-error); }
+    .evt-remove-btn { cursor: pointer; opacity: .6; font-size: 14px; line-height: 1; }
+    .evt-remove-btn:hover { opacity: 1; }
+    .evt-attachment-item {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -684,9 +684,9 @@
       background: rgba(255,255,255,.02);
       margin-bottom: 4px;
     }
-    .trn-attachment-item a { color: var(--color-blue); text-decoration: none; }
-    .trn-attachment-item a:hover { text-decoration: underline; }
-    .trn-form-input {
+    .evt-attachment-item a { color: var(--color-blue); text-decoration: none; }
+    .evt-attachment-item a:hover { text-decoration: underline; }
+    .evt-form-input {
       background: rgba(255,255,255,.04);
       border: 1px solid var(--border-medium);
       border-radius: 5px;
@@ -696,10 +696,10 @@
       width: 100%;
       font-family: inherit;
     }
-    .trn-form-input:focus { outline: none; border-color: rgba(96,165,250,.4); }
-    .trn-form-input::placeholder { color: var(--text-faint); }
-    .trn-typeahead-wrap { position: relative; }
-    .trn-typeahead-list {
+    .evt-form-input:focus { outline: none; border-color: rgba(96,165,250,.4); }
+    .evt-form-input::placeholder { color: var(--text-faint); }
+    .evt-typeahead-wrap { position: relative; }
+    .evt-typeahead-list {
       position: absolute;
       top: 100%;
       left: 0;
@@ -711,14 +711,14 @@
       overflow-y: auto;
       z-index: 10;
     }
-    .trn-typeahead-item {
+    .evt-typeahead-item {
       padding: 6px 12px;
       cursor: pointer;
       font-size: 13px;
       color: var(--text-secondary);
     }
-    .trn-typeahead-item:hover { background: var(--blue-alpha); color: var(--color-blue); }
-    .trn-spinner {
+    .evt-typeahead-item:hover { background: var(--blue-alpha); color: var(--color-blue); }
+    .evt-spinner {
       display: inline-block;
       width: 14px;
       height: 14px;
@@ -730,7 +730,7 @@
     @keyframes shimmer-spin { to { transform: rotate(360deg); } }
 
     @media (max-width: 768px) {
-      .trn-event-top { flex-direction: column; align-items: flex-start; gap: 6px; }
+      .evt-event-top { flex-direction: column; align-items: flex-start; gap: 6px; }
     }
 </style>
 {% endblock %}
@@ -1311,20 +1311,20 @@ function dashboard() {
     _chatSubscription: null,
     _chatQueuedMessage: null,
 
-    // ── Events/Training state ──
-    trainingUpcoming: [],
-    trainingPast: [],
-    trainingIsManager: false,
-    trainingLoaded: false,
-    trainingLoading: false,
-    trainingExpanded: null,
-    trainingCreating: false,
-    trainingShowParse: false,
-    trainingParseResults: [],
-    trainingParseRecordId: null,
-    trainingUpPage: 1,
-    trainingPastPage: 1,
-    trainingPerPage: 5,
+    // ── Events state ──
+    eventsUpcoming: [],
+    eventsPast: [],
+    eventsIsManager: false,
+    eventsLoaded: false,
+    eventsLoading: false,
+    eventsExpanded: null,
+    eventsCreating: false,
+    eventsShowParse: false,
+    eventsParseResults: [],
+    eventsParseRecordId: null,
+    eventsUpPage: 1,
+    eventsPastPage: 1,
+    eventsPerPage: 5,
 
     async init() {
       hashTab(['overview','calls','crew','reports','events'], 'overview').init.call(this);
@@ -1340,9 +1340,9 @@ function dashboard() {
         if (tab === 'reports' && !this.D.is_editor && !this.loading) {
           this.activeTab = 'overview';
         }
-        // Lazy-load events/training tab
-        if (tab === 'events' && !this.trainingLoaded && !this.trainingLoading) {
-          this.loadTraining();
+        // Lazy-load events tab
+        if (tab === 'events' && !this.eventsLoaded && !this.eventsLoading) {
+          this.loadEvents();
         }
       });
 
@@ -1351,8 +1351,8 @@ function dashboard() {
         this.loadReports();
       }
       // Direct navigation to #events
-      if (this.activeTab === 'events' && !this.trainingLoaded) {
-        this.loadTraining();
+      if (this.activeTab === 'events' && !this.eventsLoaded) {
+        this.loadEvents();
       }
     },
 
@@ -1623,35 +1623,35 @@ function dashboard() {
       }
     },
 
-    // ── Events/Training methods ──
+    // ── Events methods ──
 
-    async loadTraining() {
-      this.trainingLoading = true;
+    async loadEvents() {
+      this.eventsLoading = true;
       try {
         const r = await authFetch('/events/data');
         if (r.ok) {
           const d = await r.json();
-          this.trainingUpcoming = d.upcoming || [];
-          this.trainingPast = d.past || [];
-          this.trainingIsManager = d.is_manager || false;
-          this.trainingLoaded = true;
+          this.eventsUpcoming = d.upcoming || [];
+          this.eventsPast = d.past || [];
+          this.eventsIsManager = d.is_manager || false;
+          this.eventsLoaded = true;
         }
       } catch(e) {
         console.error('Events load failed:', e);
       }
-      this.trainingLoading = false;
+      this.eventsLoading = false;
     },
 
-    trainingToggle(ev) {
+    eventsToggle(ev) {
       const key = ev.event_id || ev.record_id;
-      this.trainingExpanded = this.trainingExpanded === key ? null : key;
+      this.eventsExpanded = this.eventsExpanded === key ? null : key;
     },
 
-    trainingFormatDate(iso) {
+    eventsFormatDate(iso) {
       if (!iso) return '';
       return dayjs(iso).format('ddd, MMM D YYYY');
     },
-    trainingFormatTimeRange(start, end) {
+    eventsFormatTimeRange(start, end) {
       if (!start) return '';
       const s = dayjs(start);
       const sTime = s.format('h:mm A');
@@ -1663,12 +1663,12 @@ function dashboard() {
       return sTime + ' \u2013 ' + eTime;
     },
 
-    trainingMapsUrl(location) {
+    eventsMapsUrl(location) {
       if (!location) return '';
       return 'https://www.google.com/maps/search/' + encodeURIComponent(location);
     },
 
-    trainingBadgeClass(src) {
+    eventsBadgeClass(src) {
       if (!src) return '';
       const s = src.toLowerCase();
       if (s === 'training') return 'training';
@@ -1677,23 +1677,23 @@ function dashboard() {
       return s.split(/[^a-z]/)[0] || '';
     },
 
-    trainingUpPaged() {
-      const start = (this.trainingUpPage - 1) * this.trainingPerPage;
-      return this.trainingUpcoming.slice(start, start + this.trainingPerPage);
+    eventsUpPaged() {
+      const start = (this.eventsUpPage - 1) * this.eventsPerPage;
+      return this.eventsUpcoming.slice(start, start + this.eventsPerPage);
     },
-    trainingUpTotalPages() {
-      return Math.max(1, Math.ceil(this.trainingUpcoming.length / this.trainingPerPage));
+    eventsUpTotalPages() {
+      return Math.max(1, Math.ceil(this.eventsUpcoming.length / this.eventsPerPage));
     },
-    trainingPastPaged() {
-      const start = (this.trainingPastPage - 1) * this.trainingPerPage;
-      return this.trainingPast.slice(start, start + this.trainingPerPage);
+    eventsPastPaged() {
+      const start = (this.eventsPastPage - 1) * this.eventsPerPage;
+      return this.eventsPast.slice(start, start + this.eventsPerPage);
     },
-    trainingPastTotalPages() {
-      return Math.max(1, Math.ceil(this.trainingPast.length / this.trainingPerPage));
+    eventsPastTotalPages() {
+      return Math.max(1, Math.ceil(this.eventsPast.length / this.eventsPerPage));
     },
 
-    async trainingCreateFromEvent(ev) {
-      this.trainingCreating = true;
+    async eventsCreateFromEvent(ev) {
+      this.eventsCreating = true;
       try {
         const r = await authFetch('/events/records', {
           method: 'POST',
@@ -1714,39 +1714,39 @@ function dashboard() {
           ev.record_id = rec.id;
         }
       } catch(e) { console.error(e); }
-      this.trainingCreating = false;
+      this.eventsCreating = false;
     },
 
-    async trainingConfirmParsed() {
-      const selected = this.trainingParseResults.filter(a => a.include).map(a => ({
+    async eventsConfirmParsed() {
+      const selected = this.eventsParseResults.filter(a => a.include).map(a => ({
         name: a.name,
         email: a.email || null,
         source: 'parsed',
       }));
-      if (!selected.length) { this.trainingShowParse = false; return; }
+      if (!selected.length) { this.eventsShowParse = false; return; }
 
       try {
-        const r = await authFetch('/events/records/' + this.trainingParseRecordId);
+        const r = await authFetch('/events/records/' + this.eventsParseRecordId);
         if (!r.ok) return;
         const rec = await r.json();
         const existing = new Set(rec.attendees.map(a => (a.email || a.name).toLowerCase()));
         const newAtts = selected.filter(a => !existing.has((a.email || a.name).toLowerCase()));
         const merged = [...rec.attendees, ...newAtts];
 
-        await authFetch('/events/records/' + this.trainingParseRecordId, {
+        await authFetch('/events/records/' + this.eventsParseRecordId, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ attendees: merged }),
         });
-        this.trainingShowParse = false;
-        await this.loadTraining();
+        this.eventsShowParse = false;
+        await this.loadEvents();
       } catch(e) { console.error(e); }
     }
   };
 }
 
-// ── Training record detail (nested Alpine component) ──
-function trainingRecordDetail(recordId) {
+// ── Events record detail (nested Alpine component) ──
+function eventsRecordDetail(recordId) {
   return {
     rec: null,
     loading: true,
@@ -1767,7 +1767,7 @@ function trainingRecordDetail(recordId) {
     },
 
     get isManager() {
-      return this.$data.trainingIsManager !== undefined ? this.$data.trainingIsManager : false;
+      return this.$data.eventsIsManager !== undefined ? this.$data.eventsIsManager : false;
     },
 
     async saveAttendees() {
@@ -1874,7 +1874,7 @@ function trainingRecordDetail(recordId) {
           const data = await r.json();
           const results = (data.attendees || []).map(a => ({ ...a, include: true }));
           // Update parent dashboard scope
-          this.$dispatch('show-training-parse', { results, recordId: this.rec.id });
+          this.$dispatch('show-events-parse', { results, recordId: this.rec.id });
         } else {
           const err = await r.json();
           alert(err.error || 'Parse failed');
@@ -1901,15 +1901,15 @@ function trainingRecordDetail(recordId) {
   };
 }
 
-// Bridge parse modal events from nested trainingRecordDetail to parent dashboard
+// Bridge parse modal events from nested eventsRecordDetail to parent dashboard
 document.addEventListener('alpine:init', () => {
-  window.addEventListener('show-training-parse', (e) => {
+  window.addEventListener('show-events-parse', (e) => {
     const root = document.querySelector('[x-data*="dashboard"]');
     if (root && root.__x) {
       const d = root.__x.$data;
-      d.trainingParseResults = e.detail.results;
-      d.trainingParseRecordId = e.detail.recordId;
-      d.trainingShowParse = true;
+      d.eventsParseResults = e.detail.results;
+      d.eventsParseRecordId = e.detail.recordId;
+      d.eventsShowParse = true;
     }
   });
 });

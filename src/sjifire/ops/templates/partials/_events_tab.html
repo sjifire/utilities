@@ -1,14 +1,14 @@
 {#
   Events tab content — included by dashboard.html.
   Calendar events from Exchange with optional personnel tracking.
-  Uses Alpine.js state from the dashboard() component (training* properties).
+  Uses Alpine.js state from the dashboard() component (events* properties).
 #}
 
 <!-- EVENTS TAB (lazy-loaded) -->
 <div x-show="!loading && !error && activeTab === 'events'">
 
   <!-- Loading skeleton -->
-  <div x-show="trainingLoading" style="padding:24px 0">
+  <div x-show="eventsLoading" style="padding:24px 0">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
       <div class="skeleton" style="height:16px;width:90px;border-radius:4px"></div>
       <div class="skeleton" style="height:18px;width:60px;border-radius:9px"></div>
@@ -29,49 +29,49 @@
     </template>
   </div>
 
-  <div x-show="!trainingLoading">
+  <div x-show="!eventsLoading">
 
     <!-- ── Upcoming ── -->
     <div style="margin-bottom:24px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-size:14px;font-weight:700;color:var(--text-primary);text-transform:uppercase;letter-spacing:.06em">Upcoming</span>
-          <span class="trn-count-badge" x-text="trainingUpcoming.length + ' events'"></span>
+          <span class="evt-count-badge" x-text="eventsUpcoming.length + ' events'"></span>
         </div>
       </div>
 
-      <template x-if="trainingUpcoming.length === 0">
+      <template x-if="eventsUpcoming.length === 0">
         <div class="panel">
           <div class="empty-state"><p>No upcoming events scheduled</p></div>
         </div>
       </template>
 
-      <template x-for="ev in trainingUpPaged()" :key="ev.event_id || ev.record_id">
-        <div class="trn-event-card" :class="{'trn-expanded': trainingExpanded === (ev.event_id || ev.record_id)}"
+      <template x-for="ev in eventsUpPaged()" :key="ev.event_id || ev.record_id">
+        <div class="evt-event-card" :class="{'evt-expanded': eventsExpanded === (ev.event_id || ev.record_id)}"
              x-data="{ descOpen: false }">
           <!-- Top row: subject, meta, badges, detail toggle -->
-          <div class="trn-event-top">
+          <div class="evt-event-top">
             <div style="min-width:0;flex:1">
-              <div class="trn-event-subject" x-text="ev.subject"></div>
-              <div class="trn-event-meta">
-                <span x-text="trainingFormatDate(ev.start)"></span>
-                <span x-show="trainingFormatTimeRange(ev.start, ev.end)" x-text="trainingFormatTimeRange(ev.start, ev.end)"></span>
-                <a x-show="ev.location && ev.location_address" :href="trainingMapsUrl(ev.location_address)" target="_blank" @click.stop
+              <div class="evt-event-subject" x-text="ev.subject"></div>
+              <div class="evt-event-meta">
+                <span x-text="eventsFormatDate(ev.start)"></span>
+                <span x-show="eventsFormatTimeRange(ev.start, ev.end)" x-text="eventsFormatTimeRange(ev.start, ev.end)"></span>
+                <a x-show="ev.location && ev.location_address" :href="eventsMapsUrl(ev.location_address)" target="_blank" @click.stop
                    x-text="ev.location" style="color:var(--text-dim);text-decoration:none;border-bottom:1px dotted var(--text-dim)"
                    title="Open in Google Maps"></a>
                 <span x-show="ev.location && !ev.location_address" x-text="ev.location" style="color:var(--text-dim)"></span>
               </div>
             </div>
             <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-              <span class="trn-source-badge"
-                :class="trainingBadgeClass(ev.calendar_source)"
+              <span class="evt-source-badge"
+                :class="eventsBadgeClass(ev.calendar_source)"
                 x-text="ev.calendar_source"></span>
-              <span class="trn-count-badge" x-show="ev.attendee_count" x-text="ev.attendee_count + ' attendees'"></span>
-              <span class="trn-count-badge" x-show="ev.attachment_count" x-text="ev.attachment_count + ' files'"></span>
+              <span class="evt-count-badge" x-show="ev.attendee_count" x-text="ev.attendee_count + ' attendees'"></span>
+              <span class="evt-count-badge" x-show="ev.attachment_count" x-text="ev.attachment_count + ' files'"></span>
               <button x-show="ev.has_record"
                 class="action-btn edit" style="min-width:0;font-size:11px;padding:4px 10px"
-                @click.stop="trainingToggle(ev)"
-                x-text="trainingExpanded === (ev.event_id || ev.record_id) ? 'Close' : 'Details'">
+                @click.stop="eventsToggle(ev)"
+                x-text="eventsExpanded === (ev.event_id || ev.record_id) ? 'Close' : 'Details'">
               </button>
             </div>
           </div>
@@ -94,59 +94,59 @@
           </div>
 
           <!-- + Personnel action — below description, left-aligned -->
-          <div x-show="trainingIsManager && !ev.has_record" style="margin-top:6px">
+          <div x-show="eventsIsManager && !ev.has_record" style="margin-top:6px">
             <button class="action-btn start" style="min-width:0;font-size:11px;padding:4px 10px"
-              @click.stop="trainingCreateFromEvent(ev)" :disabled="trainingCreating">
-              <span x-show="!trainingCreating">+ Personnel</span>
-              <span x-show="trainingCreating" class="trn-spinner"></span>
+              @click.stop="eventsCreateFromEvent(ev)" :disabled="eventsCreating">
+              <span x-show="!eventsCreating">+ Personnel</span>
+              <span x-show="eventsCreating" class="evt-spinner"></span>
             </button>
           </div>
 
           <!-- Expanded record detail (attendees, attachments, notes) -->
-          <template x-if="ev.has_record && trainingExpanded === (ev.event_id || ev.record_id)">
-            <div class="trn-event-detail" @click.stop>
-              <div x-data="trainingRecordDetail(ev.record_id)" x-init="load()">
+          <template x-if="ev.has_record && eventsExpanded === (ev.event_id || ev.record_id)">
+            <div class="evt-event-detail" @click.stop>
+              <div x-data="eventsRecordDetail(ev.record_id)" x-init="load()">
                 <template x-if="rec">
                   <div>
                     <!-- Attendees -->
-                    <div class="trn-detail-section">
-                      <div class="trn-detail-label">Attendees (<span x-text="rec.attendees.length"></span>)</div>
-                      <div class="trn-attendee-list" x-show="rec.attendees.length > 0">
+                    <div class="evt-detail-section">
+                      <div class="evt-detail-label">Attendees (<span x-text="rec.attendees.length"></span>)</div>
+                      <div class="evt-attendee-list" x-show="rec.attendees.length > 0">
                         <template x-for="(att, i) in rec.attendees" :key="i">
-                          <span class="trn-attendee-chip"
+                          <span class="evt-attendee-chip"
                             :class="att.email ? 'matched' : (att.uncertain ? 'uncertain' : 'unmatched')">
                             <span x-text="att.name"></span>
-                            <span class="trn-remove-btn" x-show="isManager" @click.stop="removeAttendee(i)">&times;</span>
+                            <span class="evt-remove-btn" x-show="isManager" @click.stop="removeAttendee(i)">&times;</span>
                           </span>
                         </template>
                       </div>
                       <div x-show="rec.attendees.length === 0" style="font-size:12px;color:var(--text-dim)">No attendees recorded yet</div>
 
                       <!-- Add attendee typeahead -->
-                      <div x-show="isManager" class="trn-typeahead-wrap" style="margin-top:8px;max-width:300px">
-                        <input class="trn-form-input" placeholder="Add attendee..." x-model="addName"
+                      <div x-show="isManager" class="evt-typeahead-wrap" style="margin-top:8px;max-width:300px">
+                        <input class="evt-form-input" placeholder="Add attendee..." x-model="addName"
                           @input="searchPersonnel()" @keydown.escape="suggestions = []"
                           @keydown.enter.prevent="addManualAttendee()">
-                        <div class="trn-typeahead-list" x-show="suggestions.length > 0">
+                        <div class="evt-typeahead-list" x-show="suggestions.length > 0">
                           <template x-for="s in suggestions" :key="s.email">
-                            <div class="trn-typeahead-item" @click.stop="addFromRoster(s)" x-text="s.name"></div>
+                            <div class="evt-typeahead-item" @click.stop="addFromRoster(s)" x-text="s.name"></div>
                           </template>
                         </div>
                       </div>
                     </div>
 
                     <!-- Attachments -->
-                    <div class="trn-detail-section">
-                      <div class="trn-detail-label">Attachments (<span x-text="rec.attachments.length"></span>)</div>
+                    <div class="evt-detail-section">
+                      <div class="evt-detail-label">Attachments (<span x-text="rec.attachments.length"></span>)</div>
                       <template x-for="att in rec.attachments" :key="att.id">
-                        <div class="trn-attachment-item">
+                        <div class="evt-attachment-item">
                           <a :href="'/events/records/' + rec.id + '/attachments/' + att.id" target="_blank" x-text="att.filename"></a>
                           <div style="display:flex;gap:8px;align-items:center">
                             <button class="action-btn edit" style="min-width:0;font-size:10px;padding:3px 10px"
                               x-show="isManager && isParseableType(att.content_type)"
                               @click.stop="parseFromAttachment(att.id)" :disabled="parsing">
                               <span x-show="!parsing">Parse Names</span>
-                              <span x-show="parsing" class="trn-spinner"></span>
+                              <span x-show="parsing" class="evt-spinner"></span>
                             </button>
                             <button class="action-btn" style="min-width:0;font-size:10px;padding:3px 10px;background:var(--red-alpha);color:var(--color-error);border-color:rgba(220,38,38,.3)"
                               x-show="isManager" @click.stop="deleteAttachment(att.id)">Delete</button>
@@ -156,21 +156,21 @@
 
                       <!-- Upload -->
                       <div x-show="isManager" style="margin-top:8px">
-                        <input type="file" x-ref="trnFileInput" style="display:none"
+                        <input type="file" x-ref="evtFileInput" style="display:none"
                           accept="image/*,.pdf" @change="uploadFile($event)">
-                        <button class="action-btn edit" style="min-width:0" @click.stop="$refs.trnFileInput.click()" :disabled="uploading">
+                        <button class="action-btn edit" style="min-width:0" @click.stop="$refs.evtFileInput.click()" :disabled="uploading">
                           <span x-show="!uploading">Upload File</span>
-                          <span x-show="uploading" class="trn-spinner"></span>
+                          <span x-show="uploading" class="evt-spinner"></span>
                         </button>
                       </div>
                     </div>
 
                     <!-- Notes -->
-                    <div class="trn-detail-section">
-                      <div class="trn-detail-label">Notes</div>
+                    <div class="evt-detail-section">
+                      <div class="evt-detail-label">Notes</div>
                       <template x-if="isManager">
                         <div>
-                          <textarea class="trn-form-input" x-model="rec.notes" rows="2"
+                          <textarea class="evt-form-input" x-model="rec.notes" rows="2"
                             @change="saveNotes()" placeholder="Add notes..." style="min-height:40px;resize:vertical"></textarea>
                         </div>
                       </template>
@@ -181,7 +181,7 @@
                   </div>
                 </template>
                 <template x-if="!rec && loading">
-                  <div style="padding:12px;text-align:center"><span class="trn-spinner"></span></div>
+                  <div style="padding:12px;text-align:center"><span class="evt-spinner"></span></div>
                 </template>
               </div>
             </div>
@@ -190,12 +190,12 @@
       </template>
 
       <!-- Upcoming pagination -->
-      <div x-show="trainingUpTotalPages() > 1" class="pagination-bar">
-        <span x-text="'Showing ' + (((trainingUpPage - 1) * trainingPerPage) + 1) + '\u2013' + Math.min(trainingUpPage * trainingPerPage, trainingUpcoming.length) + ' of ' + trainingUpcoming.length"></span>
+      <div x-show="eventsUpTotalPages() > 1" class="pagination-bar">
+        <span x-text="'Showing ' + (((eventsUpPage - 1) * eventsPerPage) + 1) + '\u2013' + Math.min(eventsUpPage * eventsPerPage, eventsUpcoming.length) + ' of ' + eventsUpcoming.length"></span>
         <div class="page-nav">
-          <button class="page-btn" :disabled="trainingUpPage <= 1" @click="trainingUpPage--">&lsaquo; Prev</button>
-          <span class="page-info" x-text="trainingUpPage + ' / ' + trainingUpTotalPages()"></span>
-          <button class="page-btn" :disabled="trainingUpPage >= trainingUpTotalPages()" @click="trainingUpPage++">Next &rsaquo;</button>
+          <button class="page-btn" :disabled="eventsUpPage <= 1" @click="eventsUpPage--">&lsaquo; Prev</button>
+          <span class="page-info" x-text="eventsUpPage + ' / ' + eventsUpTotalPages()"></span>
+          <button class="page-btn" :disabled="eventsUpPage >= eventsUpTotalPages()" @click="eventsUpPage++">Next &rsaquo;</button>
         </div>
       </div>
     </div>
@@ -204,40 +204,40 @@
     <div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
         <span style="font-size:14px;font-weight:700;color:var(--text-primary);text-transform:uppercase;letter-spacing:.06em">Event Log</span>
-        <span class="trn-count-badge" x-text="trainingPast.length + ' events'"></span>
+        <span class="evt-count-badge" x-text="eventsPast.length + ' events'"></span>
       </div>
 
-      <template x-if="trainingPast.length === 0">
+      <template x-if="eventsPast.length === 0">
         <div class="panel">
           <div class="empty-state"><p>No past events</p></div>
         </div>
       </template>
 
-      <template x-for="ev in trainingPastPaged()" :key="ev.event_id || ev.record_id">
-        <div class="trn-event-card" :class="{'trn-expanded': trainingExpanded === (ev.event_id || ev.record_id)}"
+      <template x-for="ev in eventsPastPaged()" :key="ev.event_id || ev.record_id">
+        <div class="evt-event-card" :class="{'evt-expanded': eventsExpanded === (ev.event_id || ev.record_id)}"
              x-data="{ descOpen: false }">
-          <div class="trn-event-top">
+          <div class="evt-event-top">
             <div style="min-width:0;flex:1">
-              <div class="trn-event-subject" x-text="ev.subject"></div>
-              <div class="trn-event-meta">
-                <span x-text="trainingFormatDate(ev.start)"></span>
-                <span x-show="trainingFormatTimeRange(ev.start, ev.end)" x-text="trainingFormatTimeRange(ev.start, ev.end)"></span>
-                <a x-show="ev.location && ev.location_address" :href="trainingMapsUrl(ev.location_address)" target="_blank" @click.stop
+              <div class="evt-event-subject" x-text="ev.subject"></div>
+              <div class="evt-event-meta">
+                <span x-text="eventsFormatDate(ev.start)"></span>
+                <span x-show="eventsFormatTimeRange(ev.start, ev.end)" x-text="eventsFormatTimeRange(ev.start, ev.end)"></span>
+                <a x-show="ev.location && ev.location_address" :href="eventsMapsUrl(ev.location_address)" target="_blank" @click.stop
                    x-text="ev.location" style="color:var(--text-dim);text-decoration:none;border-bottom:1px dotted var(--text-dim)"
                    title="Open in Google Maps"></a>
                 <span x-show="ev.location && !ev.location_address" x-text="ev.location" style="color:var(--text-dim)"></span>
               </div>
             </div>
             <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-              <span class="trn-source-badge"
-                :class="trainingBadgeClass(ev.calendar_source)"
+              <span class="evt-source-badge"
+                :class="eventsBadgeClass(ev.calendar_source)"
                 x-text="ev.calendar_source"></span>
-              <span class="trn-count-badge" x-show="ev.attendee_count" x-text="ev.attendee_count + ' attendees'"></span>
-              <span class="trn-count-badge" x-show="ev.attachment_count" x-text="ev.attachment_count + ' files'"></span>
+              <span class="evt-count-badge" x-show="ev.attendee_count" x-text="ev.attendee_count + ' attendees'"></span>
+              <span class="evt-count-badge" x-show="ev.attachment_count" x-text="ev.attachment_count + ' files'"></span>
               <button x-show="ev.has_record"
                 class="action-btn edit" style="min-width:0;font-size:11px;padding:4px 10px"
-                @click.stop="trainingToggle(ev)"
-                x-text="trainingExpanded === (ev.event_id || ev.record_id) ? 'Close' : 'Details'">
+                @click.stop="eventsToggle(ev)"
+                x-text="eventsExpanded === (ev.event_id || ev.record_id) ? 'Close' : 'Details'">
               </button>
             </div>
           </div>
@@ -260,54 +260,54 @@
           </div>
 
           <!-- + Personnel action — below description, left-aligned -->
-          <div x-show="trainingIsManager && !ev.has_record" style="margin-top:6px">
+          <div x-show="eventsIsManager && !ev.has_record" style="margin-top:6px">
             <button class="action-btn start" style="min-width:0;font-size:11px;padding:4px 10px"
-              @click.stop="trainingCreateFromEvent(ev)" :disabled="trainingCreating">
-              <span x-show="!trainingCreating">+ Personnel</span>
-              <span x-show="trainingCreating" class="trn-spinner"></span>
+              @click.stop="eventsCreateFromEvent(ev)" :disabled="eventsCreating">
+              <span x-show="!eventsCreating">+ Personnel</span>
+              <span x-show="eventsCreating" class="evt-spinner"></span>
             </button>
           </div>
 
           <!-- Expanded record detail -->
-          <template x-if="ev.has_record && trainingExpanded === (ev.event_id || ev.record_id)">
-            <div class="trn-event-detail" @click.stop>
-              <div x-data="trainingRecordDetail(ev.record_id)" x-init="load()">
+          <template x-if="ev.has_record && eventsExpanded === (ev.event_id || ev.record_id)">
+            <div class="evt-event-detail" @click.stop>
+              <div x-data="eventsRecordDetail(ev.record_id)" x-init="load()">
                 <template x-if="rec">
                   <div>
-                    <div class="trn-detail-section">
-                      <div class="trn-detail-label">Attendees (<span x-text="rec.attendees.length"></span>)</div>
-                      <div class="trn-attendee-list" x-show="rec.attendees.length > 0">
+                    <div class="evt-detail-section">
+                      <div class="evt-detail-label">Attendees (<span x-text="rec.attendees.length"></span>)</div>
+                      <div class="evt-attendee-list" x-show="rec.attendees.length > 0">
                         <template x-for="(att, i) in rec.attendees" :key="i">
-                          <span class="trn-attendee-chip"
+                          <span class="evt-attendee-chip"
                             :class="att.email ? 'matched' : (att.uncertain ? 'uncertain' : 'unmatched')">
                             <span x-text="att.name"></span>
-                            <span class="trn-remove-btn" x-show="isManager" @click.stop="removeAttendee(i)">&times;</span>
+                            <span class="evt-remove-btn" x-show="isManager" @click.stop="removeAttendee(i)">&times;</span>
                           </span>
                         </template>
                       </div>
                       <div x-show="rec.attendees.length === 0" style="font-size:12px;color:var(--text-dim)">No attendees recorded yet</div>
-                      <div x-show="isManager" class="trn-typeahead-wrap" style="margin-top:8px;max-width:300px">
-                        <input class="trn-form-input" placeholder="Add attendee..." x-model="addName"
+                      <div x-show="isManager" class="evt-typeahead-wrap" style="margin-top:8px;max-width:300px">
+                        <input class="evt-form-input" placeholder="Add attendee..." x-model="addName"
                           @input="searchPersonnel()" @keydown.escape="suggestions = []"
                           @keydown.enter.prevent="addManualAttendee()">
-                        <div class="trn-typeahead-list" x-show="suggestions.length > 0">
+                        <div class="evt-typeahead-list" x-show="suggestions.length > 0">
                           <template x-for="s in suggestions" :key="s.email">
-                            <div class="trn-typeahead-item" @click.stop="addFromRoster(s)" x-text="s.name"></div>
+                            <div class="evt-typeahead-item" @click.stop="addFromRoster(s)" x-text="s.name"></div>
                           </template>
                         </div>
                       </div>
                     </div>
-                    <div class="trn-detail-section">
-                      <div class="trn-detail-label">Attachments (<span x-text="rec.attachments.length"></span>)</div>
+                    <div class="evt-detail-section">
+                      <div class="evt-detail-label">Attachments (<span x-text="rec.attachments.length"></span>)</div>
                       <template x-for="att in rec.attachments" :key="att.id">
-                        <div class="trn-attachment-item">
+                        <div class="evt-attachment-item">
                           <a :href="'/events/records/' + rec.id + '/attachments/' + att.id" target="_blank" x-text="att.filename"></a>
                           <div style="display:flex;gap:8px;align-items:center">
                             <button class="action-btn edit" style="min-width:0;font-size:10px;padding:3px 10px"
                               x-show="isManager && isParseableType(att.content_type)"
                               @click.stop="parseFromAttachment(att.id)" :disabled="parsing">
                               <span x-show="!parsing">Parse Names</span>
-                              <span x-show="parsing" class="trn-spinner"></span>
+                              <span x-show="parsing" class="evt-spinner"></span>
                             </button>
                             <button class="action-btn" style="min-width:0;font-size:10px;padding:3px 10px;background:var(--red-alpha);color:var(--color-error);border-color:rgba(220,38,38,.3)"
                               x-show="isManager" @click.stop="deleteAttachment(att.id)">Delete</button>
@@ -315,19 +315,19 @@
                         </div>
                       </template>
                       <div x-show="isManager" style="margin-top:8px">
-                        <input type="file" x-ref="trnFileInput2" style="display:none"
+                        <input type="file" x-ref="evtFileInput2" style="display:none"
                           accept="image/*,.pdf" @change="uploadFile($event)">
-                        <button class="action-btn edit" style="min-width:0" @click.stop="$refs.trnFileInput2.click()" :disabled="uploading">
+                        <button class="action-btn edit" style="min-width:0" @click.stop="$refs.evtFileInput2.click()" :disabled="uploading">
                           <span x-show="!uploading">Upload File</span>
-                          <span x-show="uploading" class="trn-spinner"></span>
+                          <span x-show="uploading" class="evt-spinner"></span>
                         </button>
                       </div>
                     </div>
-                    <div class="trn-detail-section">
-                      <div class="trn-detail-label">Notes</div>
+                    <div class="evt-detail-section">
+                      <div class="evt-detail-label">Notes</div>
                       <template x-if="isManager">
                         <div>
-                          <textarea class="trn-form-input" x-model="rec.notes" rows="2"
+                          <textarea class="evt-form-input" x-model="rec.notes" rows="2"
                             @change="saveNotes()" placeholder="Add notes..." style="min-height:40px;resize:vertical"></textarea>
                         </div>
                       </template>
@@ -338,7 +338,7 @@
                   </div>
                 </template>
                 <template x-if="!rec && loading">
-                  <div style="padding:12px;text-align:center"><span class="trn-spinner"></span></div>
+                  <div style="padding:12px;text-align:center"><span class="evt-spinner"></span></div>
                 </template>
               </div>
             </div>
@@ -347,28 +347,28 @@
       </template>
 
       <!-- Event log pagination -->
-      <div x-show="trainingPastTotalPages() > 1" class="pagination-bar">
-        <span x-text="'Showing ' + (((trainingPastPage - 1) * trainingPerPage) + 1) + '\u2013' + Math.min(trainingPastPage * trainingPerPage, trainingPast.length) + ' of ' + trainingPast.length"></span>
+      <div x-show="eventsPastTotalPages() > 1" class="pagination-bar">
+        <span x-text="'Showing ' + (((eventsPastPage - 1) * eventsPerPage) + 1) + '\u2013' + Math.min(eventsPastPage * eventsPerPage, eventsPast.length) + ' of ' + eventsPast.length"></span>
         <div class="page-nav">
-          <button class="page-btn" :disabled="trainingPastPage <= 1" @click="trainingPastPage--">&lsaquo; Prev</button>
-          <span class="page-info" x-text="trainingPastPage + ' / ' + trainingPastTotalPages()"></span>
-          <button class="page-btn" :disabled="trainingPastPage >= trainingPastTotalPages()" @click="trainingPastPage++">Next &rsaquo;</button>
+          <button class="page-btn" :disabled="eventsPastPage <= 1" @click="eventsPastPage--">&lsaquo; Prev</button>
+          <span class="page-info" x-text="eventsPastPage + ' / ' + eventsPastTotalPages()"></span>
+          <button class="page-btn" :disabled="eventsPastPage >= eventsPastTotalPages()" @click="eventsPastPage++">Next &rsaquo;</button>
         </div>
       </div>
     </div>
   </div>
 
   <!-- Parse Results Modal -->
-  <template x-if="trainingShowParse">
-    <div class="modal-overlay" @click.self="trainingShowParse = false">
+  <template x-if="eventsShowParse">
+    <div class="modal-overlay" @click.self="eventsShowParse = false">
       <div class="modal" style="max-width:500px">
         <h2>Parsed Attendees</h2>
         <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
           Review the parsed names below. Green = matched to roster. Amber = unmatched. Red = uncertain.
         </p>
-        <template x-for="(p, i) in trainingParseResults" :key="i">
+        <template x-for="(p, i) in eventsParseResults" :key="i">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:13px">
-            <span class="trn-attendee-chip"
+            <span class="evt-attendee-chip"
               :class="p.email ? 'matched' : (p.uncertain ? 'uncertain' : 'unmatched')">
               <span x-text="p.name"></span>
             </span>
@@ -379,8 +379,8 @@
           </div>
         </template>
         <div class="modal-actions">
-          <button class="btn-secondary" @click="trainingShowParse = false">Cancel</button>
-          <button class="btn-primary" @click="trainingConfirmParsed()">Add Selected</button>
+          <button class="btn-secondary" @click="eventsShowParse = false">Cancel</button>
+          <button class="btn-primary" @click="eventsConfirmParsed()">Add Selected</button>
         </div>
       </div>
     </div>
