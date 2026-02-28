@@ -95,7 +95,11 @@ async def websocket_proxy(ws: WebSocket) -> None:
             proxy_headers[hdr] = val
 
     try:
-        async with websockets.connect(centrifugo_url, additional_headers=proxy_headers) as upstream:
+        async with websockets.connect(
+            centrifugo_url,
+            additional_headers=proxy_headers,
+            max_size=5 * 1024 * 1024,  # 5 MB — match Centrifugo limit
+        ) as upstream:
             logger.info("WS proxy: upstream connected to %s", centrifugo_url)
 
             # Forward frames in both directions concurrently

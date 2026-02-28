@@ -24,9 +24,13 @@ logger = logging.getLogger(__name__)
 _graph_token: str | None = None
 _graph_token_expires: float = 0
 
-# Cached editor check results: {user_id: (is_editor, expires_at)}
-_editor_cache: dict[str, tuple[bool, float]] = {}
-_EDITOR_CACHE_TTL = 60  # seconds
+# Cached group membership results: {(user_id, group_id): (is_member, expires_at)}
+_group_cache: dict[tuple[str, str], tuple[bool, float]] = {}
+_GROUP_CACHE_TTL = 60  # seconds
+
+# Legacy alias — kept for code that references the editor cache directly
+_editor_cache = _group_cache
+_EDITOR_CACHE_TTL = _GROUP_CACHE_TTL
 
 # Context variable holding the authenticated user for the current request
 _current_user: ContextVar[UserContext | None] = ContextVar("current_user", default=None)
@@ -68,11 +72,36 @@ class UserContext:
 # ---------------------------------------------------------------------------
 
 
-async def check_is_editor(user_id: str, *, fallback: bool = False, email: str = "") -> bool:
-    """Check group membership via Graph API (cached for 60s).
+async def check_group_membership(user_id: str, group_id: str, *, fallback: bool = False) -> bool:
+    """Check whether a user belongs to an Entra ID group (cached 60s).
 
-    Falls back to the token-based ``is_editor`` property if the Graph API
-    call fails (e.g., missing credentials in dev mode).
+    Args:
+        user_id: Entra object ID of the user
+        group_id: Entra object ID of the group
+        fallback: Value to return if the Graph API call fails
+    """
+    if not group_id or not user_id:
+        return fallback
+
+    cache_key = (user_id, group_id)
+    cached = _group_cache.get(cache_key)
+    if cached and cached[1] > time.monotonic():
+        return cached[0]
+
+    try:
+        result = await _check_member_groups(user_id, group_id)
+        _group_cache[cache_key] = (result, time.monotonic() + _GROUP_CACHE_TTL)
+        return result
+    except Exception:
+        logger.debug("Graph API group check failed for %s, using fallback", user_id, exc_info=True)
+        return fallback
+
+
+async def check_is_editor(user_id: str, *, fallback: bool = False, email: str = "") -> bool:
+    """Check editor group membership via Graph API (cached for 60s).
+
+    Convenience wrapper around ``check_group_membership`` for the
+    incident report editors group.
 
     When ``user_id`` is empty (e.g., stale Centrifugo connections pre-dating
     the user_id field), resolves the object ID from ``email`` via Graph API.
@@ -93,27 +122,7 @@ async def check_is_editor(user_id: str, *, fallback: bool = False, email: str = 
             logger.warning("Cannot resolve user_id for %s, using fallback=%s", email, fallback)
             return fallback
 
-    if not user_id:
-        return fallback
-
-    # Check cache first
-    cached = _editor_cache.get(user_id)
-    if cached and cached[1] > time.monotonic():
-        return cached[0]
-
-    try:
-        result = await _check_member_groups(user_id, group_id)
-        _editor_cache[user_id] = (result, time.monotonic() + _EDITOR_CACHE_TTL)
-        logger.info("Editor check for %s: %s (via Graph API)", user_id, result)
-        return result
-    except Exception:
-        logger.warning(
-            "Graph API group check failed for %s, using fallback=%s",
-            user_id,
-            fallback,
-            exc_info=True,
-        )
-        return fallback
+    return await check_group_membership(user_id, group_id, fallback=fallback)
 
 
 # Cache resolved user_id by email: {email: (user_id, expires_at)}

@@ -73,6 +73,8 @@ properties:
             value: __IMAGE_TAG__
           - name: CENTRIFUGO_API_KEY
             secretRef: centrifugo-api-key
+          - name: EVENT_CALENDARS
+            value: '[{"mailbox":"mhartzell@sjifire.org","label":"Training","calendar_name":"Training"},{"mailbox":"kenglish@sjifire.org","label":"Fire Prevention","calendar_name":"Fire Prevention"}]'
         probes:
           - type: Liveness
             httpGet:

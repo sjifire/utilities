@@ -358,6 +358,14 @@ if should_run 2; then
     info "Creating container 'budgets'..."
     create_container "budgets" "/month" --ttl 10368000
 
+    # Container: events (partition key: /year)
+    info "Creating container 'events'..."
+    create_container "events" "/year"
+
+    # Container: cache (partition key: /ns, TTL enabled)
+    info "Creating container 'cache'..."
+    create_container "cache" "/ns" --ttl -1
+
     # Store endpoint and key in Key Vault
     COSMOS_ENDPOINT=$(az cosmosdb show \
         --name "$COSMOS_ACCOUNT" \

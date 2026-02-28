@@ -27,6 +27,7 @@ dependencies = [
     "uvicorn>=0.34.0",
     "cent>=5.0.0",
     "websockets>=15.0",
+    "aiocache>=0.12.3",
 ]
 
 [project.scripts]
