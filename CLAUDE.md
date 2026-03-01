@@ -15,6 +15,8 @@ SJI Fire District utilities for syncing personnel data between Aladtec (scheduli
 - **httpx** + **tenacity** for iSpyFire API (with rate limit retry)
 - **azure-storage-blob** for Azure Blob Storage (incident attachments)
 - **pytest** + **pytest-asyncio** for testing
+- **pytest-playwright** for browser e2e tests
+- **polyfactory** for Pydantic model test data generation
 - **ruff** for linting/formatting
 - **ty** for type checking
 
@@ -298,12 +300,47 @@ All sync operations support `--dry-run` to preview changes without applying them
 ## Testing
 
 ```bash
-uv run pytest                    # Run all tests
+uv run pytest                    # Run all unit tests (e2e excluded by default)
 uv run pytest -v                 # Verbose
 uv run pytest --cov=sjifire      # With coverage
+uv run pytest -m e2e             # Run e2e browser tests only
+uv run pytest -m ""              # Run everything (unit + e2e)
 ```
 
 Tests use pytest-asyncio for async code. Mocking is done with respx for HTTP calls.
+
+### E2E Tests (Playwright)
+
+Browser-based tests in `tests/e2e/` exercise the dashboard via a real Chromium instance. They start the ops server as a subprocess in dev mode (no auth, in-memory stores) and seed fixture data via `POST /test/seed`.
+
+```bash
+# First-time setup
+uv run playwright install chromium
+
+# Run e2e tests
+uv run pytest -m e2e --browser chromium -v
+```
+
+E2E tests are excluded from default `pytest` runs via `addopts = "-m 'not e2e'"`. The CI workflow runs them in a parallel `e2e` job.
+
+Key files:
+- `tests/e2e/conftest.py` — Server subprocess, browser fixtures, seed fixture
+- `tests/e2e/seed_data.py` — Dispatch calls + schedule data for seeding
+- `tests/e2e/test_dashboard_smoke.py` — Page load, Alpine.js init, tab navigation
+- `tests/e2e/test_dashboard_data.py` — Stat cards, calls table, crew grid
+
+### Polyfactory Model Factories
+
+`tests/factories.py` provides `ModelFactory` subclasses for generating test data:
+
+```python
+from tests.factories import DispatchCallDocumentFactory, IncidentDocumentFactory
+
+doc = DispatchCallDocumentFactory.build(nature="Structure Fire", type="FIRE")
+docs = IncidentDocumentFactory.batch(5, status="draft")
+```
+
+Available factories: `DispatchCallDocumentFactory`, `IncidentDocumentFactory`, `DayScheduleCacheFactory`, `UnitAssignmentFactory`, `PersonnelAssignmentFactory`, and sub-model factories for `DispatchAnalysis`, `UnitTiming`, `CrewOnDuty`, `ScheduleEntryCache`, `DispatchNote`, `EditEntry`.
 
 ## Common Tasks
 
@@ -415,7 +452,7 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 
 ## GitHub Actions
 
-- `ci.yml`: Lint + test on PR/push
+- `ci.yml`: Lint + test + e2e on PR/push (e2e job runs Playwright chromium in parallel)
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Daily iSpyFire state backup (dry-run sync + artifact upload). Actual sync runs every 30 min via Container Apps Job (`ops-tasks`)
 - `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
