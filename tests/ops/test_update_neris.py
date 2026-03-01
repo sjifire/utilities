@@ -8,7 +8,12 @@ import pytest
 
 import sjifire.ops.auth as _auth_mod
 from sjifire.ops.auth import UserContext, set_current_user
-from sjifire.ops.incidents.models import DispatchNote, IncidentDocument, UnitAssignment
+from sjifire.ops.incidents.models import (
+    DispatchNote,
+    IncidentDocument,
+    PersonnelAssignment,
+    UnitAssignment,
+)
 from sjifire.ops.incidents.neris import (
     _build_neris_diff,
     _build_neris_patch,
@@ -213,6 +218,147 @@ class TestBuildNerisDiff:
         neris_record["dispatch"]["dispatch_incident_number"] = "26-002358"
         diff = _build_neris_diff(sample_doc, neris_record)
         assert "dispatch_incident_number" not in diff
+
+    def test_detects_staffing_diff(self, neris_record):
+        """Detect when local personnel count differs from NERIS staffing."""
+        doc = IncidentDocument(
+            id="staffing-test",
+            incident_number="26-002358",
+            incident_datetime=datetime(2026, 2, 20, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26SJ0020|1770457554",
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    dispatch="2026-02-20T10:30:00Z",
+                    enroute="2026-02-20T10:32:00Z",
+                    on_scene="2026-02-20T10:40:00Z",
+                    cleared="2026-02-20T11:10:00Z",
+                    personnel=[
+                        PersonnelAssignment(name="Smith, John"),
+                        PersonnelAssignment(name="Doe, Jane"),
+                        PersonnelAssignment(name="Jones, Bob"),
+                        PersonnelAssignment(name="Lee, Chris"),
+                        PersonnelAssignment(name="Park, Sam"),
+                        PersonnelAssignment(name="Kim, Pat"),
+                    ],
+                ),
+            ],
+        )
+        # NERIS has staffing=4 but local has 6 personnel
+        neris_record["dispatch"]["unit_responses"][0]["staffing"] = 4
+        diff = _build_neris_diff(doc, neris_record)
+        assert "units" in diff
+        assert "E31.staffing" in diff["units"]["local"]
+        assert diff["units"]["local"]["E31.staffing"] == 6
+        assert diff["units"]["neris"]["E31.staffing"] == 4
+
+    def test_no_staffing_diff_when_matching(self, neris_record):
+        """No staffing diff when personnel count matches NERIS staffing."""
+        doc = IncidentDocument(
+            id="staffing-match",
+            incident_number="26-002358",
+            incident_datetime=datetime(2026, 2, 20, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26SJ0020|1770457554",
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    dispatch="2026-02-20T10:30:00Z",
+                    enroute="2026-02-20T10:32:00Z",
+                    on_scene="2026-02-20T10:40:00Z",
+                    cleared="2026-02-20T11:10:00Z",
+                    personnel=[
+                        PersonnelAssignment(name="Smith, John"),
+                        PersonnelAssignment(name="Doe, Jane"),
+                        PersonnelAssignment(name="Jones, Bob"),
+                        PersonnelAssignment(name="Lee, Chris"),
+                    ],
+                ),
+            ],
+        )
+        neris_record["dispatch"]["unit_responses"][0]["staffing"] = 4
+        diff = _build_neris_diff(doc, neris_record)
+        # Timestamps all match, staffing matches — no unit diff
+        assert "E31.staffing" not in diff.get("units", {}).get("local", {})
+
+    def test_staffing_diff_when_neris_has_none(self, neris_record):
+        """Detect staffing diff when NERIS has no staffing but local has personnel."""
+        doc = IncidentDocument(
+            id="staffing-none",
+            incident_number="26-002358",
+            incident_datetime=datetime(2026, 2, 20, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26SJ0020|1770457554",
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    dispatch="2026-02-20T10:30:00Z",
+                    enroute="2026-02-20T10:32:00Z",
+                    on_scene="2026-02-20T10:40:00Z",
+                    cleared="2026-02-20T11:10:00Z",
+                    personnel=[
+                        PersonnelAssignment(name="Smith, John"),
+                        PersonnelAssignment(name="Doe, Jane"),
+                        PersonnelAssignment(name="Jones, Bob"),
+                    ],
+                ),
+            ],
+        )
+        # NERIS has no staffing field
+        neris_record["dispatch"]["unit_responses"][0].pop("staffing", None)
+        diff = _build_neris_diff(doc, neris_record)
+        assert "E31.staffing" in diff["units"]["local"]
+        assert diff["units"]["local"]["E31.staffing"] == 3
+        assert diff["units"]["neris"]["E31.staffing"] is None
+
+    def test_detects_response_mode_diff(self, neris_record):
+        """Detect when local response_mode differs from NERIS."""
+        doc = IncidentDocument(
+            id="mode-test",
+            incident_number="26-002358",
+            incident_datetime=datetime(2026, 2, 20, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26SJ0020|1770457554",
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    dispatch="2026-02-20T10:30:00Z",
+                    enroute="2026-02-20T10:32:00Z",
+                    on_scene="2026-02-20T10:40:00Z",
+                    cleared="2026-02-20T11:10:00Z",
+                    response_mode="EMERGENT",
+                ),
+            ],
+        )
+        neris_record["dispatch"]["unit_responses"][0]["response_mode"] = "NON_EMERGENT"
+        diff = _build_neris_diff(doc, neris_record)
+        assert "E31.response_mode" in diff["units"]["local"]
+        assert diff["units"]["local"]["E31.response_mode"] == "EMERGENT"
+        assert diff["units"]["neris"]["E31.response_mode"] == "NON_EMERGENT"
+
+    def test_no_response_mode_diff_when_matching(self, neris_record):
+        """No diff when local response_mode matches NERIS."""
+        doc = IncidentDocument(
+            id="mode-match",
+            incident_number="26-002358",
+            incident_datetime=datetime(2026, 2, 20, tzinfo=UTC),
+            created_by="chief@sjifire.org",
+            neris_incident_id="FD53055879|26SJ0020|1770457554",
+            units=[
+                UnitAssignment(
+                    unit_id="E31",
+                    dispatch="2026-02-20T10:30:00Z",
+                    enroute="2026-02-20T10:32:00Z",
+                    on_scene="2026-02-20T10:40:00Z",
+                    cleared="2026-02-20T11:10:00Z",
+                    response_mode="EMERGENT",
+                ),
+            ],
+        )
+        neris_record["dispatch"]["unit_responses"][0]["response_mode"] = "EMERGENT"
+        diff = _build_neris_diff(doc, neris_record)
+        assert "E31.response_mode" not in diff.get("units", {}).get("local", {})
 
 
 class TestTimestampsEqual:
@@ -526,6 +672,90 @@ class TestBuildNerisPatch:
             "action": "set",
             "value": "26-001913",
         }
+
+    def test_staffing_patch_existing_unit(self):
+        """Staffing change on existing unit produces a patch with integer value (not timestamp)."""
+        diff = {
+            "units": {
+                "local": {"E31.staffing": 6},
+                "neris": {"E31.staffing": 4},
+                "neris_uids": {"E31": 101},
+            }
+        }
+        result = _build_neris_patch(diff)
+        actions = result["dispatch"]["properties"]["unit_responses"]
+        assert len(actions) == 1
+        assert actions[0]["neris_uid"] == 101
+        assert actions[0]["action"] == "patch"
+        assert actions[0]["properties"]["staffing"] == {
+            "action": "set",
+            "value": 6,
+        }
+
+    def test_staffing_patch_new_unit(self):
+        """Staffing on a new unit (no neris_uid) should be included in the append payload."""
+        diff = {
+            "units": {
+                "local": {
+                    "L31.dispatch": "2026-02-20T10:31:00Z",
+                    "L31.staffing": 6,
+                },
+                "neris": {
+                    "L31.dispatch": "",
+                    "L31.staffing": None,
+                },
+                "neris_uids": {},
+            }
+        }
+        result = _build_neris_patch(diff)
+        actions = result["dispatch"]["properties"]["unit_responses"]
+        assert len(actions) == 1
+        assert actions[0]["action"] == "append"
+        payload = actions[0]["value"]
+        assert payload["staffing"] == 6
+        # Timestamp should be UTC-converted
+        assert payload["dispatch"] == "2026-02-20T10:31:00+00:00"
+
+    def test_response_mode_patch_existing_unit(self):
+        """Response mode change on existing unit produces a patch with string value."""
+        diff = {
+            "units": {
+                "local": {"E31.response_mode": "EMERGENT"},
+                "neris": {"E31.response_mode": "NON_EMERGENT"},
+                "neris_uids": {"E31": 101},
+            }
+        }
+        result = _build_neris_patch(diff)
+        actions = result["dispatch"]["properties"]["unit_responses"]
+        assert len(actions) == 1
+        assert actions[0]["properties"]["response_mode"] == {
+            "action": "set",
+            "value": "EMERGENT",
+        }
+
+    def test_mixed_timestamp_and_staffing_patch(self):
+        """A unit with both timestamp and staffing changes patches both correctly."""
+        diff = {
+            "units": {
+                "local": {
+                    "E31.dispatch": "2026-02-20T10:31:00Z",
+                    "E31.staffing": 6,
+                },
+                "neris": {
+                    "E31.dispatch": "2026-02-20T10:30:00Z",
+                    "E31.staffing": 4,
+                },
+                "neris_uids": {"E31": 42},
+            }
+        }
+        result = _build_neris_patch(diff)
+        actions = result["dispatch"]["properties"]["unit_responses"]
+        assert len(actions) == 1
+        props = actions[0]["properties"]
+        # Timestamp should be UTC-converted
+        assert props["dispatch"] == {"action": "set", "value": "2026-02-20T10:31:00+00:00"}
+        # Staffing should be a plain integer
+        assert props["staffing"] == {"action": "set", "value": 6}
 
     def test_empty_diff_returns_empty_patch(self):
         patch = _build_neris_patch({})

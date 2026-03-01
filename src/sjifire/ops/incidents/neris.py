@@ -1078,42 +1078,65 @@ def _build_neris_diff(doc: IncidentDocument, neris_record: dict) -> dict:
             diff["timestamps"]["local"][local_key] = local_val
             diff["timestamps"]["neris"][neris_key] = neris_val
 
-    # Unit-level timestamps
+    # ── Unit-level fields ──
+    # Each entry: (local_field, neris_field, type) where type controls
+    # comparison and serialization:
+    #   "ts"  — ISO timestamp (compared with _timestamps_equal, serialized via to_utc_iso)
+    #   "str" — plain string (compared case-sensitive, passed through as-is)
+    unit_field_map: list[tuple[str, str, str]] = [
+        ("dispatch", "dispatch", "ts"),
+        ("enroute", "enroute_to_scene", "ts"),
+        ("staged", "staging", "ts"),
+        ("on_scene", "on_scene", "ts"),
+        ("cleared", "unit_clear", "ts"),
+        ("canceled", "canceled_enroute", "ts"),
+        ("response_mode", "response_mode", "str"),
+    ]
+
     neris_units = dispatch.get("unit_responses") or []
-    # Key by uppercase for case-insensitive matching; store NERIS reported_unit_id
     neris_unit_map_local: dict[str, dict] = {}
     for nu in neris_units:
         uid = nu.get("reported_unit_id") or _resolve_neris_unit_id(nu.get("unit_neris_id", ""))
         if uid:
             neris_unit_map_local[uid.upper()] = nu
 
-    field_map = {
-        "dispatch": "dispatch",
-        "enroute": "enroute_to_scene",
-        "staged": "staging",
-        "on_scene": "on_scene",
-        "cleared": "unit_clear",
-        "canceled": "canceled_enroute",
-    }
     for unit in doc.units:
         neris_unit = neris_unit_map_local.get(unit.unit_id.upper(), {})
-        neris_uid = neris_unit.get("neris_uid")  # NERIS internal ID for patching
+        neris_uid = neris_unit.get("neris_uid")
         neris_reported_id = neris_unit.get("reported_unit_id", "")
-        for local_field, neris_field in field_map.items():
+
+        # Collect changed fields for this unit: list of (local_field, local_val, neris_val)
+        changed: list[tuple[str, object, object]] = []
+
+        for local_field, neris_field, ftype in unit_field_map:
             local_val = getattr(unit, local_field, "")
             neris_val = neris_unit.get(neris_field) or ""
-            if local_val and not _timestamps_equal(local_val, neris_val):
-                diff.setdefault(
-                    "units",
-                    {"local": {}, "neris": {}, "neris_uids": {}, "reported_unit_ids": {}},
-                )
-                key = f"{unit.unit_id}.{local_field}"
-                diff["units"]["local"][key] = local_val
-                diff["units"]["neris"][key] = neris_val
-                if neris_uid is not None:
-                    diff["units"]["neris_uids"][unit.unit_id] = neris_uid
-                if neris_reported_id:
-                    diff["units"]["reported_unit_ids"][unit.unit_id] = neris_reported_id
+            if not local_val:
+                continue
+            if ftype == "ts" and _timestamps_equal(local_val, neris_val):
+                continue
+            if ftype == "str" and local_val == neris_val:
+                continue
+            changed.append((local_field, local_val, neris_val))
+
+        # Staffing: derived from personnel list length, compared to NERIS int
+        local_staffing = len(unit.personnel) if unit.personnel else None
+        neris_staffing = neris_unit.get("staffing")
+        if local_staffing and local_staffing != neris_staffing:
+            changed.append(("staffing", local_staffing, neris_staffing))
+
+        # Record all changes for this unit
+        for field, local_val, neris_val in changed:
+            diff.setdefault(
+                "units",
+                {"local": {}, "neris": {}, "neris_uids": {}, "reported_unit_ids": {}},
+            )
+            diff["units"]["local"][f"{unit.unit_id}.{field}"] = local_val
+            diff["units"]["neris"][f"{unit.unit_id}.{field}"] = neris_val
+            if neris_uid is not None:
+                diff["units"]["neris_uids"][unit.unit_id] = neris_uid
+            if neris_reported_id:
+                diff["units"]["reported_unit_ids"][unit.unit_id] = neris_reported_id
 
     # Incident type
     types = neris_record.get("incident_types") or []
@@ -1302,35 +1325,41 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
         }
 
     if "units" in diff:
-        # Unit timestamps are patched via dispatch.unit_responses as a list
+        # Unit fields are patched via dispatch.unit_responses as a list
         # of PatchDispatchUnitResponseAction (existing units with neris_uid)
         # or AppendDispatchUnitResponseAction (new units not yet in NERIS).
         neris_uids = diff["units"].get("neris_uids", {})
         reported_ids = diff["units"].get("reported_unit_ids", {})
 
+        # Local field → NERIS field name mapping; fields not listed pass through as-is
+        # (e.g. "staffing" and "response_mode" use the same name in NERIS).
+        patch_field_map = {
+            "dispatch": "dispatch",
+            "enroute": "enroute_to_scene",
+            "staged": "staging",
+            "on_scene": "on_scene",
+            "cleared": "unit_clear",
+            "canceled": "canceled_enroute",
+        }
+        # Fields whose values are ISO timestamps and need UTC conversion
+        ts_fields = set(patch_field_map.values())
+
         # Group local diffs by unit_id
         per_unit: dict[str, dict] = {}
         for key, val in diff["units"]["local"].items():
             uid, field = key.rsplit(".", 1)
-            neris_field_map = {
-                "dispatch": "dispatch",
-                "enroute": "enroute_to_scene",
-                "staged": "staging",
-                "on_scene": "on_scene",
-                "cleared": "unit_clear",
-                "canceled": "canceled_enroute",
-            }
-            neris_field = neris_field_map.get(field, field)
+            neris_field = patch_field_map.get(field, field)
             per_unit.setdefault(uid, {})[neris_field] = val
 
         unit_actions: list[dict] = []
         for unit_id, fields in per_unit.items():
             neris_uid = neris_uids.get(unit_id)
             if neris_uid is not None:
-                # Existing unit — patch its timestamp fields
+                # Existing unit — patch changed fields
                 unit_props = {}
                 for field_name, field_val in fields.items():
-                    unit_props[field_name] = {"action": "set", "value": to_utc_iso(field_val)}
+                    value = to_utc_iso(field_val) if field_name in ts_fields else field_val
+                    unit_props[field_name] = {"action": "set", "value": value}
                 unit_actions.append(
                     {
                         "neris_uid": neris_uid,
@@ -1345,7 +1374,7 @@ def _build_neris_patch(diff: dict, neris_record: dict | None = None) -> dict:
                 append_id = reported_ids.get(unit_id, unit_id)
                 payload = {"reported_unit_id": append_id}
                 for k, v in fields.items():
-                    payload[k] = to_utc_iso(v)
+                    payload[k] = to_utc_iso(v) if k in ts_fields else v
                 unit_actions.append(
                     {
                         "action": "append",
