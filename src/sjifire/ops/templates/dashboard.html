@@ -1311,20 +1311,6 @@ function dashboard() {
     _chatSubscription: null,
     _chatQueuedMessage: null,
 
-    // ── Events state ──
-    eventsUpcoming: [],
-    eventsPast: [],
-    eventsIsManager: false,
-    eventsLoaded: false,
-    eventsLoading: false,
-    eventsExpanded: null,
-    eventsCreating: false,
-    eventsShowParse: false,
-    eventsParseResults: [],
-    eventsParseRecordId: null,
-    eventsUpPage: 1,
-    eventsPastPage: 1,
-    eventsPerPage: 5,
 
     async init() {
       hashTab(['overview','calls','crew','reports','events'], 'overview').init.call(this);
@@ -1340,9 +1326,9 @@ function dashboard() {
         if (tab === 'reports' && !this.D.is_editor && !this.loading) {
           this.activeTab = 'overview';
         }
-        // Lazy-load events tab
-        if (tab === 'events' && !this.eventsLoaded && !this.eventsLoading) {
-          this.loadEvents();
+        // Lazy-load events tab (handled by eventsTab component via custom event)
+        if (tab === 'events') {
+          window.dispatchEvent(new CustomEvent('tab-activated', { detail: 'events' }));
         }
       });
 
@@ -1351,8 +1337,8 @@ function dashboard() {
         this.loadReports();
       }
       // Direct navigation to #events
-      if (this.activeTab === 'events' && !this.eventsLoaded) {
-        this.loadEvents();
+      if (this.activeTab === 'events') {
+        window.dispatchEvent(new CustomEvent('tab-activated', { detail: 'events' }));
       }
     },
 
@@ -1623,295 +1609,8 @@ function dashboard() {
       }
     },
 
-    // ── Events methods ──
-
-    async loadEvents() {
-      this.eventsLoading = true;
-      try {
-        const r = await authFetch('/events/data');
-        if (r.ok) {
-          const d = await r.json();
-          this.eventsUpcoming = d.upcoming || [];
-          this.eventsPast = d.past || [];
-          this.eventsIsManager = d.is_manager || false;
-          this.eventsLoaded = true;
-        }
-      } catch(e) {
-        console.error('Events load failed:', e);
-      }
-      this.eventsLoading = false;
-    },
-
-    eventsToggle(ev) {
-      const key = ev.event_id || ev.record_id;
-      this.eventsExpanded = this.eventsExpanded === key ? null : key;
-    },
-
-    eventsFormatDate(iso) {
-      if (!iso) return '';
-      return dayjs(iso).format('ddd, MMM D YYYY');
-    },
-    eventsFormatTimeRange(start, end) {
-      if (!start) return '';
-      const s = dayjs(start);
-      const sTime = s.format('h:mm A');
-      if (sTime === '12:00 AM') return '';
-      if (!end) return sTime;
-      const e = dayjs(end);
-      const eTime = e.format('h:mm A');
-      if (eTime === '12:00 AM') return sTime;
-      return sTime + ' \u2013 ' + eTime;
-    },
-
-    eventsMapsUrl(location) {
-      if (!location) return '';
-      return 'https://www.google.com/maps/search/' + encodeURIComponent(location);
-    },
-
-    eventsBadgeClass(src) {
-      if (!src) return '';
-      const s = src.toLowerCase();
-      if (s === 'training') return 'training';
-      if (s === 'pub-ed') return 'pub-ed';
-      if (s === 'manual') return 'manual';
-      return s.split(/[^a-z]/)[0] || '';
-    },
-
-    eventsUpPaged() {
-      const start = (this.eventsUpPage - 1) * this.eventsPerPage;
-      return this.eventsUpcoming.slice(start, start + this.eventsPerPage);
-    },
-    eventsUpTotalPages() {
-      return Math.max(1, Math.ceil(this.eventsUpcoming.length / this.eventsPerPage));
-    },
-    eventsPastPaged() {
-      const start = (this.eventsPastPage - 1) * this.eventsPerPage;
-      return this.eventsPast.slice(start, start + this.eventsPerPage);
-    },
-    eventsPastTotalPages() {
-      return Math.max(1, Math.ceil(this.eventsPast.length / this.eventsPerPage));
-    },
-
-    async eventsCreateFromEvent(ev) {
-      this.eventsCreating = true;
-      try {
-        const r = await authFetch('/events/records', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            calendar_event_id: ev.event_id,
-            calendar_source: ev.calendar_source,
-            subject: ev.subject,
-            start: ev.start,
-            end: ev.end,
-            location: ev.location,
-            description: ev.body_preview,
-          }),
-        });
-        if (r.ok) {
-          const rec = await r.json();
-          ev.has_record = true;
-          ev.record_id = rec.id;
-        }
-      } catch(e) { console.error(e); }
-      this.eventsCreating = false;
-    },
-
-    async eventsConfirmParsed() {
-      const selected = this.eventsParseResults.filter(a => a.include).map(a => ({
-        name: a.name,
-        email: a.email || null,
-        source: 'parsed',
-      }));
-      if (!selected.length) { this.eventsShowParse = false; return; }
-
-      try {
-        const r = await authFetch('/events/records/' + this.eventsParseRecordId);
-        if (!r.ok) return;
-        const rec = await r.json();
-        const existing = new Set(rec.attendees.map(a => (a.email || a.name).toLowerCase()));
-        const newAtts = selected.filter(a => !existing.has((a.email || a.name).toLowerCase()));
-        const merged = [...rec.attendees, ...newAtts];
-
-        await authFetch('/events/records/' + this.eventsParseRecordId, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ attendees: merged }),
-        });
-        this.eventsShowParse = false;
-        await this.loadEvents();
-      } catch(e) { console.error(e); }
-    }
   };
 }
 
-// ── Events record detail (nested Alpine component) ──
-function eventsRecordDetail(recordId) {
-  return {
-    rec: null,
-    loading: true,
-    uploading: false,
-    parsing: false,
-    addName: '',
-    suggestions: [],
-    _personnelCache: null,
-    _searchTimer: null,
-
-    async load() {
-      this.loading = true;
-      try {
-        const r = await authFetch('/events/records/' + recordId);
-        if (r.ok) this.rec = await r.json();
-      } catch(e) { console.error(e); }
-      this.loading = false;
-    },
-
-    get isManager() {
-      return this.$data.eventsIsManager !== undefined ? this.$data.eventsIsManager : false;
-    },
-
-    async saveAttendees() {
-      try {
-        await authFetch('/events/records/' + this.rec.id, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ attendees: this.rec.attendees }),
-        });
-      } catch(e) { console.error(e); }
-    },
-
-    async saveNotes() {
-      try {
-        await authFetch('/events/records/' + this.rec.id, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notes: this.rec.notes }),
-        });
-      } catch(e) { console.error(e); }
-    },
-
-    removeAttendee(i) {
-      this.rec.attendees.splice(i, 1);
-      this.saveAttendees();
-    },
-
-    async searchPersonnel() {
-      clearTimeout(this._searchTimer);
-      const term = this.addName.trim();
-      if (term.length < 2) { this.suggestions = []; return; }
-      this._searchTimer = setTimeout(async () => {
-        if (!this._personnelCache) {
-          try {
-            const r = await authFetch('/events/personnel');
-            if (r.ok) this._personnelCache = await r.json();
-            else this._personnelCache = [];
-          } catch(e) { this._personnelCache = []; }
-        }
-        const lower = term.toLowerCase();
-        this.suggestions = this._personnelCache.filter(
-          p => p.name.toLowerCase().includes(lower)
-        ).slice(0, 8);
-      }, 200);
-    },
-
-    addFromRoster(person) {
-      if (this.rec.attendees.some(a => a.email === person.email)) {
-        this.addName = '';
-        this.suggestions = [];
-        return;
-      }
-      this.rec.attendees.push({
-        name: person.name,
-        email: person.email,
-        source: 'manual',
-      });
-      this.addName = '';
-      this.suggestions = [];
-      this.saveAttendees();
-    },
-
-    addManualAttendee() {
-      const name = this.addName.trim();
-      if (!name) return;
-      this.suggestions = [];
-      this.rec.attendees.push({ name, email: null, source: 'manual' });
-      this.addName = '';
-      this.saveAttendees();
-    },
-
-    async uploadFile(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-      this.uploading = true;
-      try {
-        const form = new FormData();
-        form.append('file', file);
-        const r = await authFetch('/events/records/' + this.rec.id + '/upload', {
-          method: 'POST',
-          body: form,
-        });
-        if (r.ok) {
-          const data = await r.json();
-          this.rec.attachments.push(data.attachment);
-        } else {
-          const err = await r.json();
-          alert(err.error || 'Upload failed');
-        }
-      } catch(e) { console.error(e); }
-      this.uploading = false;
-      event.target.value = '';
-    },
-
-    async parseFromAttachment(attId) {
-      this.parsing = true;
-      try {
-        const r = await authFetch('/events/records/' + this.rec.id + '/parse', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ attachment_id: attId }),
-        });
-        if (r.ok) {
-          const data = await r.json();
-          const results = (data.attendees || []).map(a => ({ ...a, include: true }));
-          // Update parent dashboard scope
-          this.$dispatch('show-events-parse', { results, recordId: this.rec.id });
-        } else {
-          const err = await r.json();
-          alert(err.error || 'Parse failed');
-        }
-      } catch(e) { console.error(e); }
-      this.parsing = false;
-    },
-
-    async deleteAttachment(attId) {
-      if (!confirm('Delete this attachment?')) return;
-      try {
-        const r = await authFetch('/events/records/' + this.rec.id + '/attachments/' + attId, {
-          method: 'DELETE',
-        });
-        if (r.ok) {
-          this.rec.attachments = this.rec.attachments.filter(a => a.id !== attId);
-        }
-      } catch(e) { console.error(e); }
-    },
-
-    isParseableType(ct) {
-      return ct && (ct.startsWith('image/') || ct === 'application/pdf');
-    },
-  };
-}
-
-// Bridge parse modal events from nested eventsRecordDetail to parent dashboard
-document.addEventListener('alpine:init', () => {
-  window.addEventListener('show-events-parse', (e) => {
-    const root = document.querySelector('[x-data*="dashboard"]');
-    if (root && root.__x) {
-      const d = root.__x.$data;
-      d.eventsParseResults = e.detail.results;
-      d.eventsParseRecordId = e.detail.recordId;
-      d.eventsShowParse = true;
-    }
-  });
-});
 </script>
 {% endblock %}
