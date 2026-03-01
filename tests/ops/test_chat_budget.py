@@ -33,9 +33,13 @@ class TestCheckBudget:
         assert status.reason is None
 
     async def test_monthly_limit_exceeded(self):
+        from datetime import UTC, datetime
+
+        month = datetime.now(UTC).strftime("%Y-%m")
+
         # Pre-load a budget that's over the monthly limit
         async with BudgetStore() as store:
-            budget = await store.get_or_create("heavy@sjifire.org", "2026-02")
+            budget = await store.get_or_create("heavy@sjifire.org", month)
             budget.input_tokens = MONTHLY_TOKEN_LIMIT
             budget.output_tokens = 1
             await store.update(budget)
@@ -47,10 +51,11 @@ class TestCheckBudget:
     async def test_daily_limit_exceeded(self):
         from datetime import UTC, datetime
 
+        month = datetime.now(UTC).strftime("%Y-%m")
         today = datetime.now(UTC).strftime("%Y-%m-%d")
 
         async with BudgetStore() as store:
-            budget = await store.get_or_create("busy@sjifire.org", "2026-02")
+            budget = await store.get_or_create("busy@sjifire.org", month)
             budget.daily_tokens[today] = DAILY_TOKEN_LIMIT + 1
             await store.update(budget)
 

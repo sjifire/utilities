@@ -702,9 +702,7 @@ class TestTurnEventsIncludeUserAttribution:
 
         user_msgs = [d for _, t, d in events if t == "user_message"]
         assert len(user_msgs) == 1
-        assert user_msgs[0]["images"] == [
-            "/reports/inc-img-bcast/attachments/att-123"
-        ]
+        assert user_msgs[0]["images"] == ["/reports/inc-img-bcast/attachments/att-123"]
 
     async def test_409_includes_holder_identity_for_banner(self):
         """Verify 409 error body includes holder name/email for the client banner."""

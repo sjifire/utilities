@@ -766,8 +766,7 @@ async def run_chat(
         }
         if image_refs:
             broadcast_data["images"] = [
-                f"/reports/{incident_id}/attachments/{ref['attachment_id']}"
-                for ref in image_refs
+                f"/reports/{incident_id}/attachments/{ref['attachment_id']}" for ref in image_refs
             ]
         await publish(channel, "user_message", broadcast_data)
 
