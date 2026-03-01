@@ -74,6 +74,21 @@ async def websocket_proxy(ws: WebSocket) -> None:
     The browser connects to ``wss://ops.sjifire.org/connection/websocket``
     which ACA routes to FastAPI port 8000. We forward each frame to
     Centrifugo on ``ws://localhost:8001/connection/websocket``.
+
+    Keepalive note: The ``websockets`` library sends WebSocket-level pings
+    (control frames) every 20s by default and kills the connection if no
+    pong arrives within 20s. These control frames are NOT relayed to the
+    browser — each leg handles them independently. This is problematic
+    because:
+
+    1. The browser never sees upstream pings, so the browser→proxy leg
+       has no WebSocket-level keepalive (only TCP keepalive).
+    2. The upstream pong timeout can kill the proxy→Centrifugo leg during
+       slow operations (long tool calls, GC pauses).
+
+    We disable the library's keepalive and rely on Centrifugo's own
+    protocol-level ping/pong (empty JSON ``{}`` text frames), which flow
+    through the proxy as normal messages and keep both legs alive.
     """
     await ws.accept()
 
@@ -98,18 +113,19 @@ async def websocket_proxy(ws: WebSocket) -> None:
         async with websockets.connect(
             centrifugo_url,
             additional_headers=proxy_headers,
-            max_size=5 * 1024 * 1024,  # 5 MB — match Centrifugo limit
+            ping_interval=None,
+            ping_timeout=None,
+            max_size=5 * 1024 * 1024,
         ) as upstream:
             logger.info("WS proxy: upstream connected to %s", centrifugo_url)
 
-            # Forward frames in both directions concurrently
             async def client_to_upstream() -> None:
                 try:
                     while True:
                         data = await ws.receive_text()
                         await upstream.send(data)
                 except WebSocketDisconnect:
-                    logger.info("WS proxy: client disconnected")
+                    logger.debug("WS proxy: client disconnected")
 
             async def upstream_to_client() -> None:
                 try:
@@ -117,14 +133,14 @@ async def websocket_proxy(ws: WebSocket) -> None:
                         text = message if isinstance(message, str) else message.decode()
                         await ws.send_text(text)
                 except websockets.exceptions.ConnectionClosed as e:
-                    logger.warning(
+                    logger.info(
                         "WS proxy: upstream closed (code=%s reason=%s)",
                         e.code,
                         e.reason,
                     )
 
             # Run both directions; when either finishes, cancel the other
-            _done, pending = await asyncio.wait(
+            done, pending = await asyncio.wait(
                 [
                     asyncio.create_task(client_to_upstream()),
                     asyncio.create_task(upstream_to_client()),
@@ -133,6 +149,11 @@ async def websocket_proxy(ws: WebSocket) -> None:
             )
             for task in pending:
                 task.cancel()
+            # Surface unexpected errors from completed relay tasks
+            for task in done:
+                exc = task.exception()
+                if exc is not None:
+                    logger.warning("WS proxy: relay task failed", exc_info=exc)
 
     except Exception:
         logger.warning("WS proxy: connection failed", exc_info=True)
