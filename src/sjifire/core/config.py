@@ -174,6 +174,7 @@ class OrgConfig:
     calendar_category: str = ""
     station_address: str = ""
     skip_emails: list[str] = field(default_factory=list)
+    event_calendars: list[dict[str, str]] = field(default_factory=list)
 
 
 # Alias for backwards compatibility
@@ -258,6 +259,7 @@ def load_org_config() -> OrgConfig:
         calendar_category=config_data.get("calendar_category", ""),
         station_address=config_data.get("station_address", ""),
         skip_emails=config_data.get("skip_emails", []),
+        event_calendars=config_data.get("event_calendars", []),
     )
 
 

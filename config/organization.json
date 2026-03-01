@@ -58,6 +58,10 @@
     "aladtec.admin@sjifire.org",
     "api@sjifire.org"
   ],
+  "event_calendars": [
+    {"mailbox": "mhartzell@sjifire.org", "label": "Training", "calendar_name": "Training"},
+    {"mailbox": "kenglish@sjifire.org", "label": "Fire Prevention", "calendar_name": "Fire Prevention"}
+  ],
   "extension_attributes": {
     "extensionAttribute1": "Rank (Captain, Lieutenant, Chief, etc.)",
     "extensionAttribute2": "EVIP Expiration Date",

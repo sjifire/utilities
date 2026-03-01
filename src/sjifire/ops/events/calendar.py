@@ -1,8 +1,8 @@
 """Read events from Exchange shared mailbox calendars.
 
 Fetches events from one or more Exchange calendars and returns them
-as a merged, sorted list of dicts. Configuration via env var
-``EVENT_CALENDARS`` (JSON array).
+as a merged, sorted list of dicts. Calendar sources are configured in
+``config/organization.json`` under the ``event_calendars`` key.
 
 Each calendar source is a dict with:
 - ``mailbox``: Email address of the user/shared-mailbox
@@ -12,34 +12,18 @@ Each calendar source is a dict with:
 """
 
 import asyncio
-import json
 import logging
-import os
 from datetime import date, datetime, time
 
-from sjifire.core.config import get_domain, get_timezone_name
+from sjifire.core.config import get_timezone_name, load_org_config
 
 logger = logging.getLogger(__name__)
 
-# Default calendar when no env var is set — queries the default calendar
-# of training@<domain>. Override via EVENT_CALENDARS env var.
-_DEFAULT_CALENDARS = [{"mailbox": "training@{domain}", "label": "Training"}]
-
 
 def _get_calendar_sources() -> list[dict[str, str]]:
-    """Parse EVENT_CALENDARS env var or return the default."""
-    raw = os.getenv("EVENT_CALENDARS") or os.getenv("TRAINING_CALENDARS")
-    if raw:
-        try:
-            return json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("Invalid EVENT_CALENDARS env var, using default")
-
-    domain = get_domain()
-    return [
-        {"mailbox": s["mailbox"].format(domain=domain), "label": s["label"]}
-        for s in _DEFAULT_CALENDARS
-    ]
+    """Load calendar sources from organization config."""
+    org = load_org_config()
+    return org.event_calendars
 
 
 def _strip_html(html: str) -> str:
@@ -146,8 +130,6 @@ async def _fetch_one_calendar(
         return []
 
     # Station address for conference rooms (falls back to org config)
-    from sjifire.core.config import load_org_config
-
     org = load_org_config()
     station_address = org.station_address
 
