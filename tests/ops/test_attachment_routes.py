@@ -48,7 +48,7 @@ def _env(monkeypatch):
     monkeypatch.delenv("AZURE_STORAGE_ACCOUNT_URL", raising=False)
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("ENTRA_MCP_API_CLIENT_ID", raising=False)
-    monkeypatch.setattr("sjifire.ops.attachments.routes._get_user", _fake_get_user)
+    monkeypatch.setattr("sjifire.ops.attachments.routes.get_request_user", _fake_get_user)
 
 
 class _FakeUploadFile:
@@ -74,7 +74,7 @@ class _FakeRequest:
 
 class TestUploadRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes._get_user", _fake_get_user_none)
+        monkeypatch.setattr("sjifire.ops.attachments.routes.get_request_user", _fake_get_user_none)
         from sjifire.ops.attachments.routes import upload_attachment_route
 
         req = _FakeRequest(path_params={"incident_id": "inc-1"})
@@ -122,7 +122,7 @@ class TestUploadRoute:
 
 class TestListRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes._get_user", _fake_get_user_none)
+        monkeypatch.setattr("sjifire.ops.attachments.routes.get_request_user", _fake_get_user_none)
         from sjifire.ops.attachments.routes import list_attachments_route
 
         req = _FakeRequest(path_params={"incident_id": "inc-1"})
@@ -132,7 +132,7 @@ class TestListRoute:
 
 class TestDownloadRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes._get_user", _fake_get_user_none)
+        monkeypatch.setattr("sjifire.ops.attachments.routes.get_request_user", _fake_get_user_none)
         from sjifire.ops.attachments.routes import download_attachment_route
 
         req = _FakeRequest(
@@ -197,7 +197,7 @@ class TestDownloadRoute:
 
 class TestDeleteRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes._get_user", _fake_get_user_none)
+        monkeypatch.setattr("sjifire.ops.attachments.routes.get_request_user", _fake_get_user_none)
         from sjifire.ops.attachments.routes import delete_attachment_route
 
         req = _FakeRequest(
@@ -486,7 +486,7 @@ class TestConversationHistoryImages:
 
         with (
             patch("sjifire.ops.chat.routes.ConversationStore", cls),
-            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
+            patch("sjifire.ops.chat.routes.get_request_user", _fake_get_user),
             patch("sjifire.ops.chat.routes.check_is_editor", return_value=True),
         ):
             resp = await conversation_history(req)
@@ -525,7 +525,7 @@ class TestConversationHistoryImages:
 
         with (
             patch("sjifire.ops.chat.routes.ConversationStore", cls),
-            patch("sjifire.ops.chat.routes._get_user", _fake_get_user),
+            patch("sjifire.ops.chat.routes.get_request_user", _fake_get_user),
             patch("sjifire.ops.chat.routes.check_is_editor", return_value=True),
         ):
             resp = await conversation_history(req)

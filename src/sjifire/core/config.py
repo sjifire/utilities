@@ -172,7 +172,9 @@ class OrgConfig:
     schedule_section_labels: dict[str, str] = field(default_factory=dict)
     duty_event_subject: str = ""
     calendar_category: str = ""
+    station_address: str = ""
     skip_emails: list[str] = field(default_factory=list)
+    event_calendars: list[dict[str, str]] = field(default_factory=list)
 
 
 # Alias for backwards compatibility
@@ -255,7 +257,9 @@ def load_org_config() -> OrgConfig:
         schedule_section_labels=config_data.get("schedule_section_labels", {}),
         duty_event_subject=config_data.get("duty_event_subject", ""),
         calendar_category=config_data.get("calendar_category", ""),
+        station_address=config_data.get("station_address", ""),
         skip_emails=config_data.get("skip_emails", []),
+        event_calendars=config_data.get("event_calendars", []),
     )
 
 

@@ -676,6 +676,33 @@ class TestTurnEventsIncludeUserAttribution:
         assert user_msgs[0]["user_email"] == TEST_USER.email
         assert user_msgs[0]["user_name"] == TEST_USER.name
         assert user_msgs[0]["content"] == "Hello team"
+        assert "images" not in user_msgs[0]  # no images → no key
+
+    async def test_user_message_broadcast_includes_images(self):
+        """When image_refs are provided, broadcast includes image URLs."""
+        from sjifire.ops.chat.engine import run_chat
+
+        await seed_incident("inc-img-bcast")
+
+        fake_publish, events = make_event_capturer()
+        client = make_fake_client([FakeStream(text_events("Photo noted."))])
+
+        image_refs = [{"attachment_id": "att-123", "content_type": "image/jpeg"}]
+        images = [{"media_type": "image/jpeg", "data": "base64data"}]
+
+        with _integration_patches(client, fake_publish):
+            await run_chat(
+                "inc-img-bcast",
+                "See this photo",
+                TEST_USER,
+                channel="ch",
+                images=images,
+                image_refs=image_refs,
+            )
+
+        user_msgs = [d for _, t, d in events if t == "user_message"]
+        assert len(user_msgs) == 1
+        assert user_msgs[0]["images"] == ["/reports/inc-img-bcast/attachments/att-123"]
 
     async def test_409_includes_holder_identity_for_banner(self):
         """Verify 409 error body includes holder name/email for the client banner."""

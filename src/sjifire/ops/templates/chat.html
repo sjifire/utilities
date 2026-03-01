@@ -2247,13 +2247,15 @@ function chatApp() {
       if (type === 'user_message') {
         // Message from another user — add it to our local view
         if (data.user_email !== this.currentUserEmail) {
-          this.messages.push({
+          const m = {
             type: 'message',
             role: 'user',
             content: data.content,
             sender_email: data.user_email,
             sender_name: data.user_name,
-          });
+          };
+          if (data.images && data.images.length) m.images = data.images;
+          this.messages.push(m);
           this.scrollToBottom();
         }
         return;

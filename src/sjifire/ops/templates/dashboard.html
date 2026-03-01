@@ -577,6 +577,161 @@
       .help-row { flex-direction: column; gap: 6px; }
       .help-label { min-width: 0; }
     }
+
+    /* ── Events tab ── */
+    .evt-event-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .evt-event-card:hover {
+      border-color: var(--border-strong);
+      background: var(--bg-panel-alt);
+    }
+    .evt-event-card.evt-expanded {
+      border-color: rgba(96, 165, 250, .3);
+    }
+    .evt-event-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .evt-event-subject {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .evt-event-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 3px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .evt-event-meta > :nth-child(n+2)::before {
+      content: '\b7';
+      margin-right: 6px;
+      color: var(--text-dim);
+    }
+    .evt-event-badges {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .evt-source-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .evt-source-badge.training { background: var(--blue-alpha); color: var(--color-blue); }
+    .evt-source-badge.pub-ed   { background: var(--purple-alpha); color: var(--color-purple); }
+    .evt-source-badge.manual   { background: var(--amber-alpha); color: var(--color-amber); }
+    .evt-count-badge {
+      font-size: 10px;
+      background: rgba(255,255,255,.08);
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: var(--text-muted);
+    }
+    .evt-event-detail {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .evt-detail-section { margin-bottom: 14px; }
+    .evt-detail-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text-dim);
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .evt-attendee-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .evt-attendee-chip {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .evt-attendee-chip.matched   { background: var(--green-alpha); color: var(--color-green); }
+    .evt-attendee-chip.unmatched { background: var(--amber-alpha); color: var(--color-amber); }
+    .evt-attendee-chip.uncertain { background: var(--red-alpha); color: var(--color-error); }
+    .evt-remove-btn { cursor: pointer; opacity: .6; font-size: 14px; line-height: 1; }
+    .evt-remove-btn:hover { opacity: 1; }
+    .evt-attachment-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: var(--text-muted);
+      background: rgba(255,255,255,.02);
+      margin-bottom: 4px;
+    }
+    .evt-attachment-item a { color: var(--color-blue); text-decoration: none; }
+    .evt-attachment-item a:hover { text-decoration: underline; }
+    .evt-form-input {
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--border-medium);
+      border-radius: 5px;
+      padding: 8px 12px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      width: 100%;
+      font-family: inherit;
+    }
+    .evt-form-input:focus { outline: none; border-color: rgba(96,165,250,.4); }
+    .evt-form-input::placeholder { color: var(--text-faint); }
+    .evt-typeahead-wrap { position: relative; }
+    .evt-typeahead-list {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: var(--bg-panel-alt);
+      border: 1px solid var(--border-medium);
+      border-radius: 0 0 5px 5px;
+      max-height: 160px;
+      overflow-y: auto;
+      z-index: 10;
+    }
+    .evt-typeahead-item {
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .evt-typeahead-item:hover { background: var(--blue-alpha); color: var(--color-blue); }
+    .evt-spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border-medium);
+      border-top-color: var(--color-blue);
+      border-radius: 50%;
+      animation: shimmer-spin .6s linear infinite;
+    }
+    @keyframes shimmer-spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 768px) {
+      .evt-event-top { flex-direction: column; align-items: flex-start; gap: 6px; }
+    }
 </style>
 {% endblock %}
 
@@ -1032,6 +1187,8 @@
     </template>
   </div><!-- /reports-layout -->
 
+  {% include "partials/_events_tab.html" %}
+
 </main>
 
 <footer class="content-wrap dashboard-footer">
@@ -1103,13 +1260,14 @@ function dashboard() {
     },
     loading: true,
     error: false,
-    ...hashTab(['overview','calls','crew','reports'], 'overview'),
+    ...hashTab(['overview','calls','crew','events','reports'], 'overview'),
 
     get tabs() {
       const t = [
         {id: 'overview', label: 'Overview'},
         {id: 'calls', label: 'Recent Calls'},
-        {id: 'crew', label: 'On Duty'}
+        {id: 'crew', label: 'On Duty'},
+        {id: 'events', label: 'Events'}
       ];
       if (this.D.is_editor) t.push({id: 'reports', label: 'Reports'});
       return t;
@@ -1153,8 +1311,23 @@ function dashboard() {
     _chatSubscription: null,
     _chatQueuedMessage: null,
 
+    // ── Events state ──
+    eventsUpcoming: [],
+    eventsPast: [],
+    eventsIsManager: false,
+    eventsLoaded: false,
+    eventsLoading: false,
+    eventsExpanded: null,
+    eventsCreating: false,
+    eventsShowParse: false,
+    eventsParseResults: [],
+    eventsParseRecordId: null,
+    eventsUpPage: 1,
+    eventsPastPage: 1,
+    eventsPerPage: 5,
+
     async init() {
-      hashTab(['overview','calls','crew','reports'], 'overview').init.call(this);
+      hashTab(['overview','calls','crew','reports','events'], 'overview').init.call(this);
       await this.refresh();
       setInterval(() => this.refresh(), 3600000);
 
@@ -1167,11 +1340,19 @@ function dashboard() {
         if (tab === 'reports' && !this.D.is_editor && !this.loading) {
           this.activeTab = 'overview';
         }
+        // Lazy-load events tab
+        if (tab === 'events' && !this.eventsLoaded && !this.eventsLoading) {
+          this.loadEvents();
+        }
       });
 
       // Direct navigation to #reports — watcher won't fire since value didn't change
       if (this.activeTab === 'reports' && this.D.is_editor && !this.reportsLoaded) {
         this.loadReports();
+      }
+      // Direct navigation to #events
+      if (this.activeTab === 'events' && !this.eventsLoaded) {
+        this.loadEvents();
       }
     },
 
@@ -1440,8 +1621,297 @@ function dashboard() {
         this.chatStreaming = false;
         this.chatScrollToBottom(true);
       }
+    },
+
+    // ── Events methods ──
+
+    async loadEvents() {
+      this.eventsLoading = true;
+      try {
+        const r = await authFetch('/events/data');
+        if (r.ok) {
+          const d = await r.json();
+          this.eventsUpcoming = d.upcoming || [];
+          this.eventsPast = d.past || [];
+          this.eventsIsManager = d.is_manager || false;
+          this.eventsLoaded = true;
+        }
+      } catch(e) {
+        console.error('Events load failed:', e);
+      }
+      this.eventsLoading = false;
+    },
+
+    eventsToggle(ev) {
+      const key = ev.event_id || ev.record_id;
+      this.eventsExpanded = this.eventsExpanded === key ? null : key;
+    },
+
+    eventsFormatDate(iso) {
+      if (!iso) return '';
+      return dayjs(iso).format('ddd, MMM D YYYY');
+    },
+    eventsFormatTimeRange(start, end) {
+      if (!start) return '';
+      const s = dayjs(start);
+      const sTime = s.format('h:mm A');
+      if (sTime === '12:00 AM') return '';
+      if (!end) return sTime;
+      const e = dayjs(end);
+      const eTime = e.format('h:mm A');
+      if (eTime === '12:00 AM') return sTime;
+      return sTime + ' \u2013 ' + eTime;
+    },
+
+    eventsMapsUrl(location) {
+      if (!location) return '';
+      return 'https://www.google.com/maps/search/' + encodeURIComponent(location);
+    },
+
+    eventsBadgeClass(src) {
+      if (!src) return '';
+      const s = src.toLowerCase();
+      if (s === 'training') return 'training';
+      if (s === 'pub-ed') return 'pub-ed';
+      if (s === 'manual') return 'manual';
+      return s.split(/[^a-z]/)[0] || '';
+    },
+
+    eventsUpPaged() {
+      const start = (this.eventsUpPage - 1) * this.eventsPerPage;
+      return this.eventsUpcoming.slice(start, start + this.eventsPerPage);
+    },
+    eventsUpTotalPages() {
+      return Math.max(1, Math.ceil(this.eventsUpcoming.length / this.eventsPerPage));
+    },
+    eventsPastPaged() {
+      const start = (this.eventsPastPage - 1) * this.eventsPerPage;
+      return this.eventsPast.slice(start, start + this.eventsPerPage);
+    },
+    eventsPastTotalPages() {
+      return Math.max(1, Math.ceil(this.eventsPast.length / this.eventsPerPage));
+    },
+
+    async eventsCreateFromEvent(ev) {
+      this.eventsCreating = true;
+      try {
+        const r = await authFetch('/events/records', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            calendar_event_id: ev.event_id,
+            calendar_source: ev.calendar_source,
+            subject: ev.subject,
+            start: ev.start,
+            end: ev.end,
+            location: ev.location,
+            description: ev.body_preview,
+          }),
+        });
+        if (r.ok) {
+          const rec = await r.json();
+          ev.has_record = true;
+          ev.record_id = rec.id;
+        }
+      } catch(e) { console.error(e); }
+      this.eventsCreating = false;
+    },
+
+    async eventsConfirmParsed() {
+      const selected = this.eventsParseResults.filter(a => a.include).map(a => ({
+        name: a.name,
+        email: a.email || null,
+        source: 'parsed',
+      }));
+      if (!selected.length) { this.eventsShowParse = false; return; }
+
+      try {
+        const r = await authFetch('/events/records/' + this.eventsParseRecordId);
+        if (!r.ok) return;
+        const rec = await r.json();
+        const existing = new Set(rec.attendees.map(a => (a.email || a.name).toLowerCase()));
+        const newAtts = selected.filter(a => !existing.has((a.email || a.name).toLowerCase()));
+        const merged = [...rec.attendees, ...newAtts];
+
+        await authFetch('/events/records/' + this.eventsParseRecordId, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attendees: merged }),
+        });
+        this.eventsShowParse = false;
+        await this.loadEvents();
+      } catch(e) { console.error(e); }
     }
   };
 }
+
+// ── Events record detail (nested Alpine component) ──
+function eventsRecordDetail(recordId) {
+  return {
+    rec: null,
+    loading: true,
+    uploading: false,
+    parsing: false,
+    addName: '',
+    suggestions: [],
+    _personnelCache: null,
+    _searchTimer: null,
+
+    async load() {
+      this.loading = true;
+      try {
+        const r = await authFetch('/events/records/' + recordId);
+        if (r.ok) this.rec = await r.json();
+      } catch(e) { console.error(e); }
+      this.loading = false;
+    },
+
+    get isManager() {
+      return this.$data.eventsIsManager !== undefined ? this.$data.eventsIsManager : false;
+    },
+
+    async saveAttendees() {
+      try {
+        await authFetch('/events/records/' + this.rec.id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attendees: this.rec.attendees }),
+        });
+      } catch(e) { console.error(e); }
+    },
+
+    async saveNotes() {
+      try {
+        await authFetch('/events/records/' + this.rec.id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes: this.rec.notes }),
+        });
+      } catch(e) { console.error(e); }
+    },
+
+    removeAttendee(i) {
+      this.rec.attendees.splice(i, 1);
+      this.saveAttendees();
+    },
+
+    async searchPersonnel() {
+      clearTimeout(this._searchTimer);
+      const term = this.addName.trim();
+      if (term.length < 2) { this.suggestions = []; return; }
+      this._searchTimer = setTimeout(async () => {
+        if (!this._personnelCache) {
+          try {
+            const r = await authFetch('/events/personnel');
+            if (r.ok) this._personnelCache = await r.json();
+            else this._personnelCache = [];
+          } catch(e) { this._personnelCache = []; }
+        }
+        const lower = term.toLowerCase();
+        this.suggestions = this._personnelCache.filter(
+          p => p.name.toLowerCase().includes(lower)
+        ).slice(0, 8);
+      }, 200);
+    },
+
+    addFromRoster(person) {
+      if (this.rec.attendees.some(a => a.email === person.email)) {
+        this.addName = '';
+        this.suggestions = [];
+        return;
+      }
+      this.rec.attendees.push({
+        name: person.name,
+        email: person.email,
+        source: 'manual',
+      });
+      this.addName = '';
+      this.suggestions = [];
+      this.saveAttendees();
+    },
+
+    addManualAttendee() {
+      const name = this.addName.trim();
+      if (!name) return;
+      this.suggestions = [];
+      this.rec.attendees.push({ name, email: null, source: 'manual' });
+      this.addName = '';
+      this.saveAttendees();
+    },
+
+    async uploadFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      this.uploading = true;
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const r = await authFetch('/events/records/' + this.rec.id + '/upload', {
+          method: 'POST',
+          body: form,
+        });
+        if (r.ok) {
+          const data = await r.json();
+          this.rec.attachments.push(data.attachment);
+        } else {
+          const err = await r.json();
+          alert(err.error || 'Upload failed');
+        }
+      } catch(e) { console.error(e); }
+      this.uploading = false;
+      event.target.value = '';
+    },
+
+    async parseFromAttachment(attId) {
+      this.parsing = true;
+      try {
+        const r = await authFetch('/events/records/' + this.rec.id + '/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attachment_id: attId }),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          const results = (data.attendees || []).map(a => ({ ...a, include: true }));
+          // Update parent dashboard scope
+          this.$dispatch('show-events-parse', { results, recordId: this.rec.id });
+        } else {
+          const err = await r.json();
+          alert(err.error || 'Parse failed');
+        }
+      } catch(e) { console.error(e); }
+      this.parsing = false;
+    },
+
+    async deleteAttachment(attId) {
+      if (!confirm('Delete this attachment?')) return;
+      try {
+        const r = await authFetch('/events/records/' + this.rec.id + '/attachments/' + attId, {
+          method: 'DELETE',
+        });
+        if (r.ok) {
+          this.rec.attachments = this.rec.attachments.filter(a => a.id !== attId);
+        }
+      } catch(e) { console.error(e); }
+    },
+
+    isParseableType(ct) {
+      return ct && (ct.startsWith('image/') || ct === 'application/pdf');
+    },
+  };
+}
+
+// Bridge parse modal events from nested eventsRecordDetail to parent dashboard
+document.addEventListener('alpine:init', () => {
+  window.addEventListener('show-events-parse', (e) => {
+    const root = document.querySelector('[x-data*="dashboard"]');
+    if (root && root.__x) {
+      const d = root.__x.$data;
+      d.eventsParseResults = e.detail.results;
+      d.eventsParseRecordId = e.detail.recordId;
+      d.eventsShowParse = true;
+    }
+  });
+});
 </script>
 {% endblock %}

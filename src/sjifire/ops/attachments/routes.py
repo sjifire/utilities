@@ -24,17 +24,9 @@ from sjifire.ops.attachments.tools import (
 from sjifire.ops.attachments.tools import (
     upload_attachment as _upload_tool,
 )
-from sjifire.ops.auth import get_easyauth_user, set_current_user
+from sjifire.ops.auth import get_request_user
 
 logger = logging.getLogger(__name__)
-
-
-def _get_user(request: Request):
-    """Extract authenticated user from EasyAuth headers."""
-    user = get_easyauth_user(request)
-    if user:
-        set_current_user(user)
-    return user
 
 
 async def upload_attachment_route(request: Request) -> Response:
@@ -46,7 +38,7 @@ async def upload_attachment_route(request: Request) -> Response:
     - ``description``: Optional description (form field)
     - ``for_parsing``: Optional "true" to return image data for LLM
     """
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -95,7 +87,7 @@ async def upload_attachment_route(request: Request) -> Response:
 
 async def list_attachments_route(request: Request) -> Response:
     """List all attachments for an incident (JSON)."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -108,7 +100,7 @@ async def list_attachments_route(request: Request) -> Response:
 
 async def download_attachment_route(request: Request) -> Response:
     """Download an attachment blob directly."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -148,7 +140,7 @@ async def download_attachment_route(request: Request) -> Response:
 
 async def delete_attachment_route(request: Request) -> Response:
     """Delete an attachment via HTTP."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 

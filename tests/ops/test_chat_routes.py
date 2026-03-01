@@ -80,7 +80,7 @@ def _patch_auth(monkeypatch):
     from sjifire.ops.chat.turn_lock import TurnLockStore
 
     monkeypatch.delenv("ENTRA_MCP_API_CLIENT_ID", raising=False)
-    monkeypatch.setattr("sjifire.ops.chat.routes._get_user", _fake_get_user)
+    monkeypatch.setattr("sjifire.ops.chat.routes.get_request_user", _fake_get_user)
     # Bypass editor check for RPC tests
     monkeypatch.setattr("sjifire.ops.chat.centrifugo.check_is_editor", AsyncMock(return_value=True))
     TurnLockStore._memory.clear()

@@ -47,6 +47,7 @@ from sjifire.ops.chat.routes import (
     reopen_report,
 )
 from sjifire.ops.dispatch import tools as dispatch_tools
+from sjifire.ops.events import routes as event_routes
 from sjifire.ops.incidents import tools as incident_tools
 from sjifire.ops.neris import tools as neris_tools
 from sjifire.ops.personnel import tools as personnel_tools
@@ -215,7 +216,11 @@ async def dashboard_page(request: Request) -> Response:
         return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=/dashboard")
     # In dev mode, _DevAuthMiddleware already set the user
     html = await dashboard.render_for_browser()
-    return Response(html, media_type="text/html")
+    return Response(
+        html,
+        media_type="text/html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @mcp.custom_route("/dashboard/data", methods=["GET"])
@@ -338,6 +343,18 @@ async def kiosk_data(request: Request) -> Response:
     return JSONResponse(data)
 
 
+@mcp.custom_route("/events", methods=["GET"])
+async def _events_page_view(request: Request) -> Response:
+    """Redirect to the dashboard events tab."""
+    return await event_routes.events_page(request)
+
+
+@mcp.custom_route("/events/data", methods=["GET"])
+async def _events_data_view(request: Request) -> Response:
+    """Return combined calendar events + event records as JSON."""
+    return await event_routes.events_data(request)
+
+
 @mcp.custom_route("/health", methods=["GET"])
 async def health(request: Request) -> JSONResponse:
     """Health check endpoint."""
@@ -407,6 +424,61 @@ app.routes.insert(
         methods=["GET"],
     ),
 )
+
+# Events routes — parameterized paths via Starlette Route
+app.routes.insert(
+    0,
+    Route(
+        "/events/records/{record_id}/attachments/{att_id}",
+        event_routes.download_attachment,
+        methods=["GET"],
+    ),
+)
+app.routes.insert(
+    0,
+    Route(
+        "/events/records/{record_id}/attachments/{att_id}",
+        event_routes.delete_attachment,
+        methods=["DELETE"],
+    ),
+)
+app.routes.insert(
+    0,
+    Route("/events/records/{record_id}/upload", event_routes.upload_file, methods=["POST"]),
+)
+app.routes.insert(
+    0,
+    Route("/events/records/{record_id}/parse", event_routes.parse_attendees, methods=["POST"]),
+)
+app.routes.insert(
+    0,
+    Route("/events/records/{record_id}", event_routes.get_record, methods=["GET"]),
+)
+app.routes.insert(
+    0,
+    Route("/events/records/{record_id}", event_routes.update_record, methods=["PATCH"]),
+)
+app.routes.insert(
+    0,
+    Route("/events/records", event_routes.create_record, methods=["POST"]),
+)
+
+
+# Events personnel endpoint for typeahead
+async def _events_personnel(request: Request) -> Response:
+    """Return personnel list for event attendee typeahead."""
+    user = get_easyauth_user(request)
+    if user:
+        set_current_user(user)
+    elif provider is not None:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    from sjifire.ops.personnel.tools import get_personnel
+
+    personnel = await get_personnel()
+    return JSONResponse(personnel)
+
+
+app.routes.insert(0, Route("/events/personnel", _events_personnel, methods=["GET"]))
 
 # General chat routes (not tied to an incident)
 app.routes.insert(0, Route("/chat/history", general_chat_history))

@@ -113,6 +113,8 @@ properties:
             value: "true"
           - name: CENTRIFUGO_CLIENT_MESSAGE_SIZE_LIMIT
             value: "5242880"
+          - name: CENTRIFUGO_WEBSOCKET_MESSAGE_SIZE_LIMIT
+            value: "5242880"
           - name: CENTRIFUGO_CHANNEL_NAMESPACES
             value: '[{"name":"chat","history_size":100,"history_ttl":"5m","force_recovery":true,"subscribe_proxy_enabled":true,"presence":true,"join_leave":true,"force_push_join_leave":true}]'
         # No liveness probe — Container Apps probes on sidecar containers

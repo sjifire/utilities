@@ -759,11 +759,16 @@ async def run_chat(
 
         # Broadcast user message to other subscribers (multi-user awareness).
         # The sender already has this message locally — clients filter by email.
-        await publish(
-            channel,
-            "user_message",
-            {"content": safe_message, "user_email": user.email, "user_name": user.name},
-        )
+        broadcast_data: dict = {
+            "content": safe_message,
+            "user_email": user.email,
+            "user_name": user.name,
+        }
+        if image_refs:
+            broadcast_data["images"] = [
+                f"/reports/{incident_id}/attachments/{ref['attachment_id']}" for ref in image_refs
+            ]
+        await publish(channel, "user_message", broadcast_data)
 
         # Persist user message — must await create (so subsequent saves are
         # updates, not conflicts), but updates can run in background.
