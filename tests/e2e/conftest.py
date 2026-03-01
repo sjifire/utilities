@@ -129,6 +129,16 @@ def _seeded(_server_process, base_url: str):
     return resp.json()
 
 
+@pytest.fixture(scope="session")
+def kiosk_token():
+    """Generate a valid kiosk token using the dev signing key."""
+    from itsdangerous import URLSafeSerializer
+
+    dev_key = "kiosk-dev-signing-key-not-for-production"
+    s = URLSafeSerializer(dev_key, salt="kiosk-token")
+    return s.dumps({"label": "e2e-test"})
+
+
 @pytest.fixture
 def page(browser, base_url: str):
     """Fresh browser context and page per test, with base_url set."""

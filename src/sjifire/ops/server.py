@@ -513,9 +513,11 @@ if os.getenv("TESTING") == "1":
             ScheduleStore._memory[sched_data["date"]] = sched_data
             seeded["schedule"] = seeded.get("schedule", 0) + 1
 
-        # Clear the dashboard cache so seeded data is picked up immediately
+        # Clear dashboard + kiosk caches so seeded data is picked up immediately
         dashboard._open_docs_cache = None
         dashboard._open_docs_ts = 0
+        dashboard._kiosk_cache = None
+        dashboard._kiosk_cache_ts = 0
 
         return JSONResponse({"seeded": seeded})
 
