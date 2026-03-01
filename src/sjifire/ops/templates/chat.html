@@ -1486,9 +1486,10 @@ function lockedApp() {
 }
 {% else %}
 function chatApp() {
-  // How long (ms) to wait with no streaming events before polling the server.
-  // Covers silent WS drops where the done event is lost.
-  const STREAMING_WATCHDOG_MS = 30_000;
+  // Safety net: if no streaming events arrive for this long, poll the server.
+  // With the proxy keepalive fix this should rarely fire — it catches server
+  // crashes or engine hangs where a done event is never published.
+  const STREAMING_WATCHDOG_MS = 60_000;
 
   // Stable color palette for presence avatars
   const _avatarColors = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981','#06b6d4','#f97316','#6366f1'];
@@ -1534,8 +1535,8 @@ function chatApp() {
     presenceUsers: {},   // {email: {name, initials, color}} — excludes self
     turnHolder: null,    // {email, name} — who has the current turn
     _blockedMessage: null, // Message blocked by 409, auto-retry after done
-    _localTurnActive: false, // True when this session initiated an RPC turn
     _streamingWatchdog: null, // Safety timer: polls server if no events arrive
+    _recoveryRetried: false, // Tracks whether watchdog has re-armed once already
 
     get presenceLabel() {
       const names = Object.values(this.presenceUsers).map(u => u.name.split(' ')[0]);
@@ -1589,17 +1590,22 @@ function chatApp() {
       this._subscription.subscribe();
       this._centrifuge.connect();
 
-      // On (re)subscribe: recover any missed messages and refresh presence
-      this._subscription.on('subscribed', async () => {
-        // If we were streaming when the connection dropped, poll server for missed turns
-        if (this.streaming) {
-          console.log('Reconnected while streaming — polling server for recovery');
+      // On (re)subscribe: use centrifuge-js recovery flags and refresh presence
+      this._subscription.on('subscribed', async (ctx) => {
+        // centrifuge-js tracks stream position and asks Centrifugo to replay
+        // missed publications on reconnect (force_recovery: true server-side).
+        // ctx.wasRecovering tells us this was a reconnect, ctx.recovered tells
+        // us whether all missed messages were successfully replayed.
+        if (ctx.wasRecovering && !ctx.recovered && this.streaming) {
+          // History buffer expired or insufficient — fall back to Cosmos DB
+          console.log('Centrifugo recovery incomplete — reloading from server');
           this._pollForRecovery();
         }
-        // Refresh presence
+        // Refresh presence (join/leave events are at-most-once delivery,
+        // so always do a full query on subscribe to get accurate state)
         try {
           const result = await this._subscription.presence();
-          this.presenceUsers = {};  // Clear stale presence
+          this.presenceUsers = {};
           for (const [, info] of Object.entries(result.clients || {})) {
             const email = info.user || '';
             const connInfo = info.conn_info || {};
@@ -1616,67 +1622,27 @@ function chatApp() {
         }
       });
 
-      // Load conversation history (always, even after reset — the engine
-      // clears stale messages server-side, so whatever comes back is current)
+      // Load conversation history
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
         if (res.ok) {
           const data = await res.json();
-          for (const msg of data.messages || []) {
-            if (msg.content) {
-              const m = {type: 'message', role: msg.role, content: msg.content};
-              if (msg.images && msg.images.length) m.images = msg.images;
-              this.messages.push(m);
-            }
-            if (msg.tool_use) {
-              // Collapse consecutive same-tool entries into one pill
-              const grouped = [];
-              for (const tu of msg.tool_use) {
-                const prev = grouped[grouped.length - 1];
-                if (prev && prev.name === tu.name) {
-                  prev.count++;
-                } else {
-                  grouped.push({name: tu.name, count: 1});
-                }
-              }
-              for (const g of grouped) {
-                const summary = g.count > 1
-                  ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups`
-                  : g.name + ' completed';
-                this.messages.push({
-                  type: 'tool',
-                  label: '',
-                  toolName: g.name,
-                  pending: false,
-                  pendingCount: 0,
-                  totalCount: g.count,
-                  summary,
-                  is_error: false
-                });
-              }
-            }
-          }
-          this._turnCount = data.turn_count || 0;
-          this.scrollToBottom(true);
+          this._loadMessages(data);
         }
       } catch (e) {
         console.error('Failed to load history:', e);
       }
 
       if (this.messages.length === 0 && !isReset) {
-        // Truly fresh conversation (no reset in progress) — auto-start
+        // Truly fresh conversation — auto-start
         this.$nextTick(() => this.sendMessage('Begin report'));
       } else if (this.messages.length === 0 && isReset) {
-        // Reset just happened — the server turn is still running.
-        // Show typing indicator and wait for events to arrive via WS.
+        // Reset just happened — server turn still running
         this.streaming = true;
       } else if (!isReset) {
         // Existing conversation — check if the agent's response was lost
         const lastMsg = this.messages[this.messages.length - 1];
         if (lastMsg && lastMsg.type === 'message' && lastMsg.role === 'user') {
-          // Last saved message was from the user — response may be in-flight
-          // or lost. Show typing indicator and let _pollForRecovery handle it
-          // (fires on next WS subscribe). Avoids duplicate sends.
           this.streaming = true;
           this._pollForRecovery();
         }
@@ -2014,18 +1980,6 @@ function chatApp() {
       await this._sendViaRPC(displayText, images);
     },
 
-    _setTurnActive(active) {
-      // Persist turn state across page reloads (EasyAuth 401 → reload)
-      try {
-        const key = 'turnActive:' + this.incidentId;
-        if (active) sessionStorage.setItem(key, '1');
-        else sessionStorage.removeItem(key);
-      } catch {}
-    },
-    _isTurnActive() {
-      try { return sessionStorage.getItem('turnActive:' + this.incidentId) === '1'; } catch { return false; }
-    },
-
     _waitForConnect(timeoutMs = 10000) {
       // Return a promise that resolves when the centrifuge client is connected.
       // If already connected, resolves immediately. Times out to avoid hanging.
@@ -2044,8 +1998,6 @@ function chatApp() {
     async _sendViaRPC(displayText, images) {
       this.streaming = true;
       this.currentText = '';
-      this._localTurnActive = true;
-      this._setTurnActive(true);
       this._startStreamingWatchdog();
 
       const payload = {
@@ -2059,25 +2011,10 @@ function chatApp() {
       try {
         await this._waitForConnect();
         await this._centrifuge.rpc('send_message', payload);
-        // RPC succeeded — events arrive on same WS, in order
       } catch (err) {
+        // Handle turn lock conflict (409)
         if (err.code === 409) {
-          // Turn lock conflict — parse holder info from error message
-          let holder = 'another user', holderEmail = '';
-          try {
-            const info = JSON.parse(err.message);
-            holder = info.holder_name || holder;
-            holderEmail = info.holder_email || '';
-          } catch {}
-          this.turnHolder = {email: holderEmail, name: holder};
-          this._blockedMessage = {displayText, images};
-          // Same-user lock: keep streaming for typing dots
-          // Other-user lock: stop streaming, banner shows instead
-          if (holderEmail && holderEmail === this.currentUserEmail) {
-            // streaming stays true — dots show until previous turn's done event
-          } else {
-            this.streaming = false;
-          }
+          this._handle409(err, displayText, images);
           return;
         }
 
@@ -2088,38 +2025,36 @@ function chatApp() {
             console.log('Chat RPC: transient error, retrying after reconnect…', err.message);
             await this._waitForConnect();
             await this._centrifuge.rpc('send_message', payload);
-            return; // retry succeeded
+            return;
           } catch (retryErr) {
             if (retryErr.code === 409) {
-              let holder = 'another user', holderEmail = '';
-              try {
-                const info = JSON.parse(retryErr.message);
-                holder = info.holder_name || holder;
-                holderEmail = info.holder_email || '';
-              } catch {}
-              this.turnHolder = {email: holderEmail, name: holder};
-              this._blockedMessage = {displayText, images};
-              if (holderEmail && holderEmail === this.currentUserEmail) {
-                // streaming stays true
-              } else {
-                this.streaming = false;
-              }
+              this._handle409(retryErr, displayText, images);
               return;
             }
-            err = retryErr; // fall through to error display
+            err = retryErr;
           }
         }
 
         console.error('Chat RPC error:', err);
-        // Remove the user message that was optimistically added (unsent)
         const lastMsg = this.messages[this.messages.length - 1];
         if (lastMsg && lastMsg.role === 'user') this.messages.pop();
         this.messages.push({type: 'error', content: 'Message failed to send — please try again. (' + (err.message || 'connection error') + ')'});
-        // Restore the text so the user doesn't have to retype
         this.inputText = lastMsg?.content || '';
         this.streaming = false;
-        this._localTurnActive = false;
-        this._setTurnActive(false);
+      }
+    },
+
+    _handle409(err, displayText, images) {
+      let holder = 'another user', holderEmail = '';
+      try {
+        const info = JSON.parse(err.message);
+        holder = info.holder_name || holder;
+        holderEmail = info.holder_email || '';
+      } catch {}
+      this.turnHolder = {email: holderEmail, name: holder};
+      this._blockedMessage = {displayText, images};
+      if (!(holderEmail && holderEmail === this.currentUserEmail)) {
+        this.streaming = false;
       }
     },
 
@@ -2142,92 +2077,98 @@ function chatApp() {
       }
     },
 
+    _loadMessages(data) {
+      // Shared loader for conversation data (init + recovery).
+      this.messages = [];
+      this.currentText = '';
+      for (const msg of data.messages || []) {
+        if (msg.content) {
+          const m = {type: 'message', role: msg.role, content: msg.content};
+          if (msg.images && msg.images.length) m.images = msg.images;
+          this.messages.push(m);
+        }
+        if (msg.tool_use) {
+          const grouped = [];
+          for (const tu of msg.tool_use) {
+            const prev = grouped[grouped.length - 1];
+            if (prev && prev.name === tu.name) prev.count++;
+            else grouped.push({name: tu.name, count: 1});
+          }
+          for (const g of grouped) {
+            const summary = g.count > 1
+              ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups`
+              : g.name + ' completed';
+            this.messages.push({
+              type: 'tool', label: '', toolName: g.name,
+              pending: false, pendingCount: 0, totalCount: g.count,
+              summary, is_error: false
+            });
+          }
+        }
+      }
+      this._turnCount = data.turn_count || 0;
+      if (data.status) this.status = data.status;
+      this.scrollToBottom(true);
+    },
+
     async _pollForRecovery() {
-      // Poll server to recover from missed events (reconnection or watchdog)
+      // Fallback recovery: reload full state from Cosmos DB.
+      // Called when centrifuge-js history recovery fails or watchdog fires.
       this._resetStreamingWatchdog();
       if (!this.streaming) return;
       try {
         const res = await authFetch(`/reports/${this.incidentId}/conversation`);
         if (!res.ok) {
-          // Fetch failed (non-401) — stop spinner so user isn't stuck
           this.streaming = false;
-          this._setTurnActive(false);
           return;
         }
         const data = await res.json();
         const serverTurnCount = data.turn_count || 0;
 
         if (serverTurnCount > this._turnCount) {
+          // Turn completed while we were disconnected — reload
           console.log(`Turn completed (${this._turnCount} → ${serverTurnCount}), recovering`);
-          this.currentText = '';
-          this.messages = [];
-          for (const msg of data.messages || []) {
-            if (msg.content) {
-              const m = {type: 'message', role: msg.role, content: msg.content};
-              if (msg.images && msg.images.length) m.images = msg.images;
-              this.messages.push(m);
-            }
-            if (msg.tool_use) {
-              const grouped = [];
-              for (const tu of msg.tool_use) {
-                const prev = grouped[grouped.length - 1];
-                if (prev && prev.name === tu.name) prev.count++;
-                else grouped.push({name: tu.name, count: 1});
-              }
-              for (const g of grouped) {
-                const summary = g.count > 1
-                  ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups`
-                  : g.name + ' completed';
-                this.messages.push({
-                  type: 'tool', label: '', toolName: g.name,
-                  pending: false, pendingCount: 0, totalCount: g.count,
-                  summary, is_error: false
-                });
-              }
-            }
-          }
-          this._turnCount = serverTurnCount;
-          if (data.status) this.status = data.status;
+          this._loadMessages(data);
           this.streaming = false;
-          this._localTurnActive = false;
-          this._setTurnActive(false);
           this.turnHolder = null;
-          this.scrollToBottom(true);
-          // Process queued messages after recovery (same as done handler)
-          if (this._messageQueue.length) {
-            const queued = this._messageQueue.shift();
-            const msgObj = {type: 'message', role: 'user', content: queued.displayText};
-            if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
-            this.messages.push(msgObj);
-            this.$nextTick(() => {
-              this.scrollToBottom(true);
-              this._sendViaRPC(queued.displayText, queued.images);
-            });
-          } else if (this._blockedMessage) {
-            const blocked = this._blockedMessage;
-            this._blockedMessage = null;
-            this.$nextTick(() => this._sendViaRPC(blocked.displayText, blocked.images));
+          this._drainQueue();
+        } else if (serverTurnCount === this._turnCount) {
+          // No new turn — either still in-flight or stale spinner.
+          // Re-arm watchdog once; if it fires again we'll stop the spinner.
+          if (!this._recoveryRetried) {
+            this._recoveryRetried = true;
+            console.log('No new server turn yet — re-arming watchdog');
+            this._startStreamingWatchdog();
           } else {
+            console.log('No new server turn after retry — stopping spinner');
+            this._recoveryRetried = false;
+            this.streaming = false;
             this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
           }
-        } else if (this._localTurnActive) {
-          // Local RPC turn in flight — don't kill the spinner.
-          // Re-arm watchdog so we poll again if still no response.
-          console.log('No new server turn but local turn active — re-arming watchdog');
-          this._startStreamingWatchdog();
-        } else {
-          // Server has no new turn and no local turn — stop the spinner.
-          // This handles stale page-load recovery (e.g. tab was closed
-          // before the response arrived and the turn has since expired).
-          console.log('No new server turn — stopping recovery spinner');
-          this.streaming = false;
-          this._setTurnActive(false);
-          this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
         }
       } catch (e) {
         console.warn('Recovery poll failed:', e);
         this.streaming = false;
-        this._setTurnActive(false);
+      }
+    },
+
+    _drainQueue() {
+      // Process the next queued or blocked message after a turn completes.
+      if (this._messageQueue.length) {
+        const queued = this._messageQueue.shift();
+        const msgObj = {type: 'message', role: 'user', content: queued.displayText};
+        if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
+        this.messages.push(msgObj);
+        this.$nextTick(() => {
+          this.scrollToBottom(true);
+          this._sendViaRPC(queued.displayText, queued.images);
+        });
+      } else if (this._blockedMessage) {
+        const blocked = this._blockedMessage;
+        this._blockedMessage = null;
+        this.$nextTick(() => this._sendViaRPC(blocked.displayText, blocked.images));
+      } else {
+        this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
       }
     },
 
@@ -2351,37 +2292,11 @@ function chatApp() {
           this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
           this.currentText = '';
         }
-        this._turnCount++;  // Track completed turn
+        this._turnCount++;
         this.streaming = false;
-        this._localTurnActive = false;
-        this._setTurnActive(false);
-        this.turnHolder = null;  // Turn lock released
-        // Wait for Alpine DOM flush (chat-hints appear, streaming-msg removed)
-        // so the messages container height is correct before scrolling.
+        this.turnHolder = null;
         this.$nextTick(() => this.scrollToBottom(true));
-
-        // Send next queued message if user typed while we were streaming.
-        // Move it from the queue into the messages array (after finalized
-        // assistant text) so it appears in the correct chronological order.
-        if (this._messageQueue.length) {
-          const queued = this._messageQueue.shift();
-          const msgObj = {type: 'message', role: 'user', content: queued.displayText};
-          if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
-          this.messages.push(msgObj);
-          this.$nextTick(() => {
-            this.scrollToBottom(true);
-            this._sendViaRPC(queued.displayText, queued.images);
-          });
-          return;
-        }
-        // Auto-retry message that was blocked by turn lock (409)
-        if (this._blockedMessage) {
-          const blocked = this._blockedMessage;
-          this._blockedMessage = null;
-          this.$nextTick(() => this._sendViaRPC(blocked.displayText, blocked.images));
-          return;
-        }
-        this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+        this._drainQueue();
       } else if (type === 'error') {
         this._resetStreamingWatchdog();
         console.error('Chat error:', data);
@@ -2390,24 +2305,11 @@ function chatApp() {
           this.currentText = '';
         }
         this.messages.push({type: 'error', content: data.message});
-        this._turnCount++;  // Error turns also increment server-side
+        this._turnCount++;
         this.streaming = false;
-        this._localTurnActive = false;
-        this._setTurnActive(false);
-        this.turnHolder = null;  // Turn lock released on error too
+        this.turnHolder = null;
         this.$nextTick(() => this.scrollToBottom(true));
-
-        // Process queued messages even after errors
-        if (this._messageQueue.length) {
-          const queued = this._messageQueue.shift();
-          const msgObj = {type: 'message', role: 'user', content: queued.displayText};
-          if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
-          this.messages.push(msgObj);
-          this.$nextTick(() => {
-            this.scrollToBottom(true);
-            this._sendViaRPC(queued.displayText, queued.images);
-          });
-        }
+        this._drainQueue();
       }
     }
   };
