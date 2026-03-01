@@ -1,5 +1,7 @@
 """Tests for chat budget enforcement."""
 
+from datetime import UTC, datetime
+
 import pytest
 
 from sjifire.ops.chat.budget import (
@@ -9,6 +11,8 @@ from sjifire.ops.chat.budget import (
     record_usage,
 )
 from sjifire.ops.chat.store import BudgetStore
+
+_CURRENT_MONTH = datetime.now(UTC).strftime("%Y-%m")
 
 
 async def _noop_container(name):
@@ -33,13 +37,9 @@ class TestCheckBudget:
         assert status.reason is None
 
     async def test_monthly_limit_exceeded(self):
-        from datetime import UTC, datetime
-
-        month = datetime.now(UTC).strftime("%Y-%m")
-
         # Pre-load a budget that's over the monthly limit
         async with BudgetStore() as store:
-            budget = await store.get_or_create("heavy@sjifire.org", month)
+            budget = await store.get_or_create("heavy@sjifire.org", _CURRENT_MONTH)
             budget.input_tokens = MONTHLY_TOKEN_LIMIT
             budget.output_tokens = 1
             await store.update(budget)
@@ -49,13 +49,10 @@ class TestCheckBudget:
         assert "Monthly" in status.reason
 
     async def test_daily_limit_exceeded(self):
-        from datetime import UTC, datetime
-
-        month = datetime.now(UTC).strftime("%Y-%m")
         today = datetime.now(UTC).strftime("%Y-%m-%d")
 
         async with BudgetStore() as store:
-            budget = await store.get_or_create("busy@sjifire.org", month)
+            budget = await store.get_or_create("busy@sjifire.org", _CURRENT_MONTH)
             budget.daily_tokens[today] = DAILY_TOKEN_LIMIT + 1
             await store.update(budget)
 
@@ -67,8 +64,6 @@ class TestCheckBudget:
 class TestRecordUsage:
     async def test_records_tokens(self):
         await record_usage("user@sjifire.org", input_tokens=500, output_tokens=100)
-
-        from datetime import UTC, datetime
 
         month = datetime.now(UTC).strftime("%Y-%m")
         async with BudgetStore() as store:
@@ -82,8 +77,6 @@ class TestRecordUsage:
         await record_usage("user@sjifire.org", input_tokens=500, output_tokens=100)
         await record_usage("user@sjifire.org", input_tokens=300, output_tokens=200)
 
-        from datetime import UTC, datetime
-
         month = datetime.now(UTC).strftime("%Y-%m")
         async with BudgetStore() as store:
             budget = await store.get_or_create("user@sjifire.org", month)
@@ -92,8 +85,6 @@ class TestRecordUsage:
         assert budget.output_tokens == 300
 
     async def test_tracks_daily_tokens(self):
-        from datetime import UTC, datetime
-
         today = datetime.now(UTC).strftime("%Y-%m-%d")
 
         await record_usage("user@sjifire.org", input_tokens=1000, output_tokens=500)

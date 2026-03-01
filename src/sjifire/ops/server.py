@@ -489,6 +489,38 @@ app.routes.insert(0, Route("/centrifugo/rpc", rpc_proxy, methods=["POST"]))
 app.routes.insert(0, Route("/centrifugo/connect", connect_proxy, methods=["POST"]))
 app.routes.insert(0, Route("/centrifugo/subscribe", subscribe_proxy, methods=["POST"]))
 
+# Test-only route: seed in-memory stores with fixture data
+if os.getenv("TESTING") == "1":
+
+    async def _test_seed(request: Request) -> JSONResponse:
+        """Populate in-memory stores with test fixture data.
+
+        Only available when TESTING=1.  Accepts JSON with optional keys:
+        ``dispatch_calls`` (list of Cosmos-serialized DispatchCallDocument dicts)
+        and ``schedule`` (list of Cosmos-serialized DayScheduleCache dicts).
+        """
+        from sjifire.ops.dispatch.store import DispatchStore
+        from sjifire.ops.schedule.store import ScheduleStore
+
+        body = await request.json()
+        seeded: dict[str, int] = {}
+
+        for call_data in body.get("dispatch_calls", []):
+            DispatchStore._memory[call_data["id"]] = call_data
+            seeded["dispatch_calls"] = seeded.get("dispatch_calls", 0) + 1
+
+        for sched_data in body.get("schedule", []):
+            ScheduleStore._memory[sched_data["date"]] = sched_data
+            seeded["schedule"] = seeded.get("schedule", 0) + 1
+
+        # Clear the dashboard cache so seeded data is picked up immediately
+        dashboard._open_docs_cache = None
+        dashboard._open_docs_ts = 0
+
+        return JSONResponse({"seeded": seeded})
+
+    app.routes.insert(0, Route("/test/seed", _test_seed, methods=["POST"]))
+
 # Dev mode: inject synthetic user context on every request
 if provider is None:
     app.add_middleware(_DevAuthMiddleware)
