@@ -24,7 +24,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user
+from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user, set_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +360,19 @@ async def _handle_send_message(data: dict, user: UserContext) -> Response:
     is_editor = await check_is_editor(user.user_id, email=user.email)
     if not is_editor:
         return JSONResponse({"error": {"code": 403, "message": "Editor role required"}})
+
+    # Set user context so downstream tools (upload_attachment, etc.) can
+    # access the authenticated user via get_current_user().
+    from sjifire.ops.auth import _get_editor_group_id
+
+    editor_group = _get_editor_group_id()
+    user = UserContext(
+        email=user.email,
+        name=user.name,
+        user_id=user.user_id,
+        groups=frozenset({editor_group}) if editor_group else frozenset(),
+    )
+    set_current_user(user)
 
     # Parse optional image attachments
     images: list[dict] | None = None
