@@ -150,9 +150,7 @@ def test_kiosk_seeded_shows_archived_calls(seeded_page, kiosk_token):
 
     # At minimum, the call natures from seeded data should appear if archived calls render
     has_calls = (
-        "Structure Fire" in page_text
-        or "ALS Medical" in page_text
-        or "Fire Alarm" in page_text
+        "Structure Fire" in page_text or "ALS Medical" in page_text or "Fire Alarm" in page_text
     )
     # Or we're in idle state (if archived calls aren't showing — depends on timing)
     has_idle = seeded_page.locator(".idle-state").is_visible()
