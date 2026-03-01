@@ -26,7 +26,7 @@ from sjifire.ops.auth import (
     UserContext,
     _current_user,
     check_is_editor,
-    get_easyauth_user,
+    get_request_user,
     set_current_user,
 )
 from sjifire.ops.chat.store import ConversationStore
@@ -182,14 +182,6 @@ def _forbidden_page() -> Response:
     return Response(html, status_code=403, media_type="text/html")
 
 
-def _get_user(request: Request) -> UserContext | None:
-    """Extract authenticated user from request."""
-    user = get_easyauth_user(request)
-    if user:
-        set_current_user(user)
-    return user
-
-
 async def _require_auth(
     request: Request,
     *,
@@ -201,7 +193,7 @@ async def _require_auth(
     Returns UserContext on success, or an error Response on failure.
     html=True returns redirect/HTML-forbidden; html=False returns JSON errors.
     """
-    user = _get_user(request)
+    user = get_request_user(request)
     is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
 
     if not user and not is_dev:
@@ -493,7 +485,7 @@ async def debug_context(request: Request) -> Response:
 
     # This endpoint is dev-only (guarded by ENTRA_MCP_API_CLIENT_ID above),
     # so no further auth checks needed.
-    user = _get_user(request)
+    user = get_request_user(request)
     if not user:
         from sjifire.ops.auth import _current_user
 

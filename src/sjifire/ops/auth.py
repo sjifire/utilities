@@ -257,6 +257,18 @@ def set_current_user(user: UserContext) -> None:
     _current_user.set(user)
 
 
+def get_request_user(request: Request) -> UserContext | None:
+    """Extract authenticated user from EasyAuth headers and set context.
+
+    Convenience wrapper used by HTTP route handlers — combines
+    ``get_easyauth_user`` + ``set_current_user`` in one call.
+    """
+    user = get_easyauth_user(request)
+    if user:
+        _current_user.set(user)
+    return user
+
+
 def get_easyauth_user(request: Request) -> UserContext | None:
     """Extract user identity from Azure Container Apps EasyAuth headers.
 

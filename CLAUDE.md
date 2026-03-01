@@ -149,6 +149,12 @@ src/sjifire/
 │   │   ├── store.py       # Azure Blob Storage client with in-memory fallback
 │   │   ├── tools.py       # MCP tools: upload, list, get, delete
 │   │   └── routes.py      # HTTP routes for browser upload/download
+│   ├── events/            # Training/event records (Cosmos DB + Outlook calendar)
+│   │   ├── models.py      # EventRecord, EventAttachmentMeta (Pydantic)
+│   │   ├── store.py       # CosmosStore subclass with in-memory fallback
+│   │   ├── routes.py      # HTTP routes: CRUD, file upload/download, attendance parsing
+│   │   ├── calendar.py    # Outlook calendar integration (create/sync events)
+│   │   └── parser.py      # Claude vision attendance sheet parser + roster matching
 │   ├── incidents/         # Incident reporting (Cosmos DB + NERIS)
 │   │   ├── models.py      # IncidentDocument, CrewAssignment (Pydantic)
 │   │   ├── neris_models.py # Pydantic input models for NERIS API records

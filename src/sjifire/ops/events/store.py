@@ -6,16 +6,15 @@ for local development and testing.
 
 import logging
 from datetime import UTC, datetime
-from typing import ClassVar, Self
+from typing import ClassVar
 
-from sjifire.core.config import get_cosmos_container
+from sjifire.ops.cosmos import CosmosStore
 from sjifire.ops.events.models import EventRecord
 
 logger = logging.getLogger(__name__)
-CONTAINER_NAME = "events"
 
 
-class EventStore:
+class EventStore(CosmosStore):
     """Async CRUD for event records in Cosmos DB.
 
     Falls back to in-memory storage when Cosmos DB is not configured.
@@ -27,23 +26,8 @@ class EventStore:
             records = await store.list_by_year("2026")
     """
 
+    _container_name: ClassVar[str] = "events"
     _memory: ClassVar[dict[str, dict]] = {}
-
-    def __init__(self) -> None:
-        """Initialize store. Call ``__aenter__`` to connect."""
-        self._container = None
-        self._in_memory = False
-
-    async def __aenter__(self) -> Self:
-        """Get a container client from the shared Cosmos connection pool."""
-        self._container = await get_cosmos_container(CONTAINER_NAME)
-        if self._container is None:
-            self._in_memory = True
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """No-op — shared Cosmos client stays alive."""
-        self._container = None
 
     async def upsert(self, doc: EventRecord) -> EventRecord:
         """Create or update an event record."""
@@ -63,13 +47,11 @@ class EventStore:
             data = self._memory.get(record_id)
             return EventRecord.from_cosmos(data) if data else None
 
-        query = "SELECT * FROM c WHERE c.id = @id"
-        parameters: list[dict] = [{"name": "@id", "value": record_id}]
-        async for item in self._container.query_items(
-            query=query, parameters=parameters, max_item_count=1
-        ):
-            return EventRecord.from_cosmos(item)
-        return None
+        return await self._query_one(
+            "SELECT * FROM c WHERE c.id = @id",
+            [{"name": "@id", "value": record_id}],
+            EventRecord,
+        )
 
     async def get_by_calendar_event_id(self, event_id: str) -> EventRecord | None:
         """Find an event record by calendar event ID (cross-partition)."""
@@ -79,13 +61,11 @@ class EventStore:
                     return EventRecord.from_cosmos(data)
             return None
 
-        query = "SELECT * FROM c WHERE c.calendar_event_id = @eid"
-        parameters: list[dict] = [{"name": "@eid", "value": event_id}]
-        async for item in self._container.query_items(
-            query=query, parameters=parameters, max_item_count=1
-        ):
-            return EventRecord.from_cosmos(item)
-        return None
+        return await self._query_one(
+            "SELECT * FROM c WHERE c.calendar_event_id = @eid",
+            [{"name": "@eid", "value": event_id}],
+            EventRecord,
+        )
 
     async def list_by_year(self, year: str) -> list[EventRecord]:
         """List all event records for a year (single-partition)."""
@@ -96,14 +76,13 @@ class EventStore:
             results.sort(key=lambda r: r.event_date)
             return results
 
-        query = "SELECT * FROM c WHERE c.year = @year ORDER BY c.event_date ASC"
-        parameters: list[dict] = [{"name": "@year", "value": year}]
-        return [
-            EventRecord.from_cosmos(item)
-            async for item in self._container.query_items(
-                query=query, parameters=parameters, partition_key=year
-            )
-        ]
+        return await self._query_many(
+            "SELECT * FROM c WHERE c.year = @year ORDER BY c.event_date ASC",
+            [{"name": "@year", "value": year}],
+            EventRecord,
+            max_items=500,
+            partition_key=year,
+        )
 
     async def list_recent(self, *, max_items: int = 200) -> list[EventRecord]:
         """List recent event records (cross-partition, newest first)."""
@@ -112,13 +91,12 @@ class EventStore:
             results.sort(key=lambda r: r.event_date, reverse=True)
             return results[:max_items]
 
-        query = "SELECT * FROM c ORDER BY c.event_date DESC"
-        items = []
-        async for item in self._container.query_items(query=query, max_item_count=max_items):
-            items.append(EventRecord.from_cosmos(item))
-            if len(items) >= max_items:
-                break
-        return items
+        return await self._query_many(
+            "SELECT * FROM c ORDER BY c.event_date DESC",
+            None,
+            EventRecord,
+            max_items=max_items,
+        )
 
     async def delete(self, record_id: str, year: str) -> None:
         """Delete an event record."""

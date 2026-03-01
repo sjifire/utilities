@@ -24,8 +24,7 @@ from sjifire.ops.attachments.store import AttachmentBlobStore
 from sjifire.ops.auth import (
     UserContext,
     check_group_membership,
-    get_easyauth_user,
-    set_current_user,
+    get_request_user,
 )
 from sjifire.ops.events.models import (
     AttendeeRecord,
@@ -50,13 +49,6 @@ def _get_event_managers_group_id() -> str:
             or os.getenv("ENTRA_REPORT_EDITORS_GROUP_ID", "")
         )
     return _EVENT_MANAGERS_GROUP_ID
-
-
-def _get_user(request: Request) -> UserContext | None:
-    user = get_easyauth_user(request)
-    if user:
-        set_current_user(user)
-    return user
 
 
 async def _is_manager(user: UserContext) -> bool:
@@ -85,7 +77,7 @@ async def events_page(request: Request) -> Response:
 
 async def events_data(request: Request) -> Response:
     """Return combined calendar events + event records as JSON."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -203,7 +195,7 @@ async def events_data(request: Request) -> Response:
 
 async def get_record(request: Request) -> Response:
     """Get full event record detail."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -219,7 +211,7 @@ async def get_record(request: Request) -> Response:
 
 async def create_record(request: Request) -> Response:
     """Create an event record (calendar-linked or manual)."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
     if not await _is_manager(user):
@@ -266,7 +258,7 @@ async def create_record(request: Request) -> Response:
 
 async def update_record(request: Request) -> Response:
     """Update an event record (attendees, notes, etc.)."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
     if not await _is_manager(user):
@@ -308,7 +300,7 @@ async def update_record(request: Request) -> Response:
 
 async def upload_file(request: Request) -> Response:
     """Upload a file attachment to an event record."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
     if not await _is_manager(user):
@@ -370,7 +362,7 @@ async def upload_file(request: Request) -> Response:
 
 async def parse_attendees(request: Request) -> Response:
     """Parse attendees from an attachment or raw text."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
     if not await _is_manager(user):
@@ -430,7 +422,7 @@ async def parse_attendees(request: Request) -> Response:
 
 async def download_attachment(request: Request) -> Response:
     """Download an event attachment."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -461,7 +453,7 @@ async def download_attachment(request: Request) -> Response:
 
 async def delete_attachment(request: Request) -> Response:
     """Delete an event attachment."""
-    user = _get_user(request)
+    user = get_request_user(request)
     if user is None:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
     if not await _is_manager(user):

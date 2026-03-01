@@ -80,7 +80,7 @@ def _patch_user(user):
         set_current_user(user)
         return user
 
-    return patch("sjifire.ops.chat.routes._get_user", _fake_get_user)
+    return patch("sjifire.ops.chat.routes.get_request_user", _fake_get_user)
 
 
 class TestTurnLockInRoutes:
