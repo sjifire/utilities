@@ -59,6 +59,8 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.0.0",
+    "pytest-playwright>=0.6.2",
+    "polyfactory>=2.19.0",
     "respx>=0.22.0",
     "hypothesis>=6.100.0",
 ]
@@ -107,7 +109,8 @@ convention = "google"
 "src/sjifire/scripts/*.py" = ["T201", "S603", "S607"]  # CLI scripts: print, subprocess calls
 "src/sjifire/ops/tasks/runner.py" = ["T201"]  # CLI runner uses print for output
 "scripts/*.py" = ["T201"]  # Utility scripts use print for output
-"tests/**/*.py" = ["S101", "S105", "S106", "D101", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords, skip docstrings, allow long lines
+"tests/**/*.py" = ["S101", "S105", "S106", "S603", "D101", "D102", "D103", "E501"]  # Tests: allow assert/hardcoded passwords/subprocess, skip docstrings, allow long lines
+"tests/factories.py" = ["RUF012"]  # Polyfactory uses mutable class attrs as factory defaults
 
 [tool.ruff.format]
 quote-style = "double"
@@ -127,7 +130,10 @@ packages = ["src/sjifire"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = "-v --tb=short"
+addopts = "-v --tb=short -m 'not e2e'"
+markers = [
+    "e2e: end-to-end browser tests requiring Playwright and a running server",
+]
 filterwarnings = [
     # Third-party deprecations we can't fix — suppress to keep CI clean
     "ignore::DeprecationWarning:kiota_abstractions",

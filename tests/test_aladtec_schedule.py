@@ -378,7 +378,7 @@ class TestAladtecScheduleScraperHTTP:
     """Tests for HTTP interactions in AladtecScheduleScraper."""
 
     @pytest.fixture
-    def base_url(self):
+    def aladtec_url(self):
         """Return test base URL."""
         return "https://test.aladtec.com"
 
@@ -403,20 +403,20 @@ class TestAladtecScheduleScraperHTTP:
         return {"return_data": return_data}
 
     @respx.mock
-    def test_fetch_ajax_schedule_success(self, mock_env_vars, base_url, sample_ajax_response):
+    def test_fetch_ajax_schedule_success(self, mock_env_vars, aladtec_url, sample_ajax_response):
         """Fetch AJAX schedule returns parsed data."""
         # Mock login page
-        respx.get(f"{base_url}/").mock(return_value=httpx.Response(200))
+        respx.get(f"{aladtec_url}/").mock(return_value=httpx.Response(200))
         # Mock login POST
-        respx.post(f"{base_url}/index.php").mock(
+        respx.post(f"{aladtec_url}/index.php").mock(
             return_value=httpx.Response(200, text="schedule dashboard")
         )
         # Mock nav POST
         respx.post(
-            f"{base_url}/index.php", params__contains={"action": "manage_work_view_ajax"}
+            f"{aladtec_url}/index.php", params__contains={"action": "manage_work_view_ajax"}
         ).mock(return_value=httpx.Response(200))
         # Mock AJAX GET
-        respx.get(f"{base_url}/index.php").mock(
+        respx.get(f"{aladtec_url}/index.php").mock(
             return_value=httpx.Response(200, json=sample_ajax_response)
         )
 
@@ -428,11 +428,13 @@ class TestAladtecScheduleScraperHTTP:
         assert "2026-02-02" in result
 
     @respx.mock
-    def test_fetch_ajax_schedule_error_status(self, mock_env_vars, base_url):
+    def test_fetch_ajax_schedule_error_status(self, mock_env_vars, aladtec_url):
         """Fetch AJAX returns empty dict on error status."""
-        respx.get(f"{base_url}/").mock(return_value=httpx.Response(200))
-        respx.post(f"{base_url}/index.php").mock(return_value=httpx.Response(200, text="schedule"))
-        respx.get(f"{base_url}/index.php").mock(return_value=httpx.Response(500))
+        respx.get(f"{aladtec_url}/").mock(return_value=httpx.Response(200))
+        respx.post(f"{aladtec_url}/index.php").mock(
+            return_value=httpx.Response(200, text="schedule")
+        )
+        respx.get(f"{aladtec_url}/index.php").mock(return_value=httpx.Response(500))
 
         with AladtecScheduleScraper() as scraper:
             scraper.login()
@@ -441,11 +443,15 @@ class TestAladtecScheduleScraperHTTP:
         assert result == {}
 
     @respx.mock
-    def test_fetch_ajax_schedule_invalid_json(self, mock_env_vars, base_url):
+    def test_fetch_ajax_schedule_invalid_json(self, mock_env_vars, aladtec_url):
         """Fetch AJAX returns empty dict on invalid JSON."""
-        respx.get(f"{base_url}/").mock(return_value=httpx.Response(200))
-        respx.post(f"{base_url}/index.php").mock(return_value=httpx.Response(200, text="schedule"))
-        respx.get(f"{base_url}/index.php").mock(return_value=httpx.Response(200, text="not json"))
+        respx.get(f"{aladtec_url}/").mock(return_value=httpx.Response(200))
+        respx.post(f"{aladtec_url}/index.php").mock(
+            return_value=httpx.Response(200, text="schedule")
+        )
+        respx.get(f"{aladtec_url}/index.php").mock(
+            return_value=httpx.Response(200, text="not json")
+        )
 
         with AladtecScheduleScraper() as scraper:
             scraper.login()
@@ -455,12 +461,14 @@ class TestAladtecScheduleScraperHTTP:
 
     @respx.mock
     def test_fetch_month_schedule_combines_requests(
-        self, mock_env_vars, base_url, sample_ajax_response
+        self, mock_env_vars, aladtec_url, sample_ajax_response
     ):
         """Fetch month makes multiple requests and combines results."""
-        respx.get(f"{base_url}/").mock(return_value=httpx.Response(200))
-        respx.post(f"{base_url}/index.php").mock(return_value=httpx.Response(200, text="schedule"))
-        respx.get(f"{base_url}/index.php").mock(
+        respx.get(f"{aladtec_url}/").mock(return_value=httpx.Response(200))
+        respx.post(f"{aladtec_url}/index.php").mock(
+            return_value=httpx.Response(200, text="schedule")
+        )
+        respx.get(f"{aladtec_url}/index.php").mock(
             return_value=httpx.Response(200, json=sample_ajax_response)
         )
 
@@ -472,7 +480,7 @@ class TestAladtecScheduleScraperHTTP:
         assert len(result) >= 2
 
     @respx.mock
-    def test_get_schedule_range_filters_dates(self, mock_env_vars, base_url):
+    def test_get_schedule_range_filters_dates(self, mock_env_vars, aladtec_url):
         """Get schedule range only includes dates within range."""
         # HTML with actual schedule entries (required for days to be included)
         entry_html = """
@@ -494,9 +502,11 @@ class TestAladtecScheduleScraperHTTP:
             }
         )
 
-        respx.get(f"{base_url}/").mock(return_value=httpx.Response(200))
-        respx.post(f"{base_url}/index.php").mock(return_value=httpx.Response(200, text="schedule"))
-        respx.get(f"{base_url}/index.php").mock(
+        respx.get(f"{aladtec_url}/").mock(return_value=httpx.Response(200))
+        respx.post(f"{aladtec_url}/index.php").mock(
+            return_value=httpx.Response(200, text="schedule")
+        )
+        respx.get(f"{aladtec_url}/index.php").mock(
             return_value=httpx.Response(200, json={"return_data": return_data})
         )
 
@@ -512,7 +522,7 @@ class TestAladtecScheduleScraperHTTP:
         assert date(2026, 2, 3) not in dates
 
     @respx.mock
-    def test_get_schedule_range_spans_months(self, mock_env_vars, base_url):
+    def test_get_schedule_range_spans_months(self, mock_env_vars, aladtec_url):
         """Get schedule range handles multi-month ranges."""
         # HTML with actual schedule entries (required for days to be included)
         entry_html = """
@@ -541,9 +551,11 @@ class TestAladtecScheduleScraperHTTP:
                 return httpx.Response(200, json={"return_data": jan_data})
             return httpx.Response(200, json={"return_data": feb_data})
 
-        respx.get(f"{base_url}/").mock(return_value=httpx.Response(200))
-        respx.post(f"{base_url}/index.php").mock(return_value=httpx.Response(200, text="schedule"))
-        respx.get(f"{base_url}/index.php").mock(side_effect=mock_response)
+        respx.get(f"{aladtec_url}/").mock(return_value=httpx.Response(200))
+        respx.post(f"{aladtec_url}/index.php").mock(
+            return_value=httpx.Response(200, text="schedule")
+        )
+        respx.get(f"{aladtec_url}/index.php").mock(side_effect=mock_response)
 
         with AladtecScheduleScraper() as scraper:
             scraper.login()
@@ -555,10 +567,10 @@ class TestAladtecScheduleScraperHTTP:
         assert date(2026, 2, 1) in dates
 
     @respx.mock
-    def test_login_success(self, mock_env_vars, base_url):
+    def test_login_success(self, mock_env_vars, aladtec_url):
         """Login returns True on success."""
-        respx.get(f"{base_url}/").mock(return_value=httpx.Response(200))
-        respx.post(f"{base_url}/index.php").mock(
+        respx.get(f"{aladtec_url}/").mock(return_value=httpx.Response(200))
+        respx.post(f"{aladtec_url}/index.php").mock(
             return_value=httpx.Response(200, text="schedule dashboard")
         )
 
@@ -568,10 +580,10 @@ class TestAladtecScheduleScraperHTTP:
         assert result is True
 
     @respx.mock
-    def test_login_failure_invalid_credentials(self, mock_env_vars, base_url):
+    def test_login_failure_invalid_credentials(self, mock_env_vars, aladtec_url):
         """Login returns False on invalid credentials."""
-        respx.get(f"{base_url}/").mock(return_value=httpx.Response(200))
-        respx.post(f"{base_url}/index.php").mock(
+        respx.get(f"{aladtec_url}/").mock(return_value=httpx.Response(200))
+        respx.post(f"{aladtec_url}/index.php").mock(
             return_value=httpx.Response(200, text="invalid credentials error")
         )
 
@@ -581,9 +593,9 @@ class TestAladtecScheduleScraperHTTP:
         assert result is False
 
     @respx.mock
-    def test_login_failure_http_error(self, mock_env_vars, base_url):
+    def test_login_failure_http_error(self, mock_env_vars, aladtec_url):
         """Login returns False on HTTP error."""
-        respx.get(f"{base_url}/").mock(return_value=httpx.Response(500))
+        respx.get(f"{aladtec_url}/").mock(return_value=httpx.Response(500))
 
         with AladtecScheduleScraper() as scraper:
             result = scraper.login()
