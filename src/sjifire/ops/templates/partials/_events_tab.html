@@ -4,6 +4,112 @@
   Registered via Alpine.data('eventsTab', ...) in the script block below.
 #}
 
+{# ── Reusable drawer template (expanded when Details is clicked) ── #}
+{% macro event_detail_drawer() %}
+<template x-if="expanded === (ev.event_id || ev.record_id)">
+  <div class="evt-event-detail" @click.stop>
+    <div x-data="eventsRecordDetail(ev.record_id, ev)" x-init="load()">
+      <template x-if="!rec && loading">
+        <div style="padding:12px;text-align:center"><span class="evt-spinner"></span></div>
+      </template>
+      <template x-if="rec">
+        <div>
+          {# Non-manager with no record: nothing useful to show #}
+          <div x-show="!rec.id && !isManager" style="padding:8px 0;font-size:13px;color:var(--text-dim)">
+            No training record for this event yet.
+          </div>
+
+          {# Manager or record exists: full detail #}
+          <div x-show="rec.id || isManager">
+            {# Attendees #}
+            <div class="evt-detail-section">
+              <div class="evt-detail-label">Attendees (<span x-text="rec.attendees.length"></span>)</div>
+              <div class="evt-attendee-list" x-show="rec.attendees.length > 0">
+                <template x-for="(att, i) in rec.attendees" :key="i">
+                  <span class="evt-attendee-chip"
+                    :class="att.email ? 'matched' : (att.uncertain ? 'uncertain' : 'unmatched')">
+                    <span x-text="att.name"></span>
+                    <span class="evt-remove-btn" x-show="isManager" @click.stop="removeAttendee(i)">&times;</span>
+                  </span>
+                </template>
+              </div>
+              <div x-show="rec.attendees.length === 0" style="font-size:12px;color:var(--text-dim)">No attendees recorded yet</div>
+              <div x-show="isManager" class="evt-typeahead-wrap" style="margin-top:8px;max-width:300px">
+                <input class="evt-form-input" placeholder="Add attendee..." x-model="addName"
+                  @input="searchPersonnel()" @keydown.escape="suggestions = []"
+                  @keydown.enter.prevent="addManualAttendee()">
+                <div class="evt-typeahead-list" x-show="suggestions.length > 0">
+                  <template x-for="s in suggestions" :key="s.email">
+                    <div class="evt-typeahead-item" @click.stop="addFromRoster(s)" x-text="s.name"></div>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            {# Paste text to parse (managers only) #}
+            <div x-show="isManager" class="evt-detail-section">
+              <div class="evt-detail-label">Paste Attendance</div>
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <textarea class="evt-form-input" x-model="$data._pasteText" rows="2"
+                  placeholder="Paste names (one per line, or comma-separated)..."
+                  style="min-height:40px;resize:vertical;flex:1"></textarea>
+                <button class="action-btn edit" style="min-width:0;flex-shrink:0;margin-top:1px"
+                  @click="parseText()" :disabled="parsing || !$data._pasteText?.trim()">
+                  <span x-show="!parsing">Parse Names</span>
+                  <span x-show="parsing" class="evt-spinner"></span>
+                </button>
+              </div>
+            </div>
+
+            {# Attachments #}
+            <div class="evt-detail-section">
+              <div class="evt-detail-label">Attachments (<span x-text="rec.attachments.length"></span>)</div>
+              <template x-for="att in rec.attachments" :key="att.id">
+                <div class="evt-attachment-item">
+                  <a :href="'/events/records/' + rec.id + '/attachments/' + att.id" target="_blank" x-text="att.filename"></a>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <button class="action-btn edit" style="min-width:0;font-size:10px;padding:3px 10px"
+                      x-show="isManager && isParseableType(att.content_type)"
+                      @click.stop="parseFromAttachment(att.id)" :disabled="parsing">
+                      <span x-show="!parsing">Parse Names</span>
+                      <span x-show="parsing" class="evt-spinner"></span>
+                    </button>
+                    <button class="action-btn" style="min-width:0;font-size:10px;padding:3px 10px;background:var(--red-alpha);color:var(--color-error);border-color:rgba(220,38,38,.3)"
+                      x-show="isManager" @click.stop="deleteAttachment(att.id)">Delete</button>
+                  </div>
+                </div>
+              </template>
+              <div x-show="isManager" style="margin-top:8px">
+                <input type="file" x-ref="evtFileInput" style="display:none"
+                  accept="image/*,.pdf" @change="uploadFile($event)">
+                <button class="action-btn edit" style="min-width:0" @click.stop="$refs.evtFileInput.click()" :disabled="uploading">
+                  <span x-show="!uploading">Upload File</span>
+                  <span x-show="uploading" class="evt-spinner"></span>
+                </button>
+              </div>
+            </div>
+
+            {# Notes #}
+            <div class="evt-detail-section">
+              <div class="evt-detail-label">Notes</div>
+              <template x-if="isManager">
+                <div>
+                  <textarea class="evt-form-input" x-model="rec.notes" rows="2"
+                    @change="saveNotes()" placeholder="Add notes..." style="min-height:40px;resize:vertical"></textarea>
+                </div>
+              </template>
+              <template x-if="!isManager">
+                <div style="font-size:13px;color:var(--text-muted);white-space:pre-wrap" x-text="rec.notes || 'No notes'"></div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+</template>
+{% endmacro %}
+
 <!-- EVENTS TAB (lazy-loaded, self-contained) -->
 <div x-data="eventsTab()" x-show="activeTab === 'events'"
      @tab-activated.window="if ($event.detail === 'events' && !loaded && !loading) load()">
@@ -68,8 +174,7 @@
                 x-text="ev.calendar_source"></span>
               <span class="evt-count-badge" x-show="ev.attendee_count" x-text="ev.attendee_count + ' attendees'"></span>
               <span class="evt-count-badge" x-show="ev.attachment_count" x-text="ev.attachment_count + ' files'"></span>
-              <button x-show="ev.has_record"
-                class="action-btn edit" style="min-width:0;font-size:11px;padding:4px 10px"
+              <button class="action-btn edit" style="min-width:0;font-size:11px;padding:4px 10px"
                 @click.stop="toggle(ev)"
                 x-text="expanded === (ev.event_id || ev.record_id) ? 'Close' : 'Details'">
               </button>
@@ -94,85 +199,7 @@
           </div>
 
           <!-- Expanded record detail -->
-          <template x-if="ev.has_record && expanded === (ev.event_id || ev.record_id)">
-            <div class="evt-event-detail" @click.stop>
-              <div x-data="eventsRecordDetail(ev.record_id)" x-init="load()">
-                <template x-if="rec">
-                  <div>
-                    <!-- Attendees -->
-                    <div class="evt-detail-section">
-                      <div class="evt-detail-label">Attendees (<span x-text="rec.attendees.length"></span>)</div>
-                      <div class="evt-attendee-list" x-show="rec.attendees.length > 0">
-                        <template x-for="(att, i) in rec.attendees" :key="i">
-                          <span class="evt-attendee-chip"
-                            :class="att.email ? 'matched' : (att.uncertain ? 'uncertain' : 'unmatched')">
-                            <span x-text="att.name"></span>
-                            <span class="evt-remove-btn" x-show="isManager" @click.stop="removeAttendee(i)">&times;</span>
-                          </span>
-                        </template>
-                      </div>
-                      <div x-show="rec.attendees.length === 0" style="font-size:12px;color:var(--text-dim)">No attendees recorded yet</div>
-                      <div x-show="isManager" class="evt-typeahead-wrap" style="margin-top:8px;max-width:300px">
-                        <input class="evt-form-input" placeholder="Add attendee..." x-model="addName"
-                          @input="searchPersonnel()" @keydown.escape="suggestions = []"
-                          @keydown.enter.prevent="addManualAttendee()">
-                        <div class="evt-typeahead-list" x-show="suggestions.length > 0">
-                          <template x-for="s in suggestions" :key="s.email">
-                            <div class="evt-typeahead-item" @click.stop="addFromRoster(s)" x-text="s.name"></div>
-                          </template>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- Attachments -->
-                    <div class="evt-detail-section">
-                      <div class="evt-detail-label">Attachments (<span x-text="rec.attachments.length"></span>)</div>
-                      <template x-for="att in rec.attachments" :key="att.id">
-                        <div class="evt-attachment-item">
-                          <a :href="'/events/records/' + rec.id + '/attachments/' + att.id" target="_blank" x-text="att.filename"></a>
-                          <div style="display:flex;gap:8px;align-items:center">
-                            <button class="action-btn edit" style="min-width:0;font-size:10px;padding:3px 10px"
-                              x-show="isManager && isParseableType(att.content_type)"
-                              @click.stop="parseFromAttachment(att.id)" :disabled="parsing">
-                              <span x-show="!parsing">Parse Names</span>
-                              <span x-show="parsing" class="evt-spinner"></span>
-                            </button>
-                            <button class="action-btn" style="min-width:0;font-size:10px;padding:3px 10px;background:var(--red-alpha);color:var(--color-error);border-color:rgba(220,38,38,.3)"
-                              x-show="isManager" @click.stop="deleteAttachment(att.id)">Delete</button>
-                          </div>
-                        </div>
-                      </template>
-                      <div x-show="isManager" style="margin-top:8px">
-                        <input type="file" x-ref="evtFileInput" style="display:none"
-                          accept="image/*,.pdf" @change="uploadFile($event)">
-                        <button class="action-btn edit" style="min-width:0" @click.stop="$refs.evtFileInput.click()" :disabled="uploading">
-                          <span x-show="!uploading">Upload File</span>
-                          <span x-show="uploading" class="evt-spinner"></span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <!-- Notes -->
-                    <div class="evt-detail-section">
-                      <div class="evt-detail-label">Notes</div>
-                      <template x-if="isManager">
-                        <div>
-                          <textarea class="evt-form-input" x-model="rec.notes" rows="2"
-                            @change="saveNotes()" placeholder="Add notes..." style="min-height:40px;resize:vertical"></textarea>
-                        </div>
-                      </template>
-                      <template x-if="!isManager">
-                        <div style="font-size:13px;color:var(--text-muted);white-space:pre-wrap" x-text="rec.notes || 'No notes'"></div>
-                      </template>
-                    </div>
-                  </div>
-                </template>
-                <template x-if="!rec && loading">
-                  <div style="padding:12px;text-align:center"><span class="evt-spinner"></span></div>
-                </template>
-              </div>
-            </div>
-          </template>
+          {{ event_detail_drawer() }}
         </div>
       </template>
 
@@ -191,147 +218,20 @@
     <div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
         <span style="font-size:14px;font-weight:700;color:var(--text-primary);text-transform:uppercase;letter-spacing:.06em">Event Log</span>
-        <span class="evt-count-badge" x-text="past.length + ' events'"></span>
-        <button x-show="isManager && !recordPanel.open" class="action-btn start"
-          style="min-width:0;font-size:11px;padding:4px 12px;margin-left:auto"
-          @click="openRecordPanel()">+ Record Training</button>
-        <button x-show="recordPanel.open" class="action-btn"
-          style="min-width:0;font-size:11px;padding:4px 12px;margin-left:auto;background:var(--red-alpha);color:var(--color-error);border-color:rgba(220,38,38,.3)"
-          @click="closeRecordPanel()">Cancel</button>
+        <span class="evt-count-badge" x-text="filteredPast().length + ' events'"></span>
       </div>
 
-      <!-- ── Record Training panel (slide-down) ── -->
-      <div x-show="recordPanel.open" x-collapse class="evt-record-panel">
-
-        <!-- Step 1: select event -->
-        <template x-if="recordPanel.step === 1">
-          <div>
-            <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Select an event to record training for:</div>
-            <template x-if="pastWithoutRecords().length === 0">
-              <div style="font-size:12px;color:var(--text-dim);padding:8px 0">All past events already have records.</div>
-            </template>
-            <div style="max-height:240px;overflow-y:auto">
-              <template x-for="ev in pastWithoutRecords()" :key="ev.event_id">
-                <div class="evt-record-panel-item" @click="selectEvent(ev)">
-                  <div>
-                    <div style="font-size:13px;font-weight:500;color:var(--text-primary)" x-text="ev.subject"></div>
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
-                      <span x-text="fmtDate(ev.start)"></span>
-                      <span x-show="fmtTimeRange(ev.start, ev.end)" x-text="' \u2022 ' + fmtTimeRange(ev.start, ev.end)"></span>
-                    </div>
-                  </div>
-                  <span class="evt-source-badge" :class="badgeClass(ev.calendar_source)" x-text="ev.calendar_source"></span>
-                </div>
-              </template>
-            </div>
-          </div>
-        </template>
-
-        <!-- Step 2: event detail — attendees, upload, notes -->
-        <template x-if="recordPanel.step === 2">
-          <div x-data="eventsRecordDetail(recordPanel.recordId)" x-init="load()">
-            <template x-if="rec">
-              <div>
-                <!-- Event summary header -->
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-                  <div>
-                    <div style="font-size:14px;font-weight:600;color:var(--text-primary)" x-text="rec.subject"></div>
-                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px" x-text="fmtDate(rec.event_date)"></div>
-                  </div>
-                </div>
-
-                <!-- Attendees -->
-                <div class="evt-detail-section">
-                  <div class="evt-detail-label">Attendees (<span x-text="rec.attendees.length"></span>)</div>
-                  <div class="evt-attendee-list" x-show="rec.attendees.length > 0">
-                    <template x-for="(att, i) in rec.attendees" :key="i">
-                      <span class="evt-attendee-chip"
-                        :class="att.email ? 'matched' : (att.uncertain ? 'uncertain' : 'unmatched')">
-                        <span x-text="att.name"></span>
-                        <span class="evt-remove-btn" @click.stop="removeAttendee(i)">&times;</span>
-                      </span>
-                    </template>
-                  </div>
-                  <div x-show="rec.attendees.length === 0" style="font-size:12px;color:var(--text-dim)">No attendees recorded yet</div>
-
-                  <!-- Typeahead -->
-                  <div class="evt-typeahead-wrap" style="margin-top:8px;max-width:300px">
-                    <input class="evt-form-input" placeholder="Add attendee..." x-model="addName"
-                      @input="searchPersonnel()" @keydown.escape="suggestions = []"
-                      @keydown.enter.prevent="addManualAttendee()">
-                    <div class="evt-typeahead-list" x-show="suggestions.length > 0">
-                      <template x-for="s in suggestions" :key="s.email">
-                        <div class="evt-typeahead-item" @click.stop="addFromRoster(s)" x-text="s.name"></div>
-                      </template>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Paste text to parse -->
-                <div class="evt-detail-section">
-                  <div class="evt-detail-label">Paste Attendance</div>
-                  <div style="display:flex;gap:8px;align-items:flex-start">
-                    <textarea class="evt-form-input" x-model="$data._pasteText" rows="2"
-                      placeholder="Paste names (one per line, or comma-separated)..."
-                      style="min-height:40px;resize:vertical;flex:1"></textarea>
-                    <button class="action-btn edit" style="min-width:0;flex-shrink:0;margin-top:1px"
-                      @click="parseText()" :disabled="parsing || !$data._pasteText?.trim()">
-                      <span x-show="!parsing">Parse Names</span>
-                      <span x-show="parsing" class="evt-spinner"></span>
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Attachments -->
-                <div class="evt-detail-section">
-                  <div class="evt-detail-label">Attachments (<span x-text="rec.attachments.length"></span>)</div>
-                  <template x-for="att in rec.attachments" :key="att.id">
-                    <div class="evt-attachment-item">
-                      <a :href="'/events/records/' + rec.id + '/attachments/' + att.id" target="_blank" x-text="att.filename"></a>
-                      <div style="display:flex;gap:8px;align-items:center">
-                        <button class="action-btn edit" style="min-width:0;font-size:10px;padding:3px 10px"
-                          x-show="isParseableType(att.content_type)"
-                          @click.stop="parseFromAttachment(att.id)" :disabled="parsing">
-                          <span x-show="!parsing">Parse Names</span>
-                          <span x-show="parsing" class="evt-spinner"></span>
-                        </button>
-                        <button class="action-btn" style="min-width:0;font-size:10px;padding:3px 10px;background:var(--red-alpha);color:var(--color-error);border-color:rgba(220,38,38,.3)"
-                          @click.stop="deleteAttachment(att.id)">Delete</button>
-                      </div>
-                    </div>
-                  </template>
-                  <div style="margin-top:8px">
-                    <input type="file" x-ref="panelFileInput" style="display:none"
-                      accept="image/*,.pdf" @change="uploadFile($event)">
-                    <button class="action-btn edit" style="min-width:0" @click.stop="$refs.panelFileInput.click()" :disabled="uploading">
-                      <span x-show="!uploading">Upload File</span>
-                      <span x-show="uploading" class="evt-spinner"></span>
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Notes -->
-                <div class="evt-detail-section">
-                  <div class="evt-detail-label">Notes</div>
-                  <textarea class="evt-form-input" x-model="rec.notes" rows="2"
-                    @change="saveNotes()" placeholder="Add notes..." style="min-height:40px;resize:vertical"></textarea>
-                </div>
-
-                <!-- Done -->
-                <div style="text-align:right;padding-top:4px">
-                  <button class="action-btn start" style="font-size:12px;padding:6px 20px"
-                    @click="$dispatch('record-panel-done')">Done</button>
-                </div>
-              </div>
-            </template>
-            <template x-if="!rec && loading">
-              <div style="padding:12px;text-align:center"><span class="evt-spinner"></span></div>
-            </template>
-          </div>
+      <!-- Filter pills -->
+      <div x-show="calendarSources.length > 1" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="evt-filter-pill" :class="sourceFilter === 'all' && 'active'"
+          @click="sourceFilter = 'all'; pastPage = 1">All</button>
+        <template x-for="src in calendarSources" :key="src">
+          <button class="evt-filter-pill" :class="sourceFilter === src && 'active'"
+            @click="sourceFilter = src; pastPage = 1" x-text="src"></button>
         </template>
       </div>
 
-      <template x-if="past.length === 0">
+      <template x-if="filteredPast().length === 0">
         <div class="panel">
           <div class="empty-state"><p>No past events</p></div>
         </div>
@@ -358,8 +258,7 @@
                 x-text="ev.calendar_source"></span>
               <span class="evt-count-badge" x-show="ev.attendee_count" x-text="ev.attendee_count + ' attendees'"></span>
               <span class="evt-count-badge" x-show="ev.attachment_count" x-text="ev.attachment_count + ' files'"></span>
-              <button x-show="ev.has_record"
-                class="action-btn edit" style="min-width:0;font-size:11px;padding:4px 10px"
+              <button class="action-btn edit" style="min-width:0;font-size:11px;padding:4px 10px"
                 @click.stop="toggle(ev)"
                 x-text="expanded === (ev.event_id || ev.record_id) ? 'Close' : 'Details'">
               </button>
@@ -384,86 +283,13 @@
           </div>
 
           <!-- Expanded record detail -->
-          <template x-if="ev.has_record && expanded === (ev.event_id || ev.record_id)">
-            <div class="evt-event-detail" @click.stop>
-              <div x-data="eventsRecordDetail(ev.record_id)" x-init="load()">
-                <template x-if="rec">
-                  <div>
-                    <div class="evt-detail-section">
-                      <div class="evt-detail-label">Attendees (<span x-text="rec.attendees.length"></span>)</div>
-                      <div class="evt-attendee-list" x-show="rec.attendees.length > 0">
-                        <template x-for="(att, i) in rec.attendees" :key="i">
-                          <span class="evt-attendee-chip"
-                            :class="att.email ? 'matched' : (att.uncertain ? 'uncertain' : 'unmatched')">
-                            <span x-text="att.name"></span>
-                            <span class="evt-remove-btn" x-show="isManager" @click.stop="removeAttendee(i)">&times;</span>
-                          </span>
-                        </template>
-                      </div>
-                      <div x-show="rec.attendees.length === 0" style="font-size:12px;color:var(--text-dim)">No attendees recorded yet</div>
-                      <div x-show="isManager" class="evt-typeahead-wrap" style="margin-top:8px;max-width:300px">
-                        <input class="evt-form-input" placeholder="Add attendee..." x-model="addName"
-                          @input="searchPersonnel()" @keydown.escape="suggestions = []"
-                          @keydown.enter.prevent="addManualAttendee()">
-                        <div class="evt-typeahead-list" x-show="suggestions.length > 0">
-                          <template x-for="s in suggestions" :key="s.email">
-                            <div class="evt-typeahead-item" @click.stop="addFromRoster(s)" x-text="s.name"></div>
-                          </template>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="evt-detail-section">
-                      <div class="evt-detail-label">Attachments (<span x-text="rec.attachments.length"></span>)</div>
-                      <template x-for="att in rec.attachments" :key="att.id">
-                        <div class="evt-attachment-item">
-                          <a :href="'/events/records/' + rec.id + '/attachments/' + att.id" target="_blank" x-text="att.filename"></a>
-                          <div style="display:flex;gap:8px;align-items:center">
-                            <button class="action-btn edit" style="min-width:0;font-size:10px;padding:3px 10px"
-                              x-show="isManager && isParseableType(att.content_type)"
-                              @click.stop="parseFromAttachment(att.id)" :disabled="parsing">
-                              <span x-show="!parsing">Parse Names</span>
-                              <span x-show="parsing" class="evt-spinner"></span>
-                            </button>
-                            <button class="action-btn" style="min-width:0;font-size:10px;padding:3px 10px;background:var(--red-alpha);color:var(--color-error);border-color:rgba(220,38,38,.3)"
-                              x-show="isManager" @click.stop="deleteAttachment(att.id)">Delete</button>
-                          </div>
-                        </div>
-                      </template>
-                      <div x-show="isManager" style="margin-top:8px">
-                        <input type="file" x-ref="evtFileInput2" style="display:none"
-                          accept="image/*,.pdf" @change="uploadFile($event)">
-                        <button class="action-btn edit" style="min-width:0" @click.stop="$refs.evtFileInput2.click()" :disabled="uploading">
-                          <span x-show="!uploading">Upload File</span>
-                          <span x-show="uploading" class="evt-spinner"></span>
-                        </button>
-                      </div>
-                    </div>
-                    <div class="evt-detail-section">
-                      <div class="evt-detail-label">Notes</div>
-                      <template x-if="isManager">
-                        <div>
-                          <textarea class="evt-form-input" x-model="rec.notes" rows="2"
-                            @change="saveNotes()" placeholder="Add notes..." style="min-height:40px;resize:vertical"></textarea>
-                        </div>
-                      </template>
-                      <template x-if="!isManager">
-                        <div style="font-size:13px;color:var(--text-muted);white-space:pre-wrap" x-text="rec.notes || 'No notes'"></div>
-                      </template>
-                    </div>
-                  </div>
-                </template>
-                <template x-if="!rec && loading">
-                  <div style="padding:12px;text-align:center"><span class="evt-spinner"></span></div>
-                </template>
-              </div>
-            </div>
-          </template>
+          {{ event_detail_drawer() }}
         </div>
       </template>
 
       <!-- Event log pagination -->
       <div x-show="pastTotalPages() > 1" class="pagination-bar">
-        <span x-text="'Showing ' + (((pastPage - 1) * perPage) + 1) + '\u2013' + Math.min(pastPage * perPage, past.length) + ' of ' + past.length"></span>
+        <span x-text="'Showing ' + (((pastPage - 1) * perPage) + 1) + '\u2013' + Math.min(pastPage * perPage, filteredPast().length) + ' of ' + filteredPast().length"></span>
         <div class="page-nav">
           <button class="page-btn" :disabled="pastPage <= 1" @click="pastPage--">&lsaquo; Prev</button>
           <span class="page-info" x-text="pastPage + ' / ' + pastTotalPages()"></span>
@@ -502,29 +328,28 @@
   </template>
 </div>
 
-<!-- Record Training panel styles -->
+<!-- Filter pill styles -->
 <style>
-  .evt-record-panel {
-    background: var(--bg-panel);
-    border: 1px solid rgba(96, 165, 250, .25);
-    border-radius: 8px;
-    padding: 16px 18px;
-    margin-bottom: 12px;
-  }
-  .evt-record-panel-item {
-    display: flex;
+  .evt-filter-pill {
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 10px 12px;
-    border-radius: 6px;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid var(--border-default);
+    background: transparent;
+    color: var(--text-muted);
     cursor: pointer;
-    transition: background .12s;
+    transition: all .15s;
   }
-  .evt-record-panel-item:hover {
-    background: var(--bg-panel-alt);
+  .evt-filter-pill:hover {
+    border-color: var(--text-dim);
   }
-  .evt-record-panel-item + .evt-record-panel-item {
-    border-top: 1px solid var(--border-subtle);
+  .evt-filter-pill.active {
+    background: rgba(96, 165, 250, .15);
+    border-color: rgba(96, 165, 250, .4);
+    color: #60a5fa;
   }
 </style>
 
@@ -546,16 +371,10 @@ document.addEventListener('alpine:init', () => {
     upPage: 1,
     pastPage: 1,
     perPage: 5,
-
-    // Record Training panel
-    recordPanel: { open: false, step: 1, recordId: null, creating: false },
+    sourceFilter: 'all',
+    calendarSources: [],
 
     init() {
-      // Listen for the "Done" button from the nested record-detail component
-      this.$el.addEventListener('record-panel-done', () => {
-        this.closeRecordPanel();
-      });
-
       // Listen for parse results from nested record-detail components
       this.$el.addEventListener('show-events-parse', (e) => {
         this.parseResults = e.detail.results;
@@ -573,6 +392,7 @@ document.addEventListener('alpine:init', () => {
           this.upcoming = d.upcoming || [];
           this.past = d.past || [];
           this.isManager = d.is_manager || false;
+          this.calendarSources = [...new Set(this.past.map(ev => ev.calendar_source).filter(Boolean))].sort();
           this.loaded = true;
         }
       } catch(e) {
@@ -623,54 +443,17 @@ document.addEventListener('alpine:init', () => {
     upTotalPages() {
       return Math.max(1, Math.ceil(this.upcoming.length / this.perPage));
     },
+    filteredPast() {
+      if (this.sourceFilter === 'all') return this.past;
+      return this.past.filter(ev => ev.calendar_source === this.sourceFilter);
+    },
     pastPaged() {
+      const list = this.filteredPast();
       const start = (this.pastPage - 1) * this.perPage;
-      return this.past.slice(start, start + this.perPage);
+      return list.slice(start, start + this.perPage);
     },
     pastTotalPages() {
-      return Math.max(1, Math.ceil(this.past.length / this.perPage));
-    },
-
-    // ── Record Training panel ──
-
-    pastWithoutRecords() {
-      return this.past.filter(ev => !ev.has_record && ev.event_id);
-    },
-
-    openRecordPanel() {
-      this.recordPanel = { open: true, step: 1, recordId: null, creating: false };
-    },
-
-    closeRecordPanel() {
-      this.recordPanel.open = false;
-      this.load(); // refresh list
-    },
-
-    async selectEvent(ev) {
-      this.recordPanel.creating = true;
-      try {
-        const r = await authFetch('/events/records', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            calendar_event_id: ev.event_id,
-            calendar_source: ev.calendar_source,
-            subject: ev.subject,
-            start: ev.start,
-            end: ev.end,
-            location: ev.location,
-            description: ev.body_preview,
-          }),
-        });
-        if (r.ok) {
-          const rec = await r.json();
-          ev.has_record = true;
-          ev.record_id = rec.id;
-          this.recordPanel.recordId = rec.id;
-          this.recordPanel.step = 2;
-        }
-      } catch(e) { console.error(e); }
-      this.recordPanel.creating = false;
+      return Math.max(1, Math.ceil(this.filteredPast().length / this.perPage));
     },
 
     async confirmParsed() {
@@ -701,7 +484,10 @@ document.addEventListener('alpine:init', () => {
   }));
 
   // ── Nested record detail component ──
-  Alpine.data('eventsRecordDetail', (recordId) => ({
+  // Accepts recordId (nullable) and calEvent (parent event object).
+  // When recordId is null, builds a pseudo-record from calEvent metadata.
+  // ensureRecord() lazily creates the real record on first mutation.
+  Alpine.data('eventsRecordDetail', (recordId, calEvent) => ({
     rec: null,
     loading: true,
     uploading: false,
@@ -715,23 +501,65 @@ document.addEventListener('alpine:init', () => {
     async load() {
       this.loading = true;
       try {
-        const r = await authFetch('/events/records/' + recordId);
-        if (r.ok) this.rec = await r.json();
+        if (recordId) {
+          const r = await authFetch('/events/records/' + recordId);
+          if (r.ok) this.rec = await r.json();
+        } else {
+          // Pseudo-record from calendar event metadata
+          this.rec = {
+            id: null,
+            subject: calEvent.subject || '',
+            event_date: calEvent.start || '',
+            attendees: [],
+            attachments: [],
+            notes: '',
+          };
+        }
       } catch(e) { console.error(e); }
       this.loading = false;
     },
 
+    async ensureRecord() {
+      if (this.rec && this.rec.id) return;
+      try {
+        const r = await authFetch('/events/records', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            calendar_event_id: calEvent.event_id || '',
+            calendar_source: calEvent.calendar_source || '',
+            subject: calEvent.subject || '',
+            start: calEvent.start || '',
+            end: calEvent.end || '',
+            location: calEvent.location || '',
+            description: calEvent.body_preview || '',
+          }),
+        });
+        if (r.ok) {
+          const created = await r.json();
+          this.rec.id = created.id;
+          calEvent.has_record = true;
+          calEvent.record_id = created.id;
+        }
+      } catch(e) { console.error(e); }
+    },
+
     async saveAttendees() {
+      await this.ensureRecord();
+      if (!this.rec || !this.rec.id) return;
       try {
         await authFetch('/events/records/' + this.rec.id, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ attendees: this.rec.attendees }),
         });
+        calEvent.attendee_count = this.rec.attendees.length;
       } catch(e) { console.error(e); }
     },
 
     async saveNotes() {
+      await this.ensureRecord();
+      if (!this.rec || !this.rec.id) return;
       try {
         await authFetch('/events/records/' + this.rec.id, {
           method: 'PATCH',
@@ -793,6 +621,8 @@ document.addEventListener('alpine:init', () => {
     async uploadFile(event) {
       const file = event.target.files[0];
       if (!file) return;
+      await this.ensureRecord();
+      if (!this.rec || !this.rec.id) return;
       this.uploading = true;
       try {
         const form = new FormData();
@@ -804,6 +634,7 @@ document.addEventListener('alpine:init', () => {
         if (r.ok) {
           const data = await r.json();
           this.rec.attachments.push(data.attachment);
+          calEvent.attachment_count = this.rec.attachments.length;
         } else {
           const err = await r.json();
           alert(err.error || 'Upload failed');
@@ -814,6 +645,8 @@ document.addEventListener('alpine:init', () => {
     },
 
     async parseFromAttachment(attId) {
+      await this.ensureRecord();
+      if (!this.rec || !this.rec.id) return;
       this.parsing = true;
       try {
         const r = await authFetch('/events/records/' + this.rec.id + '/parse', {
@@ -836,6 +669,8 @@ document.addEventListener('alpine:init', () => {
     async parseText() {
       const text = this._pasteText?.trim();
       if (!text) return;
+      await this.ensureRecord();
+      if (!this.rec || !this.rec.id) return;
       this.parsing = true;
       try {
         const r = await authFetch('/events/records/' + this.rec.id + '/parse', {
@@ -864,6 +699,7 @@ document.addEventListener('alpine:init', () => {
         });
         if (r.ok) {
           this.rec.attachments = this.rec.attachments.filter(a => a.id !== attId);
+          calEvent.attachment_count = this.rec.attachments.length;
         }
       } catch(e) { console.error(e); }
     },
