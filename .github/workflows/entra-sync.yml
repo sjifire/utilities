@@ -4,14 +4,15 @@ on:
   schedule:
     # Run at 8am Pacific, Monday-Friday (16:00 UTC = 8am PST / 9am PDT)
     - cron: '0 16 * * 1-5'
-    # Run at noon Pacific, Monday-Friday (20:00 UTC = 12pm PST / 1pm PDT)
-    - cron: '0 20 * * 1-5'
+    # Run at 1pm Pacific, Monday-Friday (21:00 UTC = 1pm PST / 2pm PDT)
+    # Offset from calendar-sync (noon) to avoid Aladtec rate limits
+    - cron: '0 21 * * 1-5'
     # Run at 6pm Pacific, Monday-Friday (02:00 UTC next day = 6pm PST / 7pm PDT)
     - cron: '0 2 * * 2-6'
-    # Run at noon Pacific, Saturday (20:00 UTC = 12pm PST / 1pm PDT)
-    - cron: '0 20 * * 6'
-    # Run at noon Pacific, Sunday (20:00 UTC = 12pm PST / 1pm PDT)
-    - cron: '0 20 * * 0'
+    # Run at 1pm Pacific, Saturday (21:00 UTC = 1pm PST / 2pm PDT)
+    - cron: '0 21 * * 6'
+    # Run at 1pm Pacific, Sunday (21:00 UTC = 1pm PST / 2pm PDT)
+    - cron: '0 21 * * 0'
   workflow_dispatch:
     inputs:
       dry_run:

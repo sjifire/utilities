@@ -838,6 +838,21 @@ class TestRemoveDistributionGroupMember:
     @patch("sjifire.exchange.client.get_exchange_credentials")
     @patch.object(ExchangeOnlineClient, "_run_powershell")
     @pytest.mark.asyncio
+    async def test_remove_member_already_not_member(self, mock_run_ps, mock_get_creds):
+        """Should return True when member is already absent (idempotent)."""
+        mock_get_creds.return_value = MockExchangeCredentials(
+            certificate_thumbprint="ABC123",
+        )
+        mock_run_ps.return_value = "ALREADY_REMOVED"
+
+        client = ExchangeOnlineClient()
+        result = await client.remove_distribution_group_member("test-group", "user@example.com")
+
+        assert result is True
+
+    @patch("sjifire.exchange.client.get_exchange_credentials")
+    @patch.object(ExchangeOnlineClient, "_run_powershell")
+    @pytest.mark.asyncio
     async def test_remove_member_failure(self, mock_run_ps, mock_get_creds):
         """Should return False on failure."""
         mock_get_creds.return_value = MockExchangeCredentials(

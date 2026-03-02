@@ -4,12 +4,15 @@ These dicts are Cosmos-serialized format (matching ``to_cosmos()`` output)
 so they can be written directly into the class-level ``_memory`` dicts.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
-# Use "today" so schedule cache is never stale.
-# The schedule tool requests yesterday/today/tomorrow — all three must be
-# present to prevent the Outlook calendar fallback (which hangs in test mode).
-_now = datetime.now(UTC)
+from sjifire.core.config import local_now
+
+# Use the server's local timezone for dates so seeded schedule data aligns
+# with what get_on_duty_crew() requests.  The server uses local_now() (Pacific),
+# not UTC — when UTC is a day ahead of Pacific (after 5 PM), UTC dates won't
+# match the server's needed dates.
+_now = local_now()
 _today = _now.strftime("%Y-%m-%d")
 _yesterday = (_now - timedelta(days=1)).strftime("%Y-%m-%d")
 _tomorrow = (_now + timedelta(days=1)).strftime("%Y-%m-%d")

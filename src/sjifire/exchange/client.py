@@ -632,16 +632,23 @@ class ExchangeOnlineClient:
         Returns:
             True if successful
         """
+        esc_identity = _escape_ps_string(identity)
+        esc_member = _escape_ps_string(member)
         commands = [
-            f"Remove-DistributionGroupMember -Identity '{_escape_ps_string(identity)}' "
-            f"-Member '{_escape_ps_string(member)}' -BypassSecurityGroupManagerCheck "
-            "-Confirm:$false -ErrorAction Stop",
-            "Write-Output 'SUCCESS'",
+            f"try {{ Remove-DistributionGroupMember -Identity '{esc_identity}' "
+            f"-Member '{esc_member}' -BypassSecurityGroupManagerCheck "
+            "-Confirm:$false -ErrorAction Stop; Write-Output 'SUCCESS' } "
+            'catch { if ($_.Exception.Message -match "isn\'t a member of the group") '
+            "{ Write-Output 'ALREADY_REMOVED' } else { throw } }",
         ]
 
         result = self._run_powershell(commands, parse_json=False)
-        if result and "SUCCESS" in str(result):
+        result_str = str(result) if result else ""
+        if "SUCCESS" in result_str:
             logger.info(f"Removed {member} from {identity}")
+            return True
+        if "ALREADY_REMOVED" in result_str:
+            logger.info(f"Member {member} already not in {identity}, skipping")
             return True
 
         logger.error(f"Failed to remove {member} from {identity}")
@@ -697,7 +704,7 @@ class ExchangeOnlineClient:
                 f"}}"
             )
 
-        # Remove members
+        # Remove members (treat "isn't a member" as success)
         for member in members_to_remove:
             esc_m = _escape_ps_string(member)
             commands.append(
@@ -709,8 +716,11 @@ class ExchangeOnlineClient:
                 f" -Confirm:$false -ErrorAction Stop; "
                 f"$removed += '{esc_m}' "
                 f"}} catch {{ "
-                f"$errors += '{esc_m}: '"
-                f" + $_.Exception.Message "
+                f"if ($_.Exception.Message -match"
+                f' "isn\'t a member of the group")'
+                f" {{ $removed += '{esc_m}' }} "
+                f"else {{ $errors += '{esc_m}: '"
+                f" + $_.Exception.Message }} "
                 f"}}"
             )
 
@@ -853,7 +863,7 @@ class ExchangeOnlineClient:
                     ' "Add $member`: "'
                     " + $_.Exception.Message } } }"
                 ),
-                # Remove members loop
+                # Remove members loop (treat "isn't a member" as success)
                 (
                     "foreach ($member in $toRemove) { "
                     "try { Remove-DistributionGroupMember"
@@ -862,9 +872,12 @@ class ExchangeOnlineClient:
                     " -BypassSecurityGroupManagerCheck"
                     " -Confirm:$false -ErrorAction Stop; "
                     "$result.removed += $member } "
-                    "catch { $result.errors +="
+                    "catch { if ($_.Exception.Message"
+                    ' -match "isn\'t a member of the group") '
+                    "{ $result.removed += $member } "
+                    "else { $result.errors +="
                     ' "Remove $member`: "'
-                    " + $_.Exception.Message } }"
+                    " + $_.Exception.Message } } }"
                 ),
                 # Output result
                 "$result | ConvertTo-Json -Depth 3",

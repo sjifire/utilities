@@ -370,7 +370,17 @@ async def _ensure_cache(
     start = datetime.strptime(min(stale_dates), "%Y-%m-%d").date()
     end = datetime.strptime(max(stale_dates), "%Y-%m-%d").date()
 
-    fresh = await fetch_schedule_from_outlook(start, end)
+    try:
+        fresh = await fetch_schedule_from_outlook(start, end)
+    except Exception:
+        # Outlook fallback failed (e.g., no Graph credentials in dev/test mode).
+        # Return whatever we have from the cache rather than crashing.
+        logger.warning(
+            "Outlook calendar fallback failed for %d dates; returning partial cache",
+            len(stale_dates),
+            exc_info=True,
+        )
+        return cached
 
     # Write fresh data to cache
     for day_cache in fresh:

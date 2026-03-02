@@ -4,8 +4,10 @@ import csv
 import io
 import logging
 import re
+import time
 
 from bs4 import BeautifulSoup
+from tenacity import retry, retry_if_result, stop_after_attempt, wait_exponential
 
 from sjifire.aladtec.client import AladtecClient
 from sjifire.aladtec.models import Member
@@ -13,6 +15,11 @@ from sjifire.core.config import get_domain
 from sjifire.core.normalize import format_phone, validate_email
 
 logger = logging.getLogger(__name__)
+
+# Delay between member detail page fetches (seconds).
+# Aladtec enforces a per-minute rate limit (~150 req/min). Without throttling,
+# fast runners can blast through 67+ requests in ~12s and trip the limit.
+ENRICHMENT_THROTTLE_DELAY = 0.75
 
 
 def clean_title(title: str | None) -> str | None:
@@ -131,6 +138,7 @@ class AladtecMemberScraper(AladtecClient):
         """Fetch inactive members from Aladtec.
 
         Uses custom layout 307 which filters for inactive members and includes email.
+        Retries on 429 rate limit responses.
 
         Returns:
             List of Member objects with status='Inactive'
@@ -150,7 +158,7 @@ class AladtecMemberScraper(AladtecClient):
             "pager": "100",
         }
 
-        response = self.get(member_list_url, params=layout_params)
+        response = self._get_with_retry(member_list_url, params=layout_params)
         if response.status_code != 200:
             logger.error(f"Failed to load inactive member list: {response.status_code}")
             return []
@@ -161,7 +169,7 @@ class AladtecMemberScraper(AladtecClient):
             "export_mode": "1",
         }
 
-        response = self.get(member_list_url, params=export_params)
+        response = self._get_with_retry(member_list_url, params=export_params)
         if response.status_code != 200:
             logger.error(f"Failed to export inactive members: {response.status_code}")
             return []
@@ -480,19 +488,38 @@ class AladtecMemberScraper(AladtecClient):
         logger.info(f"Got {len(user_map)} user IDs from roster")
         return user_map
 
+    @retry(
+        retry=retry_if_result(lambda r: r is not None and r.status_code == 429),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=30, min=60, max=120),
+        retry_error_callback=lambda state: state.outcome.result(),
+    )
+    def _get_with_retry(self, url: str, **kwargs):
+        """GET request with automatic retry on 429 rate limit responses.
+
+        Waits 60-120s between retries to let the per-minute rate limit window reset.
+        Returns the response even after retries are exhausted (caller checks status_code).
+        """
+        response = self.get(url, **kwargs)
+        if response.status_code == 429:
+            logger.warning(f"Rate limited on {url}, retrying...")
+        return response
+
     def _get_member_detail_page(self, user_id: str) -> BeautifulSoup | None:
         """Fetch and parse the member detail page.
+
+        Retries up to 3 times on 429 (rate limit) responses with exponential backoff.
 
         Args:
             user_id: Aladtec user ID
 
         Returns:
-            BeautifulSoup object or None if fetch failed
+            BeautifulSoup object or None if fetch failed (including after retries)
         """
         if not self.client:
             return None
 
-        response = self.get(
+        response = self._get_with_retry(
             f"{self.base_url}/index.php",
             params={
                 "action": "manage_members_view_member_information",
@@ -501,6 +528,9 @@ class AladtecMemberScraper(AladtecClient):
         )
 
         if response.status_code != 200:
+            logger.warning(
+                f"Failed to fetch detail page for user {user_id}: HTTP {response.status_code}"
+            )
             return None
 
         return BeautifulSoup(response.text, "html.parser")
@@ -580,12 +610,17 @@ class AladtecMemberScraper(AladtecClient):
         """Enrich members with their full position and schedule lists.
 
         Fetches position and schedule data from each member's detail page.
+        Raises RuntimeError if any detail page fetches fail, to prevent
+        stale CSV-derived positions from being written to downstream systems.
 
         Args:
             members: List of members from get_members()
 
         Returns:
             Same list with positions and schedules fields populated
+
+        Raises:
+            RuntimeError: If any member detail page fetches fail (e.g., 429 rate limit)
         """
         if not self.client:
             return members
@@ -595,7 +630,10 @@ class AladtecMemberScraper(AladtecClient):
         # Get user ID mapping
         user_map = self.get_user_id_map()
 
+        failed_members: list[str] = []
+
         # Match members to user IDs by name
+        fetched_count = 0
         for member in members:
             # Try "Last, First" format
             name_key = f"{member.last_name}, {member.first_name}"
@@ -604,9 +642,15 @@ class AladtecMemberScraper(AladtecClient):
             if not user_id:
                 continue
 
+            # Throttle between detail page fetches to avoid rate limits
+            if fetched_count > 0 and ENRICHMENT_THROTTLE_DELAY > 0:
+                time.sleep(ENRICHMENT_THROTTLE_DELAY)
+            fetched_count += 1
+
             # Fetch the detail page once and extract both positions and schedules
             soup = self._get_member_detail_page(user_id)
             if not soup:
+                failed_members.append(member.display_name)
                 continue
 
             positions = self._extract_list_items(soup, "Positions:")
@@ -620,6 +664,15 @@ class AladtecMemberScraper(AladtecClient):
                 logger.debug(
                     f"{member.display_name}: {len(positions)} positions, {len(schedules)} schedules"
                 )
+
+        if failed_members:
+            msg = (
+                f"Enrichment failed for {len(failed_members)} member(s): "
+                f"{', '.join(failed_members)}. Aborting to prevent stale positions "
+                f"from being written to Entra ID."
+            )
+            logger.error(msg)
+            raise RuntimeError(msg)
 
         logger.info("Member detail enrichment complete")
         return members

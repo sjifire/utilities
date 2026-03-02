@@ -78,4 +78,4 @@ jobs:
         run: uv run playwright install --with-deps chromium
 
       - name: Run e2e tests
-        run: uv run pytest -m e2e --browser chromium
+        run: uv run pytest -m e2e --browser chromium -x

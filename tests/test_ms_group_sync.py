@@ -828,6 +828,36 @@ class TestReconcileGhostMembers:
         assert len(errors) == 1
         assert "Failed to remove ghost member" in errors[0]
 
+    @pytest.mark.asyncio
+    async def test_ghost_already_removed_is_not_error(self, manager, mock_exchange_client):
+        """Ghost member already absent from Exchange is treated as success, not error."""
+        mock_entra_groups = AsyncMock()
+        mock_entra_group = MagicMock()
+        mock_entra_group.id = "group-id-1"
+        mock_entra_groups.get_group_by_mail_nickname = AsyncMock(return_value=mock_entra_group)
+        mock_entra_groups.get_group_members = AsyncMock(return_value=["ghost-1"])
+        manager._entra_groups = mock_entra_groups
+
+        # remove returns True because "isn't a member" is treated as success
+        mock_exchange_client.remove_distribution_group_member = AsyncMock(return_value=True)
+        manager._exchange_client = mock_exchange_client
+
+        ghost_user = self._make_entra_user(
+            "ghost-1", "Ghost User", "ghost@test.org", account_enabled=False
+        )
+        manager._all_users_cache = [ghost_user]
+
+        removed, errors = await manager._reconcile_ghost_members(
+            alias="firefighters",
+            email="firefighters@test.org",
+            target_emails=set(),
+            dry_run=False,
+        )
+
+        assert len(removed) == 1
+        assert "Ghost User (ghost)" in removed
+        assert not errors
+
 
 # =============================================================================
 # sync_group Integration Tests
