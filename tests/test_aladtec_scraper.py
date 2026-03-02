@@ -319,3 +319,109 @@ class TestGetMemberPositions:
 
         # Should only get list items, not checkboxes
         assert positions == ["From List"]
+
+
+class TestEnrichMemberDetails:
+    """Tests for enrich_member_details failure behavior."""
+
+    def _make_member(self, first, last, employee_type="Lieutenant"):
+        """Create a Member with CSV-derived positions (simulating pre-enrichment state)."""
+        from sjifire.aladtec.models import Member
+
+        positions = [p.strip() for p in employee_type.split(",") if p.strip()]
+        return Member(
+            id=f"{first.lower()}.{last.lower()}",
+            first_name=first,
+            last_name=last,
+            positions=positions,
+        )
+
+    def test_enrichment_success_overwrites_csv_positions(self, mock_env_vars):
+        """Successful enrichment should replace CSV-derived positions."""
+        from unittest.mock import MagicMock, patch
+
+        scraper = AladtecMemberScraper()
+        scraper.client = MagicMock()
+
+        member = self._make_member("Harry", "See", employee_type="Lieutenant")
+        assert member.positions == ["Lieutenant"]
+
+        html = """
+        <table>
+            <tr>
+                <td>Positions:</td>
+                <td><ul><li>Apparatus Operator</li></ul></td>
+            </tr>
+            <tr>
+                <td>Schedules:</td>
+                <td><ul><li>A Shift</li></ul></td>
+            </tr>
+        </table>
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = html
+
+        with patch.object(scraper, "get_user_id_map", return_value={"See, Harry": "42"}):
+            scraper.client.get.return_value = mock_response
+            result = scraper.enrich_member_details([member])
+
+        assert result[0].positions == ["Apparatus Operator"]
+        assert result[0].schedules == ["A Shift"]
+
+    def test_enrichment_failure_raises_runtime_error(self, mock_env_vars):
+        """Failed detail page fetch should raise RuntimeError, not silently continue."""
+        from unittest.mock import MagicMock, patch
+
+        scraper = AladtecMemberScraper()
+        scraper.client = MagicMock()
+
+        member = self._make_member("Harry", "See", employee_type="Lieutenant")
+
+        # Simulate 429 rate limit response
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+
+        with patch.object(scraper, "get_user_id_map", return_value={"See, Harry": "42"}):
+            scraper.client.get.return_value = mock_response
+            with pytest.raises(RuntimeError, match="Enrichment failed for 1 member"):
+                scraper.enrich_member_details([member])
+
+        # Positions should NOT have been updated (still CSV value)
+        assert member.positions == ["Lieutenant"]
+
+    def test_enrichment_failure_preserves_csv_positions(self, mock_env_vars):
+        """When enrichment fails, the original CSV-derived positions remain unchanged."""
+        from unittest.mock import MagicMock, patch
+
+        scraper = AladtecMemberScraper()
+        scraper.client = MagicMock()
+
+        member = self._make_member("Harry", "See", employee_type="Lieutenant")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+
+        with patch.object(scraper, "get_user_id_map", return_value={"See, Harry": "42"}):
+            scraper.client.get.return_value = mock_response
+            with pytest.raises(RuntimeError):
+                scraper.enrich_member_details([member])
+
+        # CSV-derived positions should remain (but sync should be aborted by the error)
+        assert member.positions == ["Lieutenant"]
+
+    def test_enrichment_no_user_id_is_not_failure(self, mock_env_vars):
+        """Members with no matching user ID should be skipped without error."""
+        from unittest.mock import MagicMock, patch
+
+        scraper = AladtecMemberScraper()
+        scraper.client = MagicMock()
+
+        member = self._make_member("Unknown", "Person")
+
+        # Empty user map — no IDs to look up
+        with patch.object(scraper, "get_user_id_map", return_value={}):
+            result = scraper.enrich_member_details([member])
+
+        # Should succeed — no detail page fetch attempted
+        assert len(result) == 1

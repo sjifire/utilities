@@ -501,6 +501,9 @@ class AladtecMemberScraper(AladtecClient):
         )
 
         if response.status_code != 200:
+            logger.warning(
+                f"Failed to fetch detail page for user {user_id}: HTTP {response.status_code}"
+            )
             return None
 
         return BeautifulSoup(response.text, "html.parser")
@@ -580,12 +583,17 @@ class AladtecMemberScraper(AladtecClient):
         """Enrich members with their full position and schedule lists.
 
         Fetches position and schedule data from each member's detail page.
+        Raises RuntimeError if any detail page fetches fail, to prevent
+        stale CSV-derived positions from being written to downstream systems.
 
         Args:
             members: List of members from get_members()
 
         Returns:
             Same list with positions and schedules fields populated
+
+        Raises:
+            RuntimeError: If any member detail page fetches fail (e.g., 429 rate limit)
         """
         if not self.client:
             return members
@@ -594,6 +602,8 @@ class AladtecMemberScraper(AladtecClient):
 
         # Get user ID mapping
         user_map = self.get_user_id_map()
+
+        failed_members: list[str] = []
 
         # Match members to user IDs by name
         for member in members:
@@ -607,6 +617,7 @@ class AladtecMemberScraper(AladtecClient):
             # Fetch the detail page once and extract both positions and schedules
             soup = self._get_member_detail_page(user_id)
             if not soup:
+                failed_members.append(member.display_name)
                 continue
 
             positions = self._extract_list_items(soup, "Positions:")
@@ -620,6 +631,15 @@ class AladtecMemberScraper(AladtecClient):
                 logger.debug(
                     f"{member.display_name}: {len(positions)} positions, {len(schedules)} schedules"
                 )
+
+        if failed_members:
+            msg = (
+                f"Enrichment failed for {len(failed_members)} member(s): "
+                f"{', '.join(failed_members)}. Aborting to prevent stale positions "
+                f"from being written to Entra ID."
+            )
+            logger.error(msg)
+            raise RuntimeError(msg)
 
         logger.info("Member detail enrichment complete")
         return members
