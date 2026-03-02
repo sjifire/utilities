@@ -172,6 +172,7 @@ src/sjifire/
 │   └── tasks/             # Background tasks (Container Apps Job, every 30 min)
 │       ├── registry.py    # TaskResult, @register(auto=True/False), run_task, run_all
 │       ├── dispatch_sync.py # Dispatch call sync + enrichment (3 tasks, 1 manual)
+│       ├── event_archive.py # Archive calendar events before Outlook 180-day expiry
 │       ├── ispyfire_sync.py # iSpyFire user sync from Entra
 │       ├── neris_sync.py  # NERIS report sync (incremental via checkpoint)
 │       ├── schedule_refresh.py # Crew cache refresh from Outlook calendar
@@ -235,7 +236,7 @@ Operations platform at `https://ops.sjifire.org` providing fire district tools, 
 - **Event types for multi-user**: `turn_start` (who started), `user_message` (broadcast user messages to other subscribers), `done`/`error` include `user_email`/`user_name` for attribution.
 - **Client behavior**: Messages blocked by 409 are queued and auto-retried when the active turn completes. Other users see the conversation in real-time (all events broadcast to all subscribers).
 
-**Background tasks**: Container Apps Job (`sjifire-ops-tasks`) runs `uv run ops-tasks` every 30 minutes. Runs all `auto=True` tasks: dispatch-sync, dispatch-enrich, ispyfire-sync, neris-sync, schedule-refresh. Tasks registered with `auto=False` (e.g., dispatch-reenrich) only run when explicitly requested by name. New tasks are added via `@register("name")` in `ops/tasks/`. The neris-sync task uses a high-water mark checkpoint for incremental fetches and auto-transitions local submitted incidents to approved when NERIS approves them.
+**Background tasks**: Container Apps Job (`sjifire-ops-tasks`) runs `uv run ops-tasks` every 30 minutes. Runs all `auto=True` tasks: dispatch-sync, dispatch-enrich, event-archive, ispyfire-sync, neris-sync, schedule-refresh. Tasks registered with `auto=False` (e.g., dispatch-reenrich) only run when explicitly requested by name. New tasks are added via `@register("name")` in `ops/tasks/`. The neris-sync task uses a high-water mark checkpoint for incremental fetches and auto-transitions local submitted incidents to approved when NERIS approves them.
 
 **Cosmos DB backup**: Continuous 30-day PITR (any-second point-in-time restore). For ad-hoc JSON exports beyond 30 days, use `uv run backup-cosmos`. Infrastructure provisioned via `./scripts/setup-azure-ops.sh --phase 2`.
 
