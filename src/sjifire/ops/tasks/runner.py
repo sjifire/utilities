@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 def _import_tasks() -> None:
     """Import all task modules to trigger @register decorators."""
     import sjifire.ops.tasks.dispatch_sync
+    import sjifire.ops.tasks.event_archive
     import sjifire.ops.tasks.ispyfire_sync
     import sjifire.ops.tasks.neris_sync
     import sjifire.ops.tasks.schedule_refresh  # noqa: F401
