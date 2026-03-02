@@ -378,11 +378,13 @@ class TestEnrichMemberDetails:
 
         member = self._make_member("Harry", "See", employee_type="Lieutenant")
 
-        # Simulate 429 rate limit response
+        # Simulate 429 rate limit response (persists after retries)
         mock_response = MagicMock()
         mock_response.status_code = 429
 
         with patch.object(scraper, "get_user_id_map", return_value={"See, Harry": "42"}):
+            # Bypass tenacity wait to speed up test
+            scraper._get_with_retry.retry.wait = lambda *a, **kw: 0
             scraper.client.get.return_value = mock_response
             with pytest.raises(RuntimeError, match="Enrichment failed for 1 member"):
                 scraper.enrich_member_details([member])
@@ -409,6 +411,39 @@ class TestEnrichMemberDetails:
 
         # CSV-derived positions should remain (but sync should be aborted by the error)
         assert member.positions == ["Lieutenant"]
+
+    def test_enrichment_retries_on_429_then_succeeds(self, mock_env_vars):
+        """429 should be retried; success on retry should enrich correctly."""
+        from unittest.mock import MagicMock, patch
+
+        scraper = AladtecMemberScraper()
+        scraper.client = MagicMock()
+
+        member = self._make_member("Harry", "See", employee_type="Lieutenant")
+
+        html = """
+        <table>
+            <tr><td>Positions:</td><td><ul><li>Apparatus Operator</li></ul></td></tr>
+            <tr><td>Schedules:</td><td><ul><li>A Shift</li></ul></td></tr>
+        </table>
+        """
+
+        mock_429 = MagicMock()
+        mock_429.status_code = 429
+
+        mock_200 = MagicMock()
+        mock_200.status_code = 200
+        mock_200.text = html
+
+        with patch.object(scraper, "get_user_id_map", return_value={"See, Harry": "42"}):
+            # Bypass tenacity wait to speed up test
+            scraper._get_with_retry.retry.wait = lambda *a, **kw: 0
+            # First call: 429, second call: 200
+            scraper.client.get.side_effect = [mock_429, mock_200]
+            result = scraper.enrich_member_details([member])
+
+        assert result[0].positions == ["Apparatus Operator"]
+        assert scraper.client.get.call_count == 2
 
     def test_enrichment_no_user_id_is_not_failure(self, mock_env_vars):
         """Members with no matching user ID should be skipped without error."""
