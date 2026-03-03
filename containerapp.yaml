@@ -68,7 +68,7 @@ properties:
           - name: AZURE_STORAGE_ACCOUNT_URL
             value: __AZURE_STORAGE_ACCOUNT_URL__
           - name: AZURE_STORAGE_ACCOUNT_KEY
-            value: __AZURE_STORAGE_ACCOUNT_KEY__
+            secretRef: azure-storage-account-key
           - name: BUILD_VERSION
             value: __IMAGE_TAG__
           - name: CENTRIFUGO_API_KEY
