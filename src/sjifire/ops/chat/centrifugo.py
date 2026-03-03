@@ -301,9 +301,10 @@ def _decode_b64info(b64info: str) -> dict:
     """Decode Centrifugo b64info to a dict (user_id, name, email)."""
     if not b64info:
         return {}
-    with contextlib.suppress(Exception):
+    try:
         return json.loads(base64.b64decode(b64info))
-    return {}
+    except Exception:
+        return {}
 
 
 async def rpc_proxy(request: Request) -> Response:

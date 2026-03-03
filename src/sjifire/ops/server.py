@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import sys
 from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
@@ -522,10 +523,9 @@ if os.getenv("TESTING") == "1":
 
         # Toggle editor mode for the dev user
         if body.get("is_editor"):
-            import sjifire.ops.auth as auth_mod
-
             editor_group_id = "test-editor-group"
-            auth_mod._EDITOR_GROUP_ID = editor_group_id
+            # Mutate the cached group ID on the already-imported auth module
+            sys.modules["sjifire.ops.auth"]._EDITOR_GROUP_ID = editor_group_id
 
             global _DEV_USER
             _DEV_USER = UserContext(

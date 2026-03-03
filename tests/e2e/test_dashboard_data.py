@@ -129,15 +129,19 @@ def test_recent_calls_short_descriptions(seeded_page):
 
 
 def test_recent_calls_address_links(seeded_page):
-    """Address links contain Google Maps URLs."""
+    """Address links point to Google Maps."""
     _goto_tab(seeded_page, "calls")
 
     links = seeded_page.locator(".data-table:visible .address-link")
     assert links.count() >= 2
 
+    from urllib.parse import urlparse
+
     for i in range(links.count()):
         href = links.nth(i).get_attribute("href") or ""
-        assert "google.com/maps" in href or "maps.google.com" in href
+        parsed = urlparse(href)
+        assert parsed.hostname is not None
+        assert parsed.hostname.endswith("google.com"), f"Expected Google Maps URL, got: {href}"
 
 
 def test_recent_calls_call_ids(seeded_page):

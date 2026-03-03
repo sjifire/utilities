@@ -100,7 +100,7 @@ def match_schedule_name_to_email(
         # Check if all words in display_name are in normalized_name
         display_words = set(display_normalized.split())
         schedule_words = set(normalized_name.split())
-        if display_words <= schedule_words or schedule_words <= display_words:
+        if display_words.issubset(schedule_words) or schedule_words.issubset(display_words):
             return email
 
     return None
