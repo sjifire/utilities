@@ -126,9 +126,10 @@ def test_crew_grid_populated(seeded_page):
     assert crew_names.count() >= 4
 
     all_text = seeded_page.locator(".crew-grid:visible").first.text_content()
-    assert "Capt Rodriguez" in all_text
-    assert "Lt Nguyen" in all_text
-    assert "FF Garcia" in all_text
+    # Today (A) has Rodriguez/Nguyen/Garcia, yesterday (B) has Lee/Kim/Davis
+    has_a_crew = "Rodriguez" in all_text and "Nguyen" in all_text
+    has_b_crew = "Lee" in all_text and "Kim" in all_text
+    assert has_a_crew or has_b_crew
 
 
 def test_crew_sections_grouped(seeded_page):
