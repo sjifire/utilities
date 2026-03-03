@@ -120,6 +120,12 @@ indent-style = "space"
 [tool.ty.environment]
 python-version = "3.14"
 
+[tool.ty.rules]
+# msgraph SDK has incomplete type stubs — these two rules produce many
+# false positives across any file that touches Graph API objects.
+possibly-missing-attribute = "ignore"
+invalid-argument-type = "ignore"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

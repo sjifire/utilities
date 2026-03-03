@@ -689,6 +689,10 @@ async def run_chat(
                 user_email=user.email,
             )
 
+        if conversation is None:
+            msg = "conversation must be loaded or created before this point"
+            raise RuntimeError(msg)
+
         # Attach snapshot so it's persisted with the conversation
         conversation.context_snapshot = snapshot
 
@@ -880,8 +884,9 @@ async def _run_chat_loop(
 
                         elif event.type == "content_block_delta":
                             if hasattr(event.delta, "text"):
-                                assistant_text += event.delta.text
-                                await publish(channel, "text", {"content": event.delta.text})
+                                text = str(event.delta.text)
+                                assistant_text += text
+                                await publish(channel, "text", {"content": text})
                             elif hasattr(event.delta, "partial_json") and tool_calls:
                                 tc = tool_calls[-1]
                                 tc.setdefault("_partial", "")
