@@ -174,7 +174,7 @@ class ExchangeOnlineClient:
             )
 
             if result.returncode != 0:
-                logger.error(f"PowerShell error: {result.stderr}")
+                logger.error("PowerShell error: %s", result.stderr)
                 return None
 
             output = result.stdout.strip()
@@ -197,7 +197,7 @@ class ExchangeOnlineClient:
                     # Only warn if output looks like it might contain JSON data
                     # (not just banner text or empty results)
                     if "{" in output or "[" in output:
-                        logger.warning(f"Failed to parse JSON output: {output[:200]}")
+                        logger.warning("Failed to parse JSON output: %s", output[:200])
                     return {"raw": output}
 
             return output
@@ -209,7 +209,7 @@ class ExchangeOnlineClient:
             logger.error("PowerShell (pwsh) not found. Install PowerShell 7+.")
             return None
         except Exception as e:
-            logger.error(f"Failed to run PowerShell: {e}")
+            logger.error("Failed to run PowerShell: %s", e)
             return None
 
     async def get_distribution_group(self, identity: str) -> ExchangeGroup | None:
@@ -352,7 +352,7 @@ class ExchangeOnlineClient:
 
         result = self._run_powershell(commands)
         if result and isinstance(result, dict) and "Identity" in result:
-            logger.info(f"Created mail-enabled security group: {display_name}")
+            logger.info("Created mail-enabled security group: %s", display_name)
             return ExchangeGroup(
                 identity=result.get("Identity", name),
                 display_name=result.get("DisplayName", display_name),
@@ -360,7 +360,7 @@ class ExchangeOnlineClient:
                 group_type="MailEnabledSecurity",
             )
 
-        logger.error(f"Failed to create mail-enabled security group: {name}")
+        logger.error("Failed to create mail-enabled security group: %s", name)
         return None
 
     async def update_distribution_group_description(
@@ -386,10 +386,10 @@ class ExchangeOnlineClient:
 
         result = self._run_powershell(commands, parse_json=False)
         if result and "SUCCESS" in str(result):
-            logger.info(f"Updated description for {identity}")
+            logger.info("Updated description for %s", identity)
             return True
 
-        logger.error(f"Failed to update description for {identity}")
+        logger.error("Failed to update description for %s", identity)
         return False
 
     async def update_distribution_group_managed_by(
@@ -417,10 +417,10 @@ class ExchangeOnlineClient:
 
         result = self._run_powershell(commands, parse_json=False)
         if result and "SUCCESS" in str(result):
-            logger.info(f"Updated ManagedBy for {identity} to {managed_by}")
+            logger.info("Updated ManagedBy for %s to %s", identity, managed_by)
             return True
 
-        logger.error(f"Failed to update ManagedBy for {identity}")
+        logger.error("Failed to update ManagedBy for %s", identity)
         return False
 
     async def set_distribution_group_aliases(
@@ -461,10 +461,10 @@ class ExchangeOnlineClient:
 
         result = self._run_powershell(commands, parse_json=False)
         if result and "SUCCESS" in str(result):
-            logger.info(f"Added aliases to {identity}: {', '.join(aliases)}")
+            logger.info("Added aliases to %s: %s", identity, ", ".join(aliases))
             return True
 
-        logger.error(f"Failed to add aliases to {identity}: {result}")
+        logger.error("Failed to add aliases to %s: %s", identity, result)
         return False
 
     async def update_group_settings(
@@ -509,12 +509,12 @@ class ExchangeOnlineClient:
         result = self._run_powershell(commands, parse_json=False)
         if result and "SUCCESS" in str(result):
             if description:
-                logger.info(f"Updated description for {identity}")
+                logger.info("Updated description for %s", identity)
             if managed_by:
-                logger.info(f"Updated ManagedBy for {identity} to {managed_by}")
+                logger.info("Updated ManagedBy for %s to %s", identity, managed_by)
             return True
 
-        logger.error(f"Failed to update settings for {identity}")
+        logger.error("Failed to update settings for %s", identity)
         return False
 
     async def delete_distribution_group(self, identity: str) -> bool:
@@ -534,7 +534,7 @@ class ExchangeOnlineClient:
 
         result = self._run_powershell(commands, parse_json=False)
         if result and "SUCCESS" in str(result):
-            logger.info(f"Deleted distribution group: {identity}")
+            logger.info("Deleted distribution group: %s", identity)
             return True
 
         # Check if group just doesn't exist (not an error)
@@ -542,10 +542,10 @@ class ExchangeOnlineClient:
             # Could be "not found" error - check if group exists
             check = await self.get_distribution_group(identity)
             if check is None:
-                logger.info(f"Distribution group already deleted: {identity}")
+                logger.info("Distribution group already deleted: %s", identity)
                 return True
 
-        logger.error(f"Failed to delete distribution group: {identity}")
+        logger.error("Failed to delete distribution group: %s", identity)
         return False
 
     async def get_distribution_group_members(self, identity: str) -> list[str]:
@@ -608,14 +608,14 @@ class ExchangeOnlineClient:
         result_str = str(result) if result else ""
 
         if "SUCCESS" in result_str:
-            logger.info(f"Added {member} to {identity}")
+            logger.info("Added %s to %s", member, identity)
             return True
 
         if "already a member" in result_str.lower():
-            logger.debug(f"{member} is already a member of {identity}")
+            logger.debug("%s is already a member of %s", member, identity)
             return True
 
-        logger.error(f"Failed to add {member} to {identity}")
+        logger.error("Failed to add %s to %s", member, identity)
         return False
 
     async def remove_distribution_group_member(
@@ -645,13 +645,13 @@ class ExchangeOnlineClient:
         result = self._run_powershell(commands, parse_json=False)
         result_str = str(result) if result else ""
         if "SUCCESS" in result_str:
-            logger.info(f"Removed {member} from {identity}")
+            logger.info("Removed %s from %s", member, identity)
             return True
         if "ALREADY_REMOVED" in result_str:
-            logger.info(f"Member {member} already not in {identity}, skipping")
+            logger.info("Member %s already not in %s, skipping", member, identity)
             return True
 
-        logger.error(f"Failed to remove {member} from {identity}")
+        logger.error("Failed to remove %s from %s", member, identity)
         return False
 
     async def sync_group_members(
@@ -756,11 +756,11 @@ class ExchangeOnlineClient:
 
         # Log results
         for member in added:
-            logger.info(f"Added {member} to {identity}")
+            logger.info("Added %s to %s", member, identity)
         for member in removed:
-            logger.info(f"Removed {member} from {identity}")
+            logger.info("Removed %s from %s", member, identity)
         for error in errors:
-            logger.error(f"Member sync error for {identity}: {error}")
+            logger.error("Member sync error for %s: %s", identity, error)
 
         return added, removed, errors
 
@@ -922,15 +922,18 @@ class ExchangeOnlineClient:
                 permanent_errors.append(error)
 
         if transient_failures:
-            logger.info(f"Retrying {len(transient_failures)} transient failures for {identity}")
+            logger.info("Retrying %d transient failures for %s", len(transient_failures), identity)
 
             for attempt, delay in enumerate(RETRY_DELAYS_SECONDS[:MAX_RETRY_ATTEMPTS]):
                 if not transient_failures:
                     break
 
                 logger.info(
-                    f"Retry attempt {attempt + 1}/{MAX_RETRY_ATTEMPTS} "
-                    f"after {delay}s delay for {len(transient_failures)} members"
+                    "Retry attempt %d/%d after %ds delay for %d members",
+                    attempt + 1,
+                    MAX_RETRY_ATTEMPTS,
+                    delay,
+                    len(transient_failures),
                 )
                 await asyncio.sleep(delay)
 
@@ -951,7 +954,7 @@ class ExchangeOnlineClient:
                     retry_result = self._run_powershell(add_script)
                     # Check for SUCCESS in string or raw dict output
                     if "SUCCESS" in str(retry_result):
-                        logger.info(f"Retry succeeded: Added {member} to {identity}")
+                        logger.info("Retry succeeded: Added %s to %s", member, identity)
                         result["added"].append(member)
                     elif is_transient_error(str(retry_result)):
                         still_failing.append(member)
@@ -987,11 +990,11 @@ class ExchangeOnlineClient:
         result = await asyncio.to_thread(self._run_powershell, commands, parse_json=False)
 
         if result is None:
-            logger.error(f"Failed to set welcome message for {identity}")
+            logger.error("Failed to set welcome message for %s", identity)
             return False
 
         status = "enabled" if enabled else "disabled"
-        logger.info(f"Welcome messages {status} for {identity}")
+        logger.info("Welcome messages %s for %s", status, identity)
         return True
 
     async def set_unified_group_calendar_settings(
@@ -1020,10 +1023,10 @@ class ExchangeOnlineClient:
         result = await asyncio.to_thread(self._run_powershell, commands, parse_json=False)
 
         if result is None:
-            logger.error(f"Failed to set calendar settings for {identity}")
+            logger.error("Failed to set calendar settings for %s", identity)
             return False
 
-        logger.info(f"Calendar auto-subscribe settings applied for {identity}")
+        logger.info("Calendar auto-subscribe settings applied for %s", identity)
         return True
 
     async def close(self) -> None:

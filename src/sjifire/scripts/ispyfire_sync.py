@@ -70,7 +70,7 @@ def backup_ispyfire_people(people: list, backup_dir: Path) -> Path:
     with backup_file.open("w") as f:
         json.dump(data, f, indent=2)
 
-    logger.info(f"Backed up {len(people)} people to {backup_file}")
+    logger.info("Backed up %d people to %s", len(people), backup_file)
     return backup_file
 
 
@@ -194,7 +194,7 @@ async def run_sync(
     logger.info("Fetching Entra ID employees...")
     user_manager = EntraUserManager()
     entra_users = await user_manager.get_employees()
-    logger.info(f"Fetched {len(entra_users)} employees from Entra ID")
+    logger.info("Fetched %d employees from Entra ID", len(entra_users))
 
     # Filter to single user if specified
     if single_email:
@@ -203,7 +203,7 @@ async def run_sync(
         if not entra_users:
             print(f"Error: User not found in Entra ID: {single_email}")
             return 1
-        logger.info(f"Filtering to single user: {single_email}")
+        logger.info("Filtering to single user: %s", single_email)
 
     # Get iSpyFire people (include inactive and deleted to prevent duplicates)
     logger.info("Fetching iSpyFire people...")
@@ -238,28 +238,29 @@ async def run_sync(
             existing = ispy_client.get_person_by_email(user.email) if user.email else None
             if existing:
                 logger.info(
-                    f"Found existing person for {user.email}, reactivating instead of creating"
+                    "Found existing person for %s, reactivating instead of creating",
+                    user.email,
                 )
                 if not existing.is_active:
                     if ispy_client.reactivate_person(existing.id, email=existing.email):
-                        logger.info(f"  Reactivated: {existing.display_name}")
+                        logger.info("  Reactivated: %s", existing.display_name)
                     else:
-                        logger.error(f"  Failed to reactivate: {existing.display_name}")
+                        logger.error("  Failed to reactivate: %s", existing.display_name)
                 else:
-                    logger.info(f"  Already active: {existing.display_name}")
+                    logger.info("  Already active: %s", existing.display_name)
                 continue
 
             person = entra_user_to_ispyfire_person(user)
-            logger.info(f"Creating: {person.display_name}")
+            logger.info("Creating: %s", person.display_name)
             result = ispy_client.create_and_invite(person)
             if result:
-                logger.info(f"  Created with ID: {result.id}")
+                logger.info("  Created with ID: %s", result.id)
             else:
                 logger.error("  Failed to create")
 
         # Update existing people
         for user, person in comparison.to_update:
-            logger.info(f"Updating: {person.display_name}")
+            logger.info("Updating: %s", person.display_name)
             # Update fields from Entra
             if user.first_name:
                 person.first_name = user.first_name
@@ -286,7 +287,7 @@ async def run_sync(
             if not person.is_active
         ]
         for person in to_reactivate:
-            logger.info(f"Reactivating: {person.display_name}")
+            logger.info("Reactivating: %s", person.display_name)
             if ispy_client.reactivate_person(person.id, email=person.email):
                 logger.info("  Reactivated successfully")
             else:
@@ -294,7 +295,7 @@ async def run_sync(
 
         # Deactivate removed people
         for person in comparison.to_remove:
-            logger.info(f"Deactivating: {person.display_name}")
+            logger.info("Deactivating: %s", person.display_name)
             if ispy_client.deactivate_person(person.id, email=person.email):
                 logger.info("  Deactivated successfully")
             else:

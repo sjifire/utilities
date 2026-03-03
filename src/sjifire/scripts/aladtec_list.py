@@ -55,10 +55,10 @@ def run_list(output_format: str = "table") -> int:
             logger.error("No members found")
             return 1
 
-        logger.info(f"Found {len(members)} members\n")
+        logger.info("Found %d members\n", len(members))
 
     except Exception as e:
-        logger.error(f"Failed to fetch members: {e}")
+        logger.error("Failed to fetch members: %s", e)
         return 1
 
     # Convert to dicts and format positions as comma-delimited

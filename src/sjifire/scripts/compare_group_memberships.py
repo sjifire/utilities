@@ -32,7 +32,7 @@ async def compare_memberships(
     logger.info("=" * 60)
     logger.info("Group Membership Comparison")
     logger.info("=" * 60)
-    logger.info(f"Strategies: {', '.join(strategy_names)}")
+    logger.info("Strategies: %s", ", ".join(strategy_names))
 
     # Fetch Aladtec members
     logger.info("")
@@ -45,10 +45,10 @@ async def compare_memberships(
                 return
             members = scraper.get_members(include_inactive=False)
     except Exception as e:
-        logger.error(f"Failed to fetch Aladtec members: {e}")
+        logger.error("Failed to fetch Aladtec members: %s", e)
         return
 
-    logger.info(f"Found {len(members)} active members")
+    logger.info("Found %d active members", len(members))
 
     # Build expected memberships from strategies
     # expected_memberships[group_email] = set of member emails
@@ -117,7 +117,7 @@ async def compare_memberships(
                             actual_memberships[group_email].add(user.upn.lower())
                 continue
         except Exception as e:
-            logger.debug(f"Error checking M365 for {group_email}: {e}")
+            logger.debug("Error checking M365 for %s: %s", group_email, e)
 
         # Try Exchange
         try:
@@ -128,7 +128,7 @@ async def compare_memberships(
                 actual_memberships[group_email] = {e.lower() for e in member_emails}
                 continue
         except Exception as e:
-            logger.debug(f"Error checking Exchange for {group_email}: {e}")
+            logger.debug("Error checking Exchange for %s: %s", group_email, e)
 
         # Group doesn't exist
         group_types[group_email] = "NOT FOUND"
@@ -155,23 +155,23 @@ async def compare_memberships(
         extra = actual - expected
 
         logger.info("")
-        logger.info(f"{display_name} ({group_email}):")
-        logger.info(f"  Type: {group_type}")
-        logger.info(f"  Expected: {len(expected)} members")
-        logger.info(f"  Actual:   {len(actual)} members")
+        logger.info("%s (%s):", display_name, group_email)
+        logger.info("  Type: %s", group_type)
+        logger.info("  Expected: %d members", len(expected))
+        logger.info("  Actual:   %d members", len(actual))
 
         if missing:
-            logger.info(f"  MISSING ({len(missing)}):")
+            logger.info("  MISSING (%d):", len(missing))
             for email in sorted(missing):
                 name = email_to_name.get(email, email)
-                logger.info(f"    - {name} ({email})")
+                logger.info("    - %s (%s)", name, email)
             total_missing += len(missing)
 
         if extra:
-            logger.info(f"  EXTRA ({len(extra)}):")
+            logger.info("  EXTRA (%d):", len(extra))
             for email in sorted(extra):
                 name = email_to_name.get(email, email)
-                logger.info(f"    - {name} ({email})")
+                logger.info("    - %s (%s)", name, email)
             total_extra += len(extra)
 
         if not missing and not extra and group_type != "NOT FOUND":
@@ -186,10 +186,10 @@ async def compare_memberships(
     logger.info("SUMMARY")
     logger.info("=" * 60)
     logger.info("")
-    logger.info(f"Groups analyzed: {len(expected_memberships)}")
-    logger.info(f"Groups with discrepancies: {groups_with_issues}")
-    logger.info(f"Total missing memberships: {total_missing}")
-    logger.info(f"Total extra memberships: {total_extra}")
+    logger.info("Groups analyzed: %d", len(expected_memberships))
+    logger.info("Groups with discrepancies: %d", groups_with_issues)
+    logger.info("Total missing memberships: %d", total_missing)
+    logger.info("Total extra memberships: %d", total_extra)
 
 
 def main():

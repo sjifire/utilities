@@ -91,7 +91,7 @@ def validate_email(email: str | None, context: str = "") -> str | None:
         result = ev(email, check_deliverability=False)
         return result.normalized
     except EmailNotValidError as e:
-        logger.warning(f"Invalid email '{email}'{f' for {context}' if context else ''}: {e}")
+        logger.warning("Invalid email '%s'%s: %s", email, f" for {context}" if context else "", e)
         return None
 
 

@@ -82,7 +82,7 @@ class AladtecMemberScraper(AladtecClient):
         if not self.client:
             raise RuntimeError("Scraper must be used as context manager")
 
-        logger.info(f"Fetching member CSV export (layout={layout})")
+        logger.info("Fetching member CSV export (layout=%s)", layout)
 
         member_list_url = f"{self.base_url}/index.php"
 
@@ -96,10 +96,10 @@ class AladtecMemberScraper(AladtecClient):
 
         response = self.get(member_list_url, params=layout_params)
         if response.status_code != 200:
-            logger.error(f"Failed to load member list: {response.status_code}")
+            logger.error("Failed to load member list: %s", response.status_code)
             return []
 
-        logger.debug(f"Loaded member list page with layout {layout}")
+        logger.debug("Loaded member list page with layout %s", layout)
 
         # Now request the CSV export
         export_params = {
@@ -110,7 +110,7 @@ class AladtecMemberScraper(AladtecClient):
         response = self.get(member_list_url, params=export_params)
 
         if response.status_code != 200:
-            logger.error(f"Failed to get CSV export: {response.status_code}")
+            logger.error("Failed to get CSV export: %s", response.status_code)
             return self._scrape_members_html()
 
         # Check if we got CSV content (should have commas and likely "Name" header)
@@ -119,7 +119,7 @@ class AladtecMemberScraper(AladtecClient):
             logger.warning("Export response doesn't look like CSV, trying HTML scrape")
             return self._scrape_members_html()
 
-        logger.debug(f"Got CSV export ({len(content)} bytes)")
+        logger.debug("Got CSV export (%d bytes)", len(content))
         members = self._parse_csv(content)
 
         # Optionally enrich with full position and schedule lists
@@ -130,7 +130,7 @@ class AladtecMemberScraper(AladtecClient):
         if include_inactive:
             inactive_members = self._get_inactive_members()
             members.extend(inactive_members)
-            logger.info(f"Total members (active + inactive): {len(members)}")
+            logger.info("Total members (active + inactive): %d", len(members))
 
         return members
 
@@ -160,7 +160,7 @@ class AladtecMemberScraper(AladtecClient):
 
         response = self._get_with_retry(member_list_url, params=layout_params)
         if response.status_code != 200:
-            logger.error(f"Failed to load inactive member list: {response.status_code}")
+            logger.error("Failed to load inactive member list: %s", response.status_code)
             return []
 
         # Export CSV
@@ -171,7 +171,7 @@ class AladtecMemberScraper(AladtecClient):
 
         response = self._get_with_retry(member_list_url, params=export_params)
         if response.status_code != 200:
-            logger.error(f"Failed to export inactive members: {response.status_code}")
+            logger.error("Failed to export inactive members: %s", response.status_code)
             return []
 
         content = response.text
@@ -265,7 +265,7 @@ class AladtecMemberScraper(AladtecClient):
             )
             members.append(member)
 
-        logger.info(f"Parsed {len(members)} inactive members")
+        logger.info("Parsed %d inactive members", len(members))
         return members
 
     def _parse_csv(self, csv_content: str) -> list[Member]:
@@ -300,14 +300,14 @@ class AladtecMemberScraper(AladtecClient):
 
         # Log available columns for debugging
         if reader.fieldnames:
-            logger.debug(f"CSV columns: {list(reader.fieldnames)}")
+            logger.debug("CSV columns: %s", list(reader.fieldnames))
 
         for row in reader:
             member = self._parse_csv_row(row)
             if member:
                 members.append(member)
 
-        logger.info(f"Parsed {len(members)} members from CSV")
+        logger.info("Parsed %d members from CSV", len(members))
         return members
 
     def _parse_csv_row(self, row: dict) -> Member | None:
@@ -485,7 +485,7 @@ class AladtecMemberScraper(AladtecClient):
                     name = name_match.group(1)
                     user_map[name] = user_id
 
-        logger.info(f"Got {len(user_map)} user IDs from roster")
+        logger.info("Got %d user IDs from roster", len(user_map))
         return user_map
 
     @retry(
@@ -502,7 +502,7 @@ class AladtecMemberScraper(AladtecClient):
         """
         response = self.get(url, **kwargs)
         if response.status_code == 429:
-            logger.warning(f"Rate limited on {url}, retrying...")
+            logger.warning("Rate limited on %s, retrying...", url)
         return response
 
     def _get_member_detail_page(self, user_id: str) -> BeautifulSoup | None:
@@ -529,7 +529,7 @@ class AladtecMemberScraper(AladtecClient):
 
         if response.status_code != 200:
             logger.warning(
-                f"Failed to fetch detail page for user {user_id}: HTTP {response.status_code}"
+                "Failed to fetch detail page for user %s: HTTP %s", user_id, response.status_code
             )
             return None
 
@@ -625,7 +625,7 @@ class AladtecMemberScraper(AladtecClient):
         if not self.client:
             return members
 
-        logger.info(f"Enriching {len(members)} members with position and schedule data")
+        logger.info("Enriching %d members with position and schedule data", len(members))
 
         # Get user ID mapping
         user_map = self.get_user_id_map()
@@ -662,7 +662,10 @@ class AladtecMemberScraper(AladtecClient):
 
             if positions or schedules:
                 logger.debug(
-                    f"{member.display_name}: {len(positions)} positions, {len(schedules)} schedules"
+                    "%s: %d positions, %d schedules",
+                    member.display_name,
+                    len(positions),
+                    len(schedules),
                 )
 
         if failed_members:
@@ -713,7 +716,7 @@ class AladtecMemberScraper(AladtecClient):
                     if member:
                         members.append(member)
 
-        logger.info(f"Scraped {len(members)} members from HTML")
+        logger.info("Scraped %d members from HTML", len(members))
         return members
 
     def _parse_html_row(self, cells) -> Member | None:

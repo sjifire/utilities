@@ -223,7 +223,7 @@ class EntraUserManager:
                         continue
                     users.append(self._to_entra_user(user))
 
-        logger.info(f"Found {len(users)} users")
+        logger.info("Found %d users", len(users))
         return users
 
     async def get_employees(self, include_disabled: bool = False) -> list[EntraUser]:
@@ -304,7 +304,7 @@ class EntraUserManager:
             if user:
                 return self._to_entra_user(user)
         except Exception as e:
-            logger.debug(f"User not found: {upn} - {e}")
+            logger.debug("User not found: %s - %s", upn, e)
         return None
 
     async def create_user(
@@ -373,7 +373,7 @@ class EntraUserManager:
             try:
                 hire_date = datetime.fromisoformat(employee_hire_date.replace("/", "-"))
             except ValueError:
-                logger.warning(f"Invalid hire date format: {employee_hire_date}")
+                logger.warning("Invalid hire date format: %s", employee_hire_date)
 
         # Build extension attributes if any are provided
         ext_attrs = None
@@ -416,10 +416,10 @@ class EntraUserManager:
         try:
             created = await self.client.users.post(user)
             if created:
-                logger.info(f"Created user: {display_name} ({upn})")
+                logger.info("Created user: %s (%s)", display_name, upn)
                 return self._to_entra_user(created)
         except Exception as e:
-            logger.error(f"Failed to create user {upn}: {e}")
+            logger.error("Failed to create user %s: %s", upn, e)
 
         return None
 
@@ -477,7 +477,7 @@ class EntraUserManager:
             try:
                 hire_date = datetime.fromisoformat(employee_hire_date.replace("/", "-"))
             except ValueError:
-                logger.warning(f"Invalid hire date format: {employee_hire_date}")
+                logger.warning("Invalid hire date format: %s", employee_hire_date)
 
         # Build user with non-None values, use additional_data for fields to clear
         user = User(
@@ -561,7 +561,7 @@ class EntraUserManager:
 
         try:
             await self.client.users.by_user_id(user_id).patch(user)
-            logger.info(f"Updated user: {user_id}")
+            logger.info("Updated user: %s", user_id)
             return True
         except Exception as e:
             error_str = str(e)
@@ -577,7 +577,7 @@ class EntraUserManager:
                 if personal_email:
                     skipped.append("otherMails")
                 logger.warning(
-                    f"Permission denied for {user_id}, retrying without: {', '.join(skipped)}"
+                    "Permission denied for %s, retrying without: %s", user_id, ", ".join(skipped)
                 )
                 # Retry without sensitive fields (mobilePhone, businessPhones, otherMails)
                 # Remove those from fields_to_clear too
@@ -629,17 +629,19 @@ class EntraUserManager:
                 try:
                     await self.client.users.by_user_id(user_id).patch(user_retry)
                     logger.info(
-                        f"Updated user (partial): {user_id} (skipped: {', '.join(skipped)})"
+                        "Updated user (partial): %s (skipped: %s)", user_id, ", ".join(skipped)
                     )
                     return True
                 except Exception as retry_error:
                     logger.error(
-                        f"Failed to update user {user_id} even without "
-                        f"{', '.join(skipped)}: {retry_error}"
+                        "Failed to update user %s even without %s: %s",
+                        user_id,
+                        ", ".join(skipped),
+                        retry_error,
                     )
                     return False
 
-            logger.error(f"Failed to update user {user_id}: {e}")
+            logger.error("Failed to update user %s: %s", user_id, e)
             return False
 
     async def disable_user(self, user_id: str) -> bool:
@@ -674,10 +676,10 @@ class EntraUserManager:
 
         try:
             await self.client.users.by_user_id(user_id).patch(user)
-            logger.info(f"Disabled user: {user_id}")
+            logger.info("Disabled user: %s", user_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to disable user {user_id}: {e}")
+            logger.error("Failed to disable user %s: %s", user_id, e)
             return False
 
     async def enable_user(self, user_id: str) -> bool:
@@ -693,10 +695,10 @@ class EntraUserManager:
 
         try:
             await self.client.users.by_user_id(user_id).patch(user)
-            logger.info(f"Enabled user: {user_id}")
+            logger.info("Enabled user: %s", user_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to enable user {user_id}: {e}")
+            logger.error("Failed to enable user %s: %s", user_id, e)
             return False
 
     async def get_user_licenses(self, user_id: str) -> list[str]:
@@ -714,7 +716,7 @@ class EntraUserManager:
                 return [str(lic.sku_id) for lic in result.value if lic.sku_id]
             return []
         except Exception as e:
-            logger.error(f"Failed to get licenses for {user_id}: {e}")
+            logger.error("Failed to get licenses for %s: %s", user_id, e)
             return []
 
     async def remove_all_licenses(self, user_id: str) -> bool:
@@ -730,7 +732,7 @@ class EntraUserManager:
         license_ids = await self.get_user_licenses(user_id)
 
         if not license_ids:
-            logger.info(f"User {user_id} has no licenses to remove")
+            logger.info("User %s has no licenses to remove", user_id)
             return True
 
         try:
@@ -739,10 +741,10 @@ class EntraUserManager:
                 remove_licenses=[UUID(lic_id) for lic_id in license_ids],
             )
             await self.client.users.by_user_id(user_id).assign_license.post(request_body)
-            logger.info(f"Removed {len(license_ids)} license(s) from user: {user_id}")
+            logger.info("Removed %d license(s) from user: %s", len(license_ids), user_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to remove licenses from {user_id}: {e}")
+            logger.error("Failed to remove licenses from %s: %s", user_id, e)
             return False
 
     async def disable_and_remove_licenses(self, user_id: str) -> tuple[bool, bool]:

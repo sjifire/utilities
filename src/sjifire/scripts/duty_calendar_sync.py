@@ -154,16 +154,21 @@ def main() -> int:
             logger.error(str(e))
             return 1
 
-        logger.info(f"Deleting On Duty events from {args.mailbox} for {start_date} to {end_date}")
+        logger.info(
+            "Deleting On Duty events from %s for %s to %s",
+            args.mailbox,
+            start_date,
+            end_date,
+        )
 
         calendar_sync = DutyCalendarSync(mailbox=args.mailbox)
         result = calendar_sync.delete_date_range(start_date, end_date, dry_run=args.dry_run)
 
-        logger.info(f"Delete complete: {result}")
+        logger.info("Delete complete: %s", result)
 
         if result.errors:
             for error in result.errors:
-                logger.error(f"  Error: {error}")
+                logger.error("  Error: %s", error)
             return 1
 
         return 0
@@ -177,7 +182,7 @@ def main() -> int:
             logger.error(str(e))
             return 1
 
-        logger.info(f"Inspecting calendar {args.mailbox} for {start_date} to {end_date}")
+        logger.info("Inspecting calendar %s for %s to %s", args.mailbox, start_date, end_date)
 
         calendar_sync = DutyCalendarSync(mailbox=args.mailbox)
 
@@ -222,7 +227,7 @@ def main() -> int:
         last_day_num = calendar.monthrange(end_year, end_month)[1]
         end_date = date(end_year, end_month, last_day_num)
 
-    logger.info(f"Date range: {start_date} to {end_date}")
+    logger.info("Date range: %s to %s", start_date, end_date)
 
     # Step 1: Fetch schedules from Aladtec
     logger.info("Fetching schedule from Aladtec...")
@@ -239,24 +244,24 @@ def main() -> int:
         # Still continue to sync what we have
         schedules = []
 
-    logger.info(f"Retrieved {len(schedules)} days of schedule data")
+    logger.info("Retrieved %d days of schedule data", len(schedules))
 
     # Save schedule for personal-calendar-sync to reuse
     if args.save_schedule:
         save_schedules(schedules, args.save_schedule)
 
     # Step 2: Sync to calendar
-    logger.info(f"Syncing to calendar: {args.mailbox}")
+    logger.info("Syncing to calendar: %s", args.mailbox)
 
     calendar_sync = DutyCalendarSync(mailbox=args.mailbox)
     result = calendar_sync.sync(schedules, dry_run=args.dry_run, force=args.force)
 
     # Report results
-    logger.info(f"Sync complete: {result}")
+    logger.info("Sync complete: %s", result)
 
     if result.errors:
         for error in result.errors:
-            logger.error(f"  Error: {error}")
+            logger.error("  Error: %s", error)
         return 1
 
     return 0

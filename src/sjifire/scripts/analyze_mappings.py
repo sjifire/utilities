@@ -86,7 +86,7 @@ async def analyze_mappings(verbose: bool = False) -> None:
                 return
             members = scraper.get_members(include_inactive=True)
     except Exception as e:
-        logger.error(f"Failed to fetch Aladtec members: {e}")
+        logger.error("Failed to fetch Aladtec members: %s", e)
         return
 
     # Extract unique positions and count members per position
@@ -99,7 +99,7 @@ async def analyze_mappings(verbose: bool = False) -> None:
             position_members[member.employee_type].append(member.display_name)
 
     positions = sorted(position_members.keys())
-    logger.info(f"Found {len(positions)} unique positions across {len(members)} members")
+    logger.info("Found %d unique positions across %d members", len(positions), len(members))
 
     # Fetch Entra groups
     logger.info("")
@@ -109,7 +109,7 @@ async def analyze_mappings(verbose: bool = False) -> None:
         group_manager = EntraGroupManager()
         all_groups = await group_manager.get_groups()
     except Exception as e:
-        logger.error(f"Failed to fetch Entra groups: {e}")
+        logger.error("Failed to fetch Entra groups: %s", e)
         return
 
     # Categorize groups
@@ -119,10 +119,10 @@ async def analyze_mappings(verbose: bool = False) -> None:
         g for g in all_groups if g.group_type not in (GroupType.SECURITY, GroupType.MICROSOFT_365)
     ]
 
-    logger.info(f"Found {len(all_groups)} total groups:")
-    logger.info(f"  - Security groups: {len(security_groups)}")
-    logger.info(f"  - Microsoft 365 groups: {len(m365_groups)}")
-    logger.info(f"  - Other (distribution, etc.): {len(other_groups)}")
+    logger.info("Found %d total groups:", len(all_groups))
+    logger.info("  - Security groups: %d", len(security_groups))
+    logger.info("  - Microsoft 365 groups: %d", len(m365_groups))
+    logger.info("  - Other (distribution, etc.): %d", len(other_groups))
 
     # Print all groups
     logger.info("")
@@ -135,7 +135,7 @@ async def analyze_mappings(verbose: bool = False) -> None:
     logger.info("-" * 40)
     for group in sorted(security_groups, key=lambda g: g.display_name):
         desc = f" - {group.description[:50]}..." if group.description else ""
-        logger.info(f"  {group.display_name}{desc}")
+        logger.info("  %s%s", group.display_name, desc)
 
     logger.info("")
     logger.info("Microsoft 365 Groups:")
@@ -143,14 +143,14 @@ async def analyze_mappings(verbose: bool = False) -> None:
     for group in sorted(m365_groups, key=lambda g: g.display_name):
         desc = f" - {group.description[:50]}..." if group.description else ""
         mail = f" ({group.mail})" if group.mail else ""
-        logger.info(f"  {group.display_name}{mail}{desc}")
+        logger.info("  %s%s%s", group.display_name, mail, desc)
 
     if other_groups:
         logger.info("")
         logger.info("Other Groups (Distribution Lists, etc.):")
         logger.info("-" * 40)
         for group in sorted(other_groups, key=lambda g: g.display_name):
-            logger.info(f"  {group.display_name} ({group.group_type.value})")
+            logger.info("  %s (%s)", group.display_name, group.group_type.value)
 
     # Print all positions
     logger.info("")
@@ -160,10 +160,10 @@ async def analyze_mappings(verbose: bool = False) -> None:
     logger.info("")
     for pos in positions:
         count = len(position_members[pos])
-        logger.info(f"  {pos} ({count} member{'s' if count != 1 else ''})")
+        logger.info("  %s (%d member%s)", pos, count, "s" if count != 1 else "")
         if verbose:
             for name in sorted(position_members[pos]):
-                logger.info(f"    - {name}")
+                logger.info("    - %s", name)
 
     # Analyze mappings
     logger.info("")
@@ -194,10 +194,10 @@ async def analyze_mappings(verbose: bool = False) -> None:
     for pos, matches in matched_positions:
         member_count = len(position_members[pos])
         logger.info("")
-        logger.info(f"  {pos} ({member_count} members)")
+        logger.info("  %s (%d members)", pos, member_count)
         for group, reason in matches:
             gtype = "Security" if group.group_type == GroupType.SECURITY else "M365"
-            logger.info(f"    -> {group.display_name} [{gtype}] ({reason})")
+            logger.info("    -> %s [%s] (%s)", group.display_name, gtype, reason)
 
     # Print positions without matches (GAPS)
     logger.info("")
@@ -208,7 +208,7 @@ async def analyze_mappings(verbose: bool = False) -> None:
     if unmatched_positions:
         for pos in unmatched_positions:
             member_count = len(position_members[pos])
-            logger.info(f"  {pos} ({member_count} members) - NO MATCHING GROUP")
+            logger.info("  %s (%d members) - NO MATCHING GROUP", pos, member_count)
     else:
         logger.info("  All positions have potential group matches!")
 
@@ -222,7 +222,7 @@ async def analyze_mappings(verbose: bool = False) -> None:
     if unused_groups:
         for group in sorted(unused_groups, key=lambda g: g.display_name):
             gtype = "Security" if group.group_type == GroupType.SECURITY else "M365"
-            logger.info(f"  {group.display_name} [{gtype}]")
+            logger.info("  %s [%s]", group.display_name, gtype)
     else:
         logger.info("  All groups have potential position matches!")
 
@@ -232,13 +232,13 @@ async def analyze_mappings(verbose: bool = False) -> None:
     logger.info("SUMMARY")
     logger.info("=" * 60)
     logger.info("")
-    logger.info(f"Aladtec Positions: {len(positions)}")
-    logger.info(f"  - With suggested mappings: {len(matched_positions)}")
-    logger.info(f"  - Without matches (need new groups): {len(unmatched_positions)}")
+    logger.info("Aladtec Positions: %d", len(positions))
+    logger.info("  - With suggested mappings: %d", len(matched_positions))
+    logger.info("  - Without matches (need new groups): %d", len(unmatched_positions))
     logger.info("")
-    logger.info(f"Entra Groups (Security + M365): {len(mappable_groups)}")
-    logger.info(f"  - Matched to positions: {len(used_groups)}")
-    logger.info(f"  - Not matched (may be unrelated): {len(unused_groups)}")
+    logger.info("Entra Groups (Security + M365): %d", len(mappable_groups))
+    logger.info("  - Matched to positions: %d", len(used_groups))
+    logger.info("  - Not matched (may be unrelated): %d", len(unused_groups))
 
 
 def main():
