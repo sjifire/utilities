@@ -229,7 +229,9 @@ def compare_entra_to_ispyfire(
     ispyfire_by_email: dict[str, ISpyFirePerson] = {}
     for person in ispyfire_people:
         if person.email and is_managed_email(person.email, domain):
-            ispyfire_by_email[normalize_email(person.email)] = person
+            key = normalize_email(person.email)
+            if key:
+                ispyfire_by_email[key] = person
 
     # Build lookup by name for ALL iSpyFire people (to detect duplicates with different emails)
     ispyfire_by_name: dict[str, ISpyFirePerson] = {}

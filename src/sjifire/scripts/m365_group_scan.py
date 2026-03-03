@@ -117,13 +117,13 @@ async def count_drive_files_recursive(
                             client, drive_id, item.id, limit=limit - count if limit else None
                         )
                         count += sub_count
-                        if exceeded:
+                        if exceeded and limit is not None:
                             return (limit, True)
                 else:
                     # It's a file
                     count += 1
                     if limit and count >= limit:
-                        return (limit, True)
+                        return (count, True)
     except Exception:
         logger.debug("Error counting drive files")
     return (count, False)

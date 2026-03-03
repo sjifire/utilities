@@ -490,9 +490,7 @@ class DispatchStore(CosmosStore):
             return await self.store_call(call)
         return DispatchCallDocument.from_dispatch_call(call)
 
-    async def list_recent_with_open(
-        self, *, days: int | None = None
-    ) -> list[DispatchCallDocument]:
+    async def list_recent_with_open(self, *, days: int | None = None) -> list[DispatchCallDocument]:
         """List recent calls: stored completed calls from Cosmos + live open calls.
 
         Pure read — no storage or enrichment side effects.

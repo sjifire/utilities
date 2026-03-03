@@ -91,7 +91,7 @@ def _install_logging_hook(client: NerisApiClient) -> None:
 
         return result
 
-    client._call = _logged_call
+    client._call = _logged_call  # ty: ignore[invalid-assignment]  # monkey-patch for logging
 
 
 class NerisClient:

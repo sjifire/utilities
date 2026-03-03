@@ -55,7 +55,7 @@ def _fmt_datetime(value: object, fmt: str = "%m/%d/%Y %H:%M") -> str:
         try:
             value = dt.fromisoformat(value)
         except ValueError:
-            return value  # Return as-is if unparseable
+            return str(value)  # Return as-is if unparseable
     if isinstance(value, datetime):
         tz = get_timezone()
         if value.tzinfo is None:
