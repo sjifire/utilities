@@ -18,6 +18,8 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
 from sjifire.ispyfire.models import DispatchCall
 from sjifire.ops.cosmos import CosmosStore
 from sjifire.ops.dispatch.models import DispatchCallDocument
@@ -69,7 +71,7 @@ class DispatchStore(CosmosStore):
                 partition_key=year,
             )
             return DispatchCallDocument.from_cosmos(result)
-        except Exception:
+        except CosmosResourceNotFoundError:
             logger.debug("Dispatch call not found: %s (year=%s)", call_uuid, year)
             return None
 

@@ -66,16 +66,16 @@ class DispatchAnalysis(BaseModel):
     first_enroute: str = ""
     """ISO timestamp when first SJF3 unit went enroute."""
 
-    unit_times: list[UnitTiming] = []
+    unit_times: list[UnitTiming] = Field(default_factory=list)
     """Per-unit timing for SJF3 units (paged/enroute/arrived)."""
 
-    on_duty_crew: list[CrewOnDuty] = []
+    on_duty_crew: list[CrewOnDuty] = Field(default_factory=list)
     """Everyone on duty at the time of the call (from schedule)."""
 
     summary: str = ""
     """1-2 sentence factual narrative of the incident."""
 
-    actions_taken: list[str] = []
+    actions_taken: list[str] = Field(default_factory=list)
     """Key actions in chronological order."""
 
     patient_count: int = 0
@@ -90,7 +90,7 @@ class DispatchAnalysis(BaseModel):
     short_dsc: str = ""
     """4-6 word description, e.g. 'chimney fire, false alarm'."""
 
-    key_events: list[str] = []
+    key_events: list[str] = Field(default_factory=list)
     """Condensed chronological log of significant events from the radio log.
 
     Produced by the enrichment LLM from the full radio log. Includes scene
@@ -122,7 +122,7 @@ class DispatchCallDocument(BaseModel):
     is_completed: bool = False
     cad_comments: str = ""
     responding_units: str = ""
-    responder_details: list[dict] = []
+    responder_details: list[dict] = Field(default_factory=list)
     city: str = ""
     state: str = ""
     zip_code: str = ""

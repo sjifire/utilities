@@ -53,7 +53,7 @@ jobs:
       - name: Get secrets from Key Vault
         uses: azure/cli@v2
         with:
-          azcliversion: agentazcliversion
+          azcliversion: latest
           inlineScript: |
             ALADTEC_URL=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-URL --query value -o tsv)
             echo "::add-mask::$ALADTEC_URL"
