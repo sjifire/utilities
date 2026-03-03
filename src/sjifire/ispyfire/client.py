@@ -830,7 +830,8 @@ class ISpyFireClient:
     def _get_call_by_dispatch_id(self, dispatch_id: str) -> DispatchCall | None:
         """Find a call by its dispatch ID (e.g. '26-001678').
 
-        Uses search to find the call, then fetches full details.
+        Searches headers for the matching LongTermCallID, then fetches
+        full details only for the match (avoids N+1 API calls).
 
         Args:
             dispatch_id: The LongTermCallID to search for
@@ -843,11 +844,10 @@ class ISpyFireClient:
         after = now - (90 * 24 * 60 * 60)
         raw = self.search_calls_raw(after=after, before=now)
         for entry in raw:
-            entry_id = entry.get("_id")
-            if entry_id:
-                detail = self.get_call_details(entry_id)
-                if detail and detail.long_term_call_id == dispatch_id:
-                    return detail
+            if entry.get("LongTermCallID") == dispatch_id:
+                entry_id = entry.get("_id")
+                if entry_id:
+                    return self.get_call_details(entry_id)
         return None
 
     def get_open_calls(self) -> list[DispatchCall]:

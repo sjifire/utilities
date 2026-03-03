@@ -1000,6 +1000,59 @@ class TestListRecentWithOpen:
 # ------------------------------------------------------------------
 
 
+class TestListRecentWithOpenDays:
+    """Tests for the days parameter on list_recent_with_open."""
+
+    async def test_days_filters_stored_calls(self):
+        """Only stored calls within the days window are returned."""
+        recent = _make_doc(
+            id="uuid-days-1",
+            time_reported=datetime(2026, 3, 1, 10, 0),
+            is_completed=True,
+        )
+        old = _make_doc(
+            id="uuid-days-2",
+            time_reported=datetime(2025, 1, 15, 10, 0),
+            is_completed=True,
+        )
+
+        async with DispatchStore() as store:
+            await store.upsert(recent)
+            await store.upsert(old)
+
+        async with DispatchStore() as store:
+            with patch.object(DispatchStore, "_fetch_open", return_value=[]):
+                docs = await store.list_recent_with_open(days=7)
+
+        ids = {d.id for d in docs}
+        assert "uuid-days-1" in ids
+        assert "uuid-days-2" not in ids
+
+    async def test_days_none_uses_default_limit(self):
+        """Without days, falls back to list_recent (no date filtering)."""
+        doc = _make_doc(id="uuid-days-3", is_completed=True)
+
+        async with DispatchStore() as store:
+            await store.upsert(doc)
+
+        async with DispatchStore() as store:
+            with patch.object(DispatchStore, "_fetch_open", return_value=[]):
+                docs = await store.list_recent_with_open()
+
+        assert len(docs) == 1
+
+    async def test_days_still_includes_open_calls(self):
+        """Open calls are always included regardless of days filtering."""
+        open_call = _make_call(id="uuid-days-open", is_completed=False)
+
+        async with DispatchStore() as store:
+            with patch.object(DispatchStore, "_fetch_open", return_value=[open_call]):
+                docs = await store.list_recent_with_open(days=1)
+
+        assert len(docs) == 1
+        assert docs[0].id == "uuid-days-open"
+
+
 class TestFetchOpen:
     async def test_returns_open_calls_as_docs(self):
         call = _make_call(id="uuid-fo-1", is_completed=False)

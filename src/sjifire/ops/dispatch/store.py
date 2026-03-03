@@ -15,7 +15,7 @@ operations: Cosmos CRUD, iSpyFire fetching, and enrichment. Callers
 import asyncio
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
 from sjifire.ispyfire.models import DispatchCall
@@ -240,12 +240,11 @@ class DispatchStore(CosmosStore):
             )
             return results[:limit]
 
-        query = "SELECT TOP @limit * FROM c ORDER BY c.time_reported DESC"
-        parameters: list[dict] = [{"name": "@limit", "value": limit}]
+        query = "SELECT * FROM c ORDER BY c.time_reported DESC"
 
         return await self._query_many(
             query,
-            parameters,
+            None,
             DispatchCallDocument,
             max_items=limit,
         )
@@ -491,18 +490,33 @@ class DispatchStore(CosmosStore):
             return await self.store_call(call)
         return DispatchCallDocument.from_dispatch_call(call)
 
-    async def list_recent_with_open(self) -> list[DispatchCallDocument]:
+    async def list_recent_with_open(
+        self, *, days: int | None = None
+    ) -> list[DispatchCallDocument]:
         """List recent calls: stored completed calls from Cosmos + live open calls.
 
         Pure read — no storage or enrichment side effects.
 
+        Args:
+            days: If provided, limit stored calls to this many days back.
+                When None, returns the most recent 100 stored calls.
+
         Returns:
             List of DispatchCallDocuments (open calls first, then stored)
         """
-        stored, open_calls = await asyncio.gather(
-            self.list_recent(limit=100),
-            self.fetch_open(),
-        )
+        if days is not None:
+            now = datetime.now(UTC)
+            start = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+            end = now.strftime("%Y-%m-%d")
+            stored, open_calls = await asyncio.gather(
+                self.list_by_date_range(start, end),
+                self.fetch_open(),
+            )
+        else:
+            stored, open_calls = await asyncio.gather(
+                self.list_recent(limit=100),
+                self.fetch_open(),
+            )
 
         # Merge: open calls first (active), then stored (completed)
         seen = {d.id for d in open_calls}
