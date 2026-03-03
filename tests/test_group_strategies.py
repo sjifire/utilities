@@ -1478,8 +1478,7 @@ class TestDisabledUserExclusion:
 
     @pytest.fixture
     def cleared_user(self):
-        """An EntraUser simulating post-disable state: account_enabled still True
-        (Graph API lag) but all group-driving fields cleared."""
+        """EntraUser with all group-driving fields cleared (post-disable state)."""
         return make_entra_user(
             user_id="disabled-user",
             display_name="Brian Krembs",
@@ -1494,8 +1493,7 @@ class TestDisabledUserExclusion:
 
     @pytest.mark.parametrize("strategy_name", STRATEGY_NAMES)
     def test_cleared_user_matches_no_strategy(self, strategy_name, cleared_user):
-        """A user with all group-driving fields cleared should not appear
-        in any strategy's membership, even if account_enabled is still True."""
+        """User with cleared fields should not appear in any strategy."""
         strategy = get_strategy(strategy_name)
         result = strategy.get_members([cleared_user])
 

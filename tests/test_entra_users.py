@@ -1001,8 +1001,7 @@ class TestEntraUserManagerEnableDisable:
         assert result is True
 
     async def test_disable_user_clears_extension_attributes(self, manager):
-        """Disable should clear positions, EVIP, rank, schedules to prevent
-        group sync from matching the user due to Graph API replication lag."""
+        """Disable should clear positions, EVIP, rank, schedules."""
         manager.client.users.by_user_id.return_value.patch = AsyncMock(return_value=None)
 
         await manager.disable_user("123")
@@ -1022,8 +1021,7 @@ class TestEntraUserManagerEnableDisable:
         assert ext.extension_attribute4 == ""  # schedules
 
     async def test_disable_user_clears_employee_type_and_office(self, manager):
-        """Disable should clear employeeType (work group) and officeLocation (station)
-        via additional_data so group strategies won't match the user."""
+        """Disable should clear employeeType and officeLocation."""
         manager.client.users.by_user_id.return_value.patch = AsyncMock(return_value=None)
 
         await manager.disable_user("123")
