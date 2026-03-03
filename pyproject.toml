@@ -88,6 +88,7 @@ select = [
     "T20",    # no print statements
     "A",      # don't shadow builtins
     "PERF",   # performance anti-patterns
+    "G",      # flake8-logging-format (no f-strings in logger calls)
 ]
 ignore = [
     "D100",     # Missing docstring in public module

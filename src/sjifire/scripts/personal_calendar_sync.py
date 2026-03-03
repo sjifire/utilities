@@ -177,15 +177,15 @@ def main() -> int:
         if args.dry_run:
             logger.info("DRY RUN - no changes will be made")
 
-        logger.info(f"Purging Aladtec events for {args.user}...")
+        logger.info("Purging Aladtec events for %s...", args.user)
         sync = PersonalCalendarSync()
 
         async def do_purge() -> int:
             deleted, errors = await sync.purge_aladtec_events(args.user, args.dry_run)
             if args.dry_run:
-                logger.info(f"Would delete {deleted} events")
+                logger.info("Would delete %d events", deleted)
             else:
-                logger.info(f"Deleted {deleted} events, {errors} errors")
+                logger.info("Deleted %d events, %d errors", deleted, errors)
             return 1 if errors else 0
 
         return asyncio.run(do_purge())
@@ -231,7 +231,7 @@ def main() -> int:
         if not args.user:
             parser.error("--inspect requires --user")
 
-        logger.info(f"Inspecting {args.user} for {start_date} to {end_date}")
+        logger.info("Inspecting %s for %s to %s", args.user, start_date, end_date)
         sync = PersonalCalendarSync()
 
         async def do_inspect() -> int:
@@ -262,7 +262,7 @@ def main() -> int:
 
         return asyncio.run(do_inspect())
 
-    logger.info(f"Syncing {start_date} to {end_date}")
+    logger.info("Syncing %s to %s", start_date, end_date)
 
     # Step 1: Fetch member list from Aladtec to get name->email mapping
     logger.info("Fetching member list from Aladtec...")
@@ -280,20 +280,20 @@ def main() -> int:
                 display_name = f"{member.first_name} {member.last_name}"
                 members[display_name] = member.email
 
-    logger.info(f"Found {len(members)} members with emails")
+    logger.info("Found %d members with emails", len(members))
 
     # Step 2: Get schedule data (from cache or Aladtec)
     if args.load_schedule:
-        logger.info(f"Loading schedule from {args.load_schedule}...")
+        logger.info("Loading schedule from %s...", args.load_schedule)
         try:
             schedules = load_schedules(args.load_schedule)
             # Filter to our date range (cache may have more data)
             schedules = [s for s in schedules if start_date <= s.date <= end_date]
         except FileNotFoundError:
-            logger.error(f"Schedule file not found: {args.load_schedule}")
+            logger.error("Schedule file not found: %s", args.load_schedule)
             return 1
         except Exception as e:
-            logger.error(f"Failed to load schedule: {e}")
+            logger.error("Failed to load schedule: %s", e)
             return 1
     else:
         logger.info("Fetching schedule from Aladtec...")
@@ -303,7 +303,7 @@ def main() -> int:
                 return 1
             schedules = scraper.get_schedule_range(start_date, end_date)
 
-    logger.info(f"Got {len(schedules)} days with schedule data")
+    logger.info("Got %d days with schedule data", len(schedules))
 
     # Step 3: Group entries by user
     entries_by_email: dict[str, list[ScheduleEntry]] = {}
@@ -326,24 +326,24 @@ def main() -> int:
                 unmatched_names.add(entry.name)
 
     if skipped_empty_position:
-        logger.info(f"Skipped {skipped_empty_position} entries with empty position (e.g., Trades)")
+        logger.info("Skipped %d entries with empty position (e.g., Trades)", skipped_empty_position)
 
     if unmatched_names:
-        logger.warning(f"Could not match {len(unmatched_names)} names to emails")
+        logger.warning("Could not match %d names to emails", len(unmatched_names))
         if args.verbose:
             for name in sorted(unmatched_names):
-                logger.debug(f"  Unmatched: {name}")
+                logger.debug("  Unmatched: %s", name)
 
     # Step 4: Filter to requested user(s)
     if args.user:
         user_email = args.user.lower()
         if user_email not in entries_by_email:
-            logger.warning(f"No schedule entries found for {args.user}")
+            logger.warning("No schedule entries found for %s", args.user)
             entries_by_email = {}
         else:
             entries_by_email = {user_email: entries_by_email[user_email]}
 
-    logger.info(f"Syncing calendars for {len(entries_by_email)} users")
+    logger.info("Syncing calendars for %d users", len(entries_by_email))
 
     # Step 5: Sync each user
     sync = PersonalCalendarSync()
@@ -351,12 +351,12 @@ def main() -> int:
     async def sync_all() -> list:
         results = []
         for email, entries in entries_by_email.items():
-            logger.info(f"Syncing {email} ({len(entries)} entries)...")
+            logger.info("Syncing %s (%d entries)...", email, len(entries))
             result = await sync.sync_user(
                 email, entries, start_date, end_date, args.dry_run, args.force
             )
             results.append(result)
-            logger.info(f"  {result}")
+            logger.info("  %s", result)
         return results
 
     results = asyncio.run(sync_all())
@@ -368,11 +368,13 @@ def main() -> int:
     total_errors = sum(len(r.errors) for r in results)
 
     logger.info(
-        f"\nSync complete: {total_created} created, {total_updated} updated, "
-        f"{total_deleted} deleted"
+        "\nSync complete: %d created, %d updated, %d deleted",
+        total_created,
+        total_updated,
+        total_deleted,
     )
     if total_errors:
-        logger.error(f"{total_errors} errors occurred")
+        logger.error("%d errors occurred", total_errors)
         return 1
 
     return 0

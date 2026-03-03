@@ -66,7 +66,7 @@ def backup_aladtec_members(
     with filepath.open("w") as f:
         json.dump(data, f, indent=2, default=str)
 
-    logger.info(f"Backed up {len(members)} Aladtec members to {filepath}")
+    logger.info("Backed up %d Aladtec members to %s", len(members), filepath)
     return filepath
 
 
@@ -101,7 +101,7 @@ def backup_entra_users(
     with filepath.open("w") as f:
         json.dump(data, f, indent=2, default=str)
 
-    logger.info(f"Backed up {len(users)} Entra users to {filepath}")
+    logger.info("Backed up %d Entra users to %s", len(users), filepath)
     return filepath
 
 
@@ -185,7 +185,7 @@ def backup_entra_groups(
     with filepath.open("w") as f:
         json.dump(data, f, indent=2, default=str)
 
-    logger.info(f"Backed up {len(groups)} Entra groups to {filepath}")
+    logger.info("Backed up %d Entra groups to %s", len(groups), filepath)
     return filepath
 
 
@@ -219,7 +219,7 @@ def backup_mail_groups(
     with filepath.open("w") as f:
         json.dump(data, f, indent=2, default=str)
 
-    logger.info(f"Backed up {len(groups)} mail groups to {filepath}")
+    logger.info("Backed up %d mail groups to %s", len(groups), filepath)
     return filepath
 
 

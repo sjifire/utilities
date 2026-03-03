@@ -154,13 +154,13 @@ class AladtecScheduleScraper(AladtecClient):
         )
 
         if response.status_code != 200:
-            logger.error(f"Failed to fetch schedule: {response.status_code}")
+            logger.error("Failed to fetch schedule: %s", response.status_code)
             return {}
 
         try:
             data = json.loads(response.text)
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON response: {e}")
+            logger.error("Invalid JSON response: %s", e)
             return {}
 
         return_data = data.get("return_data", "")
@@ -208,7 +208,7 @@ class AladtecScheduleScraper(AladtecClient):
 
             if not data:
                 # No data returned, advance by 5 days and retry
-                logger.debug(f"No data from {current_start}, advancing by 5 days")
+                logger.debug("No data from %s, advancing by 5 days", current_start)
                 current_start += timedelta(days=5)
                 continue
 
@@ -228,12 +228,12 @@ class AladtecScheduleScraper(AladtecClient):
 
             if next_start <= current_start:
                 # No progress made, force advance to avoid infinite loop
-                logger.debug(f"No progress from {current_start}, forcing advance")
+                logger.debug("No progress from %s, forcing advance", current_start)
                 current_start += timedelta(days=5)
             else:
                 current_start = next_start
 
-        logger.debug(f"Fetched {len(all_data)} days for {month_str} in {fetch_count} requests")
+        logger.debug("Fetched %d days for %s in %d requests", len(all_data), month_str, fetch_count)
         return all_data
 
     def parse_day_html(self, date_str: str, html: str) -> DaySchedule:
@@ -335,7 +335,7 @@ class AladtecScheduleScraper(AladtecClient):
         end_month = end_date.replace(day=1)
 
         while current <= end_month:
-            logger.info(f"Fetching {current.strftime('%B %Y')}...")
+            logger.info("Fetching %s...", current.strftime("%B %Y"))
             month_data = self.fetch_month_schedule(current)
 
             if month_data:
@@ -359,7 +359,7 @@ class AladtecScheduleScraper(AladtecClient):
                 if day_schedule.entries:
                     schedules.append(day_schedule)
 
-        logger.info(f"Fetched {len(schedules)} days with schedule data")
+        logger.info("Fetched %d days with schedule data", len(schedules))
         return schedules
 
     def get_schedule_months_ahead(self, months: int = 6) -> list[DaySchedule]:
@@ -416,7 +416,7 @@ def save_schedules(schedules: list[DaySchedule], path: str | Path) -> None:
         data.append(day_dict)
 
     Path(path).write_text(json.dumps(data, indent=2))
-    logger.info(f"Saved {len(schedules)} days of schedule data to {path}")
+    logger.info("Saved %d days of schedule data to %s", len(schedules), path)
 
 
 def load_schedules(path: str | Path) -> list[DaySchedule]:
@@ -456,5 +456,5 @@ def load_schedules(path: str | Path) -> list[DaySchedule]:
         )
         schedules.append(day)
 
-    logger.info(f"Loaded {len(schedules)} days of schedule data from {path}")
+    logger.info("Loaded %d days of schedule data from %s", len(schedules), path)
     return schedules

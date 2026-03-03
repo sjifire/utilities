@@ -241,14 +241,14 @@ async def run_audit(skip_entra: bool = False) -> int:
                 return 1
             members = scraper.get_members(include_inactive=True)
     except Exception as e:
-        logger.error(f"Failed to fetch Aladtec members: {e}")
+        logger.error("Failed to fetch Aladtec members: %s", e)
         return 1
 
     if not members:
         logger.error("No members found in Aladtec")
         return 1
 
-    logger.info(f"Found {len(members)} members in Aladtec")
+    logger.info("Found %d members in Aladtec", len(members))
 
     # Check for missing data
     print("\n" + "=" * 60)
@@ -291,11 +291,11 @@ async def run_audit(skip_entra: bool = False) -> int:
         logger.info("Fetching users from Entra ID...")
         try:
             entra_users = await get_entra_users()
-            logger.info(f"Found {len(entra_users)} users in Entra ID")
+            logger.info("Found %d users in Entra ID", len(entra_users))
 
             # Filter to just org domain accounts for reporting
             org_users = [u for u in entra_users if u.get("upn", "").endswith(f"@{domain}")]
-            logger.info(f"Found {len(org_users)} @{domain} accounts in Entra ID")
+            logger.info("Found %d @%s accounts in Entra ID", len(org_users), domain)
 
             members_not_in_entra, entra_not_in_aladtec = compare_systems(members, entra_users)
 
@@ -342,7 +342,7 @@ async def run_audit(skip_entra: bool = False) -> int:
                 )
 
         except Exception as e:
-            logger.error(f"Failed to fetch Entra ID users: {e}")
+            logger.error("Failed to fetch Entra ID users: %s", e)
             print("\n  (Entra ID comparison skipped due to error)")
 
     # Summary

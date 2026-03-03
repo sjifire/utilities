@@ -115,7 +115,7 @@ class EntraGroupManager:
                     if include_types is None or entra_group.group_type in include_types:
                         groups.append(entra_group)
 
-        logger.info(f"Found {len(groups)} groups")
+        logger.info("Found %d groups", len(groups))
         return groups
 
     def _to_entra_group(self, group: Group) -> EntraGroup:
@@ -169,10 +169,10 @@ class EntraGroupManager:
 
         try:
             await self.client.groups.by_group_id(group_id).members.ref.post(request_body)
-            logger.info(f"Added user {user_id} to group {group_id}")
+            logger.info("Added user %s to group %s", user_id, group_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to add user {user_id} to group {group_id}: {e}")
+            logger.error("Failed to add user %s to group %s: %s", user_id, group_id, e)
             return False
 
     async def remove_user_from_group(self, group_id: str, user_id: str) -> bool:
@@ -191,10 +191,10 @@ class EntraGroupManager:
                 .members.by_directory_object_id(user_id)
                 .ref.delete()
             )
-            logger.info(f"Removed user {user_id} from group {group_id}")
+            logger.info("Removed user %s from group %s", user_id, group_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to remove user {user_id} from group {group_id}: {e}")
+            logger.error("Failed to remove user %s from group %s: %s", user_id, group_id, e)
             return False
 
     async def delete_group(self, group_id: str) -> bool:
@@ -208,10 +208,10 @@ class EntraGroupManager:
         """
         try:
             await self.client.groups.by_group_id(group_id).delete()
-            logger.info(f"Deleted group: {group_id}")
+            logger.info("Deleted group: %s", group_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to delete group {group_id}: {e}")
+            logger.error("Failed to delete group %s: %s", group_id, e)
             return False
 
     async def create_security_group(
@@ -246,10 +246,10 @@ class EntraGroupManager:
         try:
             created = await self.client.groups.post(group)
             if created:
-                logger.info(f"Created security group: {display_name} (ID: {created.id})")
+                logger.info("Created security group: %s (ID: %s)", display_name, created.id)
                 return self._to_entra_group(created)
         except Exception as e:
-            logger.error(f"Failed to create security group {display_name}: {e}")
+            logger.error("Failed to create security group %s: %s", display_name, e)
 
         return None
 
@@ -294,11 +294,14 @@ class EntraGroupManager:
             created = await self.client.groups.post(group)
             if created:
                 logger.info(
-                    f"Created M365 group: {display_name} ({mail_nickname}@...) (ID: {created.id})"
+                    "Created M365 group: %s (%s@...) (ID: %s)",
+                    display_name,
+                    mail_nickname,
+                    created.id,
                 )
                 return self._to_entra_group(created)
         except Exception as e:
-            logger.error(f"Failed to create M365 group {display_name}: {e}")
+            logger.error("Failed to create M365 group %s: %s", display_name, e)
 
         return None
 
@@ -320,10 +323,10 @@ class EntraGroupManager:
 
         try:
             await self.client.groups.by_group_id(group_id).patch(group)
-            logger.info(f"Updated description for group {group_id}")
+            logger.info("Updated description for group %s", group_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to update group {group_id} description: {e}")
+            logger.error("Failed to update group %s description: %s", group_id, e)
             return False
 
     async def update_group_visibility(
@@ -349,10 +352,10 @@ class EntraGroupManager:
 
         try:
             await self.client.groups.by_group_id(group_id).patch(group)
-            logger.info(f"Updated visibility for group {group_id} to {visibility}")
+            logger.info("Updated visibility for group %s to %s", group_id, visibility)
             return True
         except Exception as e:
-            logger.warning(f"Failed to update group {group_id} visibility: {e}")
+            logger.warning("Failed to update group %s visibility: %s", group_id, e)
             return False
 
     async def get_group_by_mail_nickname(self, mail_nickname: str) -> EntraGroup | None:
@@ -383,7 +386,7 @@ class EntraGroupManager:
             if result and result.value and len(result.value) > 0:
                 return self._to_entra_group(result.value[0])
         except Exception as e:
-            logger.error(f"Failed to find group by mail nickname {mail_nickname}: {e}")
+            logger.error("Failed to find group by mail nickname %s: %s", mail_nickname, e)
 
         return None
 
@@ -415,6 +418,6 @@ class EntraGroupManager:
             if result and result.value and len(result.value) > 0:
                 return self._to_entra_group(result.value[0])
         except Exception as e:
-            logger.error(f"Failed to find group {display_name}: {e}")
+            logger.error("Failed to find group %s: %s", display_name, e)
 
         return None
