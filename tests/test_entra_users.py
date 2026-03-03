@@ -1000,6 +1000,38 @@ class TestEntraUserManagerEnableDisable:
 
         assert result is True
 
+    async def test_disable_user_clears_extension_attributes(self, manager):
+        """Disable should clear positions, EVIP, rank, schedules."""
+        manager.client.users.by_user_id.return_value.patch = AsyncMock(return_value=None)
+
+        await manager.disable_user("123")
+
+        patch_call = manager.client.users.by_user_id.return_value.patch
+        user_arg = patch_call.call_args[0][0]
+
+        # account_enabled must be False
+        assert user_arg.account_enabled is False
+
+        # Extension attributes must be cleared (empty string clears in Graph API)
+        ext = user_arg.on_premises_extension_attributes
+        assert ext is not None
+        assert ext.extension_attribute1 == ""  # rank
+        assert ext.extension_attribute2 == ""  # EVIP
+        assert ext.extension_attribute3 == ""  # positions
+        assert ext.extension_attribute4 == ""  # schedules
+
+    async def test_disable_user_clears_employee_type_and_office(self, manager):
+        """Disable should clear employeeType and officeLocation."""
+        manager.client.users.by_user_id.return_value.patch = AsyncMock(return_value=None)
+
+        await manager.disable_user("123")
+
+        patch_call = manager.client.users.by_user_id.return_value.patch
+        user_arg = patch_call.call_args[0][0]
+
+        assert user_arg.additional_data["employeeType"] is None
+        assert user_arg.additional_data["officeLocation"] is None
+
     async def test_disable_user_failure(self, manager):
         manager.client.users.by_user_id.return_value.patch = AsyncMock(
             side_effect=Exception("API error")

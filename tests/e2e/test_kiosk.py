@@ -117,10 +117,10 @@ def test_kiosk_seeded_shows_crew(seeded_page, kiosk_token):
     assert crew_strip.is_visible()
 
     crew_text = crew_strip.text_content()
-    # Seeded crew includes these names
-    assert "Rodriguez" in crew_text
-    assert "Nguyen" in crew_text
-    assert "Garcia" in crew_text
+    # Today (A) has Rodriguez/Nguyen/Garcia, yesterday (B) has Lee/Kim/Davis
+    has_a_crew = "Rodriguez" in crew_text and "Nguyen" in crew_text
+    has_b_crew = "Lee" in crew_text and "Kim" in crew_text
+    assert has_a_crew or has_b_crew
 
 
 def test_kiosk_seeded_shows_platoon(seeded_page, kiosk_token):
@@ -133,7 +133,7 @@ def test_kiosk_seeded_shows_platoon(seeded_page, kiosk_token):
     # Kiosk renders platoon as a single letter in .crew-strip-platoon
     platoon = seeded_page.locator(".crew-strip-platoon").first
     assert platoon.is_visible()
-    assert "A" in platoon.text_content()
+    assert platoon.text_content().strip() in ("A", "B")
 
 
 def test_kiosk_seeded_shows_archived_calls(seeded_page, kiosk_token):
@@ -164,14 +164,16 @@ def test_kiosk_seeded_data_api(seeded_page, base_url, kiosk_token, _seeded):
     assert resp.ok
     data = resp.json()
 
-    # Crew should be populated from seeded schedule
+    # Crew should be populated from seeded schedule (all days have 6 members)
     assert len(data["crew"]) >= 4
     crew_names = [c["name"] for c in data["crew"]]
-    assert any("Rodriguez" in n for n in crew_names)
-    assert any("Nguyen" in n for n in crew_names)
+    # Today (A) has Rodriguez/Nguyen, yesterday (B) has Lee/Kim — check either
+    has_a_crew = any("Rodriguez" in n for n in crew_names)
+    has_b_crew = any("Lee" in n for n in crew_names)
+    assert has_a_crew or has_b_crew
 
-    # Platoon should be set
-    assert "A" in data["platoon"]
+    # Platoon depends on time vs shift change
+    assert data["platoon"] in ("A", "B")
 
     # Sections should be populated
     assert len(data["sections"]) >= 1

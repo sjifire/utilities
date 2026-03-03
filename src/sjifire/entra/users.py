@@ -645,13 +645,32 @@ class EntraUserManager:
     async def disable_user(self, user_id: str) -> bool:
         """Disable a user account in Entra ID.
 
+        Clears Aladtec-synced fields (positions, schedules, EVIP, rank, work group,
+        station) in the same PATCH to prevent Graph API replication lag from causing
+        the group sync to see a "disabled" user that still has active attributes.
+
         Args:
             user_id: Entra user ID or UPN
 
         Returns:
             True if successful
         """
-        user = User(account_enabled=False)
+        # Clear extension attributes so group strategies won't match this user
+        # even if Graph API replication lag delays the account_enabled=False change
+        ext_attrs = OnPremisesExtensionAttributes(
+            extension_attribute1="",  # rank
+            extension_attribute2="",  # EVIP
+            extension_attribute3="",  # positions
+            extension_attribute4="",  # schedules
+        )
+        user = User(
+            account_enabled=False,
+            on_premises_extension_attributes=ext_attrs,
+            additional_data={
+                "employeeType": None,  # work group
+                "officeLocation": None,  # station
+            },
+        )
 
         try:
             await self.client.users.by_user_id(user_id).patch(user)
