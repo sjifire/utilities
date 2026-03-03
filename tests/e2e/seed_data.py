@@ -301,9 +301,84 @@ SCHEDULE = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Incidents (Cosmos-serialized IncidentDocument dicts)
+# ---------------------------------------------------------------------------
+
+INCIDENTS = [
+    {
+        "id": "inc-draft-001",
+        "year": _now.strftime("%Y"),
+        "status": "draft",
+        "incident_number": f"{_now.strftime('%y')}-001001",
+        "incident_datetime": _hours_ago(3),
+        "incident_type": "111 - Building fire",
+        "address": "123 Main St, Friday Harbor",
+        "city": "Friday Harbor",
+        "state": "WA",
+        "zip_code": "98250",
+        "county": "San Juan",
+        "station": "S31",
+        "narrative": "Engine 31 arrived on scene to find smoke showing from the roof.",
+        "units": [
+            {
+                "unit_id": "E31",
+                "response_mode": "EMERGENT",
+                "personnel": [
+                    {"name": "Capt Rodriguez", "email": "rodriguez@sjifire.org", "rank": "Captain"},
+                ],
+            },
+        ],
+        "timestamps": {"dispatch": _hours_ago(3), "first_arriving": _hours_ago(3)},
+        "action_taken": "ACTION",
+        "action_codes": ["31 - Extinguishment by fire service personnel"],
+        "created_by": "dev@localhost",
+        "created_at": _hours_ago(2),
+    },
+    {
+        "id": "inc-submitted-002",
+        "year": _now.strftime("%Y"),
+        "status": "submitted",
+        "incident_number": f"{_now.strftime('%y')}-001002",
+        "incident_datetime": _hours_ago(6),
+        "incident_type": "321 - EMS call, excluding vehicle accident with injury",
+        "address": "456 Spring St, Friday Harbor",
+        "city": "Friday Harbor",
+        "state": "WA",
+        "zip_code": "98250",
+        "county": "San Juan",
+        "station": "S31",
+        "narrative": "Responded to a cardiac event. Patient transported to hospital.",
+        "units": [
+            {
+                "unit_id": "M31",
+                "response_mode": "EMERGENT",
+                "personnel": [
+                    {"name": "FF Jones", "email": "jones@sjifire.org", "rank": "Firefighter"},
+                ],
+            },
+        ],
+        "timestamps": {"dispatch": _hours_ago(6)},
+        "action_taken": "ACTION",
+        "action_codes": ["33 - Provide basic life support (BLS)"],
+        "created_by": "dev@localhost",
+        "created_at": _hours_ago(5),
+        "neris_incident_id": "FD53055879|26001002|1770500761",
+    },
+]
+
+
 def seed_payload() -> dict:
     """Return the full payload for POST /test/seed."""
     return {
         "dispatch_calls": DISPATCH_CALLS,
         "schedule": SCHEDULE,
+    }
+
+
+def editor_seed_payload() -> dict:
+    """Return payload for POST /test/seed with editor mode + incidents."""
+    return {
+        "incidents": INCIDENTS,
+        "is_editor": True,
     }

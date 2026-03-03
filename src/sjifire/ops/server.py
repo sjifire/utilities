@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import sys
 from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
@@ -496,14 +497,17 @@ if os.getenv("TESTING") == "1":
         """Populate in-memory stores with test fixture data.
 
         Only available when TESTING=1.  Accepts JSON with optional keys:
-        ``dispatch_calls`` (list of Cosmos-serialized DispatchCallDocument dicts)
-        and ``schedule`` (list of Cosmos-serialized DayScheduleCache dicts).
+        ``dispatch_calls`` (list of Cosmos-serialized DispatchCallDocument dicts),
+        ``schedule`` (list of Cosmos-serialized DayScheduleCache dicts),
+        ``incidents`` (list of Cosmos-serialized IncidentDocument dicts),
+        and ``is_editor`` (bool to toggle editor mode for the dev user).
         """
         from sjifire.ops.dispatch.store import DispatchStore
+        from sjifire.ops.incidents.store import IncidentStore
         from sjifire.ops.schedule.store import ScheduleStore
 
         body = await request.json()
-        seeded: dict[str, int] = {}
+        seeded: dict[str, int | bool] = {}
 
         for call_data in body.get("dispatch_calls", []):
             DispatchStore._memory[call_data["id"]] = call_data
@@ -512,6 +516,25 @@ if os.getenv("TESTING") == "1":
         for sched_data in body.get("schedule", []):
             ScheduleStore._memory[sched_data["date"]] = sched_data
             seeded["schedule"] = seeded.get("schedule", 0) + 1
+
+        for inc_data in body.get("incidents", []):
+            IncidentStore._memory[inc_data["id"]] = inc_data
+            seeded["incidents"] = seeded.get("incidents", 0) + 1
+
+        # Toggle editor mode for the dev user
+        if body.get("is_editor"):
+            editor_group_id = "test-editor-group"
+            # Mutate the cached group ID on the already-imported auth module
+            sys.modules["sjifire.ops.auth"]._EDITOR_GROUP_ID = editor_group_id
+
+            global _DEV_USER
+            _DEV_USER = UserContext(
+                email="dev@localhost",
+                name="Dev User",
+                user_id="00000000-0000-0000-0000-000000000000",
+                groups=frozenset({editor_group_id}),
+            )
+            seeded["is_editor"] = True
 
         # Clear dashboard + kiosk caches so seeded data is picked up immediately
         dashboard._open_docs_cache = None

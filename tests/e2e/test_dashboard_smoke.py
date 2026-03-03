@@ -29,7 +29,7 @@ def test_dashboard_alpine_initializes(page):
 
 
 def test_tabs_visible(page):
-    """Nav bar shows the expected tabs (Reports hidden in dev mode)."""
+    """Nav bar shows the expected core tabs."""
     page.goto("/dashboard", wait_until=WAIT_UNTIL)
     page.wait_for_selector(".nav-tab", state="visible", timeout=10_000)
     tabs = page.locator(".nav-tab")
@@ -37,8 +37,8 @@ def test_tabs_visible(page):
     assert "Overview" in labels
     assert "Recent Calls" in labels
     assert "On Duty" in labels
-    # Reports requires editor role, hidden in dev mode (no group membership)
-    assert "Reports" not in labels
+    # Reports tab visibility depends on editor role — tested separately
+    # in test_dashboard_data.py::test_reports_tab_visible_for_editor
 
 
 def test_tab_navigation(page):
@@ -74,3 +74,44 @@ def test_health_endpoint(page, base_url):
     body = resp.json()
     assert body["status"] == "ok"
     assert body["service"] == "sjifire-ops"
+
+
+# ---------------------------------------------------------------------------
+# Nav bar
+# ---------------------------------------------------------------------------
+
+# JS expression that resolves once Alpine has fetched /dashboard/data
+_DATA_LOADED = (
+    "document.querySelector('.stat-value') && "
+    "document.querySelector('.stat-value').textContent.trim() !== ''"
+)
+
+
+def test_nav_bar_status_pill(seeded_page):
+    """Open calls status pill renders in the nav bar."""
+    seeded_page.goto("/dashboard", wait_until=WAIT_UNTIL)
+    seeded_page.wait_for_function(_DATA_LOADED, timeout=15_000)
+
+    pill = seeded_page.locator(".status-pill")
+    pill.wait_for(state="visible", timeout=5_000)
+    pill_text = pill.text_content()
+    # All seeded calls are completed, so no active calls
+    assert "No Active Calls" in pill_text or "0" in pill_text
+
+
+def test_nav_bar_date_display(seeded_page):
+    """Date is displayed in the nav bar right section."""
+    seeded_page.goto("/dashboard", wait_until=WAIT_UNTIL)
+    seeded_page.wait_for_function(_DATA_LOADED, timeout=15_000)
+
+    date_el = seeded_page.locator(".nav-status-date")
+    date_el.wait_for(state="visible", timeout=5_000)
+    date_text = date_el.text_content().strip()
+    # Should contain a day name (e.g., "Tuesday") and a year
+    from datetime import datetime
+
+    now = datetime.now()
+    assert str(now.year) in date_text
+    # Should contain a weekday name
+    weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    assert any(day in date_text for day in weekdays), f"No weekday found in: {date_text}"

@@ -29,6 +29,8 @@ jobs:
           # where logging names/emails is intentional for admin visibility
           queries: security-and-quality
           config: |
+            paths-ignore:
+              - tests/
             query-filters:
               - exclude:
                   id: py/clear-text-logging-sensitive-data

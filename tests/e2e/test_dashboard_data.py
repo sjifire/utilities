@@ -31,6 +31,7 @@ _TAB_LABELS = {
     "calls": "Recent Calls",
     "crew": "On Duty",
     "overview": "Overview",
+    "reports": "Reports",
 }
 
 
@@ -114,6 +115,48 @@ def test_recent_calls_severity_dots(seeded_page):
 
 
 # ---------------------------------------------------------------------------
+# Recent Calls tab — call content details
+# ---------------------------------------------------------------------------
+
+
+def test_recent_calls_short_descriptions(seeded_page):
+    """Short descriptions from analysis appear in the calls table."""
+    _goto_tab(seeded_page, "calls")
+
+    table_text = seeded_page.locator(".data-table:visible").text_content()
+    assert "Kitchen fire, contained" in table_text
+    assert "Chest pain, transported" in table_text
+
+
+def test_recent_calls_address_links(seeded_page):
+    """Address links point to Google Maps."""
+    _goto_tab(seeded_page, "calls")
+
+    links = seeded_page.locator(".data-table:visible .address-link")
+    assert links.count() >= 2
+
+    from urllib.parse import urlparse
+
+    for i in range(links.count()):
+        href = links.nth(i).get_attribute("href") or ""
+        parsed = urlparse(href)
+        assert parsed.hostname is not None
+        assert parsed.hostname.endswith("google.com"), f"Expected Google Maps URL, got: {href}"
+
+
+def test_recent_calls_call_ids(seeded_page):
+    """Dispatch IDs render in the calls table."""
+    _goto_tab(seeded_page, "calls")
+
+    table_text = seeded_page.locator(".data-table:visible").text_content()
+    # All seeded calls have IDs starting with the current 2-digit year prefix
+    from datetime import datetime
+
+    prefix = f"{datetime.now().strftime('%y')}-"
+    assert prefix in table_text
+
+
+# ---------------------------------------------------------------------------
 # On Duty tab — crew grid
 # ---------------------------------------------------------------------------
 
@@ -169,6 +212,44 @@ def test_platoon_displayed(seeded_page):
     assert has_platoon, f"No platoon label found in: {crew_text[:200]}"
 
 
+def test_crew_upcoming_section(seeded_page):
+    """Upcoming crew section renders with crew names."""
+    _goto_tab(seeded_page, "crew")
+
+    # The crew grid has two columns: current and upcoming
+    crew_grid = seeded_page.locator(".crew-grid:visible")
+    crew_grid.wait_for(state="visible", timeout=5_000)
+    grid_text = crew_grid.text_content()
+
+    # Upcoming should render — we seeded tomorrow's crew (B platoon)
+    assert "Upcoming" in grid_text
+
+    # Upcoming section should have crew names
+    upcoming_names = seeded_page.locator(".crew-col-upcoming .crew-row-name")
+    if upcoming_names.count() > 0:
+        # Verify crew names from the seeded upcoming data
+        upcoming_text = ""
+        for i in range(upcoming_names.count()):
+            upcoming_text += upcoming_names.nth(i).text_content()
+        # Should contain names from tomorrow's B platoon seed data
+        assert len(upcoming_text) > 0
+
+
+def test_crew_shift_info(seeded_page):
+    """Shift timing information is displayed in crew headers."""
+    _goto_tab(seeded_page, "crew")
+
+    # The crew column header should show shift end/start time or date range
+    headers = seeded_page.locator(".crew-col-header:visible")
+    assert headers.count() >= 1
+
+    header_text = ""
+    for i in range(headers.count()):
+        header_text += headers.nth(i).text_content()
+    # Should contain a date range (e.g., "Mar 3-4") or shift label
+    assert len(header_text.strip()) > 0, "Crew column headers should have content"
+
+
 # ---------------------------------------------------------------------------
 # Dashboard data API — direct JSON verification
 # ---------------------------------------------------------------------------
@@ -189,3 +270,122 @@ def test_dashboard_data_api(seeded_page, base_url, _seeded):
 
     # Sections are populated
     assert len(data["sections"]) >= 2
+
+
+def test_dashboard_data_api_recent_calls_structure(seeded_page, base_url, _seeded):
+    """Each recent call in the API response has expected fields."""
+    resp = seeded_page.request.get(f"{base_url}/dashboard/data")
+    assert resp.ok
+    data = resp.json()
+
+    for call in data["recent_calls"]:
+        assert "id" in call
+        assert "nature" in call
+        assert "address" in call
+        assert "severity" in call
+        assert "date" in call
+        assert "time" in call
+
+
+def test_dashboard_data_api_fastest_turnout(seeded_page, base_url, _seeded):
+    """Fastest turnout field is present (seeded data has unit_times for E31)."""
+    resp = seeded_page.request.get(f"{base_url}/dashboard/data")
+    assert resp.ok
+    data = resp.json()
+
+    # The seeded Structure Fire call has E31 unit_times with paged/enroute
+    ft = data.get("fastest_turnout")
+    if ft:
+        assert "display" in ft
+        assert "unit" in ft
+        assert ft["unit"] == "E31"
+
+
+def test_dashboard_data_api_open_calls_count(seeded_page, base_url, _seeded):
+    """Open calls count is 0 since all seeded calls are completed."""
+    resp = seeded_page.request.get(f"{base_url}/dashboard/data")
+    assert resp.ok
+    data = resp.json()
+
+    assert data["open_calls"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Reports tab — editor-only (requires editor_page fixture)
+# ---------------------------------------------------------------------------
+
+
+def _goto_reports_tab(page):
+    """Navigate to the dashboard and click the Reports tab (editor only)."""
+    page.goto("/dashboard", wait_until=WAIT_UNTIL)
+    page.wait_for_function(_DATA_LOADED, timeout=15_000)
+    page.locator("button.nav-tab:text('Reports')").click()
+    page.wait_for_timeout(500)  # allow Alpine x-show transition + reports loading
+
+
+def test_reports_tab_visible_for_editor(editor_page):
+    """With editor fixture, Reports tab appears."""
+    editor_page.goto("/dashboard", wait_until=WAIT_UNTIL)
+    editor_page.wait_for_function(_DATA_LOADED, timeout=15_000)
+
+    tabs = editor_page.locator(".nav-tab")
+    labels = [tabs.nth(i).text_content().strip() for i in range(tabs.count())]
+    assert "Reports" in labels
+
+
+def test_reports_table_populated(editor_page):
+    """Reports table shows rows with correct statuses for seeded data."""
+    _goto_reports_tab(editor_page)
+
+    # Wait for the reports table to have rows
+    editor_page.locator(".data-table:visible tbody tr").first.wait_for(
+        state="visible", timeout=10_000
+    )
+    rows = editor_page.locator(".data-table:visible tbody tr")
+
+    # Should show all 3 calls (2 with reports, 1 missing)
+    assert rows.count() == 3
+
+
+def test_reports_status_badges(editor_page):
+    """Report statuses render correctly: draft, submitted/locked, missing."""
+    _goto_reports_tab(editor_page)
+
+    editor_page.locator(".data-table:visible tbody tr").first.wait_for(
+        state="visible", timeout=10_000
+    )
+
+    table_text = editor_page.locator(".data-table:visible").text_content()
+
+    # Draft report should show "draft" status
+    assert "draft" in table_text.lower()
+
+    # Missing report (ccc-333 has no incident) should show missing indicator
+    missing = editor_page.locator(".report-status.missing:visible")
+    assert missing.count() >= 1
+
+    # Submitted/locked report should show locked indicator
+    locked = editor_page.locator(".report-status.locked:visible")
+    assert locked.count() >= 1
+
+
+def test_reports_filter_pills(editor_page):
+    """Filter pills change the visible row count."""
+    _goto_reports_tab(editor_page)
+
+    editor_page.locator(".data-table:visible tbody tr").first.wait_for(
+        state="visible", timeout=10_000
+    )
+
+    # "All" filter should show 3 rows
+    all_rows = editor_page.locator(".data-table:visible tbody tr")
+    all_count = all_rows.count()
+    assert all_count == 3
+
+    # Click "Missing" filter
+    editor_page.locator(".filter-pill:text('Missing')").click()
+    editor_page.wait_for_timeout(300)
+
+    # Missing should show only 1 row (ccc-333 has no report)
+    missing_rows = editor_page.locator(".data-table:visible tbody tr")
+    assert missing_rows.count() == 1

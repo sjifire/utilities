@@ -155,3 +155,26 @@ def seeded_page(browser, base_url: str, _seeded):
     pg = context.new_page()
     yield pg
     context.close()
+
+
+@pytest.fixture(scope="session")
+def _editor_seeded(_seeded, base_url: str):
+    """Seed incidents and enable editor mode (once per session).
+
+    Depends on ``_seeded`` so dispatch calls and schedule are already loaded.
+    Sends a second seed request to add incidents and toggle editor mode.
+    """
+    from tests.e2e.seed_data import editor_seed_payload
+
+    resp = httpx.post(f"{base_url}/test/seed", json=editor_seed_payload(), timeout=5)
+    assert resp.status_code == 200, f"Editor seed failed: {resp.text}"
+    return resp.json()
+
+
+@pytest.fixture
+def editor_page(browser, base_url: str, _editor_seeded):
+    """Fresh browser context with editor mode and incidents seeded."""
+    context = browser.new_context(base_url=base_url)
+    pg = context.new_page()
+    yield pg
+    context.close()
