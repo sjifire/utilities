@@ -1461,3 +1461,46 @@ class TestGroupStrategyContract:
             assert isinstance(value, list)
             for item in value:
                 assert isinstance(item, GroupMember)
+
+
+# =============================================================================
+# Test Disabled User Exclusion
+# =============================================================================
+
+
+class TestDisabledUserExclusion:
+    """Verify that a user with cleared fields (post-disable) matches no strategy.
+
+    When disable_user() runs, it clears extension attributes, employeeType,
+    and officeLocation. Even if Graph API replication lag causes the user to
+    still appear as account_enabled=True, no strategy should match them.
+    """
+
+    @pytest.fixture
+    def cleared_user(self):
+        """An EntraUser simulating post-disable state: account_enabled still True
+        (Graph API lag) but all group-driving fields cleared."""
+        return make_entra_user(
+            user_id="disabled-user",
+            display_name="Brian Krembs",
+            email="bkrembs@sjifire.org",
+            account_enabled=True,  # Graph API hasn't propagated disable yet
+            positions="",  # cleared
+            schedules="",  # cleared
+            office_location=None,  # cleared
+            employee_type=None,  # cleared
+            evip="",  # cleared
+        )
+
+    @pytest.mark.parametrize("strategy_name", STRATEGY_NAMES)
+    def test_cleared_user_matches_no_strategy(self, strategy_name, cleared_user):
+        """A user with all group-driving fields cleared should not appear
+        in any strategy's membership, even if account_enabled is still True."""
+        strategy = get_strategy(strategy_name)
+        result = strategy.get_members([cleared_user])
+
+        for group_key, members in result.items():
+            member_ids = [getattr(m, "id", None) for m in members]
+            assert "disabled-user" not in member_ids, (
+                f"Cleared user should not be in {strategy_name}/{group_key}"
+            )
