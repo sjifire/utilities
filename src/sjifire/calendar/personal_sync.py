@@ -136,10 +136,10 @@ class PersonalCalendarSync:
                 color="preset6",  # Orange
             )
             await self.client.users.by_user_id(user_email).outlook.master_categories.post(new_cat)
-            logger.info(f"Created Aladtec category for {user_email}")
+            logger.info("Created Aladtec category for %s", user_email)
             return True
         except Exception as e:
-            logger.warning(f"Could not create Aladtec category for {user_email}: {e}")
+            logger.warning("Could not create Aladtec category for %s: %s", user_email, e)
             return False
 
     async def _get_primary_calendar_id(self, user_email: str) -> str | None:
@@ -150,7 +150,7 @@ class PersonalCalendarSync:
             if calendar and calendar.id:
                 return calendar.id
         except Exception as e:
-            logger.error(f"Failed to get primary calendar for {user_email}: {e}")
+            logger.error("Failed to get primary calendar for %s: %s", user_email, e)
         return None
 
     async def get_or_create_calendar(self, user_email: str) -> str | None:
@@ -298,7 +298,7 @@ class PersonalCalendarSync:
             return events_by_key
 
         except Exception as e:
-            logger.error(f"Failed to get existing events for {user_email}: {e}")
+            logger.error("Failed to get existing events for %s: %s", user_email, e)
             return {}
 
     async def create_event(
@@ -342,7 +342,7 @@ class PersonalCalendarSync:
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to create event for {user_email}: {e}")
+            logger.error("Failed to create event for %s: %s", user_email, e)
             return False
 
     async def update_event(
@@ -388,7 +388,7 @@ class PersonalCalendarSync:
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to update event {event_id}: {e}")
+            logger.error("Failed to update event %s: %s", event_id, e)
             return False
 
     async def delete_event(
@@ -407,7 +407,7 @@ class PersonalCalendarSync:
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to delete event {event_id}: {e}")
+            logger.error("Failed to delete event %s: %s", event_id, e)
             return False
 
     async def get_aladtec_category_events(
@@ -448,7 +448,7 @@ class PersonalCalendarSync:
             return events
 
         except Exception as e:
-            logger.error(f"Failed to get Aladtec events for {user_email}: {e}")
+            logger.error("Failed to get Aladtec events for %s: %s", user_email, e)
             return []
 
     async def purge_aladtec_events(
@@ -468,7 +468,7 @@ class PersonalCalendarSync:
         # Get primary calendar
         calendar_id = await self._get_primary_calendar_id(user_email)
         if not calendar_id:
-            logger.error(f"Could not get primary calendar for {user_email}")
+            logger.error("Could not get primary calendar for %s", user_email)
             return 0, 1
 
         # Mark as using primary calendar for category filtering
@@ -478,14 +478,14 @@ class PersonalCalendarSync:
         events = await self.get_aladtec_category_events(user_email, calendar_id)
 
         if not events:
-            logger.info(f"No Aladtec events found for {user_email}")
+            logger.info("No Aladtec events found for %s", user_email)
             return 0, 0
 
-        logger.info(f"Found {len(events)} Aladtec events for {user_email}")
+        logger.info("Found %d Aladtec events for %s", len(events), user_email)
 
         if dry_run:
             for _event_id, subject, start_date in events:
-                logger.info(f"  Would delete: {start_date} - {subject}")
+                logger.info("  Would delete: %s - %s", start_date, subject)
             return len(events), 0
 
         # Delete events
@@ -503,7 +503,7 @@ class PersonalCalendarSync:
         for (_event_id, subject, start_date), success in zip(events, results, strict=True):
             if success:
                 deleted += 1
-                logger.debug(f"  Deleted: {start_date} - {subject}")
+                logger.debug("  Deleted: %s - %s", start_date, subject)
             else:
                 errors += 1
 
@@ -578,7 +578,7 @@ class PersonalCalendarSync:
                 if normalize_body_for_comparison(new_body) != normalize_body_for_comparison(
                     existing_body
                 ):
-                    logger.debug(f"Body mismatch for {key}")
+                    logger.debug("Body mismatch for %s", key)
                     to_update.append((key, existing[key].event_id))
 
         if dry_run:
@@ -587,12 +587,12 @@ class PersonalCalendarSync:
             result.events_deleted = len(to_delete)
             for key in to_create:
                 entry = entries_by_key[key]
-                logger.info(f"Would create: {entry.date} - {entry.position}")
+                logger.info("Would create: %s - %s", entry.date, entry.position)
             for key, _ in to_update:
                 entry = entries_by_key[key]
-                logger.info(f"Would update: {entry.date} - {entry.position}")
+                logger.info("Would update: %s - %s", entry.date, entry.position)
             for key in to_delete:
-                logger.info(f"Would delete: {key}")
+                logger.info("Would delete: %s", key)
         else:
             # Create new events
             semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)

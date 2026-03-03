@@ -48,7 +48,7 @@ async def cleanup_disabled_licenses(dry_run: bool = False) -> int:
 
     # Filter to only disabled users
     disabled_users = [u for u in all_users if not u.account_enabled]
-    logger.info(f"Found {len(disabled_users)} disabled users")
+    logger.info("Found %d disabled users", len(disabled_users))
 
     if not disabled_users:
         logger.info("No disabled users found - nothing to do")
@@ -59,28 +59,28 @@ async def cleanup_disabled_licenses(dry_run: bool = False) -> int:
 
     for user in disabled_users:
         display = user.display_name or user.upn or user.id
-        logger.info(f"Checking {display}...")
+        logger.info("Checking %s...", display)
 
         # Get current licenses
         licenses = await user_manager.get_user_licenses(user.id)
 
         if not licenses:
-            logger.info(f"  {display}: no licenses to remove")
+            logger.info("  %s: no licenses to remove", display)
             results["skipped"].append({"user": display, "reason": "no licenses"})
             continue
 
-        logger.info(f"  {display}: has {len(licenses)} license(s)")
+        logger.info("  %s: has %d license(s)", display, len(licenses))
 
         if dry_run:
-            logger.info(f"  Would remove {len(licenses)} license(s) from {display}")
+            logger.info("  Would remove %d license(s) from %s", len(licenses), display)
             results["cleaned"].append({"user": display, "licenses": len(licenses)})
         else:
             success = await user_manager.remove_all_licenses(user.id)
             if success:
-                logger.info(f"  Removed {len(licenses)} license(s) from {display}")
+                logger.info("  Removed %d license(s) from %s", len(licenses), display)
                 results["cleaned"].append({"user": display, "licenses": len(licenses)})
             else:
-                logger.error(f"  Failed to remove licenses from {display}")
+                logger.error("  Failed to remove licenses from %s", display)
                 results["errors"].append({"user": display, "error": "API call failed"})
 
     # Summary
@@ -88,9 +88,9 @@ async def cleanup_disabled_licenses(dry_run: bool = False) -> int:
     logger.info("=" * 50)
     logger.info("Results")
     logger.info("=" * 50)
-    logger.info(f"Licenses removed: {len(results['cleaned'])} users")
-    logger.info(f"Skipped (no licenses): {len(results['skipped'])} users")
-    logger.info(f"Errors: {len(results['errors'])} users")
+    logger.info("Licenses removed: %d users", len(results["cleaned"]))
+    logger.info("Skipped (no licenses): %d users", len(results["skipped"]))
+    logger.info("Errors: %d users", len(results["errors"]))
 
     return 0 if not results["errors"] else 1
 
@@ -140,7 +140,10 @@ async def run_import(
         active_count = sum(1 for m in members if m.is_active)
         inactive_count = len(members) - active_count
         logger.info(
-            f"Found {len(members)} members ({active_count} active, {inactive_count} inactive)"
+            "Found %d members (%d active, %d inactive)",
+            len(members),
+            active_count,
+            inactive_count,
         )
 
         # Filter to individual if specified (by email)
@@ -149,13 +152,13 @@ async def run_import(
             matching = [m for m in members if m.email and m.email.lower() == individual_lower]
 
             if not matching:
-                logger.error(f"No member found with email '{individual}'")
+                logger.error("No member found with email '%s'", individual)
                 return 1
             members = matching
-            logger.info(f"Filtering to individual: {members[0].display_name}")
+            logger.info("Filtering to individual: %s", members[0].display_name)
 
     except Exception as e:
-        logger.error(f"Failed to fetch Aladtec members: {e}")
+        logger.error("Failed to fetch Aladtec members: %s", e)
         return 1
 
     # Backup Entra data before making changes (automatic, not optional)
@@ -168,10 +171,10 @@ async def run_import(
             user_manager = EntraUserManager()
             entra_users = await user_manager.get_users(include_disabled=True)
             entra_backup = backup_entra_users(entra_users)
-            logger.info(f"Entra backup: {entra_backup}")
+            logger.info("Entra backup: %s", entra_backup)
 
         except Exception as e:
-            logger.error(f"Failed to create Entra backup: {e}")
+            logger.error("Failed to create Entra backup: %s", e)
             return 1
 
     # Import to Entra ID
@@ -187,7 +190,7 @@ async def run_import(
         )
 
     except Exception as e:
-        logger.error(f"Failed to import to Entra ID: {e}")
+        logger.error("Failed to import to Entra ID: %s", e)
         return 1
 
     # Output results
@@ -199,17 +202,17 @@ async def run_import(
     if output_json:
         print(json.dumps(asdict(result), indent=2))
     else:
-        logger.info(f"Created:  {len(result.created)}")
-        logger.info(f"Updated:  {len(result.updated)}")
-        logger.info(f"Disabled: {len(result.disabled)}")
-        logger.info(f"Skipped:  {len(result.skipped)}")
-        logger.info(f"Errors:   {len(result.errors)}")
+        logger.info("Created:  %d", len(result.created))
+        logger.info("Updated:  %d", len(result.updated))
+        logger.info("Disabled: %d", len(result.disabled))
+        logger.info("Skipped:  %d", len(result.skipped))
+        logger.info("Errors:   %d", len(result.errors))
 
         if result.errors:
             logger.info("")
             logger.info("Errors:")
             for error in result.errors:
-                logger.info(f"  - {error['member']}: {error['error']}")
+                logger.info("  - %s: %s", error["member"], error["error"])
 
         # Show interesting skips (not "no changes needed")
         interesting_skips = [s for s in result.skipped if s.get("reason") != "no changes needed"]
@@ -217,7 +220,7 @@ async def run_import(
             logger.info("")
             logger.info("Skipped:")
             for skip in interesting_skips:
-                logger.info(f"  - {skip['member']}: {skip['reason']}")
+                logger.info("  - %s: %s", skip["member"], skip["reason"])
 
     return 0 if not result.errors else 1
 

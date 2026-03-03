@@ -79,8 +79,10 @@ class AladtecImporter:
             ImportResult with details of the operation
         """
         logger.info(
-            f"Importing {len(members)} members (dry_run={dry_run}, "
-            f"disable_inactive={disable_inactive})"
+            "Importing %d members (dry_run=%s, disable_inactive=%s)",
+            len(members),
+            dry_run,
+            disable_inactive,
         )
 
         # Build lookup of existing Entra users
@@ -107,7 +109,7 @@ class AladtecImporter:
                     disable_inactive=disable_inactive,
                 )
             except Exception as e:
-                logger.error(f"Error processing {member.display_name}: {e}")
+                logger.error("Error processing %s: %s", member.display_name, e)
                 result.errors.append(
                     {
                         "member": member.display_name,
@@ -115,7 +117,7 @@ class AladtecImporter:
                     }
                 )
 
-        logger.info(f"Import complete: {result.summary()}")
+        logger.info("Import complete: %s", result.summary())
         return result
 
     async def _process_member(
@@ -215,7 +217,7 @@ class AladtecImporter:
                             "action": "would disable and remove licenses",
                         }
                     )
-                    logger.info(f"Would disable and remove licenses: {member.display_name}")
+                    logger.info("Would disable and remove licenses: %s", member.display_name)
                 else:
                     disable_ok, license_ok = await self.user_manager.disable_and_remove_licenses(
                         existing.id
@@ -230,10 +232,10 @@ class AladtecImporter:
                             }
                         )
                         if license_ok:
-                            logger.info(f"Disabled and removed licenses: {member.display_name}")
+                            logger.info("Disabled and removed licenses: %s", member.display_name)
                         else:
                             logger.warning(
-                                f"Disabled {member.display_name} but failed to remove licenses"
+                                "Disabled %s but failed to remove licenses", member.display_name
                             )
                     else:
                         result.errors.append(
@@ -260,7 +262,7 @@ class AladtecImporter:
                         "email": member.email,
                     }
                 )
-                logger.info(f"Would update: {member.display_name}")
+                logger.info("Would update: %s", member.display_name)
             else:
                 # Build business phones list from home_phone if available
                 business_phones = [member.home_phone] if member.home_phone else None
@@ -300,7 +302,7 @@ class AladtecImporter:
                             "email": member.email,
                         }
                     )
-                    logger.info(f"Updated: {member.display_name}")
+                    logger.info("Updated: %s", member.display_name)
                 else:
                     result.errors.append(
                         {
@@ -351,7 +353,7 @@ class AladtecImporter:
                     "upn": upn,
                 }
             )
-            logger.info(f"Would create: {member.display_name} ({upn})")
+            logger.info("Would create: %s (%s)", member.display_name, upn)
         else:
             # Build business phones list from home_phone if available
             business_phones = [member.home_phone] if member.home_phone else None
@@ -391,7 +393,7 @@ class AladtecImporter:
                         "upn": upn,
                     }
                 )
-                logger.info(f"Created: {member.display_name} ({upn})")
+                logger.info("Created: %s (%s)", member.display_name, upn)
             else:
                 result.errors.append(
                     {
@@ -461,8 +463,10 @@ class AladtecImporter:
                         # Aladtec date is newer - flag but don't update
                         entra_date = existing.employee_hire_date[:10]
                         logger.warning(
-                            f"Hire date conflict for {member.display_name}: "
-                            f"Aladtec={member_date} is newer than Entra={entra_date}"
+                            "Hire date conflict for %s: Aladtec=%s is newer than Entra=%s",
+                            member.display_name,
+                            member_date,
+                            entra_date,
                         )
             else:
                 # Entra has no hire date, safe to set

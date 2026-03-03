@@ -91,7 +91,7 @@ def _is_rate_limited(response: httpx.Response) -> bool:
 def _log_retry(retry_state) -> None:
     """Log retry attempts."""
     if retry_state.attempt_number > 1:
-        logger.warning(f"Retry attempt {retry_state.attempt_number} after rate limiting")
+        logger.warning("Retry attempt %d after rate limiting", retry_state.attempt_number)
 
 
 class ISpyFireClient:
@@ -176,7 +176,7 @@ class ISpyFireClient:
         response = self.client.request(method, url, **kwargs)
 
         if response.status_code == 429:
-            logger.warning(f"Rate limited (429) on {method} {url}")
+            logger.warning("Rate limited (429) on %s %s", method, url)
 
         return response
 
@@ -189,7 +189,7 @@ class ISpyFireClient:
         if not self.client:
             raise RuntimeError("Client must be used as context manager")
 
-        logger.info(f"Logging in to {self.base_url}")
+        logger.info("Logging in to %s", self.base_url)
 
         response = self.client.post(
             f"{self.base_url}/login",
@@ -200,7 +200,7 @@ class ISpyFireClient:
         )
 
         if response.status_code != 200:
-            logger.error(f"Login failed: {response.status_code}")
+            logger.error("Login failed: %s", response.status_code)
             return False
 
         logger.info("Login successful")
@@ -243,7 +243,7 @@ class ISpyFireClient:
         agency = aid_match.group(1)  # e.g. "sjf3"
         user_id = uid_match.group(1)  # e.g. "svc-automations@sjifire.org"
 
-        logger.debug(f"Central API auth: agency={agency}, user={user_id}")
+        logger.debug("Central API auth: agency=%s, user=%s", agency, user_id)
 
         # Authenticate with central API using PID as password
         self.central_client = httpx.Client(
@@ -263,7 +263,7 @@ class ISpyFireClient:
             return False
 
         if response.status_code != 200:
-            logger.warning(f"Central API login failed: {response.status_code}")
+            logger.warning("Central API login failed: %s", response.status_code)
             return False
 
         data = response.json()
@@ -297,7 +297,7 @@ class ISpyFireClient:
             return
 
         if response.status_code != 200:
-            logger.warning(f"CAD settings request failed: {response.status_code}")
+            logger.warning("CAD settings request failed: %s", response.status_code)
             return
 
         data = response.json()
@@ -306,7 +306,7 @@ class ISpyFireClient:
             settings = results[0]
             self.ispyid = settings.get("ispyid")
             self.leadispyid = settings.get("leadispyid")
-            logger.debug(f"CAD settings: ispyid={self.ispyid}, leadispyid={self.leadispyid}")
+            logger.debug("CAD settings: ispyid=%s, leadispyid=%s", self.ispyid, self.leadispyid)
 
     def _central_request(
         self,
@@ -386,7 +386,7 @@ class ISpyFireClient:
         if params:
             url += "?" + "&".join(params)
 
-        logger.info(f"Fetching people from {url}")
+        logger.info("Fetching people from %s", url)
         try:
             response = self._request("GET", url)
         except RetryError:
@@ -394,12 +394,12 @@ class ISpyFireClient:
             return []
 
         if response.status_code != 200:
-            logger.error(f"Failed to fetch people: {response.status_code}")
+            logger.error("Failed to fetch people: %s", response.status_code)
             return []
 
         data = response.json()
         people = [ISpyFirePerson.from_api(p) for p in data.get("results", [])]
-        logger.info(f"Fetched {len(people)} people from iSpyFire")
+        logger.info("Fetched %d people from iSpyFire", len(people))
         return people
 
     def get_person_by_email(self, email: str) -> ISpyFirePerson | None:
@@ -415,13 +415,13 @@ class ISpyFireClient:
         try:
             response = self._request("GET", url)
         except RetryError:
-            logger.error(f"Failed to fetch person by email after max retries: {email}")
+            logger.error("Failed to fetch person by email after max retries: %s", email)
             return None
 
         if response.status_code == 404:
             return None
         if response.status_code != 200:
-            logger.error(f"Failed to fetch person by email: {response.status_code}")
+            logger.error("Failed to fetch person by email: %s", response.status_code)
             return None
 
         data = response.json()
@@ -451,7 +451,7 @@ class ISpyFireClient:
             return None
 
         if response.status_code not in (200, 201):
-            logger.error(f"Failed to create person: {response.status_code}")
+            logger.error("Failed to create person: %s", response.status_code)
             return None
 
         data = response.json()
@@ -481,11 +481,11 @@ class ISpyFireClient:
                 headers={"Content-Type": "application/json"},
             )
         except RetryError:
-            logger.error(f"Failed to update person after max retries: {person.id}")
+            logger.error("Failed to update person after max retries: %s", person.id)
             return None
 
         if response.status_code != 200:
-            logger.error(f"Failed to update person: {response.status_code}")
+            logger.error("Failed to update person: %s", response.status_code)
             return None
 
         data = response.json()
@@ -524,7 +524,7 @@ class ISpyFireClient:
                 headers={"Content-Type": "application/json"},
             )
             if response.status_code != 200:
-                logger.warning(f"Failed to deactivate iOS push: {response.status_code}")
+                logger.warning("Failed to deactivate iOS push: %s", response.status_code)
                 success = False
         except RetryError:
             logger.warning("Failed to deactivate iOS push after max retries")
@@ -540,7 +540,7 @@ class ISpyFireClient:
                 headers={"Content-Type": "application/json"},
             )
             if response.status_code != 200:
-                logger.warning(f"Failed to deactivate GCM push: {response.status_code}")
+                logger.warning("Failed to deactivate GCM push: %s", response.status_code)
                 success = False
         except RetryError:
             logger.warning("Failed to deactivate GCM push after max retries")
@@ -553,14 +553,14 @@ class ISpyFireClient:
             try:
                 response = self._request("GET", url)
                 if response.status_code != 200:
-                    logger.warning(f"Failed to clear notifications: {response.status_code}")
+                    logger.warning("Failed to clear notifications: %s", response.status_code)
                     success = False
             except RetryError:
                 logger.warning("Failed to clear notifications after max retries")
                 success = False
 
         if success:
-            logger.info(f"Logged out push notifications for {email}")
+            logger.info("Logged out push notifications for %s", email)
         return success
 
     def remove_all_devices(self, email: str) -> bool:
@@ -583,10 +583,10 @@ class ISpyFireClient:
             return False
 
         if response.status_code != 200:
-            logger.warning(f"Failed to remove devices: {response.status_code}")
+            logger.warning("Failed to remove devices: %s", response.status_code)
             return False
 
-        logger.info(f"Removed all devices for {email}")
+        logger.info("Removed all devices for %s", email)
         return True
 
     def logout_mobile_devices(self, person_id: str) -> bool:
@@ -609,10 +609,10 @@ class ISpyFireClient:
             return False
 
         if response.status_code != 200:
-            logger.warning(f"Failed to logout mobile devices: {response.status_code}")
+            logger.warning("Failed to logout mobile devices: %s", response.status_code)
             return False
 
-        logger.info(f"Logged out mobile devices for person {person_id}")
+        logger.info("Logged out mobile devices for person %s", person_id)
         return True
 
     def send_invite_email(self, email: str) -> bool:
@@ -635,14 +635,14 @@ class ISpyFireClient:
                 headers={"Content-Type": "application/json"},
             )
         except RetryError:
-            logger.error(f"Failed to send invite email after max retries: {email}")
+            logger.error("Failed to send invite email after max retries: %s", email)
             return False
 
         if response.status_code != 200:
-            logger.warning(f"Failed to send invite email: {response.status_code}")
+            logger.warning("Failed to send invite email: %s", response.status_code)
             return False
 
-        logger.info(f"Sent invite email to {email}")
+        logger.info("Sent invite email to %s", email)
         return True
 
     def deactivate_person(
@@ -679,14 +679,14 @@ class ISpyFireClient:
                 headers={"Content-Type": "application/json"},
             )
         except RetryError:
-            logger.error(f"Failed to deactivate person after max retries: {person_id}")
+            logger.error("Failed to deactivate person after max retries: %s", person_id)
             return False
 
         if response.status_code != 200:
-            logger.error(f"Failed to deactivate person: {response.status_code}")
+            logger.error("Failed to deactivate person: %s", response.status_code)
             return False
 
-        logger.info(f"Deactivated person {person_id}")
+        logger.info("Deactivated person %s", person_id)
         return True
 
     def reactivate_person(self, person_id: str, email: str | None = None) -> bool:
@@ -712,21 +712,21 @@ class ISpyFireClient:
                 headers={"Content-Type": "application/json"},
             )
         except RetryError:
-            logger.error(f"Failed to reactivate person after max retries: {person_id}")
+            logger.error("Failed to reactivate person after max retries: %s", person_id)
             return False
 
         if response.status_code != 200:
-            logger.error(f"Failed to reactivate person: {response.status_code}")
+            logger.error("Failed to reactivate person: %s", response.status_code)
             return False
 
-        logger.info(f"Reactivated person {person_id}")
+        logger.info("Reactivated person %s", person_id)
 
         # Send password reset email if email provided
         if email:
             if self.send_invite_email(email):
-                logger.info(f"Sent password reset email to {email}")
+                logger.info("Sent password reset email to %s", email)
             else:
-                logger.warning(f"Failed to send password reset email to {email}")
+                logger.warning("Failed to send password reset email to %s", email)
 
         return True
 
@@ -755,9 +755,9 @@ class ISpyFireClient:
         # Send invite email
         if person.email:
             if self.send_invite_email(person.email):
-                logger.info(f"Sent invite email to {person.email}")
+                logger.info("Sent invite email to %s", person.email)
             else:
-                logger.warning(f"Failed to send invite email to {person.email}")
+                logger.warning("Failed to send invite email to %s", person.email)
 
         return result
 
@@ -777,7 +777,7 @@ class ISpyFireClient:
         now = int(time.time())
         after = now - (days * 24 * 60 * 60)
         raw = self.search_calls_raw(after=after, before=now)
-        logger.info(f"Search returned {len(raw)} calls for last {days} days")
+        logger.info("Search returned %d calls for last %d days", len(raw), days)
 
         calls: list[DispatchCall] = []
         for entry in raw:
@@ -812,7 +812,7 @@ class ISpyFireClient:
         url = f"{self.CENTRAL_API_BASE}/calls/details/{self.ispyid}/id/{call_id}"
         response = self._central_request("GET", url)
         if not response or response.status_code != 200:
-            logger.error(f"Failed to fetch call details: {call_id}")
+            logger.error("Failed to fetch call details: %s", call_id)
             return None
 
         data = response.json()
@@ -903,7 +903,7 @@ class ISpyFireClient:
         url = f"{self.CENTRAL_API_BASE}/logging/calldetails/callid/{call_id}"
         response = self._central_request("GET", url)
         if not response or response.status_code != 200:
-            logger.error(f"Failed to fetch call log: {call_id}")
+            logger.error("Failed to fetch call log: %s", call_id)
             return []
 
         data = response.json()
@@ -949,7 +949,7 @@ class ISpyFireClient:
         )
         if not response or response.status_code != 200:
             status = response.status_code if response else "no response"
-            logger.error(f"Search calls failed: {status}")
+            logger.error("Search calls failed: %s", status)
             return []
 
         data = response.json()

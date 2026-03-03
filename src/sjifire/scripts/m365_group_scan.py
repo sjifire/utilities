@@ -183,7 +183,7 @@ async def get_all_m365_groups(
     logger.debug("Fetching member counts, drive info, and conversations...")
     group_list = []
     for i, g in enumerate(groups):
-        logger.debug(f"  [{i + 1}/{len(groups)}] {g.display_name}")
+        logger.debug("  [%d/%d] %s", i + 1, len(groups), g.display_name)
         member_count = await get_group_member_count(client, g.id)
         drive_info = await get_group_drive_info(client, g.id)
         convo_info = await get_group_conversations_info(client, g.id)
@@ -567,7 +567,7 @@ async def get_drive_contents(client, drive_id: str, item_id: str = "root") -> li
                         sub["name"] = f"{item.name}/{sub['name']}"
                         items.append(sub)
     except Exception as e:
-        logger.debug(f"Error getting drive contents: {e}")
+        logger.debug("Error getting drive contents: %s", e)
     return items
 
 
@@ -596,7 +596,7 @@ async def get_site_pages(client, group_id: str) -> list[dict]:
                     ]
                 )
     except Exception as e:
-        logger.debug(f"Error getting site pages: {e}")
+        logger.debug("Error getting site pages: %s", e)
     return pages
 
 
@@ -618,7 +618,7 @@ async def get_email_history(client, group_id: str) -> list[dict]:
                 ]
             )
     except Exception as e:
-        logger.debug(f"Error getting conversations: {e}")
+        logger.debug("Error getting conversations: %s", e)
     return emails
 
 
@@ -715,7 +715,7 @@ async def run_deep_scan(group_names: list[str] | None, scan_all: bool) -> None:
     print(f"Scanning {len(groups)} groups...\n")
 
     for i, group in enumerate(groups):
-        logger.debug(f"[{i + 1}/{len(groups)}] Scanning {group['display_name']}...")
+        logger.debug("[%d/%d] Scanning %s...", i + 1, len(groups), group["display_name"])
 
         # Get drive ID first
         drive_info = await get_group_drive_info(client, group["id"])

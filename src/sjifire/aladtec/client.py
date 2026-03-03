@@ -69,7 +69,7 @@ class AladtecClient:
         """Exit context manager - close HTTP client and log request count."""
         if self.client:
             if self._request_count > 0:
-                logger.info(f"Aladtec API calls: {self._request_count}")
+                logger.info("Aladtec API calls: %d", self._request_count)
             self.client.close()
             self.client = None
 
@@ -109,13 +109,13 @@ class AladtecClient:
         Returns:
             True if login successful, False otherwise
         """
-        logger.info(f"Logging in to {self.base_url}")
+        logger.info("Logging in to %s", self.base_url)
 
         # Get the login page first to establish session
         response = self.get(f"{self.base_url}/")
 
         if response.status_code != 200:
-            logger.error(f"Failed to load login page: {response.status_code}")
+            logger.error("Failed to load login page: %s", response.status_code)
             return False
 
         form_data = {

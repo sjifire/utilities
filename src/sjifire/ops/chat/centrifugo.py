@@ -58,9 +58,7 @@ async def publish(channel: str, event: str, data: dict) -> None:
         req = PublishRequest(channel=channel, data={"event": event, **data})
         await client.publish(req)
     except Exception:
-        logger.error(
-            "Centrifugo publish failed (channel=%s, event=%s)", channel, event, exc_info=True
-        )
+        logger.exception("Centrifugo publish failed (channel=%s, event=%s)", channel, event)
 
 
 # ---------------------------------------------------------------------------

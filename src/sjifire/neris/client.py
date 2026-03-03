@@ -149,7 +149,7 @@ class NerisClient:
             neris_id: Entity ID (defaults to configured entity)
         """
         neris_id = neris_id or self.entity_id
-        logger.info(f"Fetching entity {neris_id}")
+        logger.info("Fetching entity %s", neris_id)
         return self.api.get_entity(neris_id)
 
     def list_incidents(
@@ -175,7 +175,7 @@ class NerisClient:
             RuntimeError: If the API returns an error response.
         """
         neris_id = neris_id or self.entity_id
-        logger.info(f"Listing incidents for {neris_id}")
+        logger.info("Listing incidents for %s", neris_id)
         result = self.api.list_incidents(
             neris_id_entity=neris_id,
             page_size=page_size,
@@ -210,7 +210,7 @@ class NerisClient:
             if not cursor or not incidents:
                 break
 
-        logger.info(f"Fetched {len(all_incidents)} total incidents")
+        logger.info("Fetched %d total incidents", len(all_incidents))
         return all_incidents
 
     def get_pending_incidents(self, *, neris_id: str | None = None) -> list[dict]:
@@ -371,5 +371,5 @@ class NerisClient:
             "action": "patch",
             "properties": properties,
         }
-        logger.info(f"Patching incident {neris_id_incident}")
+        logger.info("Patching incident %s", neris_id_incident)
         return self.api.patch_incident(neris_id, neris_id_incident, body)

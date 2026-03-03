@@ -219,12 +219,12 @@ class DutyCalendarSync:
                     if group.group_types and "Unified" in group.group_types:
                         self._group_id = group.id
                         self._is_group = True
-                        logger.info(f"Detected M365 group: {group.display_name} ({group.id})")
+                        logger.info("Detected M365 group: %s (%s)", group.display_name, group.id)
                         logger.info("Switching to delegated auth for group calendar access")
                         self._setup_delegated_client()
                         return True
         except Exception as e:
-            logger.debug(f"Error checking for group: {e}")
+            logger.debug("Error checking for group: %s", e)
 
         self._is_group = False
         return False
@@ -251,7 +251,7 @@ class DutyCalendarSync:
             self._delegated_client = GraphServiceClient(credentials=delegated_credential)
             logger.debug("Delegated auth client initialized with ROPC")
         except Exception as e:
-            logger.error(f"Failed to set up delegated auth: {e}")
+            logger.error("Failed to set up delegated auth: %s", e)
             raise RuntimeError(
                 "Delegated auth required for M365 group calendars. "
                 "Ensure service account credentials are set in environment "
@@ -310,9 +310,9 @@ class DutyCalendarSync:
                                     "phone": user.mobile_phone,
                                 }
 
-            logger.info(f"Loaded {len(self._user_cache)} user contacts")
+            logger.info("Loaded %d user contacts", len(self._user_cache))
         except Exception as e:
-            logger.error(f"Failed to load user contacts: {e}")
+            logger.error("Failed to load user contacts: %s", e)
             self._user_cache = {}
 
         return self._user_cache
@@ -429,7 +429,7 @@ class DutyCalendarSync:
         # Sort by date
         events.sort(key=lambda e: e.event_date)
 
-        logger.info(f"Converted {len(schedules)} days to {len(events)} all-day events")
+        logger.info("Converted %d days to %d all-day events", len(schedules), len(events))
         return events
 
     def _get_filled_entries(self, day_schedule: DaySchedule) -> list[ScheduleEntry]:
@@ -542,7 +542,7 @@ class DutyCalendarSync:
                     request_configuration=config
                 )
         except Exception as e:
-            logger.error(f"Failed to fetch existing events: {e}")
+            logger.error("Failed to fetch existing events: %s", e)
             return {}
 
         events_by_date: dict[date, tuple[str, str]] = {}
@@ -558,7 +558,7 @@ class DutyCalendarSync:
                         body_content = item.body.content
                     events_by_date[event_date] = (item.id, body_content)
 
-        logger.debug(f"Found {len(events_by_date)} existing On Duty events")
+        logger.debug("Found %d existing On Duty events", len(events_by_date))
         return events_by_date
 
     def _parse_graph_date(self, dt: DateTimeTimeZone | None) -> date | None:
@@ -609,7 +609,7 @@ class DutyCalendarSync:
                 result = await client.users.by_user_id(self.mailbox).events.post(graph_event)
             return result.id if result else None
         except Exception as e:
-            logger.error(f"Failed to create event: {e}")
+            logger.error("Failed to create event: %s", e)
             return None
 
     async def update_event(self, event: AllDayDutyEvent) -> bool:
@@ -657,7 +657,7 @@ class DutyCalendarSync:
                 )
             return True
         except Exception as e:
-            logger.error(f"Failed to update event {event.event_id}: {e}")
+            logger.error("Failed to update event %s: %s", event.event_id, e)
             return False
 
     async def delete_event(self, event_id: str) -> bool:
@@ -675,7 +675,7 @@ class DutyCalendarSync:
                 await client.users.by_user_id(self.mailbox).events.by_event_id(event_id).delete()
             return True
         except Exception as e:
-            logger.error(f"Failed to delete event {event_id}: {e}")
+            logger.error("Failed to delete event %s: %s", event_id, e)
             return False
 
     async def _create_event_with_semaphore(
@@ -844,11 +844,11 @@ class DutyCalendarSync:
 
         # Log what we're doing
         if events_to_create:
-            logger.info(f"Creating {len(events_to_create)} events...")
+            logger.info("Creating %d events...", len(events_to_create))
         if events_to_update:
-            logger.info(f"Updating {len(events_to_update)} events...")
+            logger.info("Updating %d events...", len(events_to_update))
         if unchanged_count:
-            logger.info(f"Skipping {unchanged_count} unchanged events")
+            logger.info("Skipping %d unchanged events", unchanged_count)
 
         if dry_run:
             result.events_created = len(events_to_create)
@@ -931,7 +931,7 @@ class DutyCalendarSync:
                 logger.info("No On Duty events found in date range")
                 return result
 
-            logger.info(f"Found {len(existing_by_date)} On Duty events to delete")
+            logger.info("Found %d On Duty events to delete", len(existing_by_date))
 
             # Extract just the event IDs from tuples (id, body)
             events_to_delete = {
@@ -940,10 +940,10 @@ class DutyCalendarSync:
 
             if dry_run:
                 for event_date in sorted(events_to_delete.keys()):
-                    logger.info(f"Would delete event for {event_date}")
+                    logger.info("Would delete event for %s", event_date)
                 result.events_deleted = len(events_to_delete)
             else:
-                logger.info(f"Deleting {len(events_to_delete)} events...")
+                logger.info("Deleting %d events...", len(events_to_delete))
                 deleted, errors = await self.delete_events_batch(events_to_delete)
                 result.events_deleted = deleted
                 result.errors.extend(errors)

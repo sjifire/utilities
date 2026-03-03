@@ -218,12 +218,13 @@ def compare_entra_to_ispyfire(
     operational_users = [u for u in managed_users if is_operational(u)]
     comparison.entra_operational = operational_users
 
-    logger.info(f"Found {len(operational_users)} operational @{domain} users in Entra")
+    logger.info("Found %d operational @%s users in Entra", len(operational_users), domain)
     if comparison.skipped_no_operational:
         logger.info(
-            f"Skipped {len(comparison.skipped_no_operational)} users without operational positions"
+            "Skipped %d users without operational positions",
+            len(comparison.skipped_no_operational),
         )
-    logger.info(f"Found {len(ispyfire_people)} people in iSpyFire")
+    logger.info("Found %d people in iSpyFire", len(ispyfire_people))
 
     # Build lookup by email for iSpyFire people (only managed domain)
     ispyfire_by_email: dict[str, ISpyFirePerson] = {}
@@ -247,7 +248,7 @@ def compare_entra_to_ispyfire(
     for user in operational_users:
         user_email = normalize_email(user.email)
         if not user_email:
-            logger.warning(f"Skipping user without email: {user.display_name}")
+            logger.warning("Skipping user without email: %s", user.display_name)
             continue
 
         # Find matching iSpyFire person by email (managed domain only)
@@ -261,7 +262,9 @@ def compare_entra_to_ispyfire(
             if person_by_name is not None:
                 # Duplicate exists with different email - skip adding
                 logger.debug(
-                    f"Skipping {user.display_name}: duplicate exists as {person_by_name.email}"
+                    "Skipping %s: duplicate exists as %s",
+                    user.display_name,
+                    person_by_name.email,
                 )
                 continue
 
@@ -294,12 +297,12 @@ def compare_entra_to_ispyfire(
             comparison.to_remove.append(person)
 
     logger.info("Comparison complete:")
-    logger.info(f"  - Matched: {len(comparison.matched)}")
-    logger.info(f"  - To add: {len(comparison.to_add)}")
-    logger.info(f"  - To update: {len(comparison.to_update)}")
-    logger.info(f"  - To remove: {len(comparison.to_remove)}")
+    logger.info("  - Matched: %d", len(comparison.matched))
+    logger.info("  - To add: %d", len(comparison.to_add))
+    logger.info("  - To update: %d", len(comparison.to_update))
+    logger.info("  - To remove: %d", len(comparison.to_remove))
     if comparison.skipped_no_phone:
-        logger.info(f"  - Skipped (no phone): {len(comparison.skipped_no_phone)}")
+        logger.info("  - Skipped (no phone): %d", len(comparison.skipped_no_phone))
 
     return comparison
 
