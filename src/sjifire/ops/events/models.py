@@ -3,20 +3,17 @@
 import uuid
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+from sjifire.core.normalize import LowerEmail, LowerEmailStr
 
 
 class AttendeeRecord(BaseModel):
     """A person who attended an event."""
 
     name: str = Field(max_length=200)
-    email: str | None = Field(default=None, max_length=254)
+    email: LowerEmail = Field(default=None, max_length=254)
     source: str = Field(default="manual", max_length=20)  # "manual" or "parsed"
-
-    @field_validator("email", mode="before")
-    @classmethod
-    def _normalize_email(cls, v: str | None) -> str | None:
-        return v.lower() if v else v
 
 
 class EventAttachmentMeta(BaseModel):
@@ -31,13 +28,8 @@ class EventAttachmentMeta(BaseModel):
     content_type: str = Field(max_length=100)
     size_bytes: int = 0
     blob_path: str = Field(default="", max_length=500)
-    uploaded_by: str = Field(max_length=254)
+    uploaded_by: LowerEmailStr = Field(max_length=254)
     uploaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-    @field_validator("uploaded_by", mode="before")
-    @classmethod
-    def _normalize_email(cls, v: str) -> str:
-        return v.lower() if v else v
 
 
 MAX_ATTENDEES = 200

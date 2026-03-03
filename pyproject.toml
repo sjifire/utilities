@@ -51,6 +51,7 @@ ops-admin = "sjifire.scripts.ops_admin:main"
 ops-logs = "sjifire.scripts.ops_logs:main"
 kiosk-url = "sjifire.scripts.kiosk_url:main"
 ops-tasks = "sjifire.ops.tasks.runner:main"
+signature-sync = "sjifire.scripts.signature_sync:main"
 
 [dependency-groups]
 dev = [

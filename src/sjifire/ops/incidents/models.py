@@ -4,9 +4,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from sjifire.core.config import get_org_config
+from sjifire.core.normalize import LowerEmail
 from sjifire.ops.attachments.models import AttachmentMeta
 
 MAX_NARRATIVE_LENGTH = 100_000
@@ -102,15 +103,10 @@ class PersonnelAssignment(BaseModel):
     """
 
     name: str = Field(max_length=200)
-    email: str | None = Field(default=None, max_length=254)
+    email: LowerEmail = Field(default=None, max_length=254)
     rank: str = Field(default="", max_length=100)
     position: str = Field(default="", max_length=100)
     role: str = Field(default="", max_length=40)  # officer, driver, or both
-
-    @field_validator("email", mode="before")
-    @classmethod
-    def _normalize_email(cls, v: str | None) -> str | None:
-        return v.lower() if v else v
 
 
 class UnitAssignment(BaseModel):

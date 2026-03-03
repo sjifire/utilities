@@ -8,7 +8,9 @@ The actual file bytes live in Azure Blob Storage under
 import uuid
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
+
+from sjifire.core.normalize import LowerEmailStr
 
 MAX_ATTACHMENTS = 50
 MAX_TITLE_LENGTH = 200
@@ -26,6 +28,25 @@ ALLOWED_CONTENT_TYPES = frozenset(
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 
+def validate_file_upload(content_type: str, size: int) -> str | None:
+    """Validate file content type and size.
+
+    Args:
+        content_type: MIME type of the uploaded file
+        size: File size in bytes
+
+    Returns:
+        Error message string if validation fails, None if OK
+    """
+    if content_type not in ALLOWED_CONTENT_TYPES:
+        allowed = ", ".join(sorted(ALLOWED_CONTENT_TYPES))
+        return f"Content type '{content_type}' not allowed. Allowed: {allowed}"
+    if size > MAX_FILE_SIZE:
+        max_mb = MAX_FILE_SIZE // (1024 * 1024)
+        return f"File too large ({size} bytes). Maximum is {max_mb} MB."
+    return None
+
+
 class AttachmentMeta(BaseModel):
     """Metadata for a single attachment on an incident report.
 
@@ -41,14 +62,8 @@ class AttachmentMeta(BaseModel):
     content_type: str = Field(max_length=100)
     size_bytes: int = 0
     blob_path: str = Field(default="", max_length=500)
-    uploaded_by: str = Field(max_length=254)  # email
+    uploaded_by: LowerEmailStr = Field(max_length=254)  # email
     uploaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-    @field_validator("uploaded_by", mode="before")
-    @classmethod
-    def _normalize_email(cls, v: str) -> str:
-        """Lowercase email for consistent matching."""
-        return v.lower() if v else v
 
 
 def build_blob_path(year: str, incident_id: str, attachment_id: str, filename: str) -> str:

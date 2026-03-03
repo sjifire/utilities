@@ -13,7 +13,7 @@ import logging
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from sjifire.ops.attachments.models import ALLOWED_CONTENT_TYPES, MAX_FILE_SIZE
+from sjifire.ops.attachments.models import validate_file_upload
 from sjifire.ops.attachments.store import AttachmentBlobStore
 from sjifire.ops.attachments.tools import (
     delete_attachment as _delete_tool,
@@ -50,20 +50,10 @@ async def upload_attachment_route(request: Request) -> Response:
         return JSONResponse({"error": "No file provided"}, status_code=400)
 
     content_type = uploaded.content_type or "application/octet-stream"
-    if content_type not in ALLOWED_CONTENT_TYPES:
-        allowed = ", ".join(sorted(ALLOWED_CONTENT_TYPES))
-        return JSONResponse(
-            {"error": f"Content type '{content_type}' not allowed. Allowed: {allowed}"},
-            status_code=400,
-        )
-
     data = await uploaded.read()
-    if len(data) > MAX_FILE_SIZE:
-        max_mb = MAX_FILE_SIZE // (1024 * 1024)
-        return JSONResponse(
-            {"error": f"File too large. Maximum is {max_mb} MB."},
-            status_code=400,
-        )
+    error = validate_file_upload(content_type, len(data))
+    if error:
+        return JSONResponse({"error": error}, status_code=400)
 
     title = form.get("title", "")
     description = form.get("description", "")
