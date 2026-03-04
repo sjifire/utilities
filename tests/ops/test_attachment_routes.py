@@ -82,7 +82,9 @@ class _FakeRequest:
 
 class TestUploadRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth)
+        monkeypatch.setattr(
+            "sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth
+        )
         from sjifire.ops.attachments.routes import upload_attachment_route
 
         req = _FakeRequest(path_params={"incident_id": "inc-1"})
@@ -130,7 +132,9 @@ class TestUploadRoute:
 
 class TestListRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth)
+        monkeypatch.setattr(
+            "sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth
+        )
         from sjifire.ops.attachments.routes import list_attachments_route
 
         req = _FakeRequest(path_params={"incident_id": "inc-1"})
@@ -140,7 +144,9 @@ class TestListRoute:
 
 class TestDownloadRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth)
+        monkeypatch.setattr(
+            "sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth
+        )
         from sjifire.ops.attachments.routes import download_attachment_route
 
         req = _FakeRequest(
@@ -205,7 +211,9 @@ class TestDownloadRoute:
 
 class TestDeleteRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth)
+        monkeypatch.setattr(
+            "sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth
+        )
         from sjifire.ops.attachments.routes import delete_attachment_route
 
         req = _FakeRequest(
