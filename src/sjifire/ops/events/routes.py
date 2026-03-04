@@ -24,7 +24,7 @@ from sjifire.ops.attachments.store import AttachmentBlobStore
 from sjifire.ops.auth import (
     UserContext,
     check_group_membership,
-    get_request_user,
+    require_auth,
 )
 from sjifire.ops.events.models import (
     AttendeeRecord,
@@ -77,9 +77,9 @@ async def events_page(request: Request) -> Response:
 
 async def events_data(request: Request) -> Response:
     """Return combined calendar events + event records as JSON."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     is_mgr = await _is_manager(user)
     today = date.today()
@@ -195,9 +195,9 @@ async def events_data(request: Request) -> Response:
 
 async def get_record(request: Request) -> Response:
     """Get full event record detail."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
     async with EventStore() as store:
@@ -211,11 +211,9 @@ async def get_record(request: Request) -> Response:
 
 async def create_record(request: Request) -> Response:
     """Create an event record (calendar-linked or manual)."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    if not await _is_manager(user):
-        return JSONResponse({"error": "Manager access required"}, status_code=403)
+    user = await require_auth(request, group_id=_get_event_managers_group_id())
+    if isinstance(user, Response):
+        return user
 
     body = await request.json()
     calendar_event_id = body.get("calendar_event_id", "")
@@ -258,11 +256,9 @@ async def create_record(request: Request) -> Response:
 
 async def update_record(request: Request) -> Response:
     """Update an event record (attendees, notes, etc.)."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    if not await _is_manager(user):
-        return JSONResponse({"error": "Manager access required"}, status_code=403)
+    user = await require_auth(request, group_id=_get_event_managers_group_id())
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
     body = await request.json()
@@ -300,11 +296,9 @@ async def update_record(request: Request) -> Response:
 
 async def upload_file(request: Request) -> Response:
     """Upload a file attachment to an event record."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    if not await _is_manager(user):
-        return JSONResponse({"error": "Manager access required"}, status_code=403)
+    user = await require_auth(request, group_id=_get_event_managers_group_id())
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
 
@@ -352,11 +346,9 @@ async def upload_file(request: Request) -> Response:
 
 async def parse_attendees(request: Request) -> Response:
     """Parse attendees from an attachment or raw text."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    if not await _is_manager(user):
-        return JSONResponse({"error": "Manager access required"}, status_code=403)
+    user = await require_auth(request, group_id=_get_event_managers_group_id())
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
     body = await request.json()
@@ -412,9 +404,9 @@ async def parse_attendees(request: Request) -> Response:
 
 async def download_attachment(request: Request) -> Response:
     """Download an event attachment."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
     att_id = request.path_params["att_id"]
@@ -443,11 +435,9 @@ async def download_attachment(request: Request) -> Response:
 
 async def delete_attachment(request: Request) -> Response:
     """Delete an event attachment."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    if not await _is_manager(user):
-        return JSONResponse({"error": "Manager access required"}, status_code=403)
+    user = await require_auth(request, group_id=_get_event_managers_group_id())
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
     att_id = request.path_params["att_id"]

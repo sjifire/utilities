@@ -24,7 +24,7 @@ from sjifire.ops.attachments.tools import (
 from sjifire.ops.attachments.tools import (
     upload_attachment as _upload_tool,
 )
-from sjifire.ops.auth import get_request_user
+from sjifire.ops.auth import require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +38,9 @@ async def upload_attachment_route(request: Request) -> Response:
     - ``description``: Optional description (form field)
     - ``for_parsing``: Optional "true" to return image data for LLM
     """
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     incident_id = request.path_params["incident_id"]
 
@@ -77,9 +77,9 @@ async def upload_attachment_route(request: Request) -> Response:
 
 async def list_attachments_route(request: Request) -> Response:
     """List all attachments for an incident (JSON)."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     incident_id = request.path_params["incident_id"]
     result = await _list_tool(incident_id)
@@ -90,9 +90,9 @@ async def list_attachments_route(request: Request) -> Response:
 
 async def download_attachment_route(request: Request) -> Response:
     """Download an attachment blob directly."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     incident_id = request.path_params["incident_id"]
     attachment_id = request.path_params["attachment_id"]
@@ -130,9 +130,9 @@ async def download_attachment_route(request: Request) -> Response:
 
 async def delete_attachment_route(request: Request) -> Response:
     """Delete an attachment via HTTP."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     incident_id = request.path_params["incident_id"]
     attachment_id = request.path_params["attachment_id"]

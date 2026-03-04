@@ -27,13 +27,15 @@ _TEST_USER = UserContext(
 )
 
 
-def _fake_get_user(_request):
+async def _fake_require_auth(_request, **_kwargs):
     set_current_user(_TEST_USER)
     return _TEST_USER
 
 
-def _fake_get_user_none(_request):
-    return None
+async def _fake_require_auth_unauth(_request, **_kwargs):
+    from starlette.responses import JSONResponse
+
+    return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
 
 @pytest.fixture(autouse=True)
@@ -221,7 +223,7 @@ class TestEventRoutes:
 
     @pytest.fixture(autouse=True)
     def _patch_auth(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.events.routes.get_request_user", _fake_get_user)
+        monkeypatch.setattr("sjifire.ops.events.routes.require_auth", _fake_require_auth)
         monkeypatch.setattr("sjifire.ops.events.routes._is_manager", AsyncMock(return_value=True))
         monkeypatch.setattr("sjifire.ops.events.routes._get_event_managers_group_id", lambda: "grp")
 
@@ -411,15 +413,20 @@ class TestEventRoutes:
     async def test_unauthenticated_returns_401(self, monkeypatch):
         from sjifire.ops.events.routes import create_record
 
-        monkeypatch.setattr("sjifire.ops.events.routes.get_request_user", _fake_get_user_none)
+        monkeypatch.setattr("sjifire.ops.events.routes.require_auth", _fake_require_auth_unauth)
         request = _make_request(json={"subject": "X", "start": "2026-04-01T09:00:00Z"})
         resp = await create_record(request)
         assert resp.status_code == 401
 
     async def test_non_manager_returns_403(self, monkeypatch):
+        from starlette.responses import JSONResponse
+
         from sjifire.ops.events.routes import create_record
 
-        monkeypatch.setattr("sjifire.ops.events.routes._is_manager", AsyncMock(return_value=False))
+        async def _fake_require_auth_forbidden(_request, **_kwargs):
+            return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+        monkeypatch.setattr("sjifire.ops.events.routes.require_auth", _fake_require_auth_forbidden)
         request = _make_request(json={"subject": "X", "start": "2026-04-01T09:00:00Z"})
         resp = await create_record(request)
         assert resp.status_code == 403
