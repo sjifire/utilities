@@ -460,3 +460,59 @@ class TestEnrichMemberDetails:
 
         # Should succeed — no detail page fetch attempted
         assert len(result) == 1
+
+
+class TestParseCSVRowEdgeCases:
+    """Tests for _parse_csv_row edge cases."""
+
+    def test_none_key_in_row(self, mock_env_vars):
+        """csv.DictReader produces None keys when rows have more values than headers."""
+        scraper = AladtecMemberScraper()
+        row = {
+            "first name": "Jordan",
+            "last name": "Pollack",
+            "email": "jpollack@sjifire.org",
+            None: "extra value",
+        }
+        member = scraper._parse_csv_row(row)
+
+        assert member is not None
+        assert member.first_name == "Jordan"
+        assert member.last_name == "Pollack"
+        assert member.email == "jpollack@sjifire.org"
+
+    def test_none_key_with_all_fields(self, mock_env_vars):
+        """None key shouldn't interfere with parsing any real fields."""
+        scraper = AladtecMemberScraper()
+        row = {
+            "first name": "Jordan",
+            "last name": "Pollack",
+            "email": "jpollack@sjifire.org",
+            "title": "Division Chief",
+            "employee type": "Chief",
+            "work group": "Contractor",
+            "station assignment": "31",
+            None: "overflow",
+        }
+        member = scraper._parse_csv_row(row)
+
+        assert member is not None
+        assert member.title == "Division Chief"
+        assert member.employee_type == "Chief"
+        assert member.work_group == "Contractor"
+        assert member.station_assignment == "31"
+
+    def test_multiple_none_keys_in_row(self, mock_env_vars):
+        """Multiple extra columns produce a single None key (last value wins)."""
+        scraper = AladtecMemberScraper()
+        # DictReader uses restkey=None, so extra values are a list under None
+        row = {
+            "first name": "John",
+            "last name": "Doe",
+            None: ["extra1", "extra2"],
+        }
+        member = scraper._parse_csv_row(row)
+
+        assert member is not None
+        assert member.first_name == "John"
+        assert member.last_name == "Doe"
