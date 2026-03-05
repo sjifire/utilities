@@ -322,7 +322,7 @@ class AladtecMemberScraper(AladtecClient):
             Member object or None if parsing fails
         """
         # Normalize column names (lowercase, strip whitespace)
-        normalized = {k.lower().strip(): v for k, v in row.items()}
+        normalized = {k.lower().strip(): v for k, v in row.items() if k is not None}
 
         # Helper to get and strip a value
         def get_field(*keys: str) -> str | None:
