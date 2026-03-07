@@ -115,12 +115,14 @@ src/sjifire/
 │   ├── models.py          # Member dataclass with rank/display_rank properties
 │   └── schedule_scraper.py # Schedule scraper for calendar data
 ├── core/
+│   ├── anthropic.py       # Anthropic API client setup
 │   ├── backup.py          # JSON backup before sync operations
 │   ├── config.py          # EntraSyncConfig, credentials from .env
-│   ├── constants.py       # Shared constants (OPERATIONAL_POSITIONS, RANK_HIERARCHY)
+│   ├── extension_attrs.py # Entra ID & Exchange attribute slot registry
 │   ├── group_strategies.py # GroupStrategy classes for group membership rules
 │   ├── msgraph_client.py  # Azure credential setup
-│   └── normalize.py       # Name normalization utilities
+│   ├── normalize.py       # Name normalization utilities
+│   └── schedule.py        # Schedule data models
 ├── entra/
 │   ├── aladtec_import.py  # User sync logic, handles matching/create/update
 │   ├── groups.py          # EntraGroupManager for M365 group operations
@@ -286,6 +288,8 @@ For email distribution without SharePoint sprawl, use mail-enabled security grou
 - `EXCHANGE_CERTIFICATE_PATH` + `EXCHANGE_CERTIFICATE_PASSWORD`: Cross-platform .pfx file
 
 The `exchange/` module mirrors the `entra/group_sync.py` strategies but creates mail-enabled security groups via PowerShell subprocess.
+
+**Signature sync** (`signature-sync`): Sets per-user custom attributes (CA6-8) on mailboxes and creates a transport rule that appends a personalized signature + org footer to all outgoing emails. Works with all email clients because signatures are applied server-side. See `scripts/signature_sync.py` and `core/extension_attrs.py` for slot assignments.
 
 **Retry logic:** Member add/remove operations use tenacity to automatically retry transient Azure AD sync errors (up to 3 attempts with exponential backoff). Groups are backed up before any sync operation.
 
