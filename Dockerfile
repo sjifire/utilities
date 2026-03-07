@@ -25,6 +25,9 @@ COPY docs/ docs/
 # Install the project (fast — deps already cached above)
 RUN uv sync --frozen --no-dev --no-editable
 
+RUN groupadd --system app && useradd --system --gid app app
+USER app
+
 EXPOSE 8000
 
 # Use the installed entry point (goes through main() for logging setup)

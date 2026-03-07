@@ -34,7 +34,7 @@ async def list_dispatch_calls(days: int = 30) -> dict:
 
     try:
         async with DispatchStore() as store:
-            docs = await store.list_recent_with_open()
+            docs = await store.list_recent_with_open(days=days)
 
         logger.info("Returning %d dispatch calls", len(docs))
         return {"calls": [d.to_dict() for d in docs], "count": len(docs)}

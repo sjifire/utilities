@@ -13,7 +13,7 @@ import logging
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from sjifire.ops.attachments.models import ALLOWED_CONTENT_TYPES, MAX_FILE_SIZE
+from sjifire.ops.attachments.models import validate_file_upload
 from sjifire.ops.attachments.store import AttachmentBlobStore
 from sjifire.ops.attachments.tools import (
     delete_attachment as _delete_tool,
@@ -24,7 +24,7 @@ from sjifire.ops.attachments.tools import (
 from sjifire.ops.attachments.tools import (
     upload_attachment as _upload_tool,
 )
-from sjifire.ops.auth import get_request_user
+from sjifire.ops.auth import require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +38,9 @@ async def upload_attachment_route(request: Request) -> Response:
     - ``description``: Optional description (form field)
     - ``for_parsing``: Optional "true" to return image data for LLM
     """
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     incident_id = request.path_params["incident_id"]
 
@@ -50,20 +50,10 @@ async def upload_attachment_route(request: Request) -> Response:
         return JSONResponse({"error": "No file provided"}, status_code=400)
 
     content_type = uploaded.content_type or "application/octet-stream"
-    if content_type not in ALLOWED_CONTENT_TYPES:
-        allowed = ", ".join(sorted(ALLOWED_CONTENT_TYPES))
-        return JSONResponse(
-            {"error": f"Content type '{content_type}' not allowed. Allowed: {allowed}"},
-            status_code=400,
-        )
-
     data = await uploaded.read()
-    if len(data) > MAX_FILE_SIZE:
-        max_mb = MAX_FILE_SIZE // (1024 * 1024)
-        return JSONResponse(
-            {"error": f"File too large. Maximum is {max_mb} MB."},
-            status_code=400,
-        )
+    error = validate_file_upload(content_type, len(data))
+    if error:
+        return JSONResponse({"error": error}, status_code=400)
 
     title = form.get("title", "")
     description = form.get("description", "")
@@ -87,9 +77,9 @@ async def upload_attachment_route(request: Request) -> Response:
 
 async def list_attachments_route(request: Request) -> Response:
     """List all attachments for an incident (JSON)."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     incident_id = request.path_params["incident_id"]
     result = await _list_tool(incident_id)
@@ -100,9 +90,9 @@ async def list_attachments_route(request: Request) -> Response:
 
 async def download_attachment_route(request: Request) -> Response:
     """Download an attachment blob directly."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     incident_id = request.path_params["incident_id"]
     attachment_id = request.path_params["attachment_id"]
@@ -140,9 +130,9 @@ async def download_attachment_route(request: Request) -> Response:
 
 async def delete_attachment_route(request: Request) -> Response:
     """Delete an attachment via HTTP."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     incident_id = request.path_params["incident_id"]
     attachment_id = request.path_params["attachment_id"]

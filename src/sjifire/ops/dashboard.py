@@ -15,6 +15,7 @@ import os
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -320,14 +321,14 @@ def _compute_shift_start(raw_crew: list[dict], crew_date: str) -> str:
 def _build_crew_list(
     raw_crew: list[dict],
     contact_lookup: dict[str, dict] | None = None,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build crew list and grouped sections from raw schedule data.
 
     Returns (crew, sections) where crew is a flat list of member dicts
     and sections is a list of {"key", "label", "members"} groups.
     """
     contacts = contact_lookup or {}
-    crew = []
+    crew: list[dict[str, Any]] = []
     for c in raw_crew:
         raw_position = c["position"]
         contact = contacts.get(c["name"].lower(), {})
@@ -344,7 +345,7 @@ def _build_crew_list(
         )
 
     # Group by section, sort sections by priority, positions by seniority
-    section_members: dict[str, list] = {}
+    section_members: dict[str, list[dict[str, Any]]] = {}
     for c in crew:
         sec = c["section"]
         if sec not in section_members:
@@ -354,7 +355,7 @@ def _build_crew_list(
         members.sort(key=lambda c: c["_sort_key"])
 
     ordered_keys = sorted(section_members, key=section_sort_key)
-    sections = [
+    sections: list[dict[str, Any]] = [
         {"key": k, "label": _get_section_labels().get(k, k), "members": section_members[k]}
         for k in ordered_keys
     ]

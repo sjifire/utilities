@@ -8,6 +8,8 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import ClassVar
 
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
 from sjifire.ops.cosmos import CosmosStore
 from sjifire.ops.schedule.models import DayScheduleCache, ScheduleEntryCache
 
@@ -50,7 +52,7 @@ class ScheduleStore(CosmosStore):
                 partition_key=date_str,
             )
             return DayScheduleCache.from_cosmos(result)
-        except Exception:
+        except CosmosResourceNotFoundError:
             return None
 
     async def upsert(self, doc: DayScheduleCache) -> None:

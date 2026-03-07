@@ -113,9 +113,9 @@ class AttachmentBlobStore:
         blob = self._container_client.get_blob_client(blob_path)
         try:
             stream = await blob.download_blob()
-            data = await stream.readall()
+            data = bytes(await stream.readall())
             props = await blob.get_blob_properties()
-            ct = props.content_settings.content_type or "application/octet-stream"
+            ct = str(props.content_settings.content_type or "application/octet-stream")
             return data, ct
         except Exception as exc:
             if "BlobNotFound" in str(exc):

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 import jwt
 from jwt import PyJWKClient
 from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +267,36 @@ def get_request_user(request: Request) -> UserContext | None:
     user = get_easyauth_user(request)
     if user:
         _current_user.set(user)
+    return user
+
+
+async def require_auth(
+    request: Request,
+    *,
+    group_id: str = "",
+) -> UserContext | Response:
+    """Extract user from request; optionally require group membership.
+
+    Returns ``UserContext`` on success, or a ``JSONResponse`` error
+    (401 if unauthenticated, 403 if not in the required group).
+
+    Usage::
+
+        user = await require_auth(request)
+        if isinstance(user, Response):
+            return user
+    """
+    user = get_request_user(request)
+    if user is None:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    if group_id:
+        is_member = await check_group_membership(
+            user.user_id,
+            group_id,
+            fallback=user.is_editor,
+        )
+        if not is_member:
+            return JSONResponse({"error": "Forbidden"}, status_code=403)
     return user
 
 

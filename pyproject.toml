@@ -51,6 +51,7 @@ ops-admin = "sjifire.scripts.ops_admin:main"
 ops-logs = "sjifire.scripts.ops_logs:main"
 kiosk-url = "sjifire.scripts.kiosk_url:main"
 ops-tasks = "sjifire.ops.tasks.runner:main"
+signature-sync = "sjifire.scripts.signature_sync:main"
 
 [dependency-groups]
 dev = [
@@ -119,6 +120,12 @@ indent-style = "space"
 
 [tool.ty.environment]
 python-version = "3.14"
+
+[tool.ty.rules]
+# msgraph SDK has incomplete type stubs — these two rules produce many
+# false positives across any file that touches Graph API objects.
+possibly-missing-attribute = "ignore"
+invalid-argument-type = "ignore"
 
 [build-system]
 requires = ["hatchling"]

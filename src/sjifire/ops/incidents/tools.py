@@ -991,7 +991,7 @@ async def update_incident(
             if status not in _EDITABLE_STATUSES:
                 valid = ", ".join(sorted(_EDITABLE_STATUSES))
                 return {"error": f"Invalid status '{status}'. Must be one of: {valid}"}
-            doc.status = status
+            doc.status = status  # type: ignore[assignment]  # validated above
             fields_changed.append("status")
 
         if incident_type is not None:
@@ -1069,7 +1069,7 @@ async def update_incident(
 
         # Actions
         if action_taken is not None:
-            doc.action_taken = action_taken
+            doc.action_taken = action_taken  # type: ignore[assignment]  # validated by Pydantic
             fields_changed.append("action_taken")
         if noaction_reason is not None:
             doc.noaction_reason = noaction_reason

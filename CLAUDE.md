@@ -417,6 +417,14 @@ uv run backup-cosmos --dispatch-only
 uv run backup-cosmos --output /path/
 ```
 
+### Email signature sync
+```bash
+uv run signature-sync --dry-run                    # Preview changes
+uv run signature-sync                              # Sync all employees + footer rule
+uv run signature-sync --email user@sjifire.org --preview  # Preview one user's signature
+uv run signature-sync --remove                     # Remove all signatures + footer rule
+```
+
 ### Check linting
 ```bash
 uv run ruff check .
@@ -454,7 +462,7 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 ## GitHub Actions
 
 - `ci.yml`: Lint + test + e2e on PR/push (e2e job runs Playwright chromium in parallel)
-- `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
+- `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync + signature sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Daily iSpyFire state backup (dry-run sync + artifact upload). Actual sync runs every 30 min via Container Apps Job (`ops-tasks`)
 - `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
 - `ops-deploy.yml`: Deploy ops server on push to main (paths: `src/sjifire/ops/**`, `Dockerfile`, `pyproject.toml`)
