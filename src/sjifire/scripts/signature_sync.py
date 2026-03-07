@@ -63,23 +63,21 @@ RULE_HTML = f"""\
 {SIG_PHONE_TOKEN}</span>
 </p>
 </div>
-<div style="margin-top: 25px; padding-top: 15px; border-top: 2px solid #c42414;">
-<table cellpadding="0" cellspacing="0" style="font-size: 11px; width: 100%;">
+<div style="margin-top: 20px; padding-top: 12px; border-top: 2px solid #c42414;">
+<table cellpadding="0" cellspacing="0" style="font-size: 11px;">
 <tr>
-<td style="padding-right: 15px; vertical-align: top; width: 70px;">
-<img src="{LOGO_URL}" alt="SJIFR" width="60" style="border-radius: 4px;">
+<td style="padding-right: 10px; vertical-align: top; width: 44px;">
+<img src="{LOGO_URL}" alt="SJIFR" width="40" style="border-radius: 4px;">
 </td>
 <td style="vertical-align: top; line-height: 1.5;">
 <strong style="font-size: 12px;">{COMPANY_NAME}</strong><br>
 {ADDRESS}<br>
-<a href="{WEBSITE_URL}">{WEBSITE_URL}</a>
-</td>
-<td style="text-align: right; vertical-align: top; padding-left: 20px;">
-<span style="font-weight: bold;">Emergency: 911</span>
+<a href="{WEBSITE_URL}">{WEBSITE_URL}</a><br>
+<strong>Emergency: 911</strong>
 </td>
 </tr>
 </table>
-<p style="font-size: 10px; line-height: 1.4; margin-top: 12px; margin-bottom: 0;">
+<p style="font-size: 10px; line-height: 1.4; margin-top: 10px; margin-bottom: 0;">
 {DISCLAIMER}
 </p>
 </div>"""
