@@ -8,6 +8,7 @@ from sjifire.scripts.signature_sync import (
     _format_phone,
     _get_phone_line,
     _get_title_line,
+    remove_transport_rule,
     sync_custom_attributes,
 )
 
@@ -84,6 +85,14 @@ class TestGetTitleLine:
         user = make_user()
         assert _get_title_line(user) == ""
 
+    def test_strips_br_from_corrupted_rank(self):
+        user = make_user(rank="Captain<br>")
+        assert _get_title_line(user) == "Captain"
+
+    def test_strips_br_from_corrupted_rank_with_job_title(self):
+        user = make_user(rank="Lieutenant<br>", job_title="Marine Coordinator")
+        assert _get_title_line(user) == "Lieutenant - Marine Coordinator"
+
 
 class TestGetPhoneLine:
     """Tests for _get_phone_line function."""
@@ -146,8 +155,46 @@ class TestSyncCustomAttributes:
         assert "u2@sjifire.org" in script
         assert "CustomAttribute1" in script
         assert "CustomAttribute2" in script
+        assert "CustomAttribute3" in script
         assert "Captain" in script
         assert "Admin" in script
+
+    def test_attr1_includes_br_for_titled_user(self):
+        users = [make_user(email="titled@sjifire.org", rank="Captain")]
+
+        with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
+            mock_client = MagicMock()
+            mock_client._run_powershell.return_value = {
+                "Success": 1,
+                "Failure": 0,
+                "Errors": [],
+            }
+            mock_cls.return_value = mock_client
+
+            sync_custom_attributes(users, dry_run=False)
+
+        commands = mock_client._run_powershell.call_args[0][0]
+        script = " ".join(commands)
+        assert "Captain<br>" in script
+
+    def test_attr1_empty_for_untitled_user(self):
+        users = [make_user(email="notitled@sjifire.org")]
+
+        with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
+            mock_client = MagicMock()
+            mock_client._run_powershell.return_value = {
+                "Success": 1,
+                "Failure": 0,
+                "Errors": [],
+            }
+            mock_cls.return_value = mock_client
+
+            sync_custom_attributes(users, dry_run=False)
+
+        commands = mock_client._run_powershell.call_args[0][0]
+        script = " ".join(commands)
+        assert "-CustomAttribute1 ''" in script
+        assert "-CustomAttribute3 ''" in script
 
     def test_handles_failures(self):
         users = [make_user()]
@@ -218,6 +265,48 @@ class TestSyncTransportRule:
         assert "Failed" in error
 
 
+class TestRemoveTransportRule:
+    """Tests for remove_transport_rule function."""
+
+    def test_dry_run(self):
+        ok, error = remove_transport_rule(dry_run=True)
+        assert ok is True
+        assert error is None
+
+    def test_removes_rule(self):
+        with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
+            mock_client = MagicMock()
+            mock_client._run_powershell.return_value = "REMOVED: SJIFR Email Signature"
+            mock_cls.return_value = mock_client
+
+            ok, error = remove_transport_rule(dry_run=False)
+
+        assert ok is True
+        assert error is None
+
+    def test_handles_not_found(self):
+        with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
+            mock_client = MagicMock()
+            mock_client._run_powershell.return_value = "NOT_FOUND: SJIFR Email Signature"
+            mock_cls.return_value = mock_client
+
+            ok, error = remove_transport_rule(dry_run=False)
+
+        assert ok is True
+        assert error is None
+
+    def test_handles_failure(self):
+        with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
+            mock_client = MagicMock()
+            mock_client._run_powershell.return_value = None
+            mock_cls.return_value = mock_client
+
+            ok, error = remove_transport_rule(dry_run=False)
+
+        assert ok is False
+        assert "Failed" in error
+
+
 class TestRunSync:
     """Tests for run_sync function."""
 
@@ -252,7 +341,6 @@ class TestRunSync:
         with (
             patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_mgr_cls,
             patch("sjifire.scripts.signature_sync.sync_custom_attributes") as mock_sync,
-
             patch("sjifire.scripts.signature_sync.sync_transport_rule") as mock_rule,
         ):
             mock_mgr = MagicMock()
@@ -288,7 +376,6 @@ class TestRunSync:
         with (
             patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_mgr_cls,
             patch("sjifire.scripts.signature_sync.sync_custom_attributes") as mock_sync,
-
             patch("sjifire.scripts.signature_sync.sync_transport_rule") as mock_rule,
         ):
             mock_mgr = MagicMock()
@@ -310,7 +397,6 @@ class TestRunSync:
         with (
             patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_mgr_cls,
             patch("sjifire.scripts.signature_sync.sync_custom_attributes") as mock_sync,
-
             patch("sjifire.scripts.signature_sync.sync_transport_rule") as mock_rule,
         ):
             mock_mgr = MagicMock()
@@ -324,3 +410,47 @@ class TestRunSync:
 
         assert exit_code == 0
         mock_rule.assert_not_called()
+
+    async def test_remove_mode(self):
+        from sjifire.scripts.signature_sync import run_sync
+
+        users = [make_user()]
+
+        with (
+            patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_mgr_cls,
+            patch("sjifire.scripts.signature_sync.sync_custom_attributes") as mock_sync,
+            patch("sjifire.scripts.signature_sync.remove_transport_rule") as mock_remove,
+        ):
+            mock_mgr = MagicMock()
+            mock_mgr.get_employees = AsyncMock(return_value=users)
+            mock_mgr_cls.return_value = mock_mgr
+            mock_sync.return_value = (1, 0, [])
+            mock_remove.return_value = (True, None)
+
+            exit_code = await run_sync(remove=True)
+
+        assert exit_code == 0
+        mock_sync.assert_called_once()
+        # Verify remove=True was passed
+        assert mock_sync.call_args[0][2] is True
+        mock_remove.assert_called_once()
+
+    async def test_returns_error_on_transport_rule_failure(self):
+        from sjifire.scripts.signature_sync import run_sync
+
+        users = [make_user()]
+
+        with (
+            patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_mgr_cls,
+            patch("sjifire.scripts.signature_sync.sync_custom_attributes") as mock_sync,
+            patch("sjifire.scripts.signature_sync.sync_transport_rule") as mock_rule,
+        ):
+            mock_mgr = MagicMock()
+            mock_mgr.get_employees = AsyncMock(return_value=users)
+            mock_mgr_cls.return_value = mock_mgr
+            mock_sync.return_value = (1, 0, [])
+            mock_rule.return_value = (False, "PowerShell error")
+
+            exit_code = await run_sync(dry_run=False)
+
+        assert exit_code == 1

@@ -523,9 +523,7 @@ class TestEntraUserManagerLicenseManagement:
             return_value=None
         )
 
-        result = await manager.assign_license(
-            "user-123", "3b555118-da6a-4418-894f-7df1e2096870"
-        )
+        result = await manager.assign_license("user-123", "3b555118-da6a-4418-894f-7df1e2096870")
 
         assert result is True
         manager.client.users.by_user_id.return_value.assign_license.post.assert_called_once()
@@ -536,9 +534,7 @@ class TestEntraUserManagerLicenseManagement:
             side_effect=Exception("No available licenses")
         )
 
-        result = await manager.assign_license(
-            "user-123", "3b555118-da6a-4418-894f-7df1e2096870"
-        )
+        result = await manager.assign_license("user-123", "3b555118-da6a-4418-894f-7df1e2096870")
 
         assert result is False
 

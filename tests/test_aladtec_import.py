@@ -1036,9 +1036,7 @@ class TestLicenseAssignmentOnCreate:
         assert len(result.created) == 1
         assert result.created[0]["license_assigned"] is True
 
-    async def test_records_license_failure(
-        self, importer_with_license, new_member, created_user
-    ):
+    async def test_records_license_failure(self, importer_with_license, new_member, created_user):
         """Should record when license assignment fails but still count as created."""
         result = ImportResult()
         importer_with_license.user_manager.create_user = AsyncMock(return_value=created_user)
@@ -1057,22 +1055,16 @@ class TestLicenseAssignmentOnCreate:
         importer.user_manager.create_user = AsyncMock(return_value=created_user)
         importer.user_manager.assign_license = AsyncMock()
 
-        await importer._handle_new_user(
-            member=new_member, result=result, dry_run=False
-        )
+        await importer._handle_new_user(member=new_member, result=result, dry_run=False)
 
         importer.user_manager.assign_license.assert_not_called()
         assert result.created[0]["license_assigned"] is None
 
-    async def test_dry_run_includes_license_sku(
-        self, importer_with_license, new_member
-    ):
+    async def test_dry_run_includes_license_sku(self, importer_with_license, new_member):
         """Dry run should report the license SKU that would be assigned."""
         result = ImportResult()
 
-        await importer_with_license._handle_new_user(
-            member=new_member, result=result, dry_run=True
-        )
+        await importer_with_license._handle_new_user(member=new_member, result=result, dry_run=True)
 
         assert len(result.created) == 1
         assert result.created[0]["license_sku"] == "3b555118-da6a-4418-894f-7df1e2096870"
@@ -1081,9 +1073,7 @@ class TestLicenseAssignmentOnCreate:
         """Dry run without license SKU should not include it."""
         result = ImportResult()
 
-        await importer._handle_new_user(
-            member=new_member, result=result, dry_run=True
-        )
+        await importer._handle_new_user(member=new_member, result=result, dry_run=True)
 
         assert len(result.created) == 1
         assert result.created[0]["license_sku"] is None
