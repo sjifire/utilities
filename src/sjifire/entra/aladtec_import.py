@@ -49,17 +49,20 @@ class AladtecImporter:
         self,
         domain: str | None = None,
         company_name: str | None = None,
+        license_sku: str | None = None,
     ) -> None:
         """Initialize the importer.
 
         Args:
             domain: Email domain for generating UPNs (loaded from config if not provided)
             company_name: Company name for Entra ID users (loaded from config if not provided)
+            license_sku: License SKU ID to assign to newly created users (optional)
         """
         config = load_entra_sync_config()
         self.domain = domain or config.domain
         self.company_name = company_name or config.company_name
         self.skip_emails = {e.lower() for e in config.skip_emails}
+        self.license_sku = license_sku
         self.user_manager = EntraUserManager(domain=self.domain)
 
     async def import_members(
@@ -351,9 +354,13 @@ class AladtecImporter:
                     "member": member.display_name,
                     "email": member.email,
                     "upn": upn,
+                    "license_sku": self.license_sku,
                 }
             )
-            logger.info("Would create: %s (%s)", member.display_name, upn)
+            if self.license_sku:
+                logger.info("Would create and assign license: %s (%s)", member.display_name, upn)
+            else:
+                logger.info("Would create: %s (%s)", member.display_name, upn)
         else:
             # Build business phones list from home_phone if available
             business_phones = [member.home_phone] if member.home_phone else None
@@ -386,11 +393,23 @@ class AladtecImporter:
                 extension_attribute4=schedules_str,
             )
             if created_user:
+                # Assign license if configured
+                license_ok = True
+                if self.license_sku:
+                    license_ok = await self.user_manager.assign_license(
+                        created_user.id, self.license_sku
+                    )
+                    if not license_ok:
+                        logger.warning(
+                            "Created %s but failed to assign license", member.display_name
+                        )
+
                 result.created.append(
                     {
                         "member": member.display_name,
                         "email": member.email,
                         "upn": upn,
+                        "license_assigned": license_ok if self.license_sku else None,
                     }
                 )
                 logger.info("Created: %s (%s)", member.display_name, upn)
