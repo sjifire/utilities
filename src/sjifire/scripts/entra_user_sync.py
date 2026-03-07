@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import sys
 from dataclasses import asdict
 
@@ -101,7 +100,6 @@ async def run_import(
     disable_inactive: bool = False,
     output_json: bool = False,
     individual: str | None = None,
-    license_sku: str | None = None,
 ) -> int:
     """Run the Aladtec to Entra import.
 
@@ -112,7 +110,6 @@ async def run_import(
         disable_inactive: If True, disable accounts for inactive members
         output_json: If True, output results as JSON
         individual: If set, only sync this individual by email
-        license_sku: If set, assign this license SKU to newly created users
 
     Returns:
         Exit code
@@ -185,7 +182,7 @@ async def run_import(
     logger.info("Importing to Entra ID...")
 
     try:
-        importer = AladtecImporter(license_sku=license_sku)
+        importer = AladtecImporter()
         result = await importer.import_members(
             members,
             dry_run=dry_run,
@@ -260,13 +257,6 @@ def main():
         metavar="EMAIL",
         help="Only sync a single individual by work email address",
     )
-    parser.add_argument(
-        "--license-sku",
-        type=str,
-        metavar="SKU_ID",
-        default=os.environ.get("ENTRA_LICENSE_SKU"),
-        help="License SKU ID to assign to newly created users (default: $ENTRA_LICENSE_SKU)",
-    )
 
     args = parser.parse_args()
 
@@ -291,7 +281,6 @@ def main():
             disable_inactive=args.disable_inactive,
             output_json=args.output_json,
             individual=individual,
-            license_sku=args.license_sku,
         )
     )
     sys.exit(exit_code)

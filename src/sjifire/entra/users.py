@@ -719,30 +719,6 @@ class EntraUserManager:
             logger.error("Failed to get licenses for %s: %s", user_id, e)
             return []
 
-    async def assign_license(self, user_id: str, sku_id: str) -> bool:
-        """Assign a license to a user.
-
-        Args:
-            user_id: Entra user ID or UPN
-            sku_id: License SKU ID (GUID string)
-
-        Returns:
-            True if successful
-        """
-        from msgraph.generated.models.assigned_license import AssignedLicense
-
-        try:
-            request_body = AssignLicensePostRequestBody(
-                add_licenses=[AssignedLicense(sku_id=UUID(sku_id))],
-                remove_licenses=[],
-            )
-            await self.client.users.by_user_id(user_id).assign_license.post(request_body)
-            logger.info("Assigned license %s to user: %s", sku_id, user_id)
-            return True
-        except Exception as e:
-            logger.error("Failed to assign license to %s: %s", user_id, e)
-            return False
-
     async def remove_all_licenses(self, user_id: str) -> bool:
         """Remove all licenses from a user.
 

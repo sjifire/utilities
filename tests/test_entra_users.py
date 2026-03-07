@@ -517,27 +517,6 @@ class TestEntraUserManagerLicenseManagement:
 
         assert licenses == []
 
-    async def test_assign_license_success(self, manager):
-        """Should assign a license and return True."""
-        manager.client.users.by_user_id.return_value.assign_license.post = AsyncMock(
-            return_value=None
-        )
-
-        result = await manager.assign_license("user-123", "3b555118-da6a-4418-894f-7df1e2096870")
-
-        assert result is True
-        manager.client.users.by_user_id.return_value.assign_license.post.assert_called_once()
-
-    async def test_assign_license_returns_false_on_error(self, manager):
-        """Should return False when license assignment fails."""
-        manager.client.users.by_user_id.return_value.assign_license.post = AsyncMock(
-            side_effect=Exception("No available licenses")
-        )
-
-        result = await manager.assign_license("user-123", "3b555118-da6a-4418-894f-7df1e2096870")
-
-        assert result is False
-
     async def test_remove_all_licenses_success(self, manager):
         """Should remove all licenses and return True."""
         # Mock get_user_licenses - must use valid UUID
