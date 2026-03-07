@@ -50,10 +50,19 @@ The ops server runs on Azure Container Apps with **0-many replicas** that restar
 - Graph API v1.0 used for all operations
 
 ### Field Mappings
+All extension attribute slot assignments are defined in `src/sjifire/core/extension_attrs.py`.
+
+**Entra ID extensionAttributes** (Graph API, written by entra-user-sync):
 - `extensionAttribute1`: Rank (Captain, Lieutenant, Chief, etc.)
 - `extensionAttribute2`: EVIP expiration date
 - `extensionAttribute3`: Positions (comma-delimited scheduling positions)
 - `extensionAttribute4`: Schedules (comma-delimited schedule visibility from Aladtec)
+
+**Exchange CustomAttributes** (PowerShell Set-Mailbox, written by signature-sync):
+- `CustomAttribute1-5`: RESERVED (synced from Entra, do not overwrite)
+- `CustomAttribute6`: Signature title HTML (with `<br>` suffix, or empty)
+- `CustomAttribute7`: Signature phone line
+- `CustomAttribute8`: Signature title plain text
 
 ### iSpyFire
 - Incident response and paging system
@@ -106,12 +115,14 @@ src/sjifire/
 │   ├── models.py          # Member dataclass with rank/display_rank properties
 │   └── schedule_scraper.py # Schedule scraper for calendar data
 ├── core/
+│   ├── anthropic.py       # Anthropic API client setup
 │   ├── backup.py          # JSON backup before sync operations
 │   ├── config.py          # EntraSyncConfig, credentials from .env
-│   ├── constants.py       # Shared constants (OPERATIONAL_POSITIONS, RANK_HIERARCHY)
+│   ├── extension_attrs.py # Entra ID & Exchange attribute slot registry
 │   ├── group_strategies.py # GroupStrategy classes for group membership rules
 │   ├── msgraph_client.py  # Azure credential setup
-│   └── normalize.py       # Name normalization utilities
+│   ├── normalize.py       # Name normalization utilities
+│   └── schedule.py        # Schedule data models
 ├── entra/
 │   ├── aladtec_import.py  # User sync logic, handles matching/create/update
 │   ├── groups.py          # EntraGroupManager for M365 group operations
@@ -278,6 +289,8 @@ For email distribution without SharePoint sprawl, use mail-enabled security grou
 
 The `exchange/` module mirrors the `entra/group_sync.py` strategies but creates mail-enabled security groups via PowerShell subprocess.
 
+**Signature sync** (`signature-sync`): Sets per-user custom attributes (CA6-8) on mailboxes and creates a transport rule that appends a personalized signature + org footer to all outgoing emails. Works with all email clients because signatures are applied server-side. See `scripts/signature_sync.py` and `core/extension_attrs.py` for slot assignments.
+
 **Retry logic:** Member add/remove operations use tenacity to automatically retry transient Azure AD sync errors (up to 3 attempts with exponential backoff). Groups are backed up before any sync operation.
 
 ## Important Patterns
@@ -417,6 +430,14 @@ uv run backup-cosmos --dispatch-only
 uv run backup-cosmos --output /path/
 ```
 
+### Email signature sync
+```bash
+uv run signature-sync --dry-run                    # Preview changes
+uv run signature-sync                              # Sync all employees + footer rule
+uv run signature-sync --email user@sjifire.org --preview  # Preview one user's signature
+uv run signature-sync --remove                     # Remove all signatures + footer rule
+```
+
 ### Check linting
 ```bash
 uv run ruff check .
@@ -454,7 +475,7 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 ## GitHub Actions
 
 - `ci.yml`: Lint + test + e2e on PR/push (e2e job runs Playwright chromium in parallel)
-- `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync), uploads backup artifacts
+- `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync + signature sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Daily iSpyFire state backup (dry-run sync + artifact upload). Actual sync runs every 30 min via Container Apps Job (`ops-tasks`)
 - `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
 - `ops-deploy.yml`: Deploy ops server on push to main (paths: `src/sjifire/ops/**`, `Dockerfile`, `pyproject.toml`)
