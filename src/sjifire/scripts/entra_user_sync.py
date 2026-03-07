@@ -112,6 +112,7 @@ async def run_import(
         disable_inactive: If True, disable accounts for inactive members
         output_json: If True, output results as JSON
         individual: If set, only sync this individual by email
+        license_sku: If set, assign this license SKU to newly created users
 
     Returns:
         Exit code
