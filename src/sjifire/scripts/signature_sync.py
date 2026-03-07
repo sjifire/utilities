@@ -67,7 +67,7 @@ RULE_HTML = f"""\
 <table cellpadding="0" cellspacing="0" style="font-size: 11px;">
 <tr>
 <td style="padding-right: 10px; vertical-align: top; width: 68px;">
-<img src="{LOGO_URL}" alt="SJIFR" width="64" style="border-radius: 4px;">
+<img src="{LOGO_URL}" alt="SJIFR" width="64" style="border-radius: 4px; padding-top: 3px;">
 </td>
 <td style="vertical-align: top; line-height: 1.5;">
 <strong style="font-size: 12px;">{COMPANY_NAME}</strong><br>
