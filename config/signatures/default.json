@@ -1,0 +1,11 @@
+{
+  "rule_name": "SJIFR Email Signature",
+  "company_name_html": "San Juan Island Fire &amp; Rescue",
+  "company_name_text": "San Juan Island Fire & Rescue",
+  "office_phone": "(360) 378-5334",
+  "logo_url": "https://www.sjifire.org/assets/sjifire-logo-clear.png",
+  "website_url": "https://www.sjifire.org",
+  "address": "1011 Mullis St, Friday Harbor, WA 98250",
+  "accent_color": "#c42414",
+  "disclaimer": "This email may contain confidential information intended only for the recipient. If you received this in error, please notify the sender and delete this message."
+}

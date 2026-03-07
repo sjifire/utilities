@@ -5,14 +5,19 @@ mail flow transport rule that appends a personalized signature + organization
 footer to all outgoing emails. Works with ALL email clients because the
 signature is applied server-side by Exchange after the email is sent.
 
-Attribute slot assignments are defined in ``sjifire.core.extension_attrs``.
+Templates are loaded from ``config/signatures/<name>.json``, ``.html``, and
+``.txt``. The default template is ``default``. Attribute slot assignments
+are defined in ``sjifire.core.extension_attrs``.
 """
 
 import argparse
 import asyncio
+import json
 import logging
 import re
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 from sjifire.core.extension_attrs import (
     SIG_PHONE_PS,
@@ -34,68 +39,71 @@ logging.getLogger("azure.identity").setLevel(logging.WARNING)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
 # =============================================================================
-# CONSTANTS
+# SIGNATURE TEMPLATE
 # =============================================================================
 
-COMPANY_NAME = "San Juan Island Fire &amp; Rescue"
-COMPANY_NAME_TEXT = "San Juan Island Fire & Rescue"
-OFFICE_PHONE = "(360) 378-5334"
-RULE_NAME = "SJIFR Email Signature"
-LOGO_URL = "https://www.sjifire.org/assets/sjifire-logo-clear.png"
-WEBSITE_URL = "https://www.sjifire.org"
-ADDRESS = "1011 Mullis St, Friday Harbor, WA 98250"
-DISCLAIMER = (
-    "This email may contain confidential information intended only for the recipient. "
-    "If you received this in error, please notify the sender and delete this message."
-)
+CONFIG_DIR = Path(__file__).resolve().parents[3] / "config" / "signatures"
 
-# =============================================================================
-# TRANSPORT RULE TEMPLATE
-# =============================================================================
-# Uses Exchange AD attribute tokens: %%FirstName%%, %%LastName%%, etc.
-# Slot assignments defined in sjifire.core.extension_attrs
 
-RULE_HTML = f"""\
-<div style="margin-top: 25px;">
-<p style="margin: 0; font-size: 14px;">
-<strong>%%FirstName%% %%LastName%%</strong><br>
-<span style="color: #666;">{SIG_TITLE_HTML_TOKEN}{COMPANY_NAME}<br>
-{SIG_PHONE_TOKEN}</span>
-</p>
-</div>
-<div style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #c42414;">
-<table cellpadding="0" cellspacing="0" style="font-size: 11px;">
-<tr>
-<td style="padding-right: 10px; vertical-align: top; width: 68px;">
-<img src="{LOGO_URL}" alt="SJIFR" width="64" style="border-radius: 4px; padding-top: 3px;">
-</td>
-<td style="vertical-align: top; line-height: 1.5;">
-<strong style="font-size: 12px;">{COMPANY_NAME}</strong><br>
-{ADDRESS}<br>
-<a href="{WEBSITE_URL}">{WEBSITE_URL}</a><br>
-<strong style="font-size: 12px;">Emergency: 911</strong>
-</td>
-</tr>
-</table>
-<p style="font-size: 10px; line-height: 1.4; margin-top: 10px; margin-bottom: 0;">
-{DISCLAIMER}
-</p>
-</div>"""
+@dataclass
+class SignatureTemplate:
+    """Loaded signature template with rendered HTML and text."""
 
-RULE_TEXT = f"""\
-%%FirstName%% %%LastName%%
-{SIG_TITLE_TEXT_TOKEN}
-{COMPANY_NAME_TEXT}
-{SIG_PHONE_TOKEN}
+    rule_name: str
+    company_name_html: str
+    company_name_text: str
+    office_phone: str
+    rule_html: str
+    rule_text: str
 
----
-{COMPANY_NAME_TEXT}
-{ADDRESS}
-{WEBSITE_URL}
-{OFFICE_PHONE} | Emergency: 911
 
-{DISCLAIMER}
-"""
+def load_template(name: str = "default") -> SignatureTemplate:
+    """Load a signature template from config/signatures/.
+
+    Reads ``<name>.json`` for settings and ``<name>.html`` / ``<name>.txt``
+    for the transport rule templates. Template placeholders use ``{{key}}``
+    syntax and are filled from the JSON config plus Exchange attribute tokens.
+
+    Args:
+        name: Template name (matches filenames without extension)
+
+    Returns:
+        SignatureTemplate with rendered HTML and text
+    """
+    config_path = CONFIG_DIR / f"{name}.json"
+    html_path = CONFIG_DIR / f"{name}.html"
+    text_path = CONFIG_DIR / f"{name}.txt"
+
+    for p in (config_path, html_path, text_path):
+        if not p.exists():
+            msg = f"Signature template file not found: {p}"
+            raise FileNotFoundError(msg)
+
+    config = json.loads(config_path.read_text())
+
+    # Build substitution variables from config + Exchange tokens
+    variables = {
+        **config,
+        "title_html_token": SIG_TITLE_HTML_TOKEN,
+        "title_text_token": SIG_TITLE_TEXT_TOKEN,
+        "phone_token": SIG_PHONE_TOKEN,
+    }
+
+    def _render(template: str) -> str:
+        result = template
+        for key, value in variables.items():
+            result = result.replace(f"{{{{{key}}}}}", str(value))
+        return result
+
+    return SignatureTemplate(
+        rule_name=config["rule_name"],
+        company_name_html=config["company_name_html"],
+        company_name_text=config["company_name_text"],
+        office_phone=config["office_phone"],
+        rule_html=_render(html_path.read_text()),
+        rule_text=_render(text_path.read_text()),
+    )
+
 
 # =============================================================================
 
@@ -127,9 +135,9 @@ def _get_title_line(user: EntraUser) -> str:
     return ""
 
 
-def _get_phone_line(user: EntraUser) -> str:
+def _get_phone_line(user: EntraUser, office_phone: str) -> str:
     """Build the phone line for a user's signature."""
-    phones = f"Office: {OFFICE_PHONE}"
+    phones = f"Office: {office_phone}"
     if user.mobile_phone:
         phones += f" | Cell: {_format_phone(user.mobile_phone)}"
     return phones
@@ -137,6 +145,7 @@ def _get_phone_line(user: EntraUser) -> str:
 
 def sync_custom_attributes(
     users: list[EntraUser],
+    template: SignatureTemplate,
     dry_run: bool = False,
     remove: bool = False,
 ) -> tuple[int, int, list[str]]:
@@ -153,7 +162,7 @@ def sync_custom_attributes(
                 logger.info("Would clear attributes for %s (%s)", user.display_name, user.email)
             else:
                 title = _get_title_line(user) or "(none)"
-                phone = _get_phone_line(user)
+                phone = _get_phone_line(user, template.office_phone)
                 logger.info(
                     "Would set attributes for %s (%s): title=%s, phone=%s",
                     user.display_name,
@@ -181,7 +190,7 @@ def sync_custom_attributes(
         else:
             title = _get_title_line(user)
             attr1 = _escape_ps_string(f"{title}<br>" if title else "")
-            attr2 = _escape_ps_string(_get_phone_line(user))
+            attr2 = _escape_ps_string(_get_phone_line(user, template.office_phone))
             attr3 = _escape_ps_string(title)
 
         commands.append(
@@ -227,23 +236,25 @@ def sync_custom_attributes(
     return success, failure, errors
 
 
-def sync_transport_rule(dry_run: bool = False) -> tuple[bool, str | None]:
+def sync_transport_rule(
+    template: SignatureTemplate, dry_run: bool = False
+) -> tuple[bool, str | None]:
     """Create or update the combined signature + footer transport rule.
 
     Returns:
         Tuple of (success, error_message)
     """
     if dry_run:
-        logger.info("Would create/update mail flow rule: %s", RULE_NAME)
+        logger.info("Would create/update mail flow rule: %s", template.rule_name)
         logger.info("Rule HTML:")
-        print(RULE_HTML)
+        print(template.rule_html)
         return True, None
 
     client = ExchangeOnlineClient()
-    escaped_html = RULE_HTML.replace("'", "''")
+    escaped_html = template.rule_html.replace("'", "''")
 
     script = f"""
-$ruleName = '{RULE_NAME}'
+$ruleName = '{template.rule_name}'
 $rule = Get-TransportRule -Identity $ruleName -ErrorAction SilentlyContinue
 
 if ($rule) {{
@@ -274,7 +285,7 @@ Write-Output 'SUCCESS'
     result = client._run_powershell([script], parse_json=False)
 
     if result and "SUCCESS" in str(result):
-        logger.info("Mail flow rule '%s' synced successfully", RULE_NAME)
+        logger.info("Mail flow rule '%s' synced successfully", template.rule_name)
         return True, None
     else:
         error = f"Failed to sync mail flow rule: {result}"
@@ -282,7 +293,9 @@ Write-Output 'SUCCESS'
         return False, error
 
 
-def remove_transport_rule(dry_run: bool = False) -> tuple[bool, str | None]:
+def remove_transport_rule(
+    template: SignatureTemplate, dry_run: bool = False
+) -> tuple[bool, str | None]:
     """Remove the signature + footer transport rule.
 
     Also removes the old footer-only rule if it exists.
@@ -291,14 +304,14 @@ def remove_transport_rule(dry_run: bool = False) -> tuple[bool, str | None]:
         Tuple of (success, error_message)
     """
     if dry_run:
-        logger.info("Would remove mail flow rule: %s", RULE_NAME)
+        logger.info("Would remove mail flow rule: %s", template.rule_name)
         return True, None
 
     client = ExchangeOnlineClient()
 
     script = f"""
 # Remove new combined rule
-$ruleName = '{RULE_NAME}'
+$ruleName = '{template.rule_name}'
 $rule = Get-TransportRule -Identity $ruleName -ErrorAction SilentlyContinue
 if ($rule) {{
     Remove-TransportRule -Identity $ruleName -Confirm:$false -ErrorAction Stop
@@ -332,6 +345,7 @@ async def run_sync(
     email: str | None = None,
     preview: bool = False,
     remove: bool = False,
+    template_name: str = "default",
 ) -> int:
     """Run signature sync.
 
@@ -351,6 +365,14 @@ async def run_sync(
 
     if dry_run:
         logger.info("DRY RUN - no changes will be made")
+
+    # Load signature template
+    try:
+        template = load_template(template_name)
+        logger.info("Template: %s", template_name)
+    except FileNotFoundError as e:
+        logger.error("Template error: %s", e)
+        return 1
 
     # Get users from Entra ID
     logger.info("")
@@ -378,7 +400,7 @@ async def run_sync(
     if preview:
         user = users[0]
         title = _get_title_line(user) or "(none)"
-        phone = _get_phone_line(user)
+        phone = _get_phone_line(user, template.office_phone)
         logger.info("")
         logger.info("Signature preview for %s (%s):", user.display_name, user.email)
         logger.info("-" * 40)
@@ -393,7 +415,7 @@ async def run_sync(
         print(f"{name}")
         if _get_title_line(user):
             print(f"{_get_title_line(user)}")
-        print(f"{COMPANY_NAME_TEXT}")
+        print(f"{template.company_name_text}")
         print(f"{phone}")
         return 0
 
@@ -404,7 +426,7 @@ async def run_sync(
     else:
         logger.info("Syncing custom attributes...")
 
-    success, failure, errors = sync_custom_attributes(users, dry_run, remove)
+    success, failure, errors = sync_custom_attributes(users, template, dry_run, remove)
 
     # Print summary
     logger.info("")
@@ -427,10 +449,10 @@ async def run_sync(
         logger.info("")
         if remove:
             logger.info("Removing mail flow rule...")
-            rule_ok, rule_error = remove_transport_rule(dry_run)
+            rule_ok, rule_error = remove_transport_rule(template, dry_run)
         else:
             logger.info("Syncing mail flow rule...")
-            rule_ok, rule_error = sync_transport_rule(dry_run)
+            rule_ok, rule_error = sync_transport_rule(template, dry_run)
 
         if not rule_ok:
             logger.error("Transport rule operation failed: %s", rule_error)
@@ -465,6 +487,12 @@ def main() -> None:
         action="store_true",
         help="Remove all custom attributes and the mail flow rule",
     )
+    parser.add_argument(
+        "--template",
+        default="default",
+        metavar="NAME",
+        help="Signature template name from config/signatures/ (default: default)",
+    )
 
     args = parser.parse_args()
 
@@ -474,6 +502,7 @@ def main() -> None:
             email=args.email,
             preview=args.preview,
             remove=args.remove,
+            template_name=args.template,
         )
     )
     sys.exit(exit_code)

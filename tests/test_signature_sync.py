@@ -2,15 +2,25 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from sjifire.entra.users import EntraUser
 from sjifire.scripts.signature_sync import (
-    OFFICE_PHONE,
     _format_phone,
     _get_phone_line,
     _get_title_line,
+    load_template,
     remove_transport_rule,
     sync_custom_attributes,
 )
+
+OFFICE_PHONE = "(360) 378-5334"
+
+
+@pytest.fixture
+def template():
+    """Load the default signature template."""
+    return load_template("default")
 
 
 def make_user(
@@ -99,34 +109,40 @@ class TestGetPhoneLine:
 
     def test_office_only(self):
         user = make_user()
-        assert _get_phone_line(user) == f"Office: {OFFICE_PHONE}"
+        assert _get_phone_line(user, OFFICE_PHONE) == f"Office: {OFFICE_PHONE}"
 
     def test_with_cell(self):
         user = make_user(mobile_phone="(360) 555-1234")
-        assert _get_phone_line(user) == f"Office: {OFFICE_PHONE} | Cell: (360) 555-1234"
+        assert (
+            _get_phone_line(user, OFFICE_PHONE) == f"Office: {OFFICE_PHONE} | Cell: (360) 555-1234"
+        )
 
     def test_raw_cell_gets_formatted(self):
         user = make_user(mobile_phone="3603177060")
-        assert _get_phone_line(user) == f"Office: {OFFICE_PHONE} | Cell: (360) 317-7060"
+        assert (
+            _get_phone_line(user, OFFICE_PHONE) == f"Office: {OFFICE_PHONE} | Cell: (360) 317-7060"
+        )
 
 
 class TestSyncCustomAttributes:
     """Tests for sync_custom_attributes function."""
 
-    def test_dry_run_returns_success(self):
+    def test_dry_run_returns_success(self, template):
         users = [make_user(rank="Captain")]
-        success, failure, errors = sync_custom_attributes(users, dry_run=True)
+        success, failure, errors = sync_custom_attributes(users, template, dry_run=True)
         assert success == len(users)
         assert failure == 0
         assert errors == []
 
-    def test_dry_run_remove(self):
+    def test_dry_run_remove(self, template):
         users = [make_user()]
-        success, failure, _errors = sync_custom_attributes(users, dry_run=True, remove=True)
+        success, failure, _errors = sync_custom_attributes(
+            users, template, dry_run=True, remove=True
+        )
         assert success == len(users)
         assert failure == 0
 
-    def test_calls_powershell_batch(self):
+    def test_calls_powershell_batch(self, template):
         users = [
             make_user(display_name="User 1", email="u1@sjifire.org", rank="Captain"),
             make_user(display_name="User 2", email="u2@sjifire.org", job_title="Admin"),
@@ -141,7 +157,7 @@ class TestSyncCustomAttributes:
             }
             mock_cls.return_value = mock_client
 
-            success, failure, errors = sync_custom_attributes(users, dry_run=False)
+            success, failure, errors = sync_custom_attributes(users, template, dry_run=False)
 
         assert success == 2
         assert failure == 0
@@ -159,7 +175,7 @@ class TestSyncCustomAttributes:
         assert "Captain" in script
         assert "Admin" in script
 
-    def test_attr1_includes_br_for_titled_user(self):
+    def test_attr1_includes_br_for_titled_user(self, template):
         users = [make_user(email="titled@sjifire.org", rank="Captain")]
 
         with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
@@ -171,13 +187,13 @@ class TestSyncCustomAttributes:
             }
             mock_cls.return_value = mock_client
 
-            sync_custom_attributes(users, dry_run=False)
+            sync_custom_attributes(users, template, dry_run=False)
 
         commands = mock_client._run_powershell.call_args[0][0]
         script = " ".join(commands)
         assert "Captain<br>" in script
 
-    def test_attr1_empty_for_untitled_user(self):
+    def test_attr1_empty_for_untitled_user(self, template):
         users = [make_user(email="notitled@sjifire.org")]
 
         with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
@@ -189,14 +205,14 @@ class TestSyncCustomAttributes:
             }
             mock_cls.return_value = mock_client
 
-            sync_custom_attributes(users, dry_run=False)
+            sync_custom_attributes(users, template, dry_run=False)
 
         commands = mock_client._run_powershell.call_args[0][0]
         script = " ".join(commands)
         assert "-CustomAttribute6 ''" in script
         assert "-CustomAttribute8 ''" in script
 
-    def test_handles_failures(self):
+    def test_handles_failures(self, template):
         users = [make_user()]
 
         with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
@@ -208,13 +224,13 @@ class TestSyncCustomAttributes:
             }
             mock_cls.return_value = mock_client
 
-            success, failure, errors = sync_custom_attributes(users, dry_run=False)
+            success, failure, errors = sync_custom_attributes(users, template, dry_run=False)
 
         assert success == 0
         assert failure == 1
         assert len(errors) == 1
 
-    def test_handles_script_failure(self):
+    def test_handles_script_failure(self, template):
         users = [make_user()]
 
         with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
@@ -222,7 +238,7 @@ class TestSyncCustomAttributes:
             mock_client._run_powershell.return_value = None
             mock_cls.return_value = mock_client
 
-            success, failure, _errors = sync_custom_attributes(users, dry_run=False)
+            success, failure, _errors = sync_custom_attributes(users, template, dry_run=False)
 
         assert success == 0
         assert failure == len(users)
@@ -231,14 +247,14 @@ class TestSyncCustomAttributes:
 class TestSyncTransportRule:
     """Tests for sync_transport_rule function."""
 
-    def test_dry_run(self):
+    def test_dry_run(self, template):
         from sjifire.scripts.signature_sync import sync_transport_rule
 
-        ok, error = sync_transport_rule(dry_run=True)
+        ok, error = sync_transport_rule(template, dry_run=True)
         assert ok is True
         assert error is None
 
-    def test_creates_rule(self):
+    def test_creates_rule(self, template):
         from sjifire.scripts.signature_sync import sync_transport_rule
 
         with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
@@ -246,12 +262,12 @@ class TestSyncTransportRule:
             mock_client._run_powershell.return_value = "Creating new rule: SJIFR\nSUCCESS"
             mock_cls.return_value = mock_client
 
-            ok, error = sync_transport_rule(dry_run=False)
+            ok, error = sync_transport_rule(template, dry_run=False)
 
         assert ok is True
         assert error is None
 
-    def test_handles_failure(self):
+    def test_handles_failure(self, template):
         from sjifire.scripts.signature_sync import sync_transport_rule
 
         with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
@@ -259,7 +275,7 @@ class TestSyncTransportRule:
             mock_client._run_powershell.return_value = None
             mock_cls.return_value = mock_client
 
-            ok, error = sync_transport_rule(dry_run=False)
+            ok, error = sync_transport_rule(template, dry_run=False)
 
         assert ok is False
         assert "Failed" in error
@@ -268,40 +284,40 @@ class TestSyncTransportRule:
 class TestRemoveTransportRule:
     """Tests for remove_transport_rule function."""
 
-    def test_dry_run(self):
-        ok, error = remove_transport_rule(dry_run=True)
+    def test_dry_run(self, template):
+        ok, error = remove_transport_rule(template, dry_run=True)
         assert ok is True
         assert error is None
 
-    def test_removes_rule(self):
+    def test_removes_rule(self, template):
         with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
             mock_client = MagicMock()
             mock_client._run_powershell.return_value = "REMOVED: SJIFR Email Signature"
             mock_cls.return_value = mock_client
 
-            ok, error = remove_transport_rule(dry_run=False)
+            ok, error = remove_transport_rule(template, dry_run=False)
 
         assert ok is True
         assert error is None
 
-    def test_handles_not_found(self):
+    def test_handles_not_found(self, template):
         with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
             mock_client = MagicMock()
             mock_client._run_powershell.return_value = "NOT_FOUND: SJIFR Email Signature"
             mock_cls.return_value = mock_client
 
-            ok, error = remove_transport_rule(dry_run=False)
+            ok, error = remove_transport_rule(template, dry_run=False)
 
         assert ok is True
         assert error is None
 
-    def test_handles_failure(self):
+    def test_handles_failure(self, template):
         with patch("sjifire.scripts.signature_sync.ExchangeOnlineClient") as mock_cls:
             mock_client = MagicMock()
             mock_client._run_powershell.return_value = None
             mock_cls.return_value = mock_client
 
-            ok, error = remove_transport_rule(dry_run=False)
+            ok, error = remove_transport_rule(template, dry_run=False)
 
         assert ok is False
         assert "Failed" in error
@@ -431,8 +447,8 @@ class TestRunSync:
 
         assert exit_code == 0
         mock_sync.assert_called_once()
-        # Verify remove=True was passed
-        assert mock_sync.call_args[0][2] is True
+        # Verify remove=True was passed (args: users, template, dry_run, remove)
+        assert mock_sync.call_args[0][3] is True
         mock_remove.assert_called_once()
 
     async def test_returns_error_on_transport_rule_failure(self):
@@ -454,3 +470,39 @@ class TestRunSync:
             exit_code = await run_sync(dry_run=False)
 
         assert exit_code == 1
+
+
+class TestLoadTemplate:
+    """Tests for load_template function."""
+
+    def test_loads_default_template(self, template):
+        assert template.rule_name == "SJIFR Email Signature"
+        assert template.office_phone == "(360) 378-5334"
+        assert template.company_name_text == "San Juan Island Fire & Rescue"
+        assert template.company_name_html == "San Juan Island Fire &amp; Rescue"
+
+    def test_html_contains_exchange_tokens(self, template):
+        assert "%%FirstName%%" in template.rule_html
+        assert "%%LastName%%" in template.rule_html
+        assert "%%CustomAttribute6%%" in template.rule_html
+        assert "%%CustomAttribute7%%" in template.rule_html
+
+    def test_text_contains_exchange_tokens(self, template):
+        assert "%%FirstName%%" in template.rule_text
+        assert "%%CustomAttribute8%%" in template.rule_text
+
+    def test_html_has_no_unresolved_placeholders(self, template):
+        import re
+
+        unresolved = re.findall(r"\{\{[^}]+\}\}", template.rule_html)
+        assert unresolved == [], f"Unresolved placeholders: {unresolved}"
+
+    def test_text_has_no_unresolved_placeholders(self, template):
+        import re
+
+        unresolved = re.findall(r"\{\{[^}]+\}\}", template.rule_text)
+        assert unresolved == [], f"Unresolved placeholders: {unresolved}"
+
+    def test_missing_template_raises(self):
+        with pytest.raises(FileNotFoundError):
+            load_template("nonexistent")
