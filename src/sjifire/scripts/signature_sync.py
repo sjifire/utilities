@@ -5,9 +5,11 @@ mail flow transport rule that appends a personalized signature + organization
 footer to all outgoing emails. Works with ALL email clients because the
 signature is applied server-side by Exchange after the email is sent.
 
-CustomAttribute1: Title line with <br> suffix for HTML (empty if no title)
-CustomAttribute2: Phone line
-CustomAttribute3: Title line plain text for text-only fallback
+CustomAttribute6: Title line with <br> suffix for HTML (empty if no title)
+CustomAttribute7: Phone line
+CustomAttribute8: Title line plain text for text-only fallback
+
+NOTE: CustomAttribute1-5 are reserved for Entra/Aladtec sync data.
 """
 
 import argparse
@@ -47,14 +49,16 @@ DISCLAIMER = (
 # TRANSPORT RULE TEMPLATE
 # =============================================================================
 # Uses Exchange AD attribute tokens: %%FirstName%%, %%LastName%%, etc.
-# CustomAttribute1 = title line (rank/title), CustomAttribute2 = phone line
+# CustomAttribute6 = title line (rank/title), CustomAttribute7 = phone line
+# CustomAttribute8 = title plain text (for text-only fallback)
+# NOTE: CA1-5 are used by Entra sync (rank, EVIP, positions, schedules, calendar ID)
 
 RULE_HTML = f"""\
 <div style="margin-top: 25px;">
 <p style="margin: 0; font-size: 14px;">
 <strong>%%FirstName%% %%LastName%%</strong><br>
-<span style="color: #666;">%%CustomAttribute1%%{COMPANY_NAME}<br>
-%%CustomAttribute2%%</span>
+<span style="color: #666;">%%CustomAttribute6%%{COMPANY_NAME}<br>
+%%CustomAttribute7%%</span>
 </p>
 </div>
 <div style="margin-top: 25px; padding-top: 15px; border-top: 2px solid #c42414;">
@@ -80,9 +84,9 @@ RULE_HTML = f"""\
 
 RULE_TEXT = f"""\
 %%FirstName%% %%LastName%%
-%%CustomAttribute3%%
+%%CustomAttribute8%%
 {COMPANY_NAME_TEXT}
-%%CustomAttribute2%%
+%%CustomAttribute7%%
 
 ---
 {COMPANY_NAME_TEXT}
@@ -138,9 +142,11 @@ def sync_custom_attributes(
 ) -> tuple[int, int, list[str]]:
     """Batch-set custom attributes on mailboxes for transport rule personalization.
 
-    CustomAttribute1: title with trailing <br> for HTML (empty if no title)
-    CustomAttribute2: phone line (shared by HTML and text)
-    CustomAttribute3: title plain text for text-only fallback (empty if no title)
+    CustomAttribute6: title with trailing <br> for HTML (empty if no title)
+    CustomAttribute7: phone line (shared by HTML and text)
+    CustomAttribute8: title plain text for text-only fallback (empty if no title)
+
+    NOTE: CA1-5 are reserved for Entra sync (rank, EVIP, positions, schedules).
 
     Returns:
         Tuple of (success_count, failure_count, error_messages)
@@ -185,9 +191,9 @@ def sync_custom_attributes(
         commands.append(
             f"try {{ "
             f"Set-Mailbox -Identity '{email}'"
-            f" -CustomAttribute1 '{attr1}'"
-            f" -CustomAttribute2 '{attr2}'"
-            f" -CustomAttribute3 '{attr3}'"
+            f" -CustomAttribute6 '{attr1}'"
+            f" -CustomAttribute7 '{attr2}'"
+            f" -CustomAttribute8 '{attr3}'"
             f" -ErrorAction Stop; "
             f"$success++ "
             f"}} catch {{ "

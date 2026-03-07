@@ -153,9 +153,9 @@ class TestSyncCustomAttributes:
         script = " ".join(commands)
         assert "u1@sjifire.org" in script
         assert "u2@sjifire.org" in script
-        assert "CustomAttribute1" in script
-        assert "CustomAttribute2" in script
-        assert "CustomAttribute3" in script
+        assert "CustomAttribute6" in script
+        assert "CustomAttribute7" in script
+        assert "CustomAttribute8" in script
         assert "Captain" in script
         assert "Admin" in script
 
@@ -193,8 +193,8 @@ class TestSyncCustomAttributes:
 
         commands = mock_client._run_powershell.call_args[0][0]
         script = " ".join(commands)
-        assert "-CustomAttribute1 ''" in script
-        assert "-CustomAttribute3 ''" in script
+        assert "-CustomAttribute6 ''" in script
+        assert "-CustomAttribute8 ''" in script
 
     def test_handles_failures(self):
         users = [make_user()]
