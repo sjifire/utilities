@@ -1,25 +1,23 @@
-"""Sync email signatures for all users.
+"""Sync email signatures for all users via transport rule.
 
-Sets OWA (Outlook on the web) signatures for all users based on their
-Entra ID profile data (name, rank/title, job title).
+Sets Exchange CustomAttribute1/2/3 on each user's mailbox, then creates a
+mail flow transport rule that appends a personalized signature + organization
+footer to all outgoing emails. Works with ALL email clients because the
+signature is applied server-side by Exchange after the email is sent.
 
-Signature format:
-- Users with rank AND job title: Name / Rank - Job Title / Company
-- Users with rank only: Name / Rank / Company
-- Users with job title only: Name / Job Title / Company
-- Users with neither: Name / Company
-
-The footer (logo, address, phone, disclaimer) is added via a separate
-mail flow rule and is not part of the signature.
+CustomAttribute1: Title line with <br> suffix for HTML (empty if no title)
+CustomAttribute2: Phone line
+CustomAttribute3: Title line plain text for text-only fallback
 """
 
 import argparse
 import asyncio
 import logging
+import re
 import sys
 
 from sjifire.entra.users import EntraUser, EntraUserManager
-from sjifire.exchange.client import ExchangeOnlineClient
+from sjifire.exchange.client import ExchangeOnlineClient, _escape_ps_string
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -30,49 +28,13 @@ logging.getLogger("azure.identity").setLevel(logging.WARNING)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
 # =============================================================================
-# SIGNATURE TEMPLATES
+# CONSTANTS
 # =============================================================================
-# Edit these templates to change the signature format for all users.
-# Available placeholders: {name}, {title}, {company}, {phones}
 
-COMPANY_NAME = "San Juan Island Fire & Rescue"
+COMPANY_NAME = "San Juan Island Fire &amp; Rescue"
+COMPANY_NAME_TEXT = "San Juan Island Fire & Rescue"
 OFFICE_PHONE = "(360) 378-5334"
-
-# HTML signature for users WITH a title (rank or job title)
-HTML_TEMPLATE_WITH_TITLE = """\
-<p style="margin: 0; font-size: 14px;">
-<strong style="color: #333;">{name}</strong><br>
-<span style="color: #666;">{title}<br>
-{company}<br>
-{phones}</span>
-</p>"""
-
-# HTML signature for users WITHOUT a title
-HTML_TEMPLATE_NO_TITLE = """\
-<p style="margin: 0; font-size: 14px;">
-<strong style="color: #333;">{name}</strong><br>
-<span style="color: #666;">{company}<br>
-{phones}</span>
-</p>"""
-
-# Plain text signature for users WITH a title
-TEXT_TEMPLATE_WITH_TITLE = """\
-{name}
-{title}
-{company}
-{phones}"""
-
-# Plain text signature for users WITHOUT a title
-TEXT_TEMPLATE_NO_TITLE = """\
-{name}
-{company}
-{phones}"""
-
-# =============================================================================
-# FOOTER TEMPLATE (added via mail flow rule to all outgoing emails)
-# =============================================================================
-
-FOOTER_RULE_NAME = "SJIFR Email Footer"
+RULE_NAME = "SJIFR Email Signature"
 LOGO_URL = "https://www.sjifire.org/assets/sjifire-logo-clear.png"
 WEBSITE_URL = "https://www.sjifire.org"
 ADDRESS = "1011 Mullis St, Friday Harbor, WA 98250"
@@ -81,32 +43,49 @@ DISCLAIMER = (
     "If you received this in error, please notify the sender and delete this message."
 )
 
-FOOTER_HTML = f"""\
-<div style="margin-top: 35px; padding-top: 15px; border-top: 2px solid #72150c;">
+# =============================================================================
+# TRANSPORT RULE TEMPLATE
+# =============================================================================
+# Uses Exchange AD attribute tokens: %%FirstName%%, %%LastName%%, etc.
+# CustomAttribute1 = title line (rank/title), CustomAttribute2 = phone line
+
+RULE_HTML = f"""\
+<div style="margin-top: 25px;">
+<p style="margin: 0; font-size: 14px;">
+<strong>%%FirstName%% %%LastName%%</strong><br>
+<span style="color: #666;">%%CustomAttribute1%%{COMPANY_NAME}<br>
+%%CustomAttribute2%%</span>
+</p>
+</div>
+<div style="margin-top: 25px; padding-top: 15px; border-top: 2px solid #c42414;">
 <table cellpadding="0" cellspacing="0" style="font-size: 11px; width: 100%;">
 <tr>
 <td style="padding-right: 15px; vertical-align: top; width: 70px;">
 <img src="{LOGO_URL}" alt="SJIFR" width="60" style="border-radius: 4px;">
 </td>
-<td style="vertical-align: top; line-height: 1.5; color: #666;">
-<strong style="color: #72150c; font-size: 12px;">{COMPANY_NAME}</strong><br>
+<td style="vertical-align: top; line-height: 1.5;">
+<strong style="font-size: 12px;">{COMPANY_NAME}</strong><br>
 {ADDRESS}<br>
 <a href="{WEBSITE_URL}">{WEBSITE_URL}</a>
 </td>
 <td style="text-align: right; vertical-align: top; padding-left: 20px;">
-<strong style="color: #333; font-size: 13px;">{OFFICE_PHONE}</strong><br>
-<span style="font-size: 11px; color: #72150c; font-weight: bold;">Emergency: 911</span>
+<span style="font-weight: bold;">Emergency: 911</span>
 </td>
 </tr>
 </table>
-<p style="font-size: 10px; color: #999; line-height: 1.4; margin-top: 12px; margin-bottom: 0;">
+<p style="font-size: 10px; line-height: 1.4; margin-top: 12px; margin-bottom: 0;">
 {DISCLAIMER}
 </p>
 </div>"""
 
-FOOTER_TEXT = f"""
+RULE_TEXT = f"""\
+%%FirstName%% %%LastName%%
+%%CustomAttribute3%%
+{COMPANY_NAME_TEXT}
+%%CustomAttribute2%%
+
 ---
-{COMPANY_NAME}
+{COMPANY_NAME_TEXT}
 {ADDRESS}
 {WEBSITE_URL}
 {OFFICE_PHONE} | Emergency: 911
@@ -117,229 +96,159 @@ FOOTER_TEXT = f"""
 # =============================================================================
 
 
-def _get_title_line(user: EntraUser) -> str | None:
+def _format_phone(number: str) -> str:
+    """Format a phone number to (XXX) XXX-XXXX."""
+    digits = re.sub(r"\D", "", number)
+    if len(digits) == 10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    if len(digits) == 11 and digits[0] == "1":
+        return f"({digits[1:4]}) {digits[4:7]}-{digits[7:]}"
+    return number
+
+
+def _get_title_line(user: EntraUser) -> str:
     """Build the title line for a user's signature.
 
-    Args:
-        user: EntraUser with profile data
-
     Returns:
-        Title string or None if no rank/title
+        Title string or empty string if no rank/title
     """
-    if user.rank and user.job_title:
-        return f"{user.rank} - {user.job_title}"
-    elif user.rank:
-        return user.rank
-    elif user.job_title:
-        return user.job_title
-    return None
+    rank = user.rank.replace("<br>", "").strip() if user.rank else None
+    job_title = user.job_title
+    if rank and job_title and rank != job_title:
+        return f"{rank} - {job_title}"
+    elif rank:
+        return rank
+    elif job_title:
+        return job_title
+    return ""
 
 
 def _get_phone_line(user: EntraUser) -> str:
-    """Build the phone line for a user's signature.
-
-    Args:
-        user: EntraUser with profile data
-
-    Returns:
-        Phone string with office and optionally cell
-    """
+    """Build the phone line for a user's signature."""
     phones = f"Office: {OFFICE_PHONE}"
     if user.mobile_phone:
-        phones += f" | Cell: {user.mobile_phone}"
+        phones += f" | Cell: {_format_phone(user.mobile_phone)}"
     return phones
 
 
-def generate_signature_html(user: EntraUser) -> str:
-    """Generate HTML signature for a user.
-
-    Args:
-        user: EntraUser with profile data
-
-    Returns:
-        HTML signature string
-    """
-    # Use first/last name, not display_name (which may include rank prefix)
-    name = f"{user.first_name} {user.last_name}".strip() or user.display_name
-    title = _get_title_line(user)
-    phones = _get_phone_line(user)
-
-    if title:
-        return HTML_TEMPLATE_WITH_TITLE.format(
-            name=name, title=title, company=COMPANY_NAME, phones=phones
-        )
-    else:
-        return HTML_TEMPLATE_NO_TITLE.format(name=name, company=COMPANY_NAME, phones=phones)
-
-
-def generate_signature_text(user: EntraUser) -> str:
-    """Generate plain text signature for a user.
-
-    Args:
-        user: EntraUser with profile data
-
-    Returns:
-        Plain text signature string
-    """
-    # Use first/last name, not display_name (which may include rank prefix)
-    name = f"{user.first_name} {user.last_name}".strip() or user.display_name
-    title = _get_title_line(user)
-    phones = _get_phone_line(user)
-
-    if title:
-        return TEXT_TEMPLATE_WITH_TITLE.format(
-            name=name, title=title, company=COMPANY_NAME, phones=phones
-        )
-    else:
-        return TEXT_TEMPLATE_NO_TITLE.format(name=name, company=COMPANY_NAME, phones=phones)
-
-
-async def sync_user_signature(
-    client: ExchangeOnlineClient,
-    user: EntraUser,
-    dry_run: bool = False,
-    remove: bool = False,
-) -> tuple[bool, str | None]:
-    """Sync or remove signature for a single user.
-
-    Args:
-        client: Exchange Online client
-        user: EntraUser to sync signature for
-        dry_run: If True, don't make changes
-        remove: If True, remove the signature instead of setting it
-
-    Returns:
-        Tuple of (success, error_message)
-    """
-    if not user.email:
-        return False, "No email address"
-
-    if remove:
-        if dry_run:
-            logger.info("Would remove signature for %s (%s)", user.display_name, user.email)
-            return True, None
-
-        # Remove signature via PowerShell
-        script = f"""
-Set-MailboxMessageConfiguration -Identity '{user.email}' `
-    -SignatureHtml '' `
-    -SignatureText '' `
-    -AutoAddSignature $false `
-    -AutoAddSignatureOnReply $false `
-    -ErrorAction Stop
-Write-Output 'SUCCESS'
-"""
-        result = client._run_powershell([script], parse_json=False)
-
-        if result and "SUCCESS" in str(result):
-            logger.info("Removed signature for %s (%s)", user.display_name, user.email)
-            return True, None
-        else:
-            error = f"Failed to remove signature: {result}"
-            logger.error("%s: %s", user.email, error)
-            return False, error
-
-    # Set signature
-    html_sig = generate_signature_html(user)
-    text_sig = generate_signature_text(user)
-
-    if dry_run:
-        logger.info("Would set signature for %s (%s)", user.display_name, user.email)
-        return True, None
-
-    # Set signature via PowerShell
-    script = f"""
-$config = Get-MailboxMessageConfiguration -Identity '{user.email}' -ErrorAction Stop
-Set-MailboxMessageConfiguration -Identity '{user.email}' `
-    -SignatureHtml @'
-{html_sig}
-'@ `
-    -SignatureText @'
-{text_sig}
-'@ `
-    -AutoAddSignature $true `
-    -AutoAddSignatureOnReply $true `
-    -ErrorAction Stop
-Write-Output 'SUCCESS'
-"""
-
-    result = client._run_powershell([script], parse_json=False)
-
-    if result and "SUCCESS" in str(result):
-        logger.info("Set signature for %s (%s)", user.display_name, user.email)
-        return True, None
-    else:
-        error = f"Failed to set signature: {result}"
-        logger.error("%s: %s", user.email, error)
-        return False, error
-
-
-async def sync_signatures(
+def sync_custom_attributes(
     users: list[EntraUser],
     dry_run: bool = False,
     remove: bool = False,
 ) -> tuple[int, int, list[str]]:
-    """Sync or remove signatures for all users.
+    """Batch-set custom attributes on mailboxes for transport rule personalization.
 
-    Args:
-        users: List of EntraUser objects
-        dry_run: If True, don't make changes
-        remove: If True, remove signatures instead of setting them
+    CustomAttribute1: title with trailing <br> for HTML (empty if no title)
+    CustomAttribute2: phone line (shared by HTML and text)
+    CustomAttribute3: title plain text for text-only fallback (empty if no title)
 
     Returns:
         Tuple of (success_count, failure_count, error_messages)
     """
+    if dry_run:
+        for user in users:
+            if remove:
+                logger.info("Would clear attributes for %s (%s)", user.display_name, user.email)
+            else:
+                title = _get_title_line(user) or "(none)"
+                phone = _get_phone_line(user)
+                logger.info(
+                    "Would set attributes for %s (%s): title=%s, phone=%s",
+                    user.display_name,
+                    user.email,
+                    title,
+                    phone,
+                )
+        return len(users), 0, []
+
     client = ExchangeOnlineClient()
 
-    success = 0
-    failure = 0
-    errors: list[str] = []
+    # Build batch PowerShell script
+    commands = [
+        "$success = 0",
+        "$failure = 0",
+        "$errors = @()",
+    ]
 
-    # Process users in batches to avoid overwhelming Exchange
-    # Each user requires a separate PowerShell connection currently
     for user in users:
-        ok, error = await sync_user_signature(client, user, dry_run, remove)
-        if ok:
-            success += 1
+        email = _escape_ps_string(user.email)
+        if remove:
+            attr1 = ""
+            attr2 = ""
+            attr3 = ""
         else:
-            failure += 1
-            if error:
-                errors.append(f"{user.email}: {error}")
+            title = _get_title_line(user)
+            attr1 = _escape_ps_string(f"{title}<br>" if title else "")
+            attr2 = _escape_ps_string(_get_phone_line(user))
+            attr3 = _escape_ps_string(title)
 
-    await client.close()
+        commands.append(
+            f"try {{ "
+            f"Set-Mailbox -Identity '{email}'"
+            f" -CustomAttribute1 '{attr1}'"
+            f" -CustomAttribute2 '{attr2}'"
+            f" -CustomAttribute3 '{attr3}'"
+            f" -ErrorAction Stop; "
+            f"$success++ "
+            f"}} catch {{ "
+            f"$failure++; "
+            f"$errors += '{email}: ' + $_.Exception.Message "
+            f"}}"
+        )
+
+    commands.append(
+        "@{ Success = $success; Failure = $failure; Errors = $errors } | ConvertTo-Json -Depth 2"
+    )
+
+    result = client._run_powershell(commands)
+
+    if not result or not isinstance(result, dict):
+        return 0, len(users), ["Failed to execute batch script"]
+
+    success = result.get("Success", 0)
+    failure = result.get("Failure", 0)
+    errors_data = result.get("Errors", [])
+
+    # Normalize errors (single item comes as string, not list)
+    if isinstance(errors_data, str):
+        errors = [errors_data] if errors_data else []
+    elif isinstance(errors_data, list):
+        errors = [str(e) for e in errors_data if e]
+    else:
+        errors = []
+
+    action = "Cleared" if remove else "Set"
+    logger.info("%s custom attributes: %d successful, %d failed", action, success, failure)
+    for error in errors[:10]:
+        logger.error("  %s", error)
+
     return success, failure, errors
 
 
-def sync_footer(dry_run: bool = False) -> tuple[bool, str | None]:
-    """Sync the organization email footer via mail flow rule.
-
-    Creates or updates a transport rule that appends the footer HTML
-    to all outgoing emails from @sjifire.org.
-
-    Args:
-        dry_run: If True, don't make changes
+def sync_transport_rule(dry_run: bool = False) -> tuple[bool, str | None]:
+    """Create or update the combined signature + footer transport rule.
 
     Returns:
         Tuple of (success, error_message)
     """
     if dry_run:
-        logger.info("Would create/update mail flow rule: %s", FOOTER_RULE_NAME)
-        logger.info("Footer HTML:")
-        print(FOOTER_HTML)
+        logger.info("Would create/update mail flow rule: %s", RULE_NAME)
+        logger.info("Rule HTML:")
+        print(RULE_HTML)
         return True, None
 
     client = ExchangeOnlineClient()
-
-    # Escape single quotes in HTML for PowerShell
-    escaped_html = FOOTER_HTML.replace("'", "''")
+    escaped_html = RULE_HTML.replace("'", "''")
 
     script = f"""
-$ruleName = '{FOOTER_RULE_NAME}'
+$ruleName = '{RULE_NAME}'
 $rule = Get-TransportRule -Identity $ruleName -ErrorAction SilentlyContinue
 
 if ($rule) {{
     Write-Output "Updating existing rule: $ruleName"
     Set-TransportRule -Identity $ruleName `
+        -FromScope InOrganization `
+        -SentToScope $null `
         -ApplyHtmlDisclaimerText @'
 {escaped_html}
 '@ `
@@ -363,7 +272,7 @@ Write-Output 'SUCCESS'
     result = client._run_powershell([script], parse_json=False)
 
     if result and "SUCCESS" in str(result):
-        logger.info("Mail flow rule '%s' synced successfully", FOOTER_RULE_NAME)
+        logger.info("Mail flow rule '%s' synced successfully", RULE_NAME)
         return True, None
     else:
         error = f"Failed to sync mail flow rule: {result}"
@@ -371,43 +280,47 @@ Write-Output 'SUCCESS'
         return False, error
 
 
-def remove_footer(dry_run: bool = False) -> tuple[bool, str | None]:
-    """Remove the organization email footer mail flow rule.
+def remove_transport_rule(dry_run: bool = False) -> tuple[bool, str | None]:
+    """Remove the signature + footer transport rule.
 
-    Args:
-        dry_run: If True, don't make changes
+    Also removes the old footer-only rule if it exists.
 
     Returns:
         Tuple of (success, error_message)
     """
     if dry_run:
-        logger.info("Would remove mail flow rule: %s", FOOTER_RULE_NAME)
+        logger.info("Would remove mail flow rule: %s", RULE_NAME)
         return True, None
 
     client = ExchangeOnlineClient()
 
     script = f"""
-$ruleName = '{FOOTER_RULE_NAME}'
+# Remove new combined rule
+$ruleName = '{RULE_NAME}'
 $rule = Get-TransportRule -Identity $ruleName -ErrorAction SilentlyContinue
-
 if ($rule) {{
     Remove-TransportRule -Identity $ruleName -Confirm:$false -ErrorAction Stop
-    Write-Output 'REMOVED'
+    Write-Output "REMOVED: $ruleName"
 }} else {{
-    Write-Output 'NOT_FOUND'
+    Write-Output "NOT_FOUND: $ruleName"
+}}
+
+# Also remove old footer-only rule if it exists
+$oldRule = Get-TransportRule -Identity 'SJIFR Email Footer' -ErrorAction SilentlyContinue
+if ($oldRule) {{
+    Remove-TransportRule -Identity 'SJIFR Email Footer' -Confirm:$false -ErrorAction Stop
+    Write-Output 'REMOVED: SJIFR Email Footer'
 }}
 """
 
     result = client._run_powershell([script], parse_json=False)
+    result_str = str(result) if result else ""
 
-    if result and "REMOVED" in str(result):
-        logger.info("Mail flow rule '%s' removed successfully", FOOTER_RULE_NAME)
-        return True, None
-    elif result and "NOT_FOUND" in str(result):
-        logger.info("Mail flow rule '%s' not found (already removed)", FOOTER_RULE_NAME)
+    if "REMOVED" in result_str or "NOT_FOUND" in result_str:
+        logger.info("Mail flow rules removed successfully")
         return True, None
     else:
-        error = f"Failed to remove mail flow rule: {result}"
+        error = f"Failed to remove mail flow rules: {result}"
         logger.error(error)
         return False, error
 
@@ -420,18 +333,12 @@ async def run_sync(
 ) -> int:
     """Run signature sync.
 
-    Args:
-        dry_run: If True, don't make changes
-        email: If provided, only sync this user
-        preview: If True, show signature preview for the user
-        remove: If True, remove all signatures and footer rule
-
     Returns:
         Exit code
     """
     logger.info("=" * 60)
     if remove:
-        logger.info("Email Signature & Footer Removal")
+        logger.info("Email Signature Removal")
     else:
         logger.info("Email Signature Sync")
     logger.info("=" * 60)
@@ -450,14 +357,10 @@ async def run_sync(
     user_manager = EntraUserManager()
 
     try:
-        # Get only employees (excludes room/resource mailboxes)
         all_users = await user_manager.get_employees(include_disabled=False)
-
-        # Filter to sjifire.org domain
         users = [u for u in all_users if u.email and u.email.lower().endswith("@sjifire.org")]
 
         if email:
-            # Filter to specific user
             users = [u for u in users if u.email and u.email.lower() == email.lower()]
             if not users:
                 logger.error("User not found: %s", email)
@@ -472,32 +375,39 @@ async def run_sync(
     # Handle preview mode
     if preview:
         user = users[0]
+        title = _get_title_line(user) or "(none)"
+        phone = _get_phone_line(user)
         logger.info("")
         logger.info("Signature preview for %s (%s):", user.display_name, user.email)
         logger.info("-" * 40)
         logger.info("Rank: %s", user.rank or "(none)")
         logger.info("Job Title: %s", user.job_title or "(none)")
         logger.info("-" * 40)
-        logger.info("HTML Signature:")
-        print(generate_signature_html(user))
+        logger.info("CustomAttribute1 (title): %s", title)
+        logger.info("CustomAttribute2 (phone): %s", phone)
         logger.info("-" * 40)
-        logger.info("Text Signature:")
-        print(generate_signature_text(user))
+        logger.info("Signature as rendered:")
+        name = f"{user.first_name} {user.last_name}".strip() or user.display_name
+        print(f"{name}")
+        if _get_title_line(user):
+            print(f"{_get_title_line(user)}")
+        print(f"{COMPANY_NAME_TEXT}")
+        print(f"{phone}")
         return 0
 
-    # Sync or remove signatures
+    # Sync or remove custom attributes
     logger.info("")
     if remove:
-        logger.info("Removing signatures...")
+        logger.info("Clearing custom attributes...")
     else:
-        logger.info("Syncing signatures...")
+        logger.info("Syncing custom attributes...")
 
-    success, failure, errors = await sync_signatures(users, dry_run, remove)
+    success, failure, errors = sync_custom_attributes(users, dry_run, remove)
 
     # Print summary
     logger.info("")
     logger.info("=" * 60)
-    logger.info("Summary")
+    logger.info("Attributes Summary")
     logger.info("=" * 60)
     logger.info("  Successful: %d", success)
     logger.info("  Failed: %d", failure)
@@ -505,23 +415,24 @@ async def run_sync(
     if errors:
         logger.info("")
         logger.info("Errors:")
-        for error in errors[:10]:  # Limit to first 10
+        for error in errors[:10]:
             logger.error("  %s", error)
         if len(errors) > 10:
             logger.error("  ... and %d more", len(errors) - 10)
 
-    # Sync or remove footer mail flow rule
-    logger.info("")
-    if remove:
-        logger.info("Removing email footer mail flow rule...")
-        footer_ok, footer_error = remove_footer(dry_run)
-    else:
-        logger.info("Syncing email footer mail flow rule...")
-        footer_ok, footer_error = sync_footer(dry_run)
+    # Sync or remove transport rule (skip for single-user syncs)
+    if not email:
+        logger.info("")
+        if remove:
+            logger.info("Removing mail flow rule...")
+            rule_ok, rule_error = remove_transport_rule(dry_run)
+        else:
+            logger.info("Syncing mail flow rule...")
+            rule_ok, rule_error = sync_transport_rule(dry_run)
 
-    if not footer_ok:
-        logger.error("Footer operation failed: %s", footer_error)
-        return 1
+        if not rule_ok:
+            logger.error("Transport rule operation failed: %s", rule_error)
+            return 1
 
     return 0 if failure == 0 else 1
 
@@ -529,8 +440,8 @@ async def run_sync(
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Sync email signatures for all users. "
-        "Sets OWA signatures based on Entra ID profile data."
+        description="Sync email signatures via transport rule. "
+        "Sets custom attributes on mailboxes and creates a mail flow rule."
     )
     parser.add_argument(
         "--dry-run",
@@ -540,7 +451,7 @@ def main() -> None:
     parser.add_argument(
         "--email",
         metavar="EMAIL",
-        help="Only sync signature for this user",
+        help="Only sync custom attributes for this user",
     )
     parser.add_argument(
         "--preview",
@@ -550,7 +461,7 @@ def main() -> None:
     parser.add_argument(
         "--remove",
         action="store_true",
-        help="Remove all signatures and the footer mail flow rule",
+        help="Remove all custom attributes and the mail flow rule",
     )
 
     args = parser.parse_args()
