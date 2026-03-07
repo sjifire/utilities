@@ -1,15 +1,11 @@
 """Sync email signatures for all users via transport rule.
 
-Sets Exchange CustomAttribute1/2/3 on each user's mailbox, then creates a
+Sets Exchange custom attributes on each user's mailbox, then creates a
 mail flow transport rule that appends a personalized signature + organization
 footer to all outgoing emails. Works with ALL email clients because the
 signature is applied server-side by Exchange after the email is sent.
 
-CustomAttribute6: Title line with <br> suffix for HTML (empty if no title)
-CustomAttribute7: Phone line
-CustomAttribute8: Title line plain text for text-only fallback
-
-NOTE: CustomAttribute1-5 are reserved for Entra/Aladtec sync data.
+Attribute slot assignments are defined in ``sjifire.core.extension_attrs``.
 """
 
 import argparse
@@ -18,6 +14,14 @@ import logging
 import re
 import sys
 
+from sjifire.core.extension_attrs import (
+    SIG_PHONE_PS,
+    SIG_PHONE_TOKEN,
+    SIG_TITLE_HTML_PS,
+    SIG_TITLE_HTML_TOKEN,
+    SIG_TITLE_TEXT_PS,
+    SIG_TITLE_TEXT_TOKEN,
+)
 from sjifire.entra.users import EntraUser, EntraUserManager
 from sjifire.exchange.client import ExchangeOnlineClient, _escape_ps_string
 
@@ -49,16 +53,14 @@ DISCLAIMER = (
 # TRANSPORT RULE TEMPLATE
 # =============================================================================
 # Uses Exchange AD attribute tokens: %%FirstName%%, %%LastName%%, etc.
-# CustomAttribute6 = title line (rank/title), CustomAttribute7 = phone line
-# CustomAttribute8 = title plain text (for text-only fallback)
-# NOTE: CA1-5 are used by Entra sync (rank, EVIP, positions, schedules, calendar ID)
+# Slot assignments defined in sjifire.core.extension_attrs
 
 RULE_HTML = f"""\
 <div style="margin-top: 25px;">
 <p style="margin: 0; font-size: 14px;">
 <strong>%%FirstName%% %%LastName%%</strong><br>
-<span style="color: #666;">%%CustomAttribute6%%{COMPANY_NAME}<br>
-%%CustomAttribute7%%</span>
+<span style="color: #666;">{SIG_TITLE_HTML_TOKEN}{COMPANY_NAME}<br>
+{SIG_PHONE_TOKEN}</span>
 </p>
 </div>
 <div style="margin-top: 25px; padding-top: 15px; border-top: 2px solid #c42414;">
@@ -84,9 +86,9 @@ RULE_HTML = f"""\
 
 RULE_TEXT = f"""\
 %%FirstName%% %%LastName%%
-%%CustomAttribute8%%
+{SIG_TITLE_TEXT_TOKEN}
 {COMPANY_NAME_TEXT}
-%%CustomAttribute7%%
+{SIG_PHONE_TOKEN}
 
 ---
 {COMPANY_NAME_TEXT}
@@ -142,11 +144,7 @@ def sync_custom_attributes(
 ) -> tuple[int, int, list[str]]:
     """Batch-set custom attributes on mailboxes for transport rule personalization.
 
-    CustomAttribute6: title with trailing <br> for HTML (empty if no title)
-    CustomAttribute7: phone line (shared by HTML and text)
-    CustomAttribute8: title plain text for text-only fallback (empty if no title)
-
-    NOTE: CA1-5 are reserved for Entra sync (rank, EVIP, positions, schedules).
+    Slot assignments defined in ``sjifire.core.extension_attrs``.
 
     Returns:
         Tuple of (success_count, failure_count, error_messages)
@@ -191,9 +189,9 @@ def sync_custom_attributes(
         commands.append(
             f"try {{ "
             f"Set-Mailbox -Identity '{email}'"
-            f" -CustomAttribute6 '{attr1}'"
-            f" -CustomAttribute7 '{attr2}'"
-            f" -CustomAttribute8 '{attr3}'"
+            f" -{SIG_TITLE_HTML_PS} '{attr1}'"
+            f" -{SIG_PHONE_PS} '{attr2}'"
+            f" -{SIG_TITLE_TEXT_PS} '{attr3}'"
             f" -ErrorAction Stop; "
             f"$success++ "
             f"}} catch {{ "
@@ -389,8 +387,8 @@ async def run_sync(
         logger.info("Rank: %s", user.rank or "(none)")
         logger.info("Job Title: %s", user.job_title or "(none)")
         logger.info("-" * 40)
-        logger.info("CustomAttribute1 (title): %s", title)
-        logger.info("CustomAttribute2 (phone): %s", phone)
+        logger.info("%s (title): %s", SIG_TITLE_HTML_PS, title)
+        logger.info("%s (phone): %s", SIG_PHONE_PS, phone)
         logger.info("-" * 40)
         logger.info("Signature as rendered:")
         name = f"{user.first_name} {user.last_name}".strip() or user.display_name

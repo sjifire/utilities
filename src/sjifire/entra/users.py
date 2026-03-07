@@ -46,11 +46,11 @@ class EntraUser:
     personal_email: str | None = None
     department: str | None = None
     company_name: str | None = None
-    # Extension attributes (1-15 available, we use 1-4)
-    extension_attribute1: str | None = None  # Rank
-    extension_attribute2: str | None = None  # EVIP
-    extension_attribute3: str | None = None  # Positions (comma-delimited)
-    extension_attribute4: str | None = None  # Schedules (comma-delimited)
+    # Entra extension attributes — slot assignments in sjifire.core.extension_attrs
+    extension_attribute1: str | None = None  # EntraAttr.RANK
+    extension_attribute2: str | None = None  # EntraAttr.EVIP
+    extension_attribute3: str | None = None  # EntraAttr.POSITIONS
+    extension_attribute4: str | None = None  # EntraAttr.SCHEDULES
 
     @property
     def is_active(self) -> bool:

@@ -50,10 +50,19 @@ The ops server runs on Azure Container Apps with **0-many replicas** that restar
 - Graph API v1.0 used for all operations
 
 ### Field Mappings
+All extension attribute slot assignments are defined in `src/sjifire/core/extension_attrs.py`.
+
+**Entra ID extensionAttributes** (Graph API, written by entra-user-sync):
 - `extensionAttribute1`: Rank (Captain, Lieutenant, Chief, etc.)
 - `extensionAttribute2`: EVIP expiration date
 - `extensionAttribute3`: Positions (comma-delimited scheduling positions)
 - `extensionAttribute4`: Schedules (comma-delimited schedule visibility from Aladtec)
+
+**Exchange CustomAttributes** (PowerShell Set-Mailbox, written by signature-sync):
+- `CustomAttribute1-5`: RESERVED (synced from Entra, do not overwrite)
+- `CustomAttribute6`: Signature title HTML (with `<br>` suffix, or empty)
+- `CustomAttribute7`: Signature phone line
+- `CustomAttribute8`: Signature title plain text
 
 ### iSpyFire
 - Incident response and paging system
