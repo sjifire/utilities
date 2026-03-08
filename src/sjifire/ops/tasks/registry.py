@@ -7,12 +7,15 @@ with ``run_task()`` or ``run_all()``.
 
 import logging
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Module-level registry: name -> (async callable, auto flag)
-_tasks: dict[str, tuple[object, bool]] = {}
+_TaskFn = Callable[[], Coroutine[Any, Any, int]]
+_tasks: dict[str, tuple[_TaskFn, bool]] = {}
 
 
 @dataclass

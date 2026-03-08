@@ -16,7 +16,6 @@ import asyncio
 import contextlib
 import logging
 import os
-import sys
 from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
@@ -525,7 +524,9 @@ if os.getenv("TESTING") == "1":
         if body.get("is_editor"):
             editor_group_id = "test-editor-group"
             # Mutate the cached group ID on the already-imported auth module
-            sys.modules["sjifire.ops.auth"]._EDITOR_GROUP_ID = editor_group_id
+            import sjifire.ops.auth as _auth_mod
+
+            _auth_mod._EDITOR_GROUP_ID = editor_group_id
 
             global _DEV_USER
             _DEV_USER = UserContext(

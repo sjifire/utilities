@@ -7,11 +7,19 @@ Each subclass must set ``_container_name`` and keeps its own
 ``_memory: ClassVar[dict[str, dict]]`` for in-memory fallback state.
 """
 
-from typing import Any, ClassVar, Self, TypeVar
+from typing import Any, ClassVar, Protocol, Self, TypeVar
 
 from sjifire.core.config import get_cosmos_container
 
-T = TypeVar("T")
+
+class _FromCosmos(Protocol):
+    """Protocol for models that can be constructed from Cosmos DB items."""
+
+    @classmethod
+    def from_cosmos(cls, data: dict) -> Self: ...
+
+
+T = TypeVar("T", bound=_FromCosmos)
 
 
 class CosmosStore:

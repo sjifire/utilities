@@ -11,8 +11,23 @@ reading from Aladtec) so that downstream code can rely on consistent formats.
 
 import logging
 import re
+from typing import Annotated
+
+from pydantic import BeforeValidator
 
 logger = logging.getLogger(__name__)
+
+
+def _lower_email(v: str | None) -> str | None:
+    """Lowercase an email address for consistent matching."""
+    return v.lower() if v else v
+
+
+LowerEmail = Annotated[str | None, BeforeValidator(_lower_email)]
+"""Pydantic annotated type that lowercases optional email fields."""
+
+LowerEmailStr = Annotated[str, BeforeValidator(_lower_email)]
+"""Pydantic annotated type that lowercases required email fields."""
 
 
 def format_phone(phone: str | None) -> str | None:

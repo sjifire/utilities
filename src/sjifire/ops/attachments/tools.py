@@ -16,11 +16,10 @@ import logging
 from datetime import UTC, datetime
 
 from sjifire.ops.attachments.models import (
-    ALLOWED_CONTENT_TYPES,
     MAX_ATTACHMENTS,
-    MAX_FILE_SIZE,
     AttachmentMeta,
     build_blob_path,
+    validate_file_upload,
 )
 from sjifire.ops.attachments.store import AttachmentBlobStore
 from sjifire.ops.auth import check_doc_edit_access, check_doc_view_access, get_current_user
@@ -70,18 +69,14 @@ async def upload_attachment(
     """
     user = get_current_user()
 
-    if content_type not in ALLOWED_CONTENT_TYPES:
-        allowed = ", ".join(sorted(ALLOWED_CONTENT_TYPES))
-        return {"error": f"Content type '{content_type}' not allowed. Allowed: {allowed}"}
-
     try:
         data = base64.b64decode(data_base64)
     except Exception:
         return {"error": "Invalid base64 data"}
 
-    if len(data) > MAX_FILE_SIZE:
-        max_mb = MAX_FILE_SIZE // (1024 * 1024)
-        return {"error": f"File too large ({len(data)} bytes). Maximum is {max_mb} MB."}
+    error = validate_file_upload(content_type, len(data))
+    if error:
+        return {"error": error}
 
     async with IncidentStore() as store:
         doc = await store.get_by_id(incident_id)

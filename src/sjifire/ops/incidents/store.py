@@ -10,6 +10,8 @@ for local development and testing with ``mcp dev``.
 import logging
 from typing import ClassVar
 
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
 from sjifire.ops.cosmos import CosmosStore
 from sjifire.ops.incidents.models import IncidentDocument
 
@@ -74,7 +76,7 @@ class IncidentStore(CosmosStore):
                 partition_key=year,
             )
             return IncidentDocument.from_cosmos(result)
-        except Exception:
+        except CosmosResourceNotFoundError:
             logger.debug("Incident not found: %s (year=%s)", incident_id, year)
             return None
 

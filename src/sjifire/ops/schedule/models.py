@@ -25,7 +25,7 @@ class DayScheduleCache(BaseModel):
     id: str  # Same as date string (YYYY-MM-DD)
     date: str  # YYYY-MM-DD, also the partition key
     platoon: str = ""
-    entries: list[ScheduleEntryCache] = []
+    entries: list[ScheduleEntryCache] = Field(default_factory=list)
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def is_stale(self, max_age_hours: float = 24.0) -> bool:

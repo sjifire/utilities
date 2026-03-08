@@ -11,9 +11,12 @@ build/
 
 # Testing
 .coverage
+coverage.xml
 .pytest_cache/
 .hypothesis/
 htmlcov/
+playwright-report/
+test-results/
 
 # IDE
 .idea/

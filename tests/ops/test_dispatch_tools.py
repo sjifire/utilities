@@ -117,7 +117,34 @@ class TestListDispatchCalls:
 
         await list_dispatch_calls()
 
-        mock_list.assert_called_once()
+        mock_list.assert_called_once_with(days=30)
+
+    @patch.object(DispatchStore, "list_recent_with_open", new_callable=AsyncMock)
+    async def test_passes_days_to_store(self, mock_list, auth_user):
+        """Verifies the days parameter is forwarded to the store."""
+        mock_list.return_value = []
+
+        await list_dispatch_calls(days=7)
+
+        mock_list.assert_called_once_with(days=7)
+
+    @patch.object(DispatchStore, "list_recent_with_open", new_callable=AsyncMock)
+    async def test_clamps_days_to_max(self, mock_list, auth_user):
+        """Days above _MAX_DISPATCH_DAYS (90) are clamped."""
+        mock_list.return_value = []
+
+        await list_dispatch_calls(days=365)
+
+        mock_list.assert_called_once_with(days=90)
+
+    @patch.object(DispatchStore, "list_recent_with_open", new_callable=AsyncMock)
+    async def test_clamps_days_to_min(self, mock_list, auth_user):
+        """Days below 1 are clamped to 1."""
+        mock_list.return_value = []
+
+        await list_dispatch_calls(days=0)
+
+        mock_list.assert_called_once_with(days=1)
 
     @patch.object(
         DispatchStore,

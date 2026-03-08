@@ -553,6 +553,82 @@ class TestGetIspyId:
             assert client._get_ispyid() == ""
 
 
+class TestGetCallByDispatchId:
+    """Tests for _get_call_by_dispatch_id — filters by header before fetching details."""
+
+    @respx.mock
+    def test_only_fetches_details_for_matching_header(self, mock_credentials):
+        """Should check LongTermCallID in search results before fetching details."""
+        respx.post("https://test.ispyfire.com/login").mock(return_value=httpx.Response(200))
+
+        # search_calls_raw returns headers with LongTermCallID
+        search_results = [
+            {"_id": "uuid-aaa", "LongTermCallID": "26-000001"},
+            {"_id": "uuid-bbb", "LongTermCallID": "26-000002"},
+            {"_id": "uuid-ccc", "LongTermCallID": "26-000003"},
+        ]
+
+        with (
+            ISpyFireClient() as client,
+            patch.object(client, "search_calls_raw", return_value=search_results),
+            patch.object(client, "get_call_details", return_value=None) as mock_details,
+            patch("sjifire.ispyfire.client.time.sleep"),
+        ):
+            from sjifire.ispyfire.models import DispatchCall
+
+            mock_details.return_value = DispatchCall(
+                id="uuid-bbb",
+                long_term_call_id="26-000002",
+                nature="Medical Aid",
+                address="200 Spring St",
+                agency_code="SJF",
+                type="EMS",
+                zone_code="Z1",
+            )
+
+            result = client._get_call_by_dispatch_id("26-000002")
+
+            # Should only fetch details for the matching header, not all 3
+            mock_details.assert_called_once_with("uuid-bbb")
+            assert result is not None
+            assert result.long_term_call_id == "26-000002"
+
+    @respx.mock
+    def test_returns_none_when_no_match(self, mock_credentials):
+        """Returns None when no search result header matches."""
+        respx.post("https://test.ispyfire.com/login").mock(return_value=httpx.Response(200))
+
+        search_results = [
+            {"_id": "uuid-aaa", "LongTermCallID": "26-000001"},
+            {"_id": "uuid-bbb", "LongTermCallID": "26-000002"},
+        ]
+
+        with (
+            ISpyFireClient() as client,
+            patch.object(client, "search_calls_raw", return_value=search_results),
+            patch.object(client, "get_call_details") as mock_details,
+            patch("sjifire.ispyfire.client.time.sleep"),
+        ):
+            result = client._get_call_by_dispatch_id("26-999999")
+
+            # Should never call get_call_details — no header matched
+            mock_details.assert_not_called()
+            assert result is None
+
+    @respx.mock
+    def test_returns_none_for_empty_search(self, mock_credentials):
+        """Returns None when search returns no results."""
+        respx.post("https://test.ispyfire.com/login").mock(return_value=httpx.Response(200))
+
+        with (
+            ISpyFireClient() as client,
+            patch.object(client, "search_calls_raw", return_value=[]),
+            patch("sjifire.ispyfire.client.time.sleep"),
+        ):
+            result = client._get_call_by_dispatch_id("26-000001")
+            assert result is None
+
+
 class TestRateLimitingRetry:
     """Tests for rate limiting and retry behavior."""
 
