@@ -271,6 +271,8 @@ class UnifiedGroupSyncManager:
 
         Sets AutoSubscribeNewMembers=True so the group calendar automatically
         appears in members' Outlook clients (desktop, mobile, web).
+        Disables welcome messages to prevent notification spam when members
+        are added/re-added during sync.
 
         Args:
             mail_nickname: The group's mail nickname (e.g., "all-personnel")
@@ -286,7 +288,13 @@ class UnifiedGroupSyncManager:
             return True
 
         try:
-            return await self.exchange_client.set_unified_group_calendar_settings(email)
+            calendar_ok = await self.exchange_client.set_unified_group_calendar_settings(
+                email
+            )
+            welcome_ok = await self.exchange_client.set_unified_group_welcome_message(
+                email, enabled=False
+            )
+            return calendar_ok and welcome_ok
         except Exception as e:
             logger.warning("Error enforcing calendar settings for %s: %s", email, e)
             return False
