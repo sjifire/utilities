@@ -262,18 +262,15 @@ def ensure_trusted_domain(
         "$errors = @()",
     ]
 
+    escaped_domain = _escape_ps_string(domain)
     for user in users:
         email = _escape_ps_string(user.email)
-        escaped_domain = _escape_ps_string(domain)
         commands.append(
             f"try {{ "
-            f"$junk = Get-MailboxJunkEmailConfiguration -Identity '{email}' -ErrorAction Stop; "
-            f"if ($junk.TrustedSendersAndDomains -notcontains '{escaped_domain}') {{ "
             f"Set-MailboxJunkEmailConfiguration -Identity '{email}'"
             f" -TrustedSendersAndDomains @{{Add='{escaped_domain}'}}"
             f" -ErrorAction Stop; "
             f"$success++ "
-            f"}} "
             f"}} catch {{ "
             f"$failure++; "
             f"$errors += '{email}: ' + $_.Exception.Message "
