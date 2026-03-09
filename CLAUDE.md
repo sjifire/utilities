@@ -289,7 +289,9 @@ For email distribution without SharePoint sprawl, use mail-enabled security grou
 
 The `exchange/` module mirrors the `entra/group_sync.py` strategies but creates mail-enabled security groups via PowerShell subprocess.
 
-**Signature sync** (`signature-sync`): Sets per-user custom attributes (CA6-8) on mailboxes and creates a transport rule that appends a personalized signature + org footer to all outgoing emails. Works with all email clients because signatures are applied server-side. See `scripts/signature_sync.py` and `core/extension_attrs.py` for slot assignments.
+**Signature sync** (`signature-sync`): Sets per-user custom attributes (CA6-8) on mailboxes, ensures the org domain is in each user's trusted senders list (so signature/footer images auto-download in Outlook), and creates a transport rule that appends a personalized signature + org footer to all outgoing emails. Works with all email clients because signatures are applied server-side. See `scripts/signature_sync.py` and `core/extension_attrs.py` for slot assignments.
+
+**M365 group settings:** Groups with `enforce_calendar_visibility=True` (e.g., All Personnel) have welcome emails disabled and auto-subscription turned off on every sync. The group calendar remains discoverable but isn't forced into members' Outlook view.
 
 **Retry logic:** Member add/remove operations use tenacity to automatically retry transient Azure AD sync errors (up to 3 attempts with exponential backoff). Groups are backed up before any sync operation.
 
