@@ -55,7 +55,6 @@ class SignatureTemplate:
     office_phone: str
     rule_html: str
     rule_text: str
-    dedupe_marker: str
 
 
 def load_template(name: str = "default") -> SignatureTemplate:
@@ -103,7 +102,6 @@ def load_template(name: str = "default") -> SignatureTemplate:
         office_phone=config["office_phone"],
         rule_html=_render(html_path.read_text()),
         rule_text=_render(text_path.read_text()),
-        dedupe_marker=config.get("dedupe_marker", ""),
     )
 
 
@@ -254,12 +252,6 @@ def sync_transport_rule(
 
     client = ExchangeOnlineClient()
     escaped_html = template.rule_html.replace("'", "''")
-    marker = _escape_ps_string(template.dedupe_marker)
-
-    # ExceptIfSubjectOrBodyContainsWords prevents duplicate signatures on replies
-    dedupe_param = ""
-    if marker:
-        dedupe_param = f"\n        -ExceptIfSubjectOrBodyContainsWords '{marker}' `"
 
     script = f"""
 $ruleName = '{template.rule_name}'
@@ -269,7 +261,8 @@ if ($rule) {{
     Write-Output "Updating existing rule: $ruleName"
     Set-TransportRule -Identity $ruleName `
         -FromScope InOrganization `
-        -SentToScope $null `{dedupe_param}
+        -SentToScope $null `
+        -ExceptIfSubjectOrBodyContainsWords $null `
         -ApplyHtmlDisclaimerText @'
 {escaped_html}
 '@ `
@@ -279,7 +272,7 @@ if ($rule) {{
 }} else {{
     Write-Output "Creating new rule: $ruleName"
     New-TransportRule -Name $ruleName `
-        -FromScope InOrganization `{dedupe_param}
+        -FromScope InOrganization `
         -ApplyHtmlDisclaimerText @'
 {escaped_html}
 '@ `
