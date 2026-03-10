@@ -267,10 +267,11 @@ class UnifiedGroupSyncManager:
     async def _enforce_m365_group_calendar_settings(
         self, mail_nickname: str, dry_run: bool = False
     ) -> bool:
-        """Ensure M365 group has correct Exchange settings for calendar visibility.
+        """Ensure M365 group has correct Exchange settings.
 
-        Sets AutoSubscribeNewMembers=True so the group calendar automatically
-        appears in members' Outlook clients (desktop, mobile, web).
+        Disables auto-subscription so the group calendar is available but not
+        forced into members' Outlook. Disables welcome messages to prevent
+        notification spam when members are added/re-added during sync.
 
         Args:
             mail_nickname: The group's mail nickname (e.g., "all-personnel")
@@ -282,13 +283,19 @@ class UnifiedGroupSyncManager:
         email = f"{mail_nickname}@{self.domain}"
 
         if dry_run:
-            logger.info("Would enforce calendar settings for %s", email)
+            logger.info("Would enforce group settings for %s", email)
             return True
 
         try:
-            return await self.exchange_client.set_unified_group_calendar_settings(email)
+            calendar_ok = await self.exchange_client.set_unified_group_calendar_settings(
+                email, auto_subscribe=False, always_subscribe_calendar=False
+            )
+            welcome_ok = await self.exchange_client.set_unified_group_welcome_message(
+                email, enabled=False
+            )
+            return calendar_ok and welcome_ok
         except Exception as e:
-            logger.warning("Error enforcing calendar settings for %s: %s", email, e)
+            logger.warning("Error enforcing group settings for %s: %s", email, e)
             return False
 
     async def detect_group_type(self, email: str, mail_nickname: str) -> GroupType:

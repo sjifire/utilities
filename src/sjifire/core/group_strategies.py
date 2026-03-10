@@ -67,7 +67,7 @@ class GroupConfig:
     mail_nickname: str  # e.g., "station31", "ff"
     description: str | None = None
     aliases: list[str] | None = None  # Additional email aliases (without domain)
-    enforce_calendar_visibility: bool = False  # For M365 groups: ensure AutoSubscribeNewMembers
+    enforce_calendar_visibility: bool = False  # For M365 groups: enforce group settings on sync
 
 
 class GroupStrategy(ABC):

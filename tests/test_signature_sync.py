@@ -363,7 +363,6 @@ class TestRunSync:
             mock_mgr.get_employees = AsyncMock(return_value=users)
             mock_mgr_cls.return_value = mock_mgr
             mock_sync.return_value = (1, 0, [])
-
             mock_rule.return_value = (True, None)
 
             await run_sync(dry_run=False)
@@ -398,7 +397,6 @@ class TestRunSync:
             mock_mgr.get_employees = AsyncMock(return_value=users)
             mock_mgr_cls.return_value = mock_mgr
             mock_sync.return_value = (1, 0, [])
-
             mock_rule.return_value = (True, None)
 
             exit_code = await run_sync(dry_run=False)

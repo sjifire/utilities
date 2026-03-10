@@ -262,6 +262,7 @@ if ($rule) {{
     Set-TransportRule -Identity $ruleName `
         -FromScope InOrganization `
         -SentToScope $null `
+        -ExceptIfSubjectOrBodyContainsWords $null `
         -ApplyHtmlDisclaimerText @'
 {escaped_html}
 '@ `
