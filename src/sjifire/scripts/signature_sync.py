@@ -55,6 +55,7 @@ class SignatureTemplate:
     office_phone: str
     rule_html: str
     rule_text: str
+    dedupe_marker: str
 
 
 def load_template(name: str = "default") -> SignatureTemplate:
@@ -102,6 +103,7 @@ def load_template(name: str = "default") -> SignatureTemplate:
         office_phone=config["office_phone"],
         rule_html=_render(html_path.read_text()),
         rule_text=_render(text_path.read_text()),
+        dedupe_marker=config.get("dedupe_marker", ""),
     )
 
 
@@ -236,74 +238,6 @@ def sync_custom_attributes(
     return success, failure, errors
 
 
-def ensure_trusted_domain(
-    users: list[EntraUser],
-    domain: str,
-    dry_run: bool = False,
-) -> tuple[int, int, list[str]]:
-    """Ensure domain is in each user's trusted senders list.
-
-    This makes Outlook auto-download images from the domain (e.g., signature
-    footer images) instead of blocking them behind "Download external images".
-
-    Returns:
-        Tuple of (success_count, failure_count, error_messages)
-    """
-    if dry_run:
-        for user in users:
-            logger.info("Would ensure %s trusted for %s", domain, user.email)
-        return len(users), 0, []
-
-    client = ExchangeOnlineClient()
-
-    commands = [
-        "$success = 0",
-        "$failure = 0",
-        "$errors = @()",
-    ]
-
-    escaped_domain = _escape_ps_string(domain)
-    for user in users:
-        email = _escape_ps_string(user.email)
-        commands.append(
-            f"try {{ "
-            f"Set-MailboxJunkEmailConfiguration -Identity '{email}'"
-            f" -TrustedSendersAndDomains @{{Add='{escaped_domain}'}}"
-            f" -ErrorAction Stop; "
-            f"$success++ "
-            f"}} catch {{ "
-            f"$failure++; "
-            f"$errors += '{email}: ' + $_.Exception.Message "
-            f"}}"
-        )
-
-    commands.append(
-        "@{ Success = $success; Failure = $failure; Errors = $errors } | ConvertTo-Json -Depth 2"
-    )
-
-    result = client._run_powershell(commands)
-
-    if not result or not isinstance(result, dict):
-        return 0, len(users), ["Failed to execute batch script"]
-
-    success = result.get("Success", 0)
-    failure = result.get("Failure", 0)
-    errors_data = result.get("Errors", [])
-
-    if isinstance(errors_data, str):
-        errors = [errors_data] if errors_data else []
-    elif isinstance(errors_data, list):
-        errors = [str(e) for e in errors_data if e]
-    else:
-        errors = []
-
-    logger.info("Trusted domain: %d updated, %d failed", success, failure)
-    for error in errors[:10]:
-        logger.error("  %s", error)
-
-    return success, failure, errors
-
-
 def sync_transport_rule(
     template: SignatureTemplate, dry_run: bool = False
 ) -> tuple[bool, str | None]:
@@ -320,6 +254,12 @@ def sync_transport_rule(
 
     client = ExchangeOnlineClient()
     escaped_html = template.rule_html.replace("'", "''")
+    marker = _escape_ps_string(template.dedupe_marker)
+
+    # ExceptIfSubjectOrBodyContainsWords prevents duplicate signatures on replies
+    dedupe_param = ""
+    if marker:
+        dedupe_param = f"\n        -ExceptIfSubjectOrBodyContainsWords '{marker}' `"
 
     script = f"""
 $ruleName = '{template.rule_name}'
@@ -329,7 +269,7 @@ if ($rule) {{
     Write-Output "Updating existing rule: $ruleName"
     Set-TransportRule -Identity $ruleName `
         -FromScope InOrganization `
-        -SentToScope $null `
+        -SentToScope $null `{dedupe_param}
         -ApplyHtmlDisclaimerText @'
 {escaped_html}
 '@ `
@@ -339,7 +279,7 @@ if ($rule) {{
 }} else {{
     Write-Output "Creating new rule: $ruleName"
     New-TransportRule -Name $ruleName `
-        -FromScope InOrganization `
+        -FromScope InOrganization `{dedupe_param}
         -ApplyHtmlDisclaimerText @'
 {escaped_html}
 '@ `
@@ -511,18 +451,6 @@ async def run_sync(
             logger.error("  %s", error)
         if len(errors) > 10:
             logger.error("  ... and %d more", len(errors) - 10)
-
-    # Ensure domain is trusted for image auto-download (skip for remove/single-user)
-    if not remove and not email:
-        logger.info("")
-        logger.info("Ensuring trusted domain for image auto-download...")
-        td_success, td_failure, td_errors = ensure_trusted_domain(users, "sjifire.org", dry_run)
-        td_skipped = len(users) - td_success - td_failure
-        logger.info("  Updated: %d, Already trusted: %d", td_success, td_skipped)
-        if td_failure:
-            logger.warning("  Failed: %d", td_failure)
-            for error in td_errors[:5]:
-                logger.error("    %s", error)
 
     # Sync or remove transport rule (skip for single-user syncs)
     if not email:

@@ -7,5 +7,6 @@
   "website_url": "https://www.sjifire.org",
   "address": "1011 Mullis St, Friday Harbor, WA 98250",
   "accent_color": "#c42414",
-  "disclaimer": "This email may contain confidential information intended only for the recipient. If you received this in error, please notify the sender and delete this message."
+  "disclaimer": "This email may contain confidential information intended only for the recipient. If you received this in error, please notify the sender and delete this message.",
+  "dedupe_marker": "SJIFR-SIG"
 }

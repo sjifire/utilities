@@ -358,14 +358,12 @@ class TestRunSync:
             patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_mgr_cls,
             patch("sjifire.scripts.signature_sync.sync_custom_attributes") as mock_sync,
             patch("sjifire.scripts.signature_sync.sync_transport_rule") as mock_rule,
-            patch("sjifire.scripts.signature_sync.ensure_trusted_domain") as mock_trusted,
         ):
             mock_mgr = MagicMock()
             mock_mgr.get_employees = AsyncMock(return_value=users)
             mock_mgr_cls.return_value = mock_mgr
             mock_sync.return_value = (1, 0, [])
             mock_rule.return_value = (True, None)
-            mock_trusted.return_value = (1, 0, [])
 
             await run_sync(dry_run=False)
 
@@ -394,14 +392,12 @@ class TestRunSync:
             patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_mgr_cls,
             patch("sjifire.scripts.signature_sync.sync_custom_attributes") as mock_sync,
             patch("sjifire.scripts.signature_sync.sync_transport_rule") as mock_rule,
-            patch("sjifire.scripts.signature_sync.ensure_trusted_domain") as mock_trusted,
         ):
             mock_mgr = MagicMock()
             mock_mgr.get_employees = AsyncMock(return_value=users)
             mock_mgr_cls.return_value = mock_mgr
             mock_sync.return_value = (1, 0, [])
             mock_rule.return_value = (True, None)
-            mock_trusted.return_value = (1, 0, [])
 
             exit_code = await run_sync(dry_run=False)
 
@@ -462,14 +458,12 @@ class TestRunSync:
             patch("sjifire.scripts.signature_sync.EntraUserManager") as mock_mgr_cls,
             patch("sjifire.scripts.signature_sync.sync_custom_attributes") as mock_sync,
             patch("sjifire.scripts.signature_sync.sync_transport_rule") as mock_rule,
-            patch("sjifire.scripts.signature_sync.ensure_trusted_domain") as mock_trusted,
         ):
             mock_mgr = MagicMock()
             mock_mgr.get_employees = AsyncMock(return_value=users)
             mock_mgr_cls.return_value = mock_mgr
             mock_sync.return_value = (1, 0, [])
             mock_rule.return_value = (False, "PowerShell error")
-            mock_trusted.return_value = (1, 0, [])
 
             exit_code = await run_sync(dry_run=False)
 
