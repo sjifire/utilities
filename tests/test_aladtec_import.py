@@ -1077,3 +1077,238 @@ class TestLicenseAssignmentOnCreate:
 
         assert len(result.created) == 1
         assert result.created[0]["license_sku"] is None
+
+
+class TestUsernameUPNMatching:
+    """Tests for username-based UPN matching and email mismatch warnings."""
+
+    async def test_matches_by_username_upn_when_email_wrong(self, importer):
+        """Should match Entra user by generated UPN from Aladtec username."""
+        members = [
+            Member(
+                id="2608",
+                first_name="Bryan",
+                last_name="Stahl",
+                username="bstahl",
+                email="jstahl@testfire.org",  # Wrong email in Aladtec
+                status="Active",
+            ),
+        ]
+
+        existing_users = [
+            EntraUser(
+                id="u1",
+                display_name="Bryan Stahl",
+                first_name="Bryan",
+                last_name="Stahl",
+                email="bstahl@testfire.org",
+                upn="bstahl@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+                company_name="Test Fire Department",
+            ),
+        ]
+
+        importer.user_manager.get_users = AsyncMock(return_value=existing_users)
+        importer.user_manager.update_user = AsyncMock(return_value=True)
+
+        result = await importer.import_members(members, dry_run=False)
+
+        # Should match existing user (not create a new one)
+        assert len(result.created) == 0
+        assert len(result.updated) == 1 or len(result.skipped) == 1
+
+    async def test_email_mismatch_warning_on_username_match(self, importer, caplog):
+        """Should log warning when matched by username but emails differ."""
+        import logging
+
+        members = [
+            Member(
+                id="2608",
+                first_name="Bryan",
+                last_name="Stahl",
+                username="bstahl",
+                email="jstahl@testfire.org",
+                status="Active",
+            ),
+        ]
+
+        existing_users = [
+            EntraUser(
+                id="u1",
+                display_name="Bryan Stahl",
+                first_name="Bryan",
+                last_name="Stahl",
+                email="bstahl@testfire.org",
+                upn="bstahl@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+                company_name="Test Fire Department",
+            ),
+        ]
+
+        importer.user_manager.get_users = AsyncMock(return_value=existing_users)
+        importer.user_manager.update_user = AsyncMock(return_value=True)
+
+        with caplog.at_level(logging.WARNING):
+            await importer.import_members(members, dry_run=True)
+
+        assert any("Email mismatch" in msg for msg in caplog.messages)
+        assert any("jstahl@testfire.org" in msg for msg in caplog.messages)
+        assert any("bstahl@testfire.org" in msg for msg in caplog.messages)
+
+    async def test_email_mismatch_warning_on_name_match(self, importer, caplog):
+        """Should log warning when matched by display name but emails differ."""
+        import logging
+
+        members = [
+            Member(
+                id="2608",
+                first_name="Bryan",
+                last_name="Stahl",
+                email="jstahl@testfire.org",
+                status="Active",
+            ),
+        ]
+
+        existing_users = [
+            EntraUser(
+                id="u1",
+                display_name="Bryan Stahl",
+                first_name="Bryan",
+                last_name="Stahl",
+                email="bstahl@testfire.org",
+                upn="bstahl@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+                company_name="Test Fire Department",
+            ),
+        ]
+
+        importer.user_manager.get_users = AsyncMock(return_value=existing_users)
+        importer.user_manager.update_user = AsyncMock(return_value=True)
+
+        with caplog.at_level(logging.WARNING):
+            await importer.import_members(members, dry_run=True)
+
+        assert any("Email mismatch" in msg for msg in caplog.messages)
+
+    async def test_no_warning_when_emails_match(self, importer, caplog):
+        """Should not log warning when Aladtec email matches Entra."""
+        import logging
+
+        members = [
+            Member(
+                id="123",
+                first_name="John",
+                last_name="Smith",
+                username="jsmith",
+                email="jsmith@testfire.org",
+                status="Active",
+            ),
+        ]
+
+        existing_users = [
+            EntraUser(
+                id="u1",
+                display_name="John Smith",
+                first_name="John",
+                last_name="Smith",
+                email="jsmith@testfire.org",
+                upn="jsmith@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+                company_name="Test Fire Department",
+            ),
+        ]
+
+        importer.user_manager.get_users = AsyncMock(return_value=existing_users)
+
+        with caplog.at_level(logging.WARNING):
+            await importer.import_members(members, dry_run=True)
+
+        assert not any("Email mismatch" in msg for msg in caplog.messages)
+
+    async def test_username_match_preferred_over_name_match(self, importer):
+        """Username UPN match should be tried before display name fallback."""
+        members = [
+            Member(
+                id="2608",
+                first_name="Bryan",
+                last_name="Stahl",
+                username="bstahl",
+                email="wrong@testfire.org",
+                status="Active",
+            ),
+        ]
+
+        # Two Entra users: one matching by UPN, another with same display name
+        existing_users = [
+            EntraUser(
+                id="u-correct",
+                display_name="B Stahl",  # Different display name
+                first_name="B",
+                last_name="Stahl",
+                email="bstahl@testfire.org",
+                upn="bstahl@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+                company_name="Test Fire Department",
+            ),
+            EntraUser(
+                id="u-wrong",
+                display_name="Bryan Stahl",  # Matches display name
+                first_name="Bryan",
+                last_name="Stahl",
+                email="bryan.stahl@testfire.org",
+                upn="bryan.stahl@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+                company_name="Test Fire Department",
+            ),
+        ]
+
+        importer.user_manager.get_users = AsyncMock(return_value=existing_users)
+        importer.user_manager.update_user = AsyncMock(return_value=True)
+
+        result = await importer.import_members(members, dry_run=True)
+
+        # Should match the UPN user (u-correct), not the display name user (u-wrong)
+        assert len(result.updated) + len(result.skipped) == 1
+        if result.updated:
+            assert result.updated[0]["email"] == "wrong@testfire.org"
+
+    async def test_no_username_falls_through_to_name(self, importer):
+        """Without username, should still fall through to display name match."""
+        members = [
+            Member(
+                id="2608",
+                first_name="Bryan",
+                last_name="Stahl",
+                email="wrong@testfire.org",
+                status="Active",
+            ),
+        ]
+
+        existing_users = [
+            EntraUser(
+                id="u1",
+                display_name="Bryan Stahl",
+                first_name="Bryan",
+                last_name="Stahl",
+                email="bstahl@testfire.org",
+                upn="bstahl@testfire.org",
+                employee_id=None,
+                account_enabled=True,
+                company_name="Test Fire Department",
+            ),
+        ]
+
+        importer.user_manager.get_users = AsyncMock(return_value=existing_users)
+        importer.user_manager.update_user = AsyncMock(return_value=True)
+
+        result = await importer.import_members(members, dry_run=True)
+
+        # Should still match by name
+        assert len(result.created) == 0
+        assert len(result.updated) + len(result.skipped) == 1
