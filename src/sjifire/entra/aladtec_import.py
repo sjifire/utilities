@@ -166,15 +166,29 @@ class AladtecImporter:
             )
             return
 
-        # Find existing Entra user
-        # UPN should be the email address
+        # Find existing Entra user — try email, then UPN (from username), then display name
         email_lower = member.email.lower()
 
-        existing = (
-            user_by_email.get(email_lower)
-            or user_by_upn.get(email_lower)
-            or user_by_name.get(member.display_name.lower())
-        )
+        existing = user_by_email.get(email_lower) or user_by_upn.get(email_lower)
+
+        if not existing and member.username:
+            generated_upn = f"{member.username.lower()}@{self.domain}"
+            existing = user_by_upn.get(generated_upn)
+
+        if not existing:
+            existing = user_by_name.get(member.display_name.lower())
+
+        # Warn if Aladtec email doesn't match the Entra user's email/UPN
+        if existing:
+            entra_email = (existing.email or existing.upn or "").lower()
+            if entra_email and entra_email != email_lower:
+                logger.warning(
+                    "Email mismatch for %s: Aladtec email='%s' but Entra='%s'. "
+                    "Update email in Aladtec.",
+                    member.display_name,
+                    member.email,
+                    existing.email or existing.upn,
+                )
 
         if existing:
             await self._handle_existing_user(
