@@ -14,6 +14,7 @@ class Member:
     id: str
     first_name: str
     last_name: str
+    username: str | None = None
     email: str | None = None
     personal_email: str | None = None
     phone: str | None = None

@@ -357,6 +357,7 @@ class TestEnrichMemberDetails:
                 <td><ul><li>A Shift</li></ul></td>
             </tr>
         </table>
+        <input name="usr_username" type="text" value="hsee"/>
         """
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -368,6 +369,7 @@ class TestEnrichMemberDetails:
 
         assert result[0].positions == ["Apparatus Operator"]
         assert result[0].schedules == ["A Shift"]
+        assert result[0].username == "hsee"
 
     def test_enrichment_failure_raises_runtime_error(self, mock_env_vars):
         """Failed detail page fetch should raise RuntimeError, not silently continue."""
@@ -460,6 +462,53 @@ class TestEnrichMemberDetails:
 
         # Should succeed — no detail page fetch attempted
         assert len(result) == 1
+
+
+class TestExtractUsername:
+    """Tests for _extract_username from member detail page."""
+
+    def test_extracts_username_from_input(self, mock_env_vars):
+        """Should extract username from usr_username input field."""
+        from bs4 import BeautifulSoup
+
+        scraper = AladtecMemberScraper()
+        html = """
+        <tr>
+            <td class="label"><h4>Username:</h4></td>
+            <td class="value" id="user_name">
+                <input class="norm" name="usr_username" type="text" value="bstahl"/>
+                <span class="required-indicator">*</span>
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        assert scraper._extract_username(soup) == "bstahl"
+
+    def test_returns_none_when_no_input(self, mock_env_vars):
+        """Should return None when no usr_username input exists."""
+        from bs4 import BeautifulSoup
+
+        scraper = AladtecMemberScraper()
+        soup = BeautifulSoup("<table></table>", "html.parser")
+        assert scraper._extract_username(soup) is None
+
+    def test_returns_none_for_empty_value(self, mock_env_vars):
+        """Should return None when username input has empty value."""
+        from bs4 import BeautifulSoup
+
+        scraper = AladtecMemberScraper()
+        html = '<input name="usr_username" type="text" value=""/>'
+        soup = BeautifulSoup(html, "html.parser")
+        assert scraper._extract_username(soup) is None
+
+    def test_strips_whitespace(self, mock_env_vars):
+        """Should strip whitespace from username value."""
+        from bs4 import BeautifulSoup
+
+        scraper = AladtecMemberScraper()
+        html = '<input name="usr_username" type="text" value="  bstahl  "/>'
+        soup = BeautifulSoup(html, "html.parser")
+        assert scraper._extract_username(soup) == "bstahl"
 
 
 class TestParseCSVRowEdgeCases:

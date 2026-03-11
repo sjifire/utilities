@@ -414,6 +414,9 @@ class AladtecMemberScraper(AladtecClient):
             "station assignment", "station", "assignment", "assigned station"
         )
 
+        # Username (Aladtec login name, used for UPN matching)
+        username = get_field("username", "user name", "login", "login name")
+
         # EVIP
         evip = get_field("evip", "e-vip")
 
@@ -427,6 +430,7 @@ class AladtecMemberScraper(AladtecClient):
             id=str(member_id).strip(),
             first_name=first_name,
             last_name=last_name,
+            username=username,
             email=email,
             personal_email=personal_email,
             phone=phone,
@@ -606,6 +610,20 @@ class AladtecMemberScraper(AladtecClient):
 
         return self._extract_list_items(soup, "Schedules:")
 
+    def _extract_username(self, soup: BeautifulSoup) -> str | None:
+        """Extract the Aladtec login username from a member detail page.
+
+        Args:
+            soup: BeautifulSoup object of the member detail page
+
+        Returns:
+            Username string or None if not found
+        """
+        username_input = soup.find("input", {"name": "usr_username"})
+        if username_input:
+            return username_input.get("value", "").strip() or None
+        return None
+
     def enrich_member_details(self, members: list[Member]) -> list[Member]:
         """Enrich members with their full position and schedule lists.
 
@@ -655,10 +673,13 @@ class AladtecMemberScraper(AladtecClient):
 
             positions = self._extract_list_items(soup, "Positions:")
             schedules = self._extract_list_items(soup, "Schedules:")
+            username = self._extract_username(soup)
 
             # Always set values (even if empty) to clear any incorrect initial value
             member.positions = positions
             member.schedules = schedules
+            if username:
+                member.username = username
 
             if positions or schedules:
                 logger.debug(
