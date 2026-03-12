@@ -3,10 +3,7 @@
 from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from sjifire.ops.tasks.ispyfire_sync import ispyfire_sync
-
 
 # ---------------------------------------------------------------------------
 # Mock data classes
@@ -123,7 +120,10 @@ def _patch_all(*, employees=None, people=None, comparison=None):
                 patch("sjifire.entra.users.EntraUserManager", return_value=mock_user_mgr),
                 patch("sjifire.ispyfire.client.ISpyFireClient", return_value=mock_client),
                 patch("sjifire.ispyfire.sync.compare_entra_to_ispyfire", return_value=comparison),
-                patch("sjifire.ispyfire.sync.entra_user_to_ispyfire_person", return_value=_MockISpyFirePerson()),
+                patch(
+                    "sjifire.ispyfire.sync.entra_user_to_ispyfire_person",
+                    return_value=_MockISpyFirePerson(),
+                ),
                 patch("sjifire.ispyfire.sync.get_responder_types", return_value=["FF"]),
             ]
 
@@ -147,7 +147,7 @@ def _patch_all(*, employees=None, people=None, comparison=None):
 class TestISpyFireSync:
     async def test_no_changes_needed(self):
         """Returns 0 when comparison shows no changes and no inactive matched."""
-        with _patch_all() as ctx:
+        with _patch_all():
             result = await ispyfire_sync()
         assert result == 0
 
@@ -233,7 +233,7 @@ class TestISpyFireSync:
         with _patch_all(
             employees=[new_user, upd_user, matched_user],
             comparison=comparison,
-        ) as ctx:
+        ):
             result = await ispyfire_sync()
 
         # 1 add + 1 update + 1 reactivate (matched inactive) + 1 deactivate = 4

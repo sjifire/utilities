@@ -25,7 +25,7 @@ from mcp.shared.auth import OAuthClientInformationFull
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
-from sjifire.ops.auth import UserContext, get_current_user, set_current_user
+from sjifire.ops.auth import UserContext, get_current_user
 from sjifire.ops.oauth_provider import (
     ACCESS_TOKEN_TTL,
     AUTH_CODE_TTL,
@@ -444,12 +444,12 @@ class TestHandleCallback:
         mock_response.status_code = 400
         mock_response.text = "invalid_grant"
 
-        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as MockClient:
+        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             request = _build_request({"code": "bad-code", "state": "state-fail"})
             resp = await provider.handle_callback(request)
@@ -464,12 +464,12 @@ class TestHandleCallback:
         mock_response.status_code = 200
         mock_response.json.return_value = {"access_token": "at-only"}  # no id_token
 
-        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as MockClient:
+        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             request = _build_request({"code": "code", "state": "state-no-id"})
             resp = await provider.handle_callback(request)
@@ -484,12 +484,12 @@ class TestHandleCallback:
         mock_response.status_code = 200
         mock_response.json.return_value = {"id_token": "bad.jwt.token"}
 
-        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as MockClient:
+        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             # Make the validator raise
             provider._validator = MagicMock()
@@ -513,12 +513,12 @@ class TestHandleCallback:
             "access_token": "entra-at",
         }
 
-        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as MockClient:
+        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             # Mock the validator to return our test user
             provider._validator = MagicMock()
@@ -547,12 +547,12 @@ class TestHandleCallback:
         mock_response.status_code = 200
         mock_response.json.return_value = {"id_token": "valid.jwt.token"}
 
-        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as MockClient:
+        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             provider._validator = MagicMock()
             provider._validator.validate_token.return_value = _TEST_USER
@@ -581,12 +581,12 @@ class TestHandleCallback:
         mock_response.status_code = 200
         mock_response.json.return_value = {"id_token": "valid.jwt.token"}
 
-        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as MockClient:
+        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             provider._validator = MagicMock()
             provider._validator.validate_token.return_value = _TEST_USER
@@ -605,12 +605,12 @@ class TestHandleCallback:
         mock_response.status_code = 200
         mock_response.json.return_value = {"id_token": "jwt"}
 
-        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as MockClient:
+        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             provider._validator = MagicMock()
             provider._validator.validate_token.return_value = _TEST_USER
@@ -639,12 +639,12 @@ class TestHandleCallback:
         mock_response.status_code = 200
         mock_response.json.return_value = {"id_token": "jwt"}
 
-        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as MockClient:
+        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             provider._validator = MagicMock()
             provider._validator.validate_token.return_value = _TEST_USER
@@ -1055,7 +1055,9 @@ class TestExchangeRefreshToken:
             scopes=["mcp.access"],
         )
 
-        new_token = await provider.exchange_refresh_token(client, rt, scopes=["mcp.access", "openid"])
+        new_token = await provider.exchange_refresh_token(
+            client, rt, scopes=["mcp.access", "openid"]
+        )
 
         assert new_token.scope == "mcp.access openid"
 
@@ -1368,12 +1370,12 @@ class TestEndToEndFlow:
         mock_response.status_code = 200
         mock_response.json.return_value = {"id_token": "valid.jwt.token"}
 
-        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as MockClient:
+        with patch("sjifire.ops.oauth_provider.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             provider._validator = MagicMock()
             provider._validator.validate_token.return_value = _TEST_USER

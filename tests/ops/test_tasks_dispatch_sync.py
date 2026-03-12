@@ -3,8 +3,6 @@
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from sjifire.ops.dispatch.models import DispatchAnalysis
 from sjifire.ops.tasks.dispatch_sync import (
     _prewarm_schedule,
@@ -14,7 +12,6 @@ from sjifire.ops.tasks.dispatch_sync import (
 )
 from tests.factories import DispatchAnalysisFactory, DispatchCallDocumentFactory
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -22,9 +19,7 @@ from tests.factories import DispatchAnalysisFactory, DispatchCallDocumentFactory
 
 def _enriched(**kw):
     """Build a doc with populated analysis (IC + summary)."""
-    return DispatchCallDocumentFactory.build(
-        analysis=DispatchAnalysisFactory.build(), **kw
-    )
+    return DispatchCallDocumentFactory.build(analysis=DispatchAnalysisFactory.build(), **kw)
 
 
 def _unenriched(**kw):
@@ -69,23 +64,21 @@ class TestDispatchSync:
 
     async def test_new_calls_and_reenriched(self):
         """Returns sum of new + successfully re-enriched."""
-        cls, s = _mock_store(sync=3, enrich=[_enriched(), _enriched()])
+        cls, _s = _mock_store(sync=3, enrich=[_enriched(), _enriched()])
         with patch(_DS, cls):
             result = await dispatch_sync()
         assert result == 5  # 3 new + 2 re-enriched
 
     async def test_new_calls_none_reenriched(self):
         """Returns only new count when enrich returns empty results."""
-        cls, s = _mock_store(sync=4)
+        cls, _s = _mock_store(sync=4)
         with patch(_DS, cls):
             result = await dispatch_sync()
         assert result == 4
 
     async def test_enrich_returns_partial_success(self):
         """Only counts docs where analysis has IC or summary set."""
-        cls, s = _mock_store(
-            enrich=[_enriched(), _unenriched(), _enriched()]
-        )
+        cls, _s = _mock_store(enrich=[_enriched(), _unenriched(), _enriched()])
         with patch(_DS, cls):
             result = await dispatch_sync()
         assert result == 2  # only the 2 enriched docs
@@ -123,14 +116,14 @@ class TestDispatchEnrich:
 
     async def test_no_stored_calls(self):
         """Returns 0 when store is empty."""
-        cls, s = _mock_store()
+        cls, _s = _mock_store()
         with patch(_DS, cls):
             result = await dispatch_enrich()
         assert result == 0
 
     async def test_enrich_partial_success(self):
         """Only counts docs that gained analysis after enrichment."""
-        cls, s = _mock_store(
+        cls, _s = _mock_store(
             recent=[_unenriched()],
             enrich=[_unenriched()],  # LLM failure
         )
@@ -174,7 +167,7 @@ class TestDispatchReenrich:
         """Counts only docs with analysis after force re-enrichment."""
         docs = [_enriched() for _ in range(4)]
         results = [_enriched(), _unenriched(), _enriched(), _unenriched()]
-        cls, s = _mock_store(recent=docs, enrich=results)
+        cls, _s = _mock_store(recent=docs, enrich=results)
         with (
             patch(_DS, cls),
             patch(_PW, new_callable=AsyncMock),
@@ -184,7 +177,7 @@ class TestDispatchReenrich:
 
     async def test_prewarm_not_called_when_empty(self):
         """_prewarm_schedule is not called when there are no docs."""
-        cls, s = _mock_store()
+        cls, _s = _mock_store()
         with (
             patch(_DS, cls),
             patch(_PW, new_callable=AsyncMock) as mock_pw,

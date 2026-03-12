@@ -9,7 +9,6 @@ from sjifire.ops.events.calendar import (
     fetch_events,
 )
 
-
 # ---------------------------------------------------------------------------
 # _strip_html
 # ---------------------------------------------------------------------------
@@ -152,9 +151,7 @@ class TestFetchEvents:
             {"mailbox": "ok@sjifire.org", "label": "OK"},
             {"mailbox": "bad@sjifire.org", "label": "Bad"},
         ]
-        ok_events = [
-            {"event_id": "1", "subject": "Good Event", "start": "2026-02-01T09:00:00"}
-        ]
+        ok_events = [{"event_id": "1", "subject": "Good Event", "start": "2026-02-01T09:00:00"}]
 
         async def fake_fetch(mailbox, label, start, end, calendar_name=""):
             if label == "Bad":
@@ -283,9 +280,7 @@ class TestFetchCached:
     async def test_cache_miss_fetches_and_caches(self):
         from sjifire.ops.events.calendar import _fetch_cached
 
-        fresh_events = [
-            {"event_id": "fresh", "subject": "Fresh", "start": "2026-02-01T10:00:00"}
-        ]
+        fresh_events = [{"event_id": "fresh", "subject": "Fresh", "start": "2026-02-01T10:00:00"}]
 
         mock_cache = AsyncMock()
         mock_cache.get = AsyncMock(return_value=None)
