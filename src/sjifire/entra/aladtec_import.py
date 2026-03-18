@@ -489,10 +489,12 @@ class AladtecImporter:
             return None
 
         licenses = await self.user_manager.get_user_licenses(existing.id)
-        if self.license_sku in licenses:
+        if licenses:
+            # User has at least one license (may be the configured SKU or a
+            # higher-tier plan like Business Standard) — don't touch it
             return True
 
-        # License missing on an active user
+        # No licenses at all on an active user
         if dry_run:
             logger.info("Would assign missing license to %s", member.display_name)
             return False

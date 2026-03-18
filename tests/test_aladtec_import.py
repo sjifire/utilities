@@ -1142,7 +1142,7 @@ class TestEnsureLicense:
     async def test_skips_when_license_already_assigned(
         self, importer_with_license, existing_user, active_member
     ):
-        """Should return True when user already has the license."""
+        """Should return True when user already has the configured license."""
         importer_with_license.user_manager.get_user_licenses = AsyncMock(
             return_value=["3b555118-da6a-4418-894f-7df1e2096870"]
         )
@@ -1151,6 +1151,22 @@ class TestEnsureLicense:
         )
         assert result is True
         importer_with_license.user_manager.assign_license = AsyncMock()
+        importer_with_license.user_manager.assign_license.assert_not_called()
+
+    async def test_skips_when_higher_tier_license_present(
+        self, importer_with_license, existing_user, active_member
+    ):
+        """Should not assign Basic when user already has a different license (e.g. Business Standard)."""
+        importer_with_license.user_manager.get_user_licenses = AsyncMock(
+            return_value=["cbdc14ab-d96c-4c30-b9f4-6ada7cdc1d46"]  # Business Standard SKU
+        )
+        importer_with_license.user_manager.assign_license = AsyncMock()
+
+        result = await importer_with_license._ensure_license(
+            existing_user, active_member, dry_run=False
+        )
+
+        assert result is True
         importer_with_license.user_manager.assign_license.assert_not_called()
 
     async def test_assigns_missing_license(
