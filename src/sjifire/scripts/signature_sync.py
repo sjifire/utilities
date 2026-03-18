@@ -54,27 +54,25 @@ class SignatureTemplate:
     company_name_text: str
     office_phone: str
     rule_html: str
-    rule_text: str
 
 
 def load_template(name: str = "default") -> SignatureTemplate:
     """Load a signature template from config/signatures/.
 
-    Reads ``<name>.json`` for settings and ``<name>.html`` / ``<name>.txt``
-    for the transport rule templates. Template placeholders use ``{{key}}``
-    syntax and are filled from the JSON config plus Exchange attribute tokens.
+    Reads ``<name>.json`` for settings and ``<name>.html`` for the transport
+    rule template. Template placeholders use ``{{key}}`` syntax and are
+    filled from the JSON config plus Exchange attribute tokens.
 
     Args:
         name: Template name (matches filenames without extension)
 
     Returns:
-        SignatureTemplate with rendered HTML and text
+        SignatureTemplate with rendered HTML
     """
     config_path = CONFIG_DIR / f"{name}.json"
     html_path = CONFIG_DIR / f"{name}.html"
-    text_path = CONFIG_DIR / f"{name}.txt"
 
-    for p in (config_path, html_path, text_path):
+    for p in (config_path, html_path):
         if not p.exists():
             msg = f"Signature template file not found: {p}"
             raise FileNotFoundError(msg)
@@ -101,7 +99,6 @@ def load_template(name: str = "default") -> SignatureTemplate:
         company_name_text=config["company_name_text"],
         office_phone=config["office_phone"],
         rule_html=_render(html_path.read_text()),
-        rule_text=_render(text_path.read_text()),
     )
 
 

@@ -485,20 +485,10 @@ class TestLoadTemplate:
         assert "%%CustomAttribute6%%" in template.rule_html
         assert "%%CustomAttribute7%%" in template.rule_html
 
-    def test_text_contains_exchange_tokens(self, template):
-        assert "%%FirstName%%" in template.rule_text
-        assert "%%CustomAttribute8%%" in template.rule_text
-
     def test_html_has_no_unresolved_placeholders(self, template):
         import re
 
         unresolved = re.findall(r"\{\{[^}]+\}\}", template.rule_html)
-        assert unresolved == [], f"Unresolved placeholders: {unresolved}"
-
-    def test_text_has_no_unresolved_placeholders(self, template):
-        import re
-
-        unresolved = re.findall(r"\{\{[^}]+\}\}", template.rule_text)
         assert unresolved == [], f"Unresolved placeholders: {unresolved}"
 
     def test_missing_template_raises(self):
