@@ -1048,9 +1048,7 @@ class TestLicenseAssignmentOnCreate:
         result = ImportResult()
         importer_with_license.user_manager.create_user = AsyncMock(return_value=created_user)
         # Fail first, succeed on retry
-        importer_with_license.user_manager.assign_license = AsyncMock(
-            side_effect=[False, True]
-        )
+        importer_with_license.user_manager.assign_license = AsyncMock(side_effect=[False, True])
 
         await importer_with_license._handle_new_user(
             member=new_member, result=result, dry_run=False
