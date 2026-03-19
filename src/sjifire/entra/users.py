@@ -400,6 +400,7 @@ class EntraUserManager:
             mail=email or upn,
             mail_nickname=upn.split("@")[0],
             password_profile=password_profile,
+            usage_location="US",
             employee_id=employee_id,
             job_title=job_title,
             mobile_phone=mobile_phone,
@@ -718,6 +719,22 @@ class EntraUserManager:
         except Exception as e:
             logger.error("Failed to get licenses for %s: %s", user_id, e)
             return []
+
+    async def set_usage_location(self, user_id: str, location: str = "US") -> bool:
+        """Set usageLocation on a user (required before license assignment).
+
+        Only updates if not already set.
+        """
+        try:
+            user = await self.client.users.by_user_id(user_id).get()
+            if user and user.usage_location:
+                return True
+            await self.client.users.by_user_id(user_id).patch(User(usage_location=location))
+            logger.info("Set usageLocation=%s for user: %s", location, user_id)
+            return True
+        except Exception as e:
+            logger.error("Failed to set usageLocation for %s: %s", user_id, e)
+            return False
 
     async def assign_license(self, user_id: str, sku_id: str) -> bool:
         """Assign a license to a user.

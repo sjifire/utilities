@@ -499,6 +499,9 @@ class AladtecImporter:
             logger.info("Would assign missing license to %s", member.display_name)
             return False
 
+        # Ensure usageLocation is set (required for license assignment)
+        await self.user_manager.set_usage_location(existing.id)
+
         ok = await self.user_manager.assign_license(existing.id, self.license_sku)
         if ok:
             logger.info("Assigned missing license to %s", member.display_name)

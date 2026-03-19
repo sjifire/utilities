@@ -1170,8 +1170,9 @@ class TestEnsureLicense:
     async def test_assigns_missing_license(
         self, importer_with_license, existing_user, active_member
     ):
-        """Should assign license when missing on active user."""
+        """Should set usageLocation and assign license when missing on active user."""
         importer_with_license.user_manager.get_user_licenses = AsyncMock(return_value=[])
+        importer_with_license.user_manager.set_usage_location = AsyncMock(return_value=True)
         importer_with_license.user_manager.assign_license = AsyncMock(return_value=True)
 
         result = await importer_with_license._ensure_license(
@@ -1179,6 +1180,7 @@ class TestEnsureLicense:
         )
 
         assert result is True
+        importer_with_license.user_manager.set_usage_location.assert_called_once_with("user-123")
         importer_with_license.user_manager.assign_license.assert_called_once_with(
             "user-123", "3b555118-da6a-4418-894f-7df1e2096870"
         )
@@ -1202,6 +1204,7 @@ class TestEnsureLicense:
     ):
         """Should return False when license assignment fails."""
         importer_with_license.user_manager.get_user_licenses = AsyncMock(return_value=[])
+        importer_with_license.user_manager.set_usage_location = AsyncMock(return_value=True)
         importer_with_license.user_manager.assign_license = AsyncMock(return_value=False)
 
         result = await importer_with_license._ensure_license(
