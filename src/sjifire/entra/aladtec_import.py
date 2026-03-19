@@ -502,11 +502,10 @@ class AladtecImporter:
         # Ensure usageLocation is set (required for license assignment)
         await self.user_manager.set_usage_location(existing.id)
 
-        ok = await self.user_manager.assign_license(existing.id, self.license_sku)
-        if ok:
-            logger.info("Assigned missing license to %s", member.display_name)
-        else:
-            logger.warning("Failed to assign missing license to %s", member.display_name)
+        # Retry with backoff — usageLocation may not have replicated yet
+        ok = await self._assign_license_with_retry(
+            existing.id, self.license_sku, member.display_name
+        )
         return ok
 
     def _needs_update(self, existing: EntraUser, member: Member) -> bool:

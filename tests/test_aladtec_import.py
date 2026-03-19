@@ -1181,7 +1181,7 @@ class TestEnsureLicense:
 
         assert result is True
         importer_with_license.user_manager.set_usage_location.assert_called_once_with("user-123")
-        importer_with_license.user_manager.assign_license.assert_called_once_with(
+        importer_with_license.user_manager.assign_license.assert_called_with(
             "user-123", "3b555118-da6a-4418-894f-7df1e2096870"
         )
 
@@ -1199,10 +1199,11 @@ class TestEnsureLicense:
         assert result is False
         importer_with_license.user_manager.assign_license.assert_not_called()
 
+    @patch("sjifire.entra.aladtec_import.asyncio.sleep", new_callable=AsyncMock)
     async def test_handles_assign_failure(
-        self, importer_with_license, existing_user, active_member
+        self, mock_sleep, importer_with_license, existing_user, active_member
     ):
-        """Should return False when license assignment fails."""
+        """Should return False when license assignment fails after retries."""
         importer_with_license.user_manager.get_user_licenses = AsyncMock(return_value=[])
         importer_with_license.user_manager.set_usage_location = AsyncMock(return_value=True)
         importer_with_license.user_manager.assign_license = AsyncMock(return_value=False)
