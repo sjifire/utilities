@@ -1,5 +1,6 @@
 """Import Aladtec members into Entra ID."""
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 
@@ -335,6 +336,9 @@ class AladtecImporter:
                 }
             )
 
+        # Ensure license is assigned (catches failed assignments from prior runs)
+        await self._ensure_license(existing, member, dry_run)
+
     async def _handle_new_user(
         self,
         member: Member,
@@ -407,16 +411,13 @@ class AladtecImporter:
                 extension_attribute4=schedules_str,
             )
             if created_user:
-                # Assign license if configured
+                # Assign license if configured — retry with backoff since Entra
+                # may not have fully replicated the new user object yet
                 license_ok = True
                 if self.license_sku:
-                    license_ok = await self.user_manager.assign_license(
-                        created_user.id, self.license_sku
+                    license_ok = await self._assign_license_with_retry(
+                        created_user.id, self.license_sku, member.display_name
                     )
-                    if not license_ok:
-                        logger.warning(
-                            "Created %s but failed to assign license", member.display_name
-                        )
 
                 result.created.append(
                     {
@@ -447,6 +448,65 @@ class AladtecImporter:
         if member.display_rank:
             return f"{member.display_rank} {member.first_name} {member.last_name}"
         return member.display_name
+
+    async def _assign_license_with_retry(
+        self, user_id: str, sku_id: str, display_name: str, max_attempts: int = 3
+    ) -> bool:
+        """Assign a license with retry and backoff for newly created users.
+
+        Entra ID may not have fully replicated the user object immediately
+        after creation, causing license assignment to fail with a
+        ValidationException.
+        """
+        for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                delay = 5 * attempt  # 10s, 15s
+                logger.info(
+                    "Retrying license assignment for %s (attempt %d/%d, waiting %ds)",
+                    display_name,
+                    attempt,
+                    max_attempts,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+
+            ok = await self.user_manager.assign_license(user_id, sku_id)
+            if ok:
+                return True
+
+        logger.warning(
+            "Created %s but failed to assign license after %d attempts",
+            display_name,
+            max_attempts,
+        )
+        return False
+
+    async def _ensure_license(
+        self, existing: EntraUser, member: Member, dry_run: bool
+    ) -> bool | None:
+        """Check license and assign if missing. Returns None if no license_sku configured."""
+        if not self.license_sku:
+            return None
+
+        licenses = await self.user_manager.get_user_licenses(existing.id)
+        if licenses:
+            # User has at least one license (may be the configured SKU or a
+            # higher-tier plan like Business Standard) — don't touch it
+            return True
+
+        # No licenses at all on an active user
+        if dry_run:
+            logger.info("Would assign missing license to %s", member.display_name)
+            return False
+
+        # Ensure usageLocation is set (required for license assignment)
+        await self.user_manager.set_usage_location(existing.id)
+
+        # Retry with backoff — usageLocation may not have replicated yet
+        ok = await self._assign_license_with_retry(
+            existing.id, self.license_sku, member.display_name
+        )
+        return ok
 
     def _needs_update(self, existing: EntraUser, member: Member) -> bool:
         """Check if an existing user needs to be updated.

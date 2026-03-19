@@ -560,6 +560,7 @@ class TestHandleExistingUserDisableInactive:
         result = ImportResult()
         importer.user_manager.disable_and_remove_licenses = AsyncMock()
         importer.user_manager.update_user = AsyncMock(return_value=True)
+        importer.user_manager.get_user_licenses = AsyncMock(return_value=[])
 
         # Make sure member needs no update so it gets skipped
         active_entra_user.company_name = importer.company_name
@@ -581,6 +582,7 @@ class TestHandleExistingUserDisableInactive:
         result = ImportResult()
         importer.user_manager.disable_and_remove_licenses = AsyncMock()
         importer.user_manager.update_user = AsyncMock(return_value=True)
+        importer.user_manager.get_user_licenses = AsyncMock(return_value=[])
         active_entra_user.email = "bjones@testfire.org"
         active_entra_user.upn = "bjones@testfire.org"
         active_entra_user.company_name = importer.company_name
@@ -761,6 +763,7 @@ class TestImportMembersDisableInactive:
         importer.user_manager.get_users = AsyncMock(return_value=existing_users)
         importer.user_manager.disable_and_remove_licenses = AsyncMock(return_value=(True, True))
         importer.user_manager.update_user = AsyncMock(return_value=True)
+        importer.user_manager.get_user_licenses = AsyncMock(return_value=[])
 
         result = await importer.import_members(members, dry_run=False, disable_inactive=True)
 
@@ -874,6 +877,7 @@ class TestImportMembersDisableInactive:
         importer.user_manager.get_users = AsyncMock(return_value=existing_users)
         importer.user_manager.disable_and_remove_licenses = AsyncMock(return_value=(True, True))
         importer.user_manager.update_user = AsyncMock(return_value=True)
+        importer.user_manager.get_user_licenses = AsyncMock(return_value=[])
 
         result = await importer.import_members(members, dry_run=False, disable_inactive=True)
 
@@ -1036,8 +1040,29 @@ class TestLicenseAssignmentOnCreate:
         assert len(result.created) == 1
         assert result.created[0]["license_assigned"] is True
 
-    async def test_records_license_failure(self, importer_with_license, new_member, created_user):
-        """Should record when license assignment fails but still count as created."""
+    @patch("sjifire.entra.aladtec_import.asyncio.sleep", new_callable=AsyncMock)
+    async def test_retries_license_on_failure(
+        self, mock_sleep, importer_with_license, new_member, created_user
+    ):
+        """Should retry license assignment with backoff on failure."""
+        result = ImportResult()
+        importer_with_license.user_manager.create_user = AsyncMock(return_value=created_user)
+        # Fail first, succeed on retry
+        importer_with_license.user_manager.assign_license = AsyncMock(side_effect=[False, True])
+
+        await importer_with_license._handle_new_user(
+            member=new_member, result=result, dry_run=False
+        )
+
+        assert importer_with_license.user_manager.assign_license.call_count == 2
+        mock_sleep.assert_called_once_with(10)  # 5 * attempt(2)
+        assert result.created[0]["license_assigned"] is True
+
+    @patch("sjifire.entra.aladtec_import.asyncio.sleep", new_callable=AsyncMock)
+    async def test_records_license_failure_after_all_retries(
+        self, mock_sleep, importer_with_license, new_member, created_user
+    ):
+        """Should record failure after exhausting all retry attempts."""
         result = ImportResult()
         importer_with_license.user_manager.create_user = AsyncMock(return_value=created_user)
         importer_with_license.user_manager.assign_license = AsyncMock(return_value=False)
@@ -1046,6 +1071,7 @@ class TestLicenseAssignmentOnCreate:
             member=new_member, result=result, dry_run=False
         )
 
+        assert importer_with_license.user_manager.assign_license.call_count == 3
         assert len(result.created) == 1
         assert result.created[0]["license_assigned"] is False
 
@@ -1077,6 +1103,171 @@ class TestLicenseAssignmentOnCreate:
 
         assert len(result.created) == 1
         assert result.created[0]["license_sku"] is None
+
+
+class TestEnsureLicense:
+    """Tests for license reconciliation on existing users."""
+
+    @pytest.fixture
+    def existing_user(self):
+        return EntraUser(
+            id="user-123",
+            display_name="John Smith",
+            first_name="John",
+            last_name="Smith",
+            email="jsmith@testfire.org",
+            upn="jsmith@testfire.org",
+            employee_id="123",
+            account_enabled=True,
+            company_name="Test Fire Department",
+        )
+
+    @pytest.fixture
+    def active_member(self):
+        return Member(
+            id="123",
+            first_name="John",
+            last_name="Smith",
+            email="jsmith@testfire.org",
+            status="Active",
+        )
+
+    async def test_skips_when_no_license_sku(self, importer, existing_user, active_member):
+        """Should return None when no license_sku configured."""
+        result = await importer._ensure_license(existing_user, active_member, dry_run=False)
+        assert result is None
+
+    async def test_skips_when_license_already_assigned(
+        self, importer_with_license, existing_user, active_member
+    ):
+        """Should return True when user already has the configured license."""
+        importer_with_license.user_manager.get_user_licenses = AsyncMock(
+            return_value=["3b555118-da6a-4418-894f-7df1e2096870"]
+        )
+        result = await importer_with_license._ensure_license(
+            existing_user, active_member, dry_run=False
+        )
+        assert result is True
+        importer_with_license.user_manager.assign_license = AsyncMock()
+        importer_with_license.user_manager.assign_license.assert_not_called()
+
+    async def test_skips_when_higher_tier_license_present(
+        self, importer_with_license, existing_user, active_member
+    ):
+        """Should not assign Basic when user already has a different license (e.g. Business Standard)."""
+        importer_with_license.user_manager.get_user_licenses = AsyncMock(
+            return_value=["cbdc14ab-d96c-4c30-b9f4-6ada7cdc1d46"]  # Business Standard SKU
+        )
+        importer_with_license.user_manager.assign_license = AsyncMock()
+
+        result = await importer_with_license._ensure_license(
+            existing_user, active_member, dry_run=False
+        )
+
+        assert result is True
+        importer_with_license.user_manager.assign_license.assert_not_called()
+
+    async def test_assigns_missing_license(
+        self, importer_with_license, existing_user, active_member
+    ):
+        """Should set usageLocation and assign license when missing on active user."""
+        importer_with_license.user_manager.get_user_licenses = AsyncMock(return_value=[])
+        importer_with_license.user_manager.set_usage_location = AsyncMock(return_value=True)
+        importer_with_license.user_manager.assign_license = AsyncMock(return_value=True)
+
+        result = await importer_with_license._ensure_license(
+            existing_user, active_member, dry_run=False
+        )
+
+        assert result is True
+        importer_with_license.user_manager.set_usage_location.assert_called_once_with("user-123")
+        importer_with_license.user_manager.assign_license.assert_called_with(
+            "user-123", "3b555118-da6a-4418-894f-7df1e2096870"
+        )
+
+    async def test_dry_run_reports_missing_license(
+        self, importer_with_license, existing_user, active_member
+    ):
+        """Should report missing license in dry run without assigning."""
+        importer_with_license.user_manager.get_user_licenses = AsyncMock(return_value=[])
+        importer_with_license.user_manager.assign_license = AsyncMock()
+
+        result = await importer_with_license._ensure_license(
+            existing_user, active_member, dry_run=True
+        )
+
+        assert result is False
+        importer_with_license.user_manager.assign_license.assert_not_called()
+
+    @patch("sjifire.entra.aladtec_import.asyncio.sleep", new_callable=AsyncMock)
+    async def test_handles_assign_failure(
+        self, mock_sleep, importer_with_license, existing_user, active_member
+    ):
+        """Should return False when license assignment fails after retries."""
+        importer_with_license.user_manager.get_user_licenses = AsyncMock(return_value=[])
+        importer_with_license.user_manager.set_usage_location = AsyncMock(return_value=True)
+        importer_with_license.user_manager.assign_license = AsyncMock(return_value=False)
+
+        result = await importer_with_license._ensure_license(
+            existing_user, active_member, dry_run=False
+        )
+
+        assert result is False
+
+    async def test_called_for_existing_active_user(
+        self, importer_with_license, existing_user, active_member
+    ):
+        """Ensure license check runs for active users in _handle_existing_user."""
+        result = ImportResult()
+        importer_with_license.user_manager.get_user_licenses = AsyncMock(
+            return_value=["3b555118-da6a-4418-894f-7df1e2096870"]
+        )
+        importer_with_license.user_manager.update_user = AsyncMock(return_value=True)
+
+        await importer_with_license._handle_existing_user(
+            member=active_member,
+            existing=existing_user,
+            result=result,
+            dry_run=False,
+            disable_inactive=False,
+        )
+
+        importer_with_license.user_manager.get_user_licenses.assert_called_once()
+
+    async def test_not_called_for_inactive_disabled(self, importer_with_license):
+        """Ensure license check does NOT run for inactive users being disabled."""
+        result = ImportResult()
+        existing = EntraUser(
+            id="user-123",
+            display_name="John Smith",
+            first_name="John",
+            last_name="Smith",
+            email="jsmith@testfire.org",
+            upn="jsmith@testfire.org",
+            employee_id="123",
+            account_enabled=True,
+        )
+        member = Member(
+            id="123",
+            first_name="John",
+            last_name="Smith",
+            email="jsmith@testfire.org",
+            status="Inactive",
+        )
+        importer_with_license.user_manager.disable_and_remove_licenses = AsyncMock(
+            return_value=(True, True)
+        )
+        importer_with_license.user_manager.get_user_licenses = AsyncMock()
+
+        await importer_with_license._handle_existing_user(
+            member=member,
+            existing=existing,
+            result=result,
+            dry_run=False,
+            disable_inactive=True,
+        )
+
+        importer_with_license.user_manager.get_user_licenses.assert_not_called()
 
 
 class TestUsernameUPNMatching:
