@@ -124,7 +124,7 @@ class TestDutyCalendarSyncFiltering:
         """Create DutyCalendarSync instance."""
         with (
             patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.duty_sync.GraphServiceClient"),
+            patch("sjifire.calendar.duty_sync.create_graph_client"),
         ):
             return DutyCalendarSync()
 
@@ -296,7 +296,7 @@ class TestDutyCalendarSyncContactLookup:
         """Create DutyCalendarSync instance."""
         with (
             patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.duty_sync.GraphServiceClient"),
+            patch("sjifire.calendar.duty_sync.create_graph_client"),
         ):
             return DutyCalendarSync()
 
@@ -369,7 +369,7 @@ class TestDutyCalendarSyncConvertSchedules:
         """Create DutyCalendarSync instance."""
         with (
             patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.duty_sync.GraphServiceClient"),
+            patch("sjifire.calendar.duty_sync.create_graph_client"),
         ):
             return DutyCalendarSync()
 
@@ -464,7 +464,7 @@ class TestDutyCalendarSyncGraphAPI:
         """Create DutyCalendarSync with mocked Graph client."""
         with (
             patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.create_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
@@ -650,7 +650,7 @@ class TestDutyCalendarSyncBatchOperations:
         """Create DutyCalendarSync with mocked Graph client."""
         with (
             patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.create_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
@@ -750,7 +750,7 @@ class TestDutyCalendarSyncSyncEvents:
         """Create DutyCalendarSync with mocked methods."""
         with (
             patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.create_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
@@ -879,7 +879,7 @@ class TestDutyCalendarSyncDeleteDateRange:
         """Create DutyCalendarSync with mocked methods."""
         with (
             patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.create_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
@@ -946,7 +946,7 @@ class TestDutyCalendarSyncUpdateEventsBatch:
         """Create DutyCalendarSync with mocked client."""
         with (
             patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.create_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
@@ -1029,7 +1029,7 @@ class TestDutyCalendarSyncSyncWrapper:
         """Create DutyCalendarSync with mocked methods."""
         with (
             patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.duty_sync.create_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client

@@ -1,0 +1,1917 @@
+{% extends "base.html" %}
+{% from "partials/_crew_panel.html" import crew_column %}
+{% from "partials/_call_card.html" import call_cards %}
+
+{% block title %}SJIF&amp;R Dashboard{% endblock %}
+
+{% block head_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/calendar.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/isToday.js"></script>
+<script>dayjs.extend(dayjs_plugin_calendar); dayjs.extend(dayjs_plugin_isToday);</script>
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/centrifuge@5/dist/centrifuge.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3/dist/cdn.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+    /* Animations */
+    @keyframes shimmer {
+      0%   { background-position: -400px 0; }
+      100% { background-position:  400px 0; }
+    }
+
+    /* Content wrapper */
+    .content-wrap { max-width: 1200px; margin: 0 auto; }
+    /* (reports tab now uses same max-width as other tabs) */
+
+    /* ── Grid layouts ── */
+    .grid-4, .grid-3, .grid-overview { display: grid; gap: 16px; }
+    .grid-4        { grid-template-columns: repeat(4, 1fr); }
+    .grid-3        { grid-template-columns: repeat(3, 1fr); }
+    .grid-overview { grid-template-columns: 1fr 1.6fr; gap: 20px; }
+
+    .call-card:last-child { border-bottom: none; }
+
+    /* ── Call cards ── */
+    .call-card {
+      padding: 14px 18px;
+      border-left: 3px solid;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .call-card[data-s="high"] {
+      border-left-color: var(--color-red);
+      background: rgba(220, 38, 38, .1);
+    }
+    .call-card[data-s="medium"] {
+      border-left-color: var(--color-amber-dark);
+      background: rgba(245, 158, 11, .08);
+    }
+    .call-card[data-s="low"] {
+      border-left-color: var(--color-gray);
+      background: rgba(107, 114, 128, .08);
+    }
+    .call-card-right { text-align: right; flex-shrink: 0; }
+
+    /* ── Crew ── */
+    .crew-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .contact-link {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-decoration: none;
+    }
+    .contact-link:hover {
+      color: var(--color-blue);
+      text-decoration: underline;
+    }
+    .contact-link + .contact-link::before {
+      content: " | ";
+      color: var(--text-faint);
+    }
+
+    /* Address link */
+    .address-link { color: var(--text-muted); text-decoration: none; }
+    .address-link:hover { color: var(--color-blue); text-decoration: underline; }
+
+    /* ── Skeleton loading ── */
+    .skeleton {
+      background: linear-gradient(90deg,
+        var(--border-subtle) 25%,
+        var(--border-medium) 50%,
+        var(--border-subtle) 75%);
+      background-size: 800px 100%;
+      animation: shimmer 1.5s ease-in-out infinite;
+      border-radius: 4px;
+    }
+    .skeleton-stat { height: 100px; }
+    .skeleton-text { height: 16px; border-radius: 4px; }
+    .skeleton-row  { height: 48px; border-bottom: 1px solid var(--border-subtle); }
+
+    /* Footer */
+    .dashboard-footer {
+      padding: 16px 24px 32px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-faint);
+    }
+
+    /* ── Completeness bar ── */
+    .completeness-bar          { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .completeness-bar .bar     { display: inline-block; width: 40px; height: 5px; background: var(--border-medium); border-radius: 3px; overflow: hidden; vertical-align: middle; }
+    .completeness-bar .bar-fill { display: block; height: 100%; background: var(--color-blue); border-radius: 3px; }
+
+    /* ── Reports layout ── */
+    .reports-layout {}
+
+    /* Table hover */
+    .data-table tbody tr { transition: background .15s; }
+    .data-table tbody tr:hover { background: rgba(96, 165, 250, .06); }
+
+    /* ── Report detail cells ── */
+    .neris-id {
+      font-size: 10px;
+      color: var(--text-dim);
+      font-family: monospace;
+      margin-top: 2px;
+    }
+    .completeness {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+    .completeness-bar-sm {
+      display: inline-block;
+      width: 40px;
+      height: 3px;
+      background: var(--border-default);
+      border-radius: 2px;
+      vertical-align: middle;
+      margin-left: 4px;
+    }
+    .completeness-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--color-blue);
+    }
+    /* ── Severity dot (call priority indicator) ── */
+    .dot-cell { width: 12px; padding-right: 0 !important; }
+    .severity-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border-medium);
+    }
+    .severity-dot.high   { background: var(--color-red); }
+    .severity-dot.medium { background: var(--color-amber-dark); }
+    .severity-dot.low    { background: var(--color-green); }
+
+    /* ── Report status badges ── */
+    .report-status { font-size: 12px; font-weight: 600; }
+    .report-status.neris   { color: var(--color-green); }
+    .report-status.local   { color: var(--color-blue); text-transform: capitalize; }
+    .report-status.locked  { color: var(--text-dim); }
+    .report-status.missing { color: var(--color-amber-dark); }
+    .call-id { font-family: monospace; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+    .nature  { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
+    .address { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
+    .dt      { white-space: nowrap; color: var(--text-secondary); }
+    .dt-time { color: var(--text-muted); font-size: 12px; }
+
+    /* ── Filter pills ── */
+    .filter-pills { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-pill {
+      background: none;
+      border: 1px solid var(--border-default);
+      color: var(--text-dim);
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .filter-pill:hover { color: var(--text-muted); border-color: var(--border-medium); }
+    .filter-pill.active {
+      background: var(--blue-alpha);
+      border-color: rgba(96, 165, 250, .3);
+      color: var(--color-blue);
+    }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-medium);
+      border-radius: 10px;
+      padding: 24px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+    }
+    .modal h2 {
+      font-size: 16px;
+      color: var(--text-primary);
+      margin-bottom: 16px;
+    }
+    .modal label {
+      display: block;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .modal input,
+    .modal select {
+      width: 100%;
+      background: var(--bg-page);
+      border: 1px solid var(--border-medium);
+      border-radius: 6px;
+      color: var(--text-secondary);
+      padding: 8px 12px;
+      font-size: 14px;
+      font-family: inherit;
+      margin-bottom: 12px;
+    }
+    .modal input:focus,
+    .modal select:focus {
+      outline: none;
+      border-color: var(--color-blue);
+    }
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
+    .modal-actions button {
+      padding: 8px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary { background: var(--color-blue); color: #fff; }
+    .btn-primary:hover { background: #4a94f0; }
+    .btn-secondary { background: var(--border-medium); color: var(--text-muted); }
+    .btn-secondary:hover { background: var(--border-strong); }
+
+    /* ── Help modal ── */
+    .help-row {
+      padding: 12px 0;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .help-label { flex-shrink: 0; min-width: 280px; }
+    .help-cmd {
+      font-size: 12px;
+      background: rgba(96, 165, 250, .1);
+      color: var(--color-blue);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-weight: 600;
+    }
+    .help-btn {
+      background: none;
+      border: 1px solid var(--border-default);
+      color: var(--text-dim);
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .15s;
+    }
+    .help-btn:hover { color: var(--text-secondary); border-color: var(--color-blue); }
+
+    /* ── Chat drawer (top) ── */
+    .chat-drawer {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .chat-drawer-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      background: var(--bg-panel-alt);
+      border-bottom: 1px solid var(--border-default);
+    }
+    .chat-drawer-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .chat-drawer-toggle {
+      background: none;
+      border: 1px solid var(--border-default);
+      color: var(--text-dim);
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all .15s;
+    }
+    .chat-drawer-toggle:hover { color: var(--text-secondary); border-color: var(--color-blue); }
+    .chat-drawer-messages {
+      max-height: 45vh;
+      overflow-y: auto;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .chat-drawer-messages::-webkit-scrollbar       { width: 5px; }
+    .chat-drawer-messages::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+    .chat-msg {
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .chat-msg.user {
+      max-width: 70%;
+      align-self: flex-end;
+      background: var(--color-blue);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .chat-msg.assistant {
+      align-self: stretch;
+      background: var(--bg-page);
+      border: 1px solid var(--border-default);
+      border-bottom-left-radius: 4px;
+    }
+    .chat-msg.assistant p             { margin-bottom: 6px; }
+    .chat-msg.assistant p:last-child  { margin-bottom: 0; }
+    .chat-msg.assistant strong        { color: var(--text-primary); }
+    .chat-msg.assistant code          { background: var(--border-medium); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+    .chat-msg.assistant ul,
+    .chat-msg.assistant ol            { margin: 4px 0 6px 16px; }
+    .chat-msg.assistant li            { margin-bottom: 2px; }
+    .chat-msg.assistant table         { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8px 0; }
+    .chat-msg.assistant th,
+    .chat-msg.assistant td            { padding: 6px 10px; border: 1px solid var(--border-default); text-align: left; white-space: nowrap; }
+    .chat-msg.assistant th            { background: var(--bg-panel-alt); font-weight: 600; color: var(--text-primary); }
+    .chat-msg.assistant td            { color: var(--text-secondary); }
+    .chat-msg.assistant .table-wrap   { overflow-x: auto; }
+
+    .chat-tool-indicator {
+      align-self: flex-start;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: var(--border-subtle);
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    .chat-tool-indicator .spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid var(--border-medium);
+      border-top-color: var(--color-blue);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .chat-tool-result {
+      align-self: flex-start;
+      padding: 6px 10px;
+      background: var(--green-alpha);
+      border: 1px solid rgba(34, 197, 94, .2);
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--color-green);
+    }
+
+    .chat-typing {
+      align-self: flex-start;
+      display: flex;
+      gap: 3px;
+      padding: 10px 14px;
+      background: var(--bg-page);
+      border: 1px solid var(--border-default);
+      border-radius: 10px;
+      border-bottom-left-radius: 4px;
+    }
+    .chat-typing span              { width: 6px; height: 6px; background: var(--text-dim); border-radius: 50%; animation: bounce 1.4s infinite; }
+    .chat-typing span:nth-child(2) { animation-delay: .2s; }
+    .chat-typing span:nth-child(3) { animation-delay: .4s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30%           { transform: translateY(-5px); }
+    }
+
+    .chat-error {
+      background: var(--red-alpha);
+      border: 1px solid rgba(220, 38, 38, .3);
+      color: var(--color-error);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      text-align: center;
+      align-self: stretch;
+    }
+
+    /* ── Suggestion chips ── */
+    .chat-hints {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 12px;
+      flex-shrink: 0;
+    }
+    .chat-hint {
+      background: var(--border-subtle);
+      border: 1px solid var(--border-default);
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 5px 11px;
+      border-radius: 14px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .chat-hint:hover {
+      background: rgba(96, 165, 250, .1);
+      border-color: var(--color-blue);
+      color: var(--text-secondary);
+    }
+
+    .chat-drawer-input {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex: 1;
+      min-width: 0;
+    }
+    .chat-drawer-input textarea {
+      flex: 1;
+      background: var(--bg-page);
+      border: 1px solid var(--border-medium);
+      border-radius: 6px;
+      color: var(--text-secondary);
+      padding: 6px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      resize: none;
+      min-height: 32px;
+      max-height: 80px;
+      line-height: 1.4;
+    }
+    .chat-drawer-input textarea:focus       { outline: none; border-color: var(--color-blue); }
+    .chat-drawer-input textarea::placeholder { color: var(--text-dim); }
+    .chat-drawer-input textarea:disabled    { opacity: .5; }
+    .chat-send-btn {
+      background: var(--color-blue);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      height: 36px;
+    }
+    .chat-send-btn:hover:not(:disabled) { background: #4a94f0; }
+    .chat-send-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Chat empty state ── */
+    .chat-empty-state {
+      padding: 20px 16px;
+      text-align: center;
+    }
+    .chat-empty-state p {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+    .chat-empty-hints {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    /* ── Pagination ── */
+    .pagination-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 18px;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .pagination-bar .page-nav {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .pagination-bar .page-info {
+      min-width: 60px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .page-btn {
+      background: none;
+      border: 1px solid var(--border-default);
+      color: var(--text-muted);
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .page-btn:hover:not(:disabled) {
+      border-color: var(--color-blue);
+      color: var(--color-blue);
+    }
+    .page-btn:disabled {
+      opacity: .3;
+      cursor: not-allowed;
+    }
+
+    /* ── Dashboard responsive ── */
+    @media (max-width: 768px) {
+      .grid-4             { grid-template-columns: repeat(2, 1fr); }
+      .grid-3,
+      .grid-overview,
+      .crew-grid           { grid-template-columns: 1fr; }
+      .dashboard-main      { padding: 12px; }
+      .data-table-wrap     { -webkit-overflow-scrolling: touch; }
+      .dashboard-footer    { flex-direction: column; gap: 4px; }
+
+      .chat-drawer-bar { flex-wrap: wrap; }
+      .filter-pills { gap: 4px; }
+      .filter-pill { padding: 5px 10px; font-size: 11px; }
+
+      /* Card layout tweaks for reports table */
+      .data-table.mobile-cards .dt { font-size: 11px; color: var(--text-dim); padding-left: 18px; margin-bottom: 2px; }
+      .data-table.mobile-cards .dt .dt-time { display: inline; }
+      .data-table.mobile-cards .dt .dt-time::before { content: ' \b7 '; }
+      .data-table.mobile-cards td:nth-child(4) { padding-left: 18px; margin-bottom: 2px; }
+      .data-table.mobile-cards td:nth-child(4) .nature { font-size: 14px; }
+      .data-table.mobile-cards td.address { padding-left: 18px; font-size: 12px; margin-bottom: 6px; }
+      .data-table.mobile-cards td:nth-child(6) { display: inline-block; }
+      .data-table.mobile-cards td:nth-child(7) { display: inline-block; float: right; }
+
+      .help-row { flex-direction: column; gap: 6px; }
+      .help-label { min-width: 0; }
+    }
+
+    /* ── Events tab ── */
+    .evt-event-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .evt-event-card:hover {
+      border-color: var(--border-strong);
+      background: var(--bg-panel-alt);
+    }
+    .evt-event-card.evt-expanded {
+      border-color: rgba(96, 165, 250, .3);
+    }
+    .evt-event-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .evt-event-subject {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .evt-event-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 3px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .evt-event-meta > :nth-child(n+2)::before {
+      content: '\b7';
+      margin-right: 6px;
+      color: var(--text-dim);
+    }
+    .evt-event-badges {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .evt-source-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .evt-source-badge.training { background: var(--blue-alpha); color: var(--color-blue); }
+    .evt-source-badge.pub-ed   { background: var(--purple-alpha); color: var(--color-purple); }
+    .evt-source-badge.manual   { background: var(--amber-alpha); color: var(--color-amber); }
+    .evt-count-badge {
+      font-size: 10px;
+      background: rgba(255,255,255,.08);
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: var(--text-muted);
+    }
+    .evt-event-detail {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .evt-detail-section { margin-bottom: 14px; }
+    .evt-detail-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text-dim);
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .evt-attendee-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .evt-attendee-chip {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .evt-attendee-chip.matched   { background: var(--green-alpha); color: var(--color-green); }
+    .evt-attendee-chip.unmatched { background: var(--amber-alpha); color: var(--color-amber); }
+    .evt-attendee-chip.uncertain { background: var(--red-alpha); color: var(--color-error); }
+    .evt-remove-btn { cursor: pointer; opacity: .6; font-size: 14px; line-height: 1; }
+    .evt-remove-btn:hover { opacity: 1; }
+    .evt-attachment-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: var(--text-muted);
+      background: rgba(255,255,255,.02);
+      margin-bottom: 4px;
+    }
+    .evt-attachment-item a { color: var(--color-blue); text-decoration: none; }
+    .evt-attachment-item a:hover { text-decoration: underline; }
+    .evt-form-input {
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--border-medium);
+      border-radius: 5px;
+      padding: 8px 12px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      width: 100%;
+      font-family: inherit;
+    }
+    .evt-form-input:focus { outline: none; border-color: rgba(96,165,250,.4); }
+    .evt-form-input::placeholder { color: var(--text-faint); }
+    .evt-typeahead-wrap { position: relative; }
+    .evt-typeahead-list {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: var(--bg-panel-alt);
+      border: 1px solid var(--border-medium);
+      border-radius: 0 0 5px 5px;
+      max-height: 160px;
+      overflow-y: auto;
+      z-index: 10;
+    }
+    .evt-typeahead-item {
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .evt-typeahead-item:hover { background: var(--blue-alpha); color: var(--color-blue); }
+    .evt-spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border-medium);
+      border-top-color: var(--color-blue);
+      border-radius: 50%;
+      animation: shimmer-spin .6s linear infinite;
+    }
+    @keyframes shimmer-spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 768px) {
+      .evt-event-top { flex-direction: column; align-items: flex-start; gap: 6px; }
+    }
+</style>
+{% endblock %}
+
+{% block body_attrs %}x-cloak x-data="dashboard()"{% endblock %}
+
+{% block tab_bar %}
+<nav class="nav-bar">
+  <div class="nav-bar-left">
+    <template x-for="t in tabs" :key="t.id">
+      <button class="nav-tab" :class="{'active': activeTab === t.id}" @click="activeTab = t.id" x-text="t.label"></button>
+    </template>
+  </div>
+  <div class="nav-bar-right">
+    <button class="help-btn" x-show="D.is_editor" @click="showHelp = true" title="Assistant commands">?</button>
+    <div x-data="headerStatus()" x-cloak style="display:contents">
+      <span class="nav-status-date" x-show="date_display" x-text="date_display"></span>
+      <div class="status-pill" :class="open_calls ? 'active' : 'ok'" x-show="loaded">
+        <span class="pulse-dot"></span>
+        <span x-text="open_calls ? open_calls + ' Active Call' + (open_calls > 1 ? 's' : '') : 'No Active Calls'"></span>
+      </div>
+    </div>
+  </div>
+</nav>
+{% endblock %}
+
+{% block body %}
+<main class="content-wrap dashboard-main" style="padding:24px">
+
+  <!-- LOADING SKELETON — Overview -->
+  <div x-show="loading && activeTab === 'overview'">
+    <div class="grid-4" style="margin-bottom:24px">
+      <div class="skeleton skeleton-stat"></div>
+      <div class="skeleton skeleton-stat"></div>
+      <div class="skeleton skeleton-stat"></div>
+      <div class="skeleton skeleton-stat"></div>
+    </div>
+    <div class="grid-overview">
+      <div class="panel">
+        <div class="panel-header"><div class="skeleton skeleton-text" style="width:140px"></div></div>
+        <div class="skeleton skeleton-row"></div>
+        <div class="skeleton skeleton-row"></div>
+        <div class="skeleton skeleton-row"></div>
+        <div class="skeleton skeleton-row"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><div class="skeleton skeleton-text" style="width:120px"></div></div>
+        <div class="skeleton skeleton-row"></div>
+        <div class="skeleton skeleton-row"></div>
+        <div class="skeleton skeleton-row"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOADING SKELETON — Calls -->
+  <div x-show="loading && activeTab === 'calls'">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="skeleton skeleton-text" style="width:120px"></div>
+        <div class="skeleton skeleton-text" style="width:80px"></div>
+      </div>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:24px"></th>
+              <th style="width:90px"><div class="skeleton skeleton-text" style="width:20px"></div></th>
+              <th style="width:130px"><div class="skeleton skeleton-text" style="width:70px"></div></th>
+              <th style="width:140px"><div class="skeleton skeleton-text" style="width:50px"></div></th>
+              <th><div class="skeleton skeleton-text" style="width:60px"></div></th>
+              <th style="width:50px"><div class="skeleton skeleton-text" style="width:20px"></div></th>
+              <th><div class="skeleton skeleton-text" style="width:80px"></div></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="i in 8" :key="i">
+              <tr>
+                <td><div class="skeleton" style="width:8px;height:8px;border-radius:50%"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:75px"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:110px"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:120px"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:80%"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:40px"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:70%"></div></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOADING SKELETON — Crew -->
+  <div x-show="loading && activeTab === 'crew'">
+    <div class="crew-grid">
+      <template x-for="col in 2" :key="col">
+        <div class="panel" style="padding:14px 18px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+            <div class="skeleton skeleton-text" style="width:60px;height:14px"></div>
+            <div class="skeleton skeleton-text" style="width:100px;height:14px"></div>
+            <div class="skeleton" style="width:100px;height:20px;border-radius:10px"></div>
+          </div>
+          <template x-for="s in 3" :key="s">
+            <div>
+              <div class="skeleton skeleton-text" style="width:100px;height:12px;margin:12px 0 8px"></div>
+              <template x-for="r in (s === 1 ? 1 : 3)" :key="r">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-subtle)">
+                  <div class="skeleton skeleton-text" style="width:140px"></div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <div class="skeleton" style="width:70px;height:20px;border-radius:10px"></div>
+                    <div class="skeleton skeleton-text" style="width:80px"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- LOADING SKELETON — Reports -->
+  <div x-show="loading && activeTab === 'reports'">
+    <div style="display:flex;gap:6px;margin-bottom:16px">
+      <template x-for="i in 4" :key="i">
+        <div class="skeleton" style="width:90px;height:32px;border-radius:20px"></div>
+      </template>
+    </div>
+    <div class="panel data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width:24px"></th>
+            <th style="width:90px"><div class="skeleton skeleton-text" style="width:20px"></div></th>
+            <th style="width:100px"><div class="skeleton skeleton-text" style="width:70px"></div></th>
+            <th><div class="skeleton skeleton-text" style="width:50px"></div></th>
+            <th><div class="skeleton skeleton-text" style="width:60px"></div></th>
+            <th style="width:80px"><div class="skeleton skeleton-text" style="width:50px"></div></th>
+            <th style="width:100px"><div class="skeleton skeleton-text" style="width:50px"></div></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="i in 10" :key="i">
+            <tr>
+              <td><div class="skeleton" style="width:8px;height:8px;border-radius:50%"></div></td>
+              <td><div class="skeleton skeleton-text" style="width:75px"></div></td>
+              <td>
+                <div class="skeleton skeleton-text" style="width:70px;margin-bottom:4px"></div>
+                <div class="skeleton skeleton-text" style="width:50px;height:12px"></div>
+              </td>
+              <td><div class="skeleton skeleton-text" style="width:120px"></div></td>
+              <td><div class="skeleton skeleton-text" style="width:80%"></div></td>
+              <td><div class="skeleton skeleton-text" style="width:60px"></div></td>
+              <td><div class="skeleton" style="width:80px;height:28px;border-radius:4px"></div></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ERROR STATE -->
+  <div x-show="error && !loading" class="empty-state" style="padding:40px">
+    Failed to load dashboard data. Will retry automatically.
+  </div>
+
+  <!-- OVERVIEW TAB -->
+  <div x-show="!loading && !error && activeTab === 'overview'">
+    <div class="grid-4" style="margin-bottom:24px">
+      <div class="stat-card accent-green">
+        <div class="stat-label">Open Calls</div>
+        <div class="stat-value" x-text="D.open_calls"></div>
+        <div class="stat-desc" x-text="D.open_calls ? 'Active dispatch' : 'All clear'"></div>
+      </div>
+      <div class="stat-card accent-blue">
+        <div class="stat-label">On Duty</div>
+        <div class="stat-value" x-text="D.unique_crew_count"></div>
+        <div class="stat-desc" x-text="D.platoon"></div>
+      </div>
+      <div class="stat-card accent-amber">
+        <div class="stat-label">Recent Calls</div>
+        <div class="stat-value" x-text="D.recent_calls.length"></div>
+        <div class="stat-desc" x-text="D.neris_count + ' submitted to NERIS'"></div>
+      </div>
+      <div class="stat-card accent-purple">
+        <div class="stat-label">Fastest Enroute</div>
+        <div class="stat-value" x-text="D.fastest_turnout ? D.fastest_turnout.display : '\u2014'"></div>
+        <div class="stat-desc" x-text="D.fastest_turnout ? D.fastest_turnout.unit + ' \u2014 ' + D.fastest_turnout.nature + ' (' + D.fastest_turnout.date + ' ' + D.fastest_turnout.time + ')' : 'Page \u2192 enroute'"></div>
+      </div>
+    </div>
+    <div class="grid-overview">
+      <!-- Crew panel -->
+      <div class="panel" style="padding:14px 18px">
+        {{ crew_column("D.sections", "D.platoon", "On Duty", badge_expr="formatShiftEnd(D.shift_end)") }}
+      </div>
+      <!-- Recent calls panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <span style="font-size:14px;color:var(--text-primary)" class="font-semibold">Recent Calls</span>
+          <span style="font-size:11px;color:var(--text-dim)">Last 5 calls</span>
+        </div>
+        {{ call_cards("D.recent_calls", limit=5) }}
+      </div>
+    </div>
+  </div>
+
+  <!-- CALLS TAB -->
+  <div x-show="!loading && !error && activeTab === 'calls'">
+    <div class="panel">
+      <div class="panel-header">
+        <span style="font-size:14px;color:var(--text-primary)" class="font-semibold">Dispatch Log</span>
+        <span style="font-size:11px;color:var(--text-dim)">Last 15 calls</span>
+      </div>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>ID</th>
+              <th>Date/Time</th>
+              <th>Nature</th>
+              <th>Address</th>
+              <th>IC</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="c in D.recent_calls" :key="c.id">
+              <tr>
+                <td class="dot-cell"><span class="severity-dot" :class="c.severity"></span></td>
+                <td class="mono nowrap" style="font-size:12px;color:var(--text-muted)" x-text="c.id"></td>
+                <td class="nowrap" style="color:var(--text-secondary)" x-text="c.date + ' ' + c.time"></td>
+                <td class="nowrap font-semibold" style="color:var(--text-primary)"><span x-text="c.icon + ' ' + c.nature"></span></td>
+                <td><a :href="mapsUrl(c.address)" target="_blank" rel="noopener" class="address-link" x-text="c.address"></a></td>
+                <td class="nowrap font-semibold" style="font-size:12px;color:var(--text-secondary)" x-text="c.ic || '\u2014'"></td>
+                <td style="font-size:12px;color:var(--text-muted)" x-text="c.short_dsc || '\u2014'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- CREW TAB -->
+  <div x-show="!loading && !error && activeTab === 'crew'">
+    <div class="crew-grid">
+      <!-- Current crew -->
+      <div class="panel" style="padding:14px 18px">
+        {{ crew_column("D.sections", "D.platoon + ' \u2014 ' + D.crew_date_range", "On Duty", badge_expr="formatShiftEnd(D.shift_end) || 'On duty'", show_contacts=true, show_shift=true) }}
+      </div>
+      <!-- Upcoming crew -->
+      <div class="panel" style="padding:14px 18px" x-show="D.upcoming_sections.length">
+        {{ crew_column("D.upcoming_sections", "D.upcoming_platoon + ' ' + D.upcoming_date_range", "Upcoming", badge_expr="formatShiftStart(D.upcoming_shift_starts) || D.upcoming_crew.length + ' crew'", show_contacts=true, show_shift=true) }}
+      </div>
+    </div>
+  </div>
+
+  <!-- REPORTS TAB (editor-only, lazy-loaded) -->
+  <div x-show="!loading && !error && activeTab === 'reports' && D.is_editor" class="reports-layout">
+
+    <!-- Chat drawer (top) -->
+    <div class="chat-drawer">
+      <!-- Bar: title + hints + input (always visible) -->
+      <div class="chat-drawer-bar">
+        <button class="chat-drawer-toggle" @click="chatOpen = !chatOpen" :title="chatOpen ? 'Collapse' : 'Expand'">
+          <span x-text="chatOpen ? '\u25B2' : '\u25BC'" style="font-size:10px"></span>
+        </button>
+        <span class="chat-drawer-title">Assistant</span>
+        <!-- Hint chips in bar (hidden when streaming, has messages, or drawer is open) -->
+        <div class="chat-hints" x-show="!chatStreaming && chatMessages.length === 0 && !chatOpen" style="margin:0;padding:0">
+          <button class="chat-hint" @click="chatInput='Who is on duty today?';sendChatMessage()">Who's on duty?</button>
+          <button class="chat-hint" @click="chatInput='Show recent calls';sendChatMessage()">Recent calls</button>
+          <button class="chat-hint" @click="chatInput='Which reports are missing?';sendChatMessage()">Missing reports</button>
+          <button class="chat-hint" @click="chatInput='Look up a NERIS code for structure fire';sendChatMessage()">NERIS codes</button>
+        </div>
+        <div class="chat-drawer-input">
+          <textarea
+            x-ref="chatInput"
+            x-model="chatInput"
+            :placeholder="chatStreaming ? 'Type your next message...' : 'Ask about calls, crew, NERIS codes...'"
+            @keydown.enter.prevent="if (!$event.shiftKey) sendChatMessage()"
+            @input="chatAutoResize($event)"
+            rows="1"
+          ></textarea>
+          <button class="chat-send-btn" :disabled="!chatInput.trim()" @click="sendChatMessage()">Send</button>
+        </div>
+      </div>
+      <!-- Collapsible area -->
+      <div x-show="chatOpen" x-collapse>
+        <!-- Empty state (no messages yet) -->
+        <template x-if="chatMessages.length === 0 && !chatStreaming">
+          <div class="chat-empty-state">
+            <p>Ask the assistant about dispatch calls, crew schedules, NERIS codes, or incident reports.</p>
+            <div class="chat-empty-hints">
+              <button class="chat-hint" @click="chatInput='Who is on duty today?';sendChatMessage()">Who's on duty?</button>
+              <button class="chat-hint" @click="chatInput='Show recent calls';sendChatMessage()">Recent calls</button>
+              <button class="chat-hint" @click="chatInput='Which reports are missing?';sendChatMessage()">Missing reports</button>
+              <button class="chat-hint" @click="chatInput='Look up a NERIS code for structure fire';sendChatMessage()">NERIS codes</button>
+              <button class="chat-hint" @click="chatInput='Search calls from last week';sendChatMessage()">Search calls</button>
+              <button class="chat-hint" @click="chatInput='List incident reports';sendChatMessage()">List reports</button>
+            </div>
+          </div>
+        </template>
+        <!-- Messages area -->
+        <template x-if="chatMessages.length > 0 || chatStreaming">
+          <div class="chat-drawer-messages" x-ref="chatMessages">
+            <template x-for="(msg, i) in chatMessages" :key="i">
+              <div>
+                <template x-if="msg.type === 'message'">
+                  <div class="chat-msg" :class="msg.role" x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : DOMPurify.sanitize(msg.content)"></div>
+                </template>
+                <template x-if="msg.type === 'tool_call'">
+                  <div class="chat-tool-indicator">
+                    <template x-if="msg.pending"><div class="spinner"></div></template>
+                    <span x-text="msg.label"></span>
+                  </div>
+                </template>
+                <template x-if="msg.type === 'tool_result'">
+                  <div class="chat-tool-result" x-text="'\u2713 ' + msg.summary"></div>
+                </template>
+                <template x-if="msg.type === 'error'">
+                  <div class="chat-error" x-text="msg.content"></div>
+                </template>
+              </div>
+            </template>
+            <template x-if="chatStreaming && !chatCurrentText">
+              <div class="chat-typing">
+                <span></span><span></span><span></span>
+                <span x-show="chatThinking" x-transition style="width:auto;height:auto;background:none;animation:none;color:var(--text-dim);font-size:11px;margin-left:4px">Thinking&hellip;</span>
+              </div>
+            </template>
+            <template x-if="chatStreaming && chatCurrentText">
+              <div class="chat-msg assistant" x-html="renderMarkdown(chatCurrentText)"></div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Filter pills -->
+    <div class="filter-pills">
+      <button class="filter-pill" :class="{'active': reportsFilter === 'all'}" @click="reportsFilter = 'all'; reportsPage = 1">
+        All <span style="opacity:.6" x-text="'(' + reportsCalls.length + ')'"></span>
+      </button>
+      <button class="filter-pill" :class="{'active': reportsFilter === 'missing'}" @click="reportsFilter = 'missing'; reportsPage = 1">
+        Missing <span style="opacity:.6" x-text="'(' + reportsCountByFilter('missing') + ')'"></span>
+      </button>
+      <button class="filter-pill" :class="{'active': reportsFilter === 'local'}" @click="reportsFilter = 'local'; reportsPage = 1">
+        In Progress <span style="opacity:.6" x-text="'(' + reportsCountByFilter('local') + ')'"></span>
+      </button>
+      <button class="filter-pill" :class="{'active': reportsFilter === 'neris'}" @click="reportsFilter = 'neris'; reportsPage = 1">
+        Submitted <span style="opacity:.6" x-text="'(' + reportsCountByFilter('neris') + ')'"></span>
+      </button>
+    </div>
+
+    <!-- Loading state -->
+    <div x-show="reportsLoading" class="empty-state" style="padding:40px">
+      Loading reports data&hellip;
+    </div>
+
+    <!-- Reports table (full width) -->
+    <template x-if="reportsFiltered().length > 0">
+      <div>
+      <div class="panel data-table-wrap">
+        <table class="data-table mobile-cards">
+          <thead>
+            <tr>
+              <th class="dot-cell"></th>
+              <th>ID</th>
+              <th>Date/Time</th>
+              <th>Nature</th>
+              <th>Address</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="c in reportsPaged()" :key="c.id">
+              <tr>
+                <td class="dot-cell"><span class="severity-dot" :class="c.severity"></span></td>
+                <td class="call-id mobile-hide" x-text="c.id"></td>
+                <td class="dt">
+                  <div x-text="c.date"></div>
+                  <div class="dt-time" x-text="c.time"></div>
+                </td>
+                <td>
+                  <div class="nature" x-text="c.icon + ' ' + c.nature"></div>
+                </td>
+                <td class="address" x-text="c.address || '\u2014'"></td>
+                <td>
+                  <template x-if="c.report_source === 'neris'">
+                    <div>
+                      <div class="report-status neris" x-text="'\u2713 In NERIS'"></div>
+                    </div>
+                  </template>
+                  <template x-if="c.report_source === 'local' && c.is_locked">
+                    <div>
+                      <div class="report-status locked" x-text="c.report_status === 'approved' ? '\uD83D\uDD12 Approved' : (c.neris_export_declined ? '\uD83D\uDD12 Closed (no NERIS)' : '\uD83D\uDD12 Submitted to NERIS')"></div>
+                    </div>
+                  </template>
+                  <template x-if="c.report_source === 'local' && !c.is_locked">
+                    <div>
+                      <div class="report-status local" x-text="c.report_status || 'draft'"></div>
+                      <template x-if="c.completeness">
+                        <div class="completeness">
+                          <span x-text="c.completeness.filled + '/' + c.completeness.total"></span>
+                          <span class="completeness-bar-sm"><span class="completeness-fill" :style="'width:' + (c.completeness.total ? (c.completeness.filled / c.completeness.total * 100) : 0) + '%'"></span></span>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="!c.has_report">
+                    <div class="report-status missing">&triangledown; Missing</div>
+                  </template>
+                </td>
+                <td>
+                  <template x-if="c.report_source === 'local' && c.incident_id && !c.is_locked">
+                    <a class="action-btn edit" :href="'/reports/' + c.incident_id" @click.stop>Edit Report</a>
+                  </template>
+                  <template x-if="c.report_source === 'local' && c.incident_id && c.is_locked">
+                    <a class="action-btn view" :href="'/reports/' + c.incident_id" @click.stop>View Report</a>
+                  </template>
+                  <template x-if="c.report_source === 'neris'">
+                    <button class="action-btn import" @click.stop="startReport(c)" x-text="c.report_label"></button>
+                  </template>
+                  <template x-if="!c.has_report">
+                    <button class="action-btn start" @click.stop="startReport(c)">Start Report</button>
+                  </template>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <!-- Pagination -->
+        <div x-show="reportsTotalPages() > 1" class="pagination-bar">
+          <span x-text="'Showing ' + (((reportsPage - 1) * reportsPerPage) + 1) + '\u2013' + Math.min(reportsPage * reportsPerPage, reportsFiltered().length) + ' of ' + reportsFiltered().length"></span>
+          <div class="page-nav">
+            <button class="page-btn" :disabled="reportsPage <= 1" @click="reportsPage--">&lsaquo; Prev</button>
+            <span class="page-info" x-text="reportsPage + ' / ' + reportsTotalPages()"></span>
+            <button class="page-btn" :disabled="reportsPage >= reportsTotalPages()" @click="reportsPage++">Next &rsaquo;</button>
+          </div>
+        </div>
+      </div>
+      </div>
+    </template>
+
+    <!-- Empty state -->
+    <template x-if="reportsFiltered().length === 0 && reportsLoaded">
+      <div class="empty-state" style="padding:60px 20px">
+        <h2>No calls match this filter</h2>
+        <p>Try a different filter or check back later.</p>
+      </div>
+    </template>
+  </div><!-- /reports-layout -->
+
+  {% include "partials/_events_tab.html" %}
+
+</main>
+
+<footer class="content-wrap dashboard-footer">
+  <span>San Juan County Fire District 3 &middot; 1011 Mullis Street, Friday Harbor, WA 98250</span>
+  <span>&copy; 2026 SJIF&amp;R</span>
+</footer>
+
+<!-- Help Modal -->
+<template x-if="showHelp">
+  <div class="modal-overlay" @click.self="showHelp = false" @keydown.escape.window="showHelp = false">
+    <div class="modal" style="max-width:600px">
+      <h2>Assistant Commands</h2>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;line-height:1.5">Use these commands in the chat panel to interact with dispatch, crew, and reporting.</p>
+      <template x-for="h in helpCommands" :key="h[0]">
+        <div class="help-row">
+          <div class="help-label"><code class="help-cmd" x-text="h[0]"></code></div>
+          <div style="font-size:12px;color:var(--text-muted);line-height:1.5" x-text="h[1]"></div>
+        </div>
+      </template>
+      <p style="font-size:12px;color:var(--text-faint);line-height:1.5;margin-top:12px">You can also ask anything in natural language using the chat panel.</p>
+      <div style="margin-top:16px;text-align:right">
+        <button class="btn-secondary" @click="showHelp = false">Close</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- New Report Modal -->
+<template x-if="showModal">
+  <div class="modal-overlay" @click.self="showModal = false" @keydown.escape.window="showModal = false">
+    <div class="modal">
+      <h2>Start Incident Report</h2>
+      <form method="POST" action="/reports/new" @submit="submitting = true">
+        <label for="incident_number">Incident Number</label>
+        <input type="text" id="incident_number" name="incident_number" :value="modalCallId" required readonly style="opacity:.7">
+
+        <label for="incident_date">Incident Date</label>
+        <input type="date" id="incident_date" name="incident_date" :value="modalDate" required>
+
+        <label for="station">Station</label>
+        <select id="station" name="station">
+          <option value="S31" selected>S31 &mdash; Friday Harbor</option>
+        </select>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" @click="showModal = false">Cancel</button>
+          <button type="submit" class="btn-primary" :disabled="submitting" x-text="submitting ? 'Creating...' : 'Create Report'"></button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>
+{% endblock %}
+
+{% block body_scripts %}
+<script>
+function dashboard() {
+  return {
+    D: {
+      date_display: '', updated_time: '', is_business_hours: false,
+      user_name: '', is_editor: false, user_email: '',
+      platoon: '', crew: [], unique_crew_count: 0,
+      chief_officer: '', open_calls: 0, recent_calls: [],
+      neris_count: 0,
+      sections: [], crew_date_range: '', shift_end: '',
+      upcoming_platoon: '', upcoming_crew: [], upcoming_sections: [],
+      upcoming_date_range: '', upcoming_shift_starts: '',
+      fastest_turnout: null
+    },
+    loading: true,
+    error: false,
+    ...hashTab(['overview','calls','crew','events','reports'], 'overview'),
+
+    get tabs() {
+      const t = [
+        {id: 'overview', label: 'Overview'},
+        {id: 'calls', label: 'Recent Calls'},
+        {id: 'crew', label: 'On Duty'},
+        {id: 'events', label: 'Events'}
+      ];
+      if (this.D.is_editor) t.push({id: 'reports', label: 'Reports'});
+      return t;
+    },
+
+    // ── Reports state ──
+    reportsCalls: [],
+    reportsLoaded: false,
+    reportsLoading: false,
+    reportsFilter: 'all',
+    reportsPage: 1,
+    reportsPerPage: 25,
+    // ── Modal state ──
+    showModal: false,
+    submitting: false,
+    modalCallId: '',
+    modalDate: new Date().toISOString().split('T')[0],
+
+    // ── Help modal state ──
+    showHelp: false,
+    helpCommands: [
+      ['Who is on duty today?', 'Look up current crew schedule'],
+      ['Who was on duty Jan 15?', 'Look up crew for any date'],
+      ['Show me call 26-XXXXXX', 'Get dispatch call details'],
+      ['Show recent calls', 'List the last 30 days of calls'],
+      ['Search calls from Jan 1 to Jan 31', 'Search dispatch archive'],
+      ['List incidents', 'Show draft/in-progress reports'],
+      ['Look up NERIS code for structure fire', 'Search NERIS value sets'],
+      ['What is the incident type for a chimney fire?', 'Find specific NERIS codes']
+    ],
+
+    // ── Chat state ──
+    chatOpen: false,
+    chatMessages: [],
+    chatInput: '',
+    chatStreaming: false,
+    chatCurrentText: '',
+    chatThinking: false,
+    _chatThinkingTimer: null,
+    _centrifuge: null,
+    _chatSubscription: null,
+    _chatQueuedMessage: null,
+
+    // ── Events state ──
+    eventsUpcoming: [],
+    eventsPast: [],
+    eventsIsManager: false,
+    eventsLoaded: false,
+    eventsLoading: false,
+    eventsExpanded: null,
+    eventsCreating: false,
+    eventsShowParse: false,
+    eventsParseResults: [],
+    eventsParseRecordId: null,
+    eventsUpPage: 1,
+    eventsPastPage: 1,
+    eventsPerPage: 5,
+
+    async init() {
+      hashTab(['overview','calls','crew','reports','events'], 'overview').init.call(this);
+      await this.refresh();
+      setInterval(() => this.refresh(), 3600000);
+
+      // Watch for reports tab activation to lazy-load
+      this.$watch('activeTab', (tab) => {
+        if (tab === 'reports' && this.D.is_editor && !this.reportsLoaded && !this.reportsLoading) {
+          this.loadReports();
+        }
+        // Redirect non-editors away from reports tab
+        if (tab === 'reports' && !this.D.is_editor && !this.loading) {
+          this.activeTab = 'overview';
+        }
+        // Lazy-load events tab
+        if (tab === 'events' && !this.eventsLoaded && !this.eventsLoading) {
+          this.loadEvents();
+        }
+      });
+
+      // Direct navigation to #reports — watcher won't fire since value didn't change
+      if (this.activeTab === 'reports' && this.D.is_editor && !this.reportsLoaded) {
+        this.loadReports();
+      }
+      // Direct navigation to #events
+      if (this.activeTab === 'events' && !this.eventsLoaded) {
+        this.loadEvents();
+      }
+    },
+
+    async refresh() {
+      try {
+        const r = await authFetch('/dashboard/data');
+        if (r.ok) {
+          this.D = await r.json();
+          this.loading = false;
+          this.error = false;
+          // Keep reports tab in sync with dashboard data
+          if (this.reportsLoaded) this.reportsCalls = this.D.recent_calls || [];
+        } else {
+          this.error = true;
+          this.loading = false;
+        }
+      } catch (e) {
+        console.error('Dashboard refresh failed:', e);
+        this.error = true;
+        this.loading = false;
+      }
+    },
+
+    // ── Reports methods ──
+
+    loadReports() {
+      // Reuse the already-loaded dashboard data — no extra API call
+      this.reportsCalls = this.D.recent_calls || [];
+      this.reportsLoaded = true;
+      this.reportsLoading = false;
+      this.initChat();
+    },
+
+    reportsFiltered() {
+      if (this.reportsFilter === 'all') return this.reportsCalls;
+      if (this.reportsFilter === 'missing') return this.reportsCalls.filter(c => !c.has_report);
+      if (this.reportsFilter === 'local') return this.reportsCalls.filter(c => c.report_source === 'local' && !c.is_locked);
+      if (this.reportsFilter === 'neris') return this.reportsCalls.filter(c => c.report_source === 'neris' || c.is_locked);
+      return this.reportsCalls;
+    },
+
+    reportsPaged() {
+      const start = (this.reportsPage - 1) * this.reportsPerPage;
+      return this.reportsFiltered().slice(start, start + this.reportsPerPage);
+    },
+
+    reportsTotalPages() {
+      return Math.max(1, Math.ceil(this.reportsFiltered().length / this.reportsPerPage));
+    },
+
+    reportsCountByFilter(f) {
+      if (f === 'missing') return this.reportsCalls.filter(c => !c.has_report).length;
+      if (f === 'local') return this.reportsCalls.filter(c => c.report_source === 'local' && !c.is_locked).length;
+      if (f === 'neris') return this.reportsCalls.filter(c => c.report_source === 'neris' || c.is_locked).length;
+      return this.reportsCalls.length;
+    },
+
+    startReport(call) {
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/reports/new';
+      const fields = {
+        incident_number: call.id,
+        incident_date: this.parseCallDate(call.date) || new Date().toISOString().split('T')[0],
+        station: 'S31',
+        neris_id: call.neris_id || ''
+      };
+      for (const [k, v] of Object.entries(fields)) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = k;
+        input.value = v;
+        form.appendChild(input);
+      }
+      document.body.appendChild(form);
+      form.submit();
+    },
+
+    parseCallDate(dateStr) {
+      if (!dateStr) return null;
+      const d = new Date(dateStr + ' ' + new Date().getFullYear());
+      if (isNaN(d)) return null;
+      return d.toISOString().split('T')[0];
+    },
+
+    // ── Dashboard methods ──
+
+    formatShiftEnd(iso) {
+      if (!iso) return '';
+      const d = dayjs(iso);
+      const hhmm = d.format('HHmm');
+      const label = d.calendar(null, {
+        sameDay: '[today]', nextDay: '[tomorrow]',
+        nextWeek: 'ddd', lastDay: '[yesterday]',
+        lastWeek: '[last] ddd', sameElse: 'MMM D'
+      });
+      return label === 'today' ? 'until ' + hhmm : 'until ' + hhmm + ' ' + label;
+    },
+
+    formatShiftStart(iso) {
+      if (!iso) return '';
+      const d = dayjs(iso);
+      const hhmm = d.format('HHmm');
+      const label = d.calendar(null, {
+        sameDay: '[today]', nextDay: '[tomorrow]',
+        nextWeek: 'ddd', lastDay: '[yesterday]',
+        lastWeek: '[last] ddd', sameElse: 'MMM D'
+      });
+      return label === 'today' ? 'starting ' + hhmm : 'starting ' + hhmm + ' ' + label;
+    },
+
+    mapsUrl(addr) {
+      return 'https://www.google.com/maps/search/?api=1&query=' +
+        encodeURIComponent((addr || '') + ', San Juan Island, WA');
+    },
+
+    // ── Chat methods ──
+
+    renderMarkdown(text) {
+      if (!text) return '';
+      try {
+        return DOMPurify.sanitize(marked.parse(text));
+      } catch {
+        return text;
+      }
+    },
+
+    initChat() {
+      if (this._centrifuge) return; // Already initialized
+
+      const channel = `chat:general:${this.D.user_email}`;
+      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this._centrifuge = new Centrifuge(`${wsProto}//${location.host}/connection/websocket`);
+      this._chatSubscription = this._centrifuge.newSubscription(channel);
+      this._chatSubscription.on('publication', (ctx) => {
+        const {event, ...data} = ctx.data;
+        this.handleChatEvent(event, data);
+      });
+      this._chatSubscription.subscribe();
+      this._centrifuge.connect();
+    },
+
+    chatAutoResize(e) {
+      const ta = e.target;
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 80) + 'px';
+    },
+
+    chatScrollToBottom(force) {
+      this.$nextTick(() => {
+        const el = this.$refs.chatMessages;
+        if (!el) return;
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        if (force || nearBottom) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    async sendChatMessage() {
+      const text = this.chatInput.trim();
+      if (!text) return;
+
+      // If already streaming, queue the message
+      if (this.chatStreaming) {
+        this._chatQueuedMessage = text;
+        this.chatMessages.push({type: 'message', role: 'user', content: text});
+        this.chatInput = '';
+        if (this.$refs.chatInput) this.$refs.chatInput.style.height = 'auto';
+        this.chatScrollToBottom(true);
+        return;
+      }
+
+      this.chatMessages.push({type: 'message', role: 'user', content: text});
+      this.chatInput = '';
+      this.chatStreaming = true;
+      this.chatCurrentText = '';
+      this.chatThinking = false;
+      this._chatThinkingTimer = setTimeout(() => { this.chatThinking = true; }, 4000);
+      this.chatOpen = true;
+      this.chatScrollToBottom(true);
+
+      if (this.$refs.chatInput) this.$refs.chatInput.style.height = 'auto';
+
+      try {
+        // Wait for WebSocket connection before sending RPC
+        if (this._centrifuge.state !== 'connected') {
+          await new Promise(r => this._centrifuge.once('connected', r));
+        }
+        await this._centrifuge.rpc('send_general_message', {
+          message: text,
+          context: {
+            calls: this.reportsCalls.map(c => ({
+              id: c.id, nature: c.nature, address: c.address,
+              date: c.date, time: c.time, ic: c.ic,
+              report_source: c.report_source, report_status: c.report_status
+            }))
+          }
+        });
+        // RPC succeeded — events arrive on same WS, in order
+      } catch (e) {
+        console.error('Chat RPC error:', e);
+        this.chatMessages.push({type: 'error', content: e.message || 'Connection error. Please try again.'});
+        this.chatStreaming = false;
+      }
+    },
+
+    handleChatEvent(type, data) {
+      if (this._chatThinkingTimer) { clearTimeout(this._chatThinkingTimer); this._chatThinkingTimer = null; }
+      this.chatThinking = false;
+      if (type === 'text') {
+        this.chatCurrentText += data.content || '';
+        this.chatScrollToBottom();
+      } else if (type === 'tool_call') {
+        if (this.chatCurrentText) {
+          this.chatMessages.push({type: 'message', role: 'assistant', content: this.chatCurrentText});
+          this.chatCurrentText = '';
+        }
+        const labels = {
+          get_dispatch_call: 'Looking up dispatch data...',
+          list_dispatch_calls: 'Listing recent calls...',
+          search_dispatch_calls: 'Searching dispatch calls...',
+          get_on_duty_crew: 'Checking crew schedule...',
+          get_neris_values: 'Looking up NERIS values...',
+          list_incidents: 'Listing incident reports...',
+          get_incident: 'Loading incident data...'
+        };
+        this.chatMessages.push({
+          type: 'tool_call',
+          label: labels[data.name] || `Running ${data.name}...`,
+          pending: true
+        });
+        this.chatScrollToBottom();
+      } else if (type === 'tool_result') {
+        for (let i = this.chatMessages.length - 1; i >= 0; i--) {
+          if (this.chatMessages[i].type === 'tool_call' && this.chatMessages[i].pending) {
+            this.chatMessages[i].pending = false;
+            break;
+          }
+        }
+        this.chatMessages.push({
+          type: 'tool_result',
+          summary: data.summary || data.name,
+        });
+        this.chatScrollToBottom();
+      } else if (type === 'done') {
+        if (this.chatCurrentText) {
+          this.chatMessages.push({type: 'message', role: 'assistant', content: this.chatCurrentText});
+          this.chatCurrentText = '';
+        }
+        this.chatStreaming = false;
+        this.chatScrollToBottom(true);
+
+        // Send queued message if user typed while streaming
+        if (this._chatQueuedMessage) {
+          const queued = this._chatQueuedMessage;
+          this._chatQueuedMessage = null;
+          this.$nextTick(() => { this.chatInput = queued; this.sendChatMessage(); });
+          return;
+        }
+        this.$nextTick(() => { if (this.$refs.chatInput) this.$refs.chatInput.focus(); });
+      } else if (type === 'error') {
+        if (this.chatCurrentText) {
+          this.chatMessages.push({type: 'message', role: 'assistant', content: this.chatCurrentText});
+          this.chatCurrentText = '';
+        }
+        this.chatMessages.push({type: 'error', content: data.message});
+        this.chatStreaming = false;
+        this.chatScrollToBottom(true);
+      }
+    },
+
+    // ── Events methods ──
+
+    async loadEvents() {
+      this.eventsLoading = true;
+      try {
+        const r = await authFetch('/events/data');
+        if (r.ok) {
+          const d = await r.json();
+          this.eventsUpcoming = d.upcoming || [];
+          this.eventsPast = d.past || [];
+          this.eventsIsManager = d.is_manager || false;
+          this.eventsLoaded = true;
+        }
+      } catch(e) {
+        console.error('Events load failed:', e);
+      }
+      this.eventsLoading = false;
+    },
+
+    eventsToggle(ev) {
+      const key = ev.event_id || ev.record_id;
+      this.eventsExpanded = this.eventsExpanded === key ? null : key;
+    },
+
+    eventsFormatDate(iso) {
+      if (!iso) return '';
+      return dayjs(iso).format('ddd, MMM D YYYY');
+    },
+    eventsFormatTimeRange(start, end) {
+      if (!start) return '';
+      const s = dayjs(start);
+      const sTime = s.format('h:mm A');
+      if (sTime === '12:00 AM') return '';
+      if (!end) return sTime;
+      const e = dayjs(end);
+      const eTime = e.format('h:mm A');
+      if (eTime === '12:00 AM') return sTime;
+      return sTime + ' \u2013 ' + eTime;
+    },
+
+    eventsMapsUrl(location) {
+      if (!location) return '';
+      return 'https://www.google.com/maps/search/' + encodeURIComponent(location);
+    },
+
+    eventsBadgeClass(src) {
+      if (!src) return '';
+      const s = src.toLowerCase();
+      if (s === 'training') return 'training';
+      if (s === 'pub-ed') return 'pub-ed';
+      if (s === 'manual') return 'manual';
+      return s.split(/[^a-z]/)[0] || '';
+    },
+
+    eventsUpPaged() {
+      const start = (this.eventsUpPage - 1) * this.eventsPerPage;
+      return this.eventsUpcoming.slice(start, start + this.eventsPerPage);
+    },
+    eventsUpTotalPages() {
+      return Math.max(1, Math.ceil(this.eventsUpcoming.length / this.eventsPerPage));
+    },
+    eventsPastPaged() {
+      const start = (this.eventsPastPage - 1) * this.eventsPerPage;
+      return this.eventsPast.slice(start, start + this.eventsPerPage);
+    },
+    eventsPastTotalPages() {
+      return Math.max(1, Math.ceil(this.eventsPast.length / this.eventsPerPage));
+    },
+
+    async eventsCreateFromEvent(ev) {
+      this.eventsCreating = true;
+      try {
+        const r = await authFetch('/events/records', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            calendar_event_id: ev.event_id,
+            calendar_source: ev.calendar_source,
+            subject: ev.subject,
+            start: ev.start,
+            end: ev.end,
+            location: ev.location,
+            description: ev.body_preview,
+          }),
+        });
+        if (r.ok) {
+          const rec = await r.json();
+          ev.has_record = true;
+          ev.record_id = rec.id;
+        }
+      } catch(e) { console.error(e); }
+      this.eventsCreating = false;
+    },
+
+    async eventsConfirmParsed() {
+      const selected = this.eventsParseResults.filter(a => a.include).map(a => ({
+        name: a.name,
+        email: a.email || null,
+        source: 'parsed',
+      }));
+      if (!selected.length) { this.eventsShowParse = false; return; }
+
+      try {
+        const r = await authFetch('/events/records/' + this.eventsParseRecordId);
+        if (!r.ok) return;
+        const rec = await r.json();
+        const existing = new Set(rec.attendees.map(a => (a.email || a.name).toLowerCase()));
+        const newAtts = selected.filter(a => !existing.has((a.email || a.name).toLowerCase()));
+        const merged = [...rec.attendees, ...newAtts];
+
+        await authFetch('/events/records/' + this.eventsParseRecordId, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attendees: merged }),
+        });
+        this.eventsShowParse = false;
+        await this.loadEvents();
+      } catch(e) { console.error(e); }
+    }
+  };
+}
+
+// ── Events record detail (nested Alpine component) ──
+function eventsRecordDetail(recordId) {
+  return {
+    rec: null,
+    loading: true,
+    uploading: false,
+    parsing: false,
+    addName: '',
+    suggestions: [],
+    _personnelCache: null,
+    _searchTimer: null,
+
+    async load() {
+      this.loading = true;
+      try {
+        const r = await authFetch('/events/records/' + recordId);
+        if (r.ok) this.rec = await r.json();
+      } catch(e) { console.error(e); }
+      this.loading = false;
+    },
+
+    get isManager() {
+      return this.$data.eventsIsManager !== undefined ? this.$data.eventsIsManager : false;
+    },
+
+    async saveAttendees() {
+      try {
+        await authFetch('/events/records/' + this.rec.id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attendees: this.rec.attendees }),
+        });
+      } catch(e) { console.error(e); }
+    },
+
+    async saveNotes() {
+      try {
+        await authFetch('/events/records/' + this.rec.id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes: this.rec.notes }),
+        });
+      } catch(e) { console.error(e); }
+    },
+
+    removeAttendee(i) {
+      this.rec.attendees.splice(i, 1);
+      this.saveAttendees();
+    },
+
+    async searchPersonnel() {
+      clearTimeout(this._searchTimer);
+      const term = this.addName.trim();
+      if (term.length < 2) { this.suggestions = []; return; }
+      this._searchTimer = setTimeout(async () => {
+        if (!this._personnelCache) {
+          try {
+            const r = await authFetch('/events/personnel');
+            if (r.ok) this._personnelCache = await r.json();
+            else this._personnelCache = [];
+          } catch(e) { this._personnelCache = []; }
+        }
+        const lower = term.toLowerCase();
+        this.suggestions = this._personnelCache.filter(
+          p => p.name.toLowerCase().includes(lower)
+        ).slice(0, 8);
+      }, 200);
+    },
+
+    addFromRoster(person) {
+      if (this.rec.attendees.some(a => a.email === person.email)) {
+        this.addName = '';
+        this.suggestions = [];
+        return;
+      }
+      this.rec.attendees.push({
+        name: person.name,
+        email: person.email,
+        source: 'manual',
+      });
+      this.addName = '';
+      this.suggestions = [];
+      this.saveAttendees();
+    },
+
+    addManualAttendee() {
+      const name = this.addName.trim();
+      if (!name) return;
+      this.suggestions = [];
+      this.rec.attendees.push({ name, email: null, source: 'manual' });
+      this.addName = '';
+      this.saveAttendees();
+    },
+
+    async uploadFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      this.uploading = true;
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const r = await authFetch('/events/records/' + this.rec.id + '/upload', {
+          method: 'POST',
+          body: form,
+        });
+        if (r.ok) {
+          const data = await r.json();
+          this.rec.attachments.push(data.attachment);
+        } else {
+          const err = await r.json();
+          alert(err.error || 'Upload failed');
+        }
+      } catch(e) { console.error(e); }
+      this.uploading = false;
+      event.target.value = '';
+    },
+
+    async parseFromAttachment(attId) {
+      this.parsing = true;
+      try {
+        const r = await authFetch('/events/records/' + this.rec.id + '/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attachment_id: attId }),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          const results = (data.attendees || []).map(a => ({ ...a, include: true }));
+          // Update parent dashboard scope
+          this.$dispatch('show-events-parse', { results, recordId: this.rec.id });
+        } else {
+          const err = await r.json();
+          alert(err.error || 'Parse failed');
+        }
+      } catch(e) { console.error(e); }
+      this.parsing = false;
+    },
+
+    async deleteAttachment(attId) {
+      if (!confirm('Delete this attachment?')) return;
+      try {
+        const r = await authFetch('/events/records/' + this.rec.id + '/attachments/' + attId, {
+          method: 'DELETE',
+        });
+        if (r.ok) {
+          this.rec.attachments = this.rec.attachments.filter(a => a.id !== attId);
+        }
+      } catch(e) { console.error(e); }
+    },
+
+    isParseableType(ct) {
+      return ct && (ct.startsWith('image/') || ct === 'application/pdf');
+    },
+  };
+}
+
+// Bridge parse modal events from nested eventsRecordDetail to parent dashboard
+document.addEventListener('alpine:init', () => {
+  window.addEventListener('show-events-parse', (e) => {
+    const root = document.querySelector('[x-data*="dashboard"]');
+    if (root && root.__x) {
+      const d = root.__x.$data;
+      d.eventsParseResults = e.detail.results;
+      d.eventsParseRecordId = e.detail.recordId;
+      d.eventsShowParse = true;
+    }
+  });
+});
+</script>
+{% endblock %}

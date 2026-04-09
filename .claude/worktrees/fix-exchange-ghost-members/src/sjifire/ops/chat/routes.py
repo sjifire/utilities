@@ -1,0 +1,512 @@
+"""HTTP route handlers for the chat-based incident reporting UI.
+
+Routes:
+- POST /reports/new                        → Create new report (redirect)
+- GET  /reports/{incident_id}              → Chat page (HTML)
+- GET  /reports/{incident_id}/conversation → Conversation history (JSON)
+- POST /reports/{incident_id}/chat         → Chat message (202 Accepted)
+"""
+
+import asyncio
+import json
+import logging
+from pathlib import Path
+
+from jinja2 import Environment, FileSystemLoader
+from starlette.requests import Request
+from starlette.responses import JSONResponse, RedirectResponse, Response
+
+from sjifire.core.config import local_now
+from sjifire.ops.auth import UserContext, check_is_editor, get_easyauth_user, set_current_user
+from sjifire.ops.chat.engine import run_chat, run_general_chat
+from sjifire.ops.chat.store import ConversationStore
+from sjifire.ops.chat.turn_lock import TurnLockStore
+from sjifire.ops.dispatch.store import DispatchStore
+from sjifire.ops.incidents.store import IncidentStore
+
+logger = logging.getLogger(__name__)
+
+# Hold references to background chat tasks so they aren't garbage-collected.
+_background_tasks: set[asyncio.Task] = set()
+
+_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+_jinja_env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=True)
+
+
+def _forbidden_page() -> Response:
+    """Render a styled 403 page for non-editors."""
+    template = _jinja_env.get_template("forbidden.html")
+    html = template.render()
+    return Response(html, status_code=403, media_type="text/html")
+
+
+def _get_user(request: Request) -> UserContext | None:
+    """Extract authenticated user from request."""
+    user = get_easyauth_user(request)
+    if user:
+        set_current_user(user)
+    return user
+
+
+async def create_report(request: Request) -> Response:
+    """Create a new incident and redirect to the chat UI."""
+    if request.method == "GET":
+        return RedirectResponse("/dashboard#reports", status_code=303)
+
+    user = _get_user(request)
+
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    # In dev mode, user may be set by middleware
+    if not user:
+        from sjifire.ops.auth import _current_user
+
+        user = _current_user.get()
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    # Only editors (or dev mode) can create reports
+    if not is_dev and not await check_is_editor(user.user_id, fallback=user.is_editor):
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+    try:
+        form = await request.form()
+    except Exception:
+        return JSONResponse({"error": "Invalid form data"}, status_code=400)
+
+    incident_number = str(form.get("incident_number", "")).strip()
+    incident_date = str(form.get("incident_date", "")).strip()
+    station = str(form.get("station", "")).strip() or "S31"
+    neris_id = str(form.get("neris_id", "")).strip() or None
+
+    if not incident_number or not incident_date:
+        return JSONResponse({"error": "Incident number and date are required"}, status_code=400)
+
+    # Use the existing create_incident tool function
+    from sjifire.ops.incidents import tools as incident_tools
+
+    result = await incident_tools.create_incident(
+        incident_number=incident_number,
+        incident_date=incident_date,
+        station=station,
+        neris_id=neris_id,
+    )
+
+    if "error" in result:
+        # If duplicate, redirect to the existing report
+        if "existing_id" in result:
+            return RedirectResponse(f"/reports/{result['existing_id']}", status_code=303)
+        return JSONResponse(result, status_code=400)
+
+    return RedirectResponse(f"/reports/{result['id']}", status_code=303)
+
+
+async def print_report(request: Request) -> Response:
+    """Serve a print-optimized incident report."""
+    user = _get_user(request)
+
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=" + str(request.url.path))
+
+    is_editor = is_dev or (
+        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+    )
+    if not is_editor:
+        return _forbidden_page()
+
+    incident_id = request.path_params["incident_id"]
+
+    set_current_user(user) if user else None
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+    if doc is None:
+        return JSONResponse({"error": "Incident not found"}, status_code=404)
+
+    template = _jinja_env.get_template("print_report.html")
+    html = template.render(
+        doc=doc.model_dump(mode="json"),
+        now=local_now().strftime("%b %d, %Y %H:%M"),
+    )
+    return Response(html, media_type="text/html")
+
+
+async def chat_page(request: Request) -> Response:
+    """Serve the chat UI page for an incident."""
+    user = _get_user(request)
+
+    # Check if we're in dev mode (no EasyAuth)
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return RedirectResponse("/.auth/login/aad?post_login_redirect_uri=" + str(request.url.path))
+
+    # Only editors (or dev mode) can access reports
+    is_editor = is_dev or (
+        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+    )
+    if not is_editor:
+        return _forbidden_page()
+
+    incident_id = request.path_params["incident_id"]
+
+    # Verify incident exists and user has access
+    set_current_user(user) if user else None
+    async with IncidentStore() as store:
+        doc = await store.get_by_id(incident_id)
+
+    if doc is None:
+        return JSONResponse({"error": "Incident not found"}, status_code=404)
+
+    # Fetch dispatch data for the summary panel
+    dispatch_context: dict = {}
+    try:
+        async with DispatchStore() as dstore:
+            dispatch = await dstore.get_by_dispatch_id(doc.incident_number)
+        if dispatch:
+            dispatch_context = {
+                "nature": dispatch.nature,
+                "address": dispatch.address,
+                "time_reported": (
+                    dispatch.time_reported.strftime("%b %d, %Y %H:%M")
+                    if dispatch.time_reported
+                    else ""
+                ),
+                "responding_units": dispatch.responding_units,
+                "ic": (
+                    dispatch.analysis.incident_commander_name
+                    or dispatch.analysis.incident_commander
+                ),
+                "short_dsc": dispatch.analysis.short_dsc,
+                "summary": dispatch.analysis.summary,
+            }
+    except Exception:
+        logger.debug("Failed to load dispatch data for %s", doc.incident_number, exc_info=True)
+
+    template = _jinja_env.get_template("chat.html")
+    html = template.render(
+        incident_id=incident_id,
+        incident_number=doc.incident_number,
+        incident_date=doc.incident_date or "",
+        incident_status=doc.status,
+        completeness=doc.completeness() if not doc.neris_incident_id else None,
+        dispatch=dispatch_context,
+        user_email=user.email if user else "",
+        user_name=user.name if user else "",
+    )
+    return Response(html, media_type="text/html")
+
+
+async def conversation_history(request: Request) -> Response:
+    """Return the conversation history as JSON."""
+    user = _get_user(request)
+
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    is_editor = is_dev or (
+        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+    )
+    if not is_editor:
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+    incident_id = request.path_params["incident_id"]
+
+    async with ConversationStore() as store:
+        conversation = await store.get_by_incident(incident_id)
+
+    if conversation is None:
+        return JSONResponse({"messages": [], "turn_count": 0})
+
+    messages = []
+    for msg in conversation.messages:
+        if not msg.content and not msg.tool_use:
+            continue  # Skip tool-result-only messages in display
+        entry = {
+            "role": msg.role,
+            "content": msg.content,
+            "tool_use": msg.tool_use,
+            "tool_results": [
+                {"name": tr.get("name", "tool"), "summary": _result_summary(tr)}
+                for tr in (msg.tool_results or [])
+            ]
+            if msg.tool_results
+            else None,
+            "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+        }
+        # Include image download URLs for blob-backed chat images
+        if msg.images:
+            entry["images"] = [
+                f"/reports/{incident_id}/attachments/{ref['attachment_id']}" for ref in msg.images
+            ]
+        messages.append(entry)
+
+    return JSONResponse(
+        {
+            "messages": messages,
+            "turn_count": conversation.turn_count,
+            "total_input_tokens": conversation.total_input_tokens,
+            "total_output_tokens": conversation.total_output_tokens,
+        }
+    )
+
+
+async def chat_stream(request: Request) -> Response:
+    """Handle a chat message, publishing events via Centrifugo."""
+    user = _get_user(request)
+
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    is_editor = is_dev or (
+        user is not None and await check_is_editor(user.user_id, fallback=user.is_editor)
+    )
+    if not is_editor:
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+    # In dev mode, user may be set by middleware
+    if not user:
+        from sjifire.ops.auth import _current_user
+
+        user = _current_user.get()
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    incident_id = request.path_params["incident_id"]
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    message = body.get("message", "").strip()
+    if not message:
+        return JSONResponse({"error": "Message is required"}, status_code=400)
+
+    if len(message) > 5000:
+        return JSONResponse({"error": "Message too long (max 5000 chars)"}, status_code=400)
+
+    # Parse optional image attachments
+    images: list[dict] | None = None
+    raw_images = body.get("images")
+    if raw_images:
+        allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+        if not isinstance(raw_images, list) or len(raw_images) > 3:
+            return JSONResponse({"error": "Maximum 3 images allowed"}, status_code=400)
+        images = []
+        for img in raw_images:
+            if not isinstance(img, dict):
+                return JSONResponse({"error": "Invalid image format"}, status_code=400)
+            media_type = img.get("media_type", "")
+            data = img.get("data", "")
+            if media_type not in allowed_types:
+                return JSONResponse(
+                    {"error": f"Unsupported image type: {media_type}"}, status_code=400
+                )
+            if len(data) > 2_000_000:  # ~1.5MB decoded
+                return JSONResponse({"error": "Image too large (max ~1.5MB)"}, status_code=400)
+            images.append({"media_type": media_type, "data": data})
+
+    # Auto-save uploaded images as incident attachments.
+    # Persists chat images to blob storage so they're linked to the
+    # report even if the chat session is lost. Title is intentionally
+    # minimal — the LLM will see the image and can update the title
+    # via the attachment tools if it identifies something specific.
+    # We capture the attachment metadata so the conversation message
+    # can reference the blob-backed images for display on reload.
+    saved_image_refs: list[dict] = []
+    if images:
+        from sjifire.ops.attachments.tools import upload_attachment
+
+        for idx, img in enumerate(images, 1):
+            suffix = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}.get(
+                img["media_type"], ".jpg"
+            )
+            try:
+                result = await upload_attachment(
+                    incident_id=incident_id,
+                    filename=f"chat-photo-{idx}{suffix}",
+                    data_base64=img["data"],
+                    content_type=img["media_type"],
+                )
+                if "error" not in result:
+                    saved_image_refs.append(
+                        {"attachment_id": result["id"], "content_type": img["media_type"]}
+                    )
+                else:
+                    logger.warning("Auto-save attachment returned error: %s", result["error"])
+            except Exception:
+                logger.warning("Failed to auto-save chat image", exc_info=True)
+
+    if saved_image_refs:
+        logger.info(
+            "Chat auto-saved %d image(s) as attachments: %s",
+            len(saved_image_refs),
+            saved_image_refs,
+        )
+
+    # Acquire distributed turn lock — prevents concurrent Claude calls
+    # for the same incident across replicas.
+    try:
+        async with TurnLockStore() as lock_store:
+            lock = await lock_store.acquire(incident_id, user.email, user.name)
+    except Exception:
+        logger.warning("Turn lock check failed for %s", incident_id, exc_info=True)
+        lock = None  # Proceed without lock on infra failure (degrade gracefully)
+
+    if lock is None:
+        # Lock held by another user — return 409 with holder info
+        try:
+            async with TurnLockStore() as lock_store:
+                existing = await lock_store.get(incident_id)
+        except Exception:
+            existing = None
+        holder = existing.holder_name if existing else "another user"
+        holder_email = existing.holder_email if existing else ""
+        return JSONResponse(
+            {
+                "error": f"Claude is responding to {holder}. Please wait for their turn to finish.",
+                "holder_name": holder,
+                "holder_email": holder_email,
+                "retry_after": "done",
+            },
+            status_code=409,
+        )
+
+    channel = f"chat:incident:{incident_id}"
+    task = asyncio.create_task(
+        run_chat(
+            incident_id,
+            message,
+            user,
+            channel=channel,
+            images=images,
+            image_refs=saved_image_refs or None,
+        )
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return JSONResponse({"status": "accepted"}, status_code=202)
+
+
+async def general_chat_stream_endpoint(request: Request) -> Response:
+    """Handle a general chat message, publishing events via Centrifugo."""
+    user = _get_user(request)
+
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    if not user:
+        from sjifire.ops.auth import _current_user
+
+        user = _current_user.get()
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    message = body.get("message", "").strip()
+    if not message:
+        return JSONResponse({"error": "Message is required"}, status_code=400)
+
+    if len(message) > 5000:
+        return JSONResponse({"error": "Message too long (max 5000 chars)"}, status_code=400)
+
+    context = body.get("context")
+
+    channel = f"chat:general:{user.email}"
+    task = asyncio.create_task(run_general_chat(message, user, channel=channel, context=context))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return JSONResponse({"status": "accepted"}, status_code=202)
+
+
+async def general_chat_history(request: Request) -> Response:
+    """Return the general conversation history as JSON."""
+    user = _get_user(request)
+
+    import os
+
+    is_dev = not os.getenv("ENTRA_MCP_API_CLIENT_ID")
+
+    if not user and not is_dev:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    if not user:
+        from sjifire.ops.auth import _current_user
+
+        user = _current_user.get()
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    conversation_key = f"general:{user.email}"
+
+    async with ConversationStore() as store:
+        conversation = await store.get_by_incident(conversation_key)
+
+    if conversation is None:
+        return JSONResponse({"messages": [], "turn_count": 0})
+
+    messages = [
+        {
+            "role": msg.role,
+            "content": msg.content,
+            "tool_use": msg.tool_use,
+            "tool_results": [
+                {"name": tr.get("name", "tool"), "summary": _result_summary(tr)}
+                for tr in (msg.tool_results or [])
+            ]
+            if msg.tool_results
+            else None,
+            "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+        }
+        for msg in conversation.messages
+        if msg.content or msg.tool_use
+    ]
+
+    return JSONResponse(
+        {
+            "messages": messages,
+            "turn_count": conversation.turn_count,
+        }
+    )
+
+
+def _result_summary(tool_result: dict) -> str:
+    """Extract a brief summary from a tool result for display."""
+    content = tool_result.get("content", "")
+    if isinstance(content, str):
+        try:
+            data = json.loads(content)
+            if "error" in data:
+                return f"Error: {data['error']}"
+            return content[:200]
+        except (json.JSONDecodeError, TypeError):
+            return str(content)[:200]
+    return str(content)[:200]

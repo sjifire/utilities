@@ -1,0 +1,1064 @@
+{% extends "base.html" %}
+
+{% block title %}SJIF&amp;R Station Monitor{% endblock %}
+
+{% block head_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/relativeTime.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/calendar.js"></script>
+<script>dayjs.extend(dayjs_plugin_relativeTime); dayjs.extend(dayjs_plugin_calendar);</script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
+{% if azure_maps_key %}
+<link rel="stylesheet" href="https://atlas.microsoft.com/sdk/javascript/mapcontrol/3/atlas.min.css">
+<script src="https://atlas.microsoft.com/sdk/javascript/mapcontrol/3/atlas.min.js"></script>
+{% endif %}
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+  /* ── Kiosk Layout ── */
+  html, body { height: 100%; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+
+  .kiosk-header {
+    background: linear-gradient(135deg, #0f2240, #1a3a5c);
+    border-bottom: 3px solid var(--color-red);
+    padding: 10px 28px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .kiosk-header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .kiosk-header-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .kiosk-clock {
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .02em;
+  }
+  .kiosk-date {
+    font-size: 16px;
+    color: var(--text-muted);
+    margin-left: 4px;
+  }
+  .kiosk-header-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-shrink: 0;
+  }
+
+  /* Status pill — enlarged for TV */
+  .kiosk-status {
+    font-size: 16px;
+    padding: 6px 18px;
+    border-radius: 24px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .kiosk-status.ok {
+    background: var(--green-alpha);
+    border: 1px solid rgba(34, 197, 94, .3);
+    color: var(--color-green);
+  }
+  .kiosk-status.active {
+    background: var(--red-alpha);
+    border: 1px solid rgba(220, 38, 38, .4);
+    color: var(--color-error);
+    animation: pulse-bg 1.5s ease-in-out infinite, glow-red 2s ease-in-out infinite;
+  }
+  .kiosk-status .pulse-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .kiosk-status.ok .pulse-dot { background: var(--color-green); }
+  .kiosk-status.active .pulse-dot { background: var(--color-error); }
+
+  /* ── Main Content ── */
+  .kiosk-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px 28px;
+    gap: 12px;
+  }
+
+  /* ── Call Indicator Strip ── */
+  .call-strip {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .call-pill {
+    padding: 6px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid;
+    transition: all .3s;
+  }
+  .call-pill.high {
+    background: var(--red-alpha);
+    border-color: rgba(220, 38, 38, .3);
+    color: var(--color-error);
+  }
+  .call-pill.medium {
+    background: var(--amber-alpha);
+    border-color: rgba(245, 158, 11, .3);
+    color: var(--color-amber);
+  }
+  .call-pill.low {
+    background: rgba(107, 114, 128, .12);
+    border-color: rgba(107, 114, 128, .3);
+    color: var(--text-muted);
+  }
+  .call-pill.current {
+    box-shadow: 0 0 0 2px var(--text-primary);
+  }
+
+  /* ── Call Detail Panel ── */
+  .call-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-radius: 10px;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .call-panel {
+    border: 2px solid var(--color-red);
+    animation: glow-red 2s ease-in-out infinite;
+  }
+  .call-header {
+    padding: 14px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .call-panel .call-header { background: rgba(220, 38, 38, .12); }
+
+  .call-nature {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  .call-id {
+    font-size: 18px;
+    font-family: monospace;
+    color: var(--text-muted);
+  }
+  .call-address {
+    font-size: 18px;
+    color: var(--text-secondary);
+    padding: 8px 20px 12px;
+  }
+  .call-reported {
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .call-body {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Map container */
+  .call-map {
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border-subtle);
+    position: relative;
+    min-height: 200px;
+  }
+  .call-map-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-faint);
+    font-size: 14px;
+  }
+
+  /* Info column */
+  .call-info {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .call-info-section {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .call-info-section:last-child { border-bottom: none; }
+  .call-info-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--text-dim);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  /* CAD / radio log */
+  .call-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 18px;
+    min-height: 0;
+  }
+  .log-entry {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+  .radio-line {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.8;
+    display: flex;
+    gap: 12px;
+  }
+  .radio-time {
+    color: var(--text-dim);
+    flex-shrink: 0;
+    min-width: 70px;
+  }
+  .radio-unit {
+    color: var(--color-blue);
+    font-weight: 600;
+    flex-shrink: 0;
+    min-width: 60px;
+  }
+
+  /* Site history */
+  .site-entry {
+    font-size: 13px;
+    color: var(--text-muted);
+    padding: 3px 0;
+  }
+
+  /* ── Archived (completed) call panel ── */
+  .call-panel.archived {
+    border: 2px solid rgba(107, 114, 128, .35);
+    animation: none;
+  }
+  .call-panel.archived .call-header {
+    background: rgba(107, 114, 128, .10);
+  }
+  .call-panel.archived .call-nature {
+    color: var(--text-muted);
+  }
+  .call-panel.archived .call-id {
+    color: var(--text-dim);
+  }
+  .call-panel.archived .call-address {
+    color: var(--text-dim);
+  }
+  .archived-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 6px;
+    background: rgba(34, 197, 94, .10);
+    border: 1px solid rgba(34, 197, 94, .25);
+    color: var(--color-green);
+    letter-spacing: .02em;
+  }
+  .archived-badge .check-icon {
+    font-size: 14px;
+  }
+  .call-pill.archived {
+    background: rgba(107, 114, 128, .08);
+    border-color: rgba(107, 114, 128, .25);
+    color: var(--text-dim);
+  }
+
+  /* ── Idle State ── */
+  .idle-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+  }
+  .idle-label {
+    font-size: 20px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: .12em;
+  }
+
+  /* ── Crew Strip (dense grid for kiosk) ── */
+  .crew-strip {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    padding: 8px 20px;
+    flex-shrink: 0;
+  }
+  .crew-strip-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 32px;
+  }
+  .crew-strip-hdr {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .crew-strip-hdr .crew-strip-badge {
+    margin-left: auto;
+  }
+  .crew-strip-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--text-muted);
+  }
+  .crew-strip-platoon {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .crew-strip-badge {
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: var(--bg-surface);
+    color: var(--text-dim);
+    border: 1px solid var(--border-subtle);
+  }
+  .crew-grid-names {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px 16px;
+  }
+  .crew-grid-cell {
+    display: flex;
+    align-items: baseline;
+    gap: 2px 6px;
+    padding: 2px 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .crew-standby-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
+  }
+  .crew-grid-cell.chief {
+    color: var(--color-amber);
+    font-weight: 600;
+  }
+  .crew-grid-pos {
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: var(--bg-surface);
+    color: var(--text-dim);
+    border: 1px solid var(--border-subtle);
+    white-space: nowrap;
+  }
+  .crew-grid-cell.chief .crew-grid-pos {
+    background: var(--amber-alpha);
+    border-color: rgba(245, 158, 11, .3);
+    color: var(--color-amber);
+  }
+  .crew-grid-cell.standby {
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+  .crew-standby-divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 4px 0;
+  }
+  .crew-grid-section {
+    font-size: 9px;
+    padding: 0 4px;
+    border-radius: 3px;
+    white-space: nowrap;
+    font-weight: 600;
+    letter-spacing: .03em;
+  }
+  .crew-grid-section.station {
+    background: rgba(59, 130, 246, .1);
+    border: 1px solid rgba(59, 130, 246, .25);
+    color: var(--color-blue);
+  }
+  .crew-grid-section.standby {
+    background: rgba(107, 114, 128, .1);
+    border: 1px solid rgba(107, 114, 128, .25);
+    color: var(--text-dim);
+  }
+  .crew-grid-section.fireboat {
+    background: rgba(6, 182, 212, .1);
+    border: 1px solid rgba(6, 182, 212, .25);
+    color: rgb(6, 182, 212);
+  }
+
+  /* ── Scrollbar ── */
+  .call-log::-webkit-scrollbar { width: 6px; }
+  .call-log::-webkit-scrollbar-track { background: transparent; }
+  .call-log::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+</style>
+{% endblock %}
+
+{% block header %}
+<!-- Kiosk header replaces the standard page header -->
+<header class="kiosk-header" x-data="kioskHeader()" x-init="startClock()">
+  <div class="kiosk-header-left">
+    <img src="https://res.cloudinary.com/san-juan-fire-district-3/image/fetch/f_auto/https://www.sjifire.org/assets/sjifire-logo-clear.png" alt="SJIF&amp;R" style="height:48px;width:48px;border-radius:4px">
+    <div>
+      <div style="font-size:22px;font-weight:700;color:var(--text-primary);letter-spacing:.02em">Live Incidents</div>
+      <div class="kiosk-date" x-text="date"></div>
+    </div>
+  </div>
+  <div class="kiosk-header-center">
+    <div class="kiosk-status" :class="$store.kiosk.activeCalls > 0 ? 'active' : 'ok'">
+      <span class="pulse-dot"></span>
+      <span x-text="$store.kiosk.activeCalls > 0
+        ? ($store.kiosk.activeCalls === 1 ? 'ACTIVE CALL' : $store.kiosk.activeCalls + ' ACTIVE CALLS')
+        : 'All Clear'"></span>
+    </div>
+  </div>
+  <div class="kiosk-header-right">
+    <div class="kiosk-clock" x-text="clock"></div>
+  </div>
+</header>
+{% endblock %}
+
+{% block tab_bar %}{% endblock %}
+
+{% block body %}
+<div class="kiosk-main" x-data="kioskApp()" x-init="init()">
+
+  <!-- Call indicator strip (always visible when calls exist) -->
+  <template x-if="$store.kiosk.calls.length > 1">
+    <div class="call-strip">
+      <template x-for="(call, i) in $store.kiosk.calls" :key="call.dispatch_id">
+        <div class="call-pill"
+             :class="[call.archived ? 'archived' : call._severity, i === currentCallIndex ? 'current' : '']"
+             @click="showCall(i)">
+          <span x-text="call.dispatch_id + (call.nature ? ' ' + call.nature : ' Incoming')"></span>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- Active / archived call detail -->
+  <template x-if="$store.kiosk.calls.length > 0">
+    <div class="call-panel" :class="{ archived: currentCall.archived }">
+      <div class="call-header">
+        <div>
+          <span class="call-nature" x-text="currentCall.nature ? (currentCall.icon + ' ' + currentCall.nature) : 'Incoming Call'"></span>
+          <template x-if="!currentCall.archived">
+            <span class="call-reported" x-text="'  Reported ' + relTime(currentCall.time_reported)"></span>
+          </template>
+          <template x-if="currentCall.archived">
+            <span class="call-reported" x-text="'  Completed ' + relTime(currentCall.completed_at)"></span>
+          </template>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <template x-if="currentCall.archived">
+            <div class="archived-badge">
+              <span class="check-icon">&#10003;</span>
+              <span>COMPLETED</span>
+            </div>
+          </template>
+          <span class="call-id" x-text="currentCall.dispatch_id"></span>
+        </div>
+      </div>
+      <div class="call-address" x-text="currentCall.address || 'Awaiting address...'"></div>
+
+      <div class="call-body">
+        <!-- Column 1: Map -->
+        <div class="call-map">
+          <template x-if="currentCall.latitude && currentCall.longitude && hasAzureMaps">
+            <div :id="'map-' + currentCall.dispatch_id" style="width:100%;height:100%"
+                 x-effect="updateMap(currentCall)"></div>
+          </template>
+          <template x-if="!currentCall.latitude || !currentCall.longitude || !hasAzureMaps">
+            <div class="call-map-placeholder">
+              <span x-text="currentCall.latitude ? 'Map loading...' : 'Awaiting location...'"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Column 2: Dispatch Log (most recent on top) -->
+        <div class="call-info" style="border-right:1px solid var(--border-subtle)">
+          <div class="call-log">
+            <div class="call-info-label">Dispatch Log</div>
+            <template x-if="currentCall.responder_details && currentCall.responder_details.length > 0">
+              <div>
+                <template x-for="rd in currentCall.responder_details.slice().sort((a,b) => (b.time_of_status_change||'').localeCompare(a.time_of_status_change||''))" :key="rd.unit_call_sign + rd.status + rd.time_of_status_change">
+                  <div class="radio-line">
+                    <span class="radio-time" x-text="fmtTime(rd.time_of_status_change)"></span>
+                    <span class="radio-unit" x-text="rd.unit_call_sign"></span>
+                    <template x-if="rd.radio_log && (rd.status === 'Note' || rd.status === 'NOTE')">
+                      <span><span style="color:var(--text-muted)">Note:</span> <span style="color:var(--text-muted);font-style:italic" x-text="rd.radio_log"></span></span>
+                    </template>
+                    <template x-if="!(rd.radio_log && (rd.status === 'Note' || rd.status === 'NOTE'))">
+                      <span x-text="displayStatus(rd.status)"></span>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <template x-if="!currentCall.responder_details || currentCall.responder_details.length === 0">
+              <div style="color:var(--text-faint);font-size:13px">Awaiting unit responses...</div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Column 3: CAD Notes + Site History -->
+        <div class="call-info">
+          <template x-if="currentCall.cad_comments">
+            <div class="call-info-section">
+              <div class="call-info-label">CAD Notes</div>
+              <div class="log-entry" x-text="currentCall.cad_comments.split('\n').reverse().join('\n')"></div>
+            </div>
+          </template>
+          <template x-if="!currentCall.cad_comments">
+            <div class="call-info-section">
+              <div class="call-info-label">CAD Notes</div>
+              <div style="color:var(--text-faint);font-size:13px">Awaiting CAD notes...</div>
+            </div>
+          </template>
+
+          <!-- Site History -->
+          <template x-if="currentCall.site_history && currentCall.site_history.length > 0">
+            <div class="call-info-section">
+              <div class="call-info-label">Site History</div>
+              <template x-for="h in currentCall.site_history" :key="h.dispatch_id">
+                <div class="site-entry">
+                  <span x-text="h.dispatch_id"></span> —
+                  <span x-text="h.nature"></span>
+                  <span style="color:var(--text-dim)" x-text="h.date ? '(' + dayjs(h.date).format('MMM D, YYYY') + ')' : ''"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Idle state -->
+  <template x-if="$store.kiosk.calls.length === 0">
+    <div class="idle-state">
+      <div class="idle-label">No Active Calls</div>
+    </div>
+  </template>
+
+  <!-- Crew strip (dense grid) -->
+  <div class="crew-strip">
+    <div class="crew-strip-grid">
+      <!-- On Duty -->
+      <div>
+        <div class="crew-strip-hdr">
+          <span class="crew-strip-label">On Duty</span>
+          <span class="crew-strip-platoon" x-text="$store.kiosk.platoon"></span>
+          <span class="crew-strip-badge" x-text="formatShiftEnd($store.kiosk.shift_end) || ''"></span>
+        </div>
+        <div class="crew-grid-names">
+          <template x-for="(c, i) in $store.kiosk.crew.filter(c => !isStandbyCrew(c))" :key="c.name + '-' + i">
+            <div class="crew-grid-cell" :class="{ chief: c.section === 'Chief Officer' }">
+              <span x-text="c.name"></span>
+              <span class="crew-grid-pos" x-text="c.position"></span>
+            </div>
+          </template>
+        </div>
+        <template x-if="$store.kiosk.crew.filter(c => isStandbyCrew(c)).length > 0">
+          <div>
+            <div class="crew-standby-divider"></div>
+            <div class="crew-standby-wrap">
+              <template x-for="(c, i) in $store.kiosk.crew.filter(c => isStandbyCrew(c))" :key="c.name + '-sby-' + i">
+                <div class="crew-grid-cell standby">
+                  <span x-text="c.name"></span>
+                  <template x-if="!sectionTag(c.section).label || sectionTag(c.section).label !== c.position">
+                    <span class="crew-grid-pos" x-text="c.position"></span>
+                  </template>
+                  <template x-if="sectionTag(c.section).label">
+                    <span class="crew-grid-section" :class="sectionTag(c.section).cls" x-text="sectionTag(c.section).label"></span>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+      <!-- Upcoming -->
+      <div x-show="$store.kiosk.upcoming_crew.length">
+        <div class="crew-strip-hdr">
+          <span class="crew-strip-label">Upcoming</span>
+          <span class="crew-strip-platoon" x-text="$store.kiosk.upcoming_platoon"></span>
+          <span class="crew-strip-badge" x-text="formatShiftStart($store.kiosk.upcoming_shift_starts) || ''"></span>
+        </div>
+        <div class="crew-grid-names">
+          <template x-for="(c, i) in $store.kiosk.upcoming_crew.filter(c => !isStandbyCrew(c))" :key="c.name + '-' + i">
+            <div class="crew-grid-cell" :class="{ chief: c.section === 'Chief Officer' }">
+              <span x-text="c.name"></span>
+              <span class="crew-grid-pos" x-text="c.position"></span>
+            </div>
+          </template>
+        </div>
+        <template x-if="$store.kiosk.upcoming_crew.filter(c => isStandbyCrew(c)).length > 0">
+          <div>
+            <div class="crew-standby-divider"></div>
+            <div class="crew-standby-wrap">
+              <template x-for="(c, i) in $store.kiosk.upcoming_crew.filter(c => isStandbyCrew(c))" :key="c.name + '-sby-' + i">
+                <div class="crew-grid-cell standby">
+                  <span x-text="c.name"></span>
+                  <template x-if="!sectionTag(c.section).label || sectionTag(c.section).label !== c.position">
+                    <span class="crew-grid-pos" x-text="c.position"></span>
+                  </template>
+                  <template x-if="sectionTag(c.section).label">
+                    <span class="crew-grid-section" :class="sectionTag(c.section).cls" x-text="sectionTag(c.section).label"></span>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block body_scripts %}
+<script>
+// Read params from URL once
+const _params = new URLSearchParams(window.location.search);
+const KIOSK_TOKEN = _params.get('token') || '';
+const TEST_MODE = _params.get('test_mode') || '';
+const AZURE_MAPS_KEY = '{{ azure_maps_key }}';
+const POLL_INTERVAL = 2000;
+
+// Build fetch URL with correct params
+function kioskDataUrl() {
+  const p = new URLSearchParams();
+  if (KIOSK_TOKEN) p.set('token', KIOSK_TOKEN);
+  if (TEST_MODE) p.set('test_mode', TEST_MODE);
+  return '/kiosk/data?' + p.toString();
+}
+
+// Global store for shared state
+document.addEventListener('alpine:init', () => {
+  Alpine.store('kiosk', {
+    calls: [],
+    activeCalls: 0,
+    crew: [],
+    sections: [],
+    platoon: '',
+    shift_end: '',
+    upcoming_crew: [],
+    upcoming_sections: [],
+    upcoming_platoon: '',
+    upcoming_shift_starts: '',
+    loaded: false,
+  });
+});
+
+// Check if a crew member is standby/support (goes below the divider)
+function isStandbyCrew(c) {
+  if (!c.section) return false;
+  return c.section.includes('Standby') || c.section === 'Support Standby';
+}
+
+// Parse section name into a display tag + CSS class
+function sectionTag(section) {
+  if (!section || section === 'Chief Officer') return { label: '', cls: '' };
+  if (section === 'Support Standby') return { label: 'Support', cls: 'standby' };
+  const isStandby = section.includes('Standby');
+  const station = section.replace(/ Standby company$/, '').trim();
+  if (station.startsWith('FB')) {
+    return { label: station, cls: 'fireboat' };
+  }
+  if (isStandby) {
+    return { label: station + ' SBY', cls: 'standby' };
+  }
+  // Active station assignment (e.g. "S31")
+  if (/^S\d+$/.test(station)) {
+    return { label: station, cls: 'station' };
+  }
+  return { label: '', cls: '' };
+}
+
+function kioskHeader() {
+  return {
+    clock: '',
+    date: '',
+    startClock() {
+      const tick = () => {
+        const now = new Date();
+        this.clock = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        this.date = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+      };
+      tick();
+      setInterval(tick, 1000);
+    }
+  };
+}
+
+function kioskApp() {
+  // Track first-seen time for call priority (5-min window)
+  const callFirstSeen = {};
+  // Track current map instances for cleanup
+  const maps = {};
+
+  // Auto-scroll state for archived call logs
+  let autoScrollTimer = null;
+  let autoScrollDir = 1;  // 1 = down, -1 = up
+  const SCROLL_SPEED = 0.5;      // px per tick
+  const SCROLL_INTERVAL = 30;    // ms between ticks (~33fps)
+  const SCROLL_PAUSE = 3000;     // ms pause at top/bottom
+
+  return {
+    currentCallIndex: 0,
+    rotationTimer: null,
+    hasAzureMaps: !!AZURE_MAPS_KEY,
+
+    get currentCall() {
+      const calls = this.$store.kiosk.calls;
+      if (calls.length === 0) return {};
+      const idx = Math.min(this.currentCallIndex, calls.length - 1);
+      return calls[idx] || {};
+    },
+
+    async init() {
+      await this.poll();
+      setInterval(() => this.poll(), POLL_INTERVAL);
+    },
+
+    async poll() {
+      try {
+        const r = await fetch(kioskDataUrl());
+        if (!r.ok) return;
+        const data = await r.json();
+
+        // Enrich calls with severity, icon, and first-seen tracking
+        const now = Date.now();
+        const calls = (data.calls || []).map(c => {
+          if (!c.archived && !callFirstSeen[c.dispatch_id]) callFirstSeen[c.dispatch_id] = now;
+          return {
+            ...c,
+            _severity: c.severity || 'low',
+            _firstSeen: callFirstSeen[c.dispatch_id] || now,
+            icon: c.icon || '',
+          };
+        });
+
+        // Clean up first-seen for calls no longer active (but not archived)
+        const activeIds = new Set(calls.filter(c => !c.archived).map(c => c.dispatch_id));
+        for (const id of Object.keys(callFirstSeen)) {
+          if (!activeIds.has(id)) delete callFirstSeen[id];
+        }
+
+        // Detect new active (non-archived) calls
+        const oldActiveIds = new Set(this.$store.kiosk.calls.filter(c => !c.archived).map(c => c.dispatch_id));
+        const newCalls = calls.filter(c => !c.archived && !oldActiveIds.has(c.dispatch_id));
+
+        this.$store.kiosk.calls = calls;
+        this.$store.kiosk.activeCalls = calls.filter(c => !c.archived).length;
+        this.$store.kiosk.crew = data.crew || [];
+        this.$store.kiosk.sections = data.sections || [];
+        this.$store.kiosk.platoon = data.platoon || '';
+        this.$store.kiosk.shift_end = data.shift_end || '';
+        this.$store.kiosk.upcoming_crew = data.upcoming_crew || [];
+        this.$store.kiosk.upcoming_sections = data.upcoming_sections || [];
+        this.$store.kiosk.upcoming_platoon = data.upcoming_platoon || '';
+        this.$store.kiosk.upcoming_shift_starts = data.upcoming_shift_starts || '';
+        this.$store.kiosk.loaded = true;
+
+        // New call interrupts rotation — show it immediately
+        if (newCalls.length > 0) {
+          const newIdx = calls.findIndex(c => c.dispatch_id === newCalls[0].dispatch_id);
+          if (newIdx >= 0) {
+            this.currentCallIndex = newIdx;
+            this.resetRotation();
+          }
+        }
+
+        // Manage rotation + auto-scroll for archived calls
+        this.manageRotation();
+        if (this.currentCall.archived) {
+          // Start auto-scroll if not already running
+          if (!autoScrollTimer) this.startAutoScroll();
+        } else {
+          this.stopAutoScroll();
+        }
+
+        // Clean up maps for calls no longer displayed
+        const allDisplayedIds = new Set(calls.map(c => c.dispatch_id));
+        for (const id of Object.keys(maps)) {
+          if (!allDisplayedIds.has(id)) {
+            maps[id].dispose();
+            delete maps[id];
+          }
+        }
+      } catch (e) {
+        // Silent — keep showing stale data
+      }
+    },
+
+    showCall(index) {
+      this.currentCallIndex = index;
+      this.resetRotation();
+      // Restart auto-scroll for the newly selected call
+      this.$nextTick(() => this.startAutoScroll());
+    },
+
+    manageRotation() {
+      const calls = this.$store.kiosk.calls;
+      const activeCalls = calls.filter(c => !c.archived);
+
+      // Only rotate among active calls; archived calls don't rotate
+      if (activeCalls.length <= 1) {
+        this.stopRotation();
+        return;
+      }
+
+      // Check if current call is still in priority window (< 5 min)
+      const current = calls[this.currentCallIndex];
+      if (current && !current.archived) {
+        const age = Date.now() - (current._firstSeen || 0);
+        if (age < 300000) {
+          // Still in priority window — don't rotate
+          this.stopRotation();
+          return;
+        }
+      }
+
+      // Start rotation if not already running
+      if (!this.rotationTimer) {
+        this.rotationTimer = setInterval(() => {
+          this.currentCallIndex = (this.currentCallIndex + 1) % this.$store.kiosk.calls.length;
+        }, 30000);
+      }
+    },
+
+    resetRotation() {
+      this.stopRotation();
+      // Rotation will restart from manageRotation() on next poll
+    },
+
+    stopRotation() {
+      if (this.rotationTimer) {
+        clearInterval(this.rotationTimer);
+        this.rotationTimer = null;
+      }
+    },
+
+    // Auto-scroll the dispatch log for archived (static) calls
+    startAutoScroll() {
+      this.stopAutoScroll();
+      const call = this.currentCall;
+      if (!call.archived) return;
+
+      // Find the .call-log element inside the current panel
+      const el = document.querySelector('.call-panel .call-log');
+      if (!el || el.scrollHeight <= el.clientHeight) return;  // no overflow
+
+      autoScrollDir = 1;
+      el.scrollTop = 0;
+
+      autoScrollTimer = setInterval(() => {
+        const maxScroll = el.scrollHeight - el.clientHeight;
+        if (maxScroll <= 0) return;
+
+        el.scrollTop += SCROLL_SPEED * autoScrollDir;
+
+        // Hit bottom — pause then reverse
+        if (el.scrollTop >= maxScroll) {
+          el.scrollTop = maxScroll;
+          autoScrollDir = -1;
+          clearInterval(autoScrollTimer);
+          autoScrollTimer = setTimeout(() => {
+            autoScrollTimer = setInterval(() => {
+              el.scrollTop += SCROLL_SPEED * autoScrollDir;
+              if (el.scrollTop <= 0) {
+                el.scrollTop = 0;
+                autoScrollDir = 1;
+                clearInterval(autoScrollTimer);
+                autoScrollTimer = setTimeout(() => this.startAutoScroll(), SCROLL_PAUSE);
+              }
+            }, SCROLL_INTERVAL);
+          }, SCROLL_PAUSE);
+        }
+      }, SCROLL_INTERVAL);
+    },
+
+    stopAutoScroll() {
+      if (autoScrollTimer) {
+        clearInterval(autoScrollTimer);
+        clearTimeout(autoScrollTimer);
+        autoScrollTimer = null;
+      }
+    },
+
+    formatShiftEnd(iso) {
+      if (!iso) return '';
+      try {
+        const d = dayjs(iso);
+        const hhmm = d.format('HHmm');
+        if (!d.calendar) return 'until ' + hhmm;
+        const label = d.calendar(null, {
+          sameDay: '[today]', nextDay: '[tomorrow]',
+          nextWeek: 'ddd', lastDay: '[yesterday]',
+          lastWeek: '[last] ddd', sameElse: 'MMM D'
+        });
+        return label === 'today' ? 'until ' + hhmm : 'until ' + hhmm + ' ' + label;
+      } catch { return ''; }
+    },
+
+    formatShiftStart(iso) {
+      if (!iso) return '';
+      try {
+        const d = dayjs(iso);
+        const hhmm = d.format('HHmm');
+        if (!d.calendar) return 'starting ' + hhmm;
+        const label = d.calendar(null, {
+          sameDay: '[today]', nextDay: '[tomorrow]',
+          nextWeek: 'ddd', lastDay: '[yesterday]',
+          lastWeek: '[last] ddd', sameElse: 'MMM D'
+        });
+        return label === 'today' ? 'starting ' + hhmm : 'starting ' + hhmm + ' ' + label;
+      } catch { return ''; }
+    },
+
+    relTime(iso) {
+      if (!iso) return '';
+      return dayjs(iso).fromNow();
+    },
+
+    displayStatus(s) {
+      const map = { 'Returning': 'Complete', 'RTQ': 'Complete' };
+      return map[s] || s;
+    },
+
+    fmtTime(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      } catch { return ''; }
+    },
+
+    updateMap(call) {
+      if (!AZURE_MAPS_KEY || !call.latitude || !call.longitude) return;
+      if (typeof atlas === 'undefined') return;
+
+      const id = call.dispatch_id;
+      const containerId = 'map-' + id;
+      const el = document.getElementById(containerId);
+      if (!el) return;
+
+      // Already have a map for this call
+      if (maps[id]) {
+        // Update position if changed
+        const z = { 2: 12 }[parseInt(_params.get('map_style') || '2', 10)] || 13;
+        maps[id].setCamera({ center: [call.longitude, call.latitude], zoom: z });
+        return;
+      }
+
+      // Map style presets — switch via ?map_style=1 through 6
+      // 0 (default): night, no tweaks
+      // 1: grayscale_dark, no tweaks
+      // 2: night, zoom out to 12
+      // 3: satellite_road_labels
+      // 4: night, wider roads + bigger labels
+      // 5: grayscale_dark, wider roads + bigger labels
+      // 6: high_contrast_dark
+      const MAP_STYLE = parseInt(_params.get('map_style') || '2', 10);
+
+      const styleMap = {
+        0: 'night',
+        1: 'grayscale_dark',
+        2: 'night',
+        3: 'satellite_road_labels',
+        4: 'night',
+        5: 'grayscale_dark',
+        6: 'high_contrast_dark',
+      };
+      const zoomMap = { 2: 12 };
+      const tweakRoads = new Set([4, 5]);
+
+      const mapStyle = styleMap[MAP_STYLE] || 'night';
+      const mapZoom = zoomMap[MAP_STYLE] || 13;
+
+      // Create new map
+      const map = new atlas.Map(containerId, {
+        center: [call.longitude, call.latitude],
+        zoom: mapZoom,
+        style: mapStyle,
+        interactive: false,
+        authOptions: {
+          authType: 'subscriptionKey',
+          subscriptionKey: AZURE_MAPS_KEY,
+        },
+      });
+
+      map.events.add('ready', () => {
+        if (tweakRoads.has(MAP_STYLE)) {
+          try {
+            const s = map.map.getStyle();
+            if (s && s.layers) {
+              for (const layer of s.layers) {
+                if (layer.type === 'line' && layer.id && /road/i.test(layer.id)) {
+                  map.map.setPaintProperty(layer.id, 'line-width', ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 5, 18, 12]);
+                  map.map.setPaintProperty(layer.id, 'line-opacity', 0.9);
+                }
+                if (layer.type === 'symbol' && layer.id && /road.*label/i.test(layer.id)) {
+                  map.map.setLayoutProperty(layer.id, 'text-size', ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 16, 18, 20]);
+                }
+              }
+            }
+          } catch (e) { /* style tweak failed, map still works */ }
+        }
+
+        const marker = new atlas.HtmlMarker({
+          position: [call.longitude, call.latitude],
+          color: '#dc2626',
+        });
+        map.markers.add(marker);
+      });
+
+      maps[id] = map;
+    },
+  };
+}
+</script>
+{% endblock %}

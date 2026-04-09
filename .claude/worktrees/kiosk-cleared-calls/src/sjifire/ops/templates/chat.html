@@ -1,0 +1,2385 @@
+{% extends "base.html" %}
+
+{% block title %}Incident Report &mdash; {{ incident_number }}{% endblock %}
+
+{% block head_scripts %}
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/centrifuge@5/dist/centrifuge.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.js"></script>
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+    body { overflow: hidden; }
+
+    /* ── Layout ── */
+    .chat-app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .chat-header {
+      background: linear-gradient(135deg, #0f2240, #1a3a5c);
+      border-bottom: 3px solid var(--color-red);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .chat-header-left { display: flex; align-items: center; gap: 12px; }
+    .chat-header h1   { font-size: 16px; color: var(--text-primary); font-weight: 600; }
+    .back-link         { color: var(--color-blue); text-decoration: none; font-size: 13px; opacity: .8; }
+    .back-link:hover   { opacity: 1; }
+    .print-link        { color: var(--text-muted); text-decoration: none; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border-medium); border-radius: 4px; }
+    .print-link:hover  { color: var(--text-secondary); border-color: var(--color-blue); }
+    .header-actions    { display: flex; align-items: center; gap: 8px; }
+    .export-wrap       { position: relative; }
+    .export-btn        { background: none; border: 1px solid var(--border-medium); border-radius: 4px; color: var(--text-muted); font-size: 12px; padding: 4px 10px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+    .export-btn:hover  { color: var(--text-secondary); border-color: var(--color-blue); }
+    .export-btn svg    { width: 14px; height: 14px; }
+    .export-menu       { position: absolute; right: 0; top: calc(100% + 4px); background: var(--bg-panel-alt); border: 1px solid var(--border-medium); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.3); min-width: 160px; z-index: 50; overflow: hidden; }
+    .export-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 14px; font-size: 13px; color: var(--text-secondary); background: none; border: none; cursor: pointer; text-align: left; }
+    .export-menu button:hover { background: var(--border-subtle); color: var(--text-primary); }
+    .export-menu .fmt  { color: var(--text-dim); font-size: 11px; font-family: monospace; min-width: 28px; }
+
+    .status-badge {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .status-badge.draft        { background: var(--blue-alpha);  color: var(--color-blue); }
+    .status-badge.in_progress  { background: var(--amber-alpha); color: var(--color-amber); }
+    .status-badge.ready_review { background: var(--green-alpha); color: var(--color-green); }
+    .status-badge.submitted    { background: var(--green-alpha); color: var(--color-green); }
+    .status-badge.approved     { background: var(--green-alpha); color: var(--color-green); }
+
+    /* ── Locked report view ── */
+    .report-view {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    .report-view::-webkit-scrollbar       { width: 6px; }
+    .report-view::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+
+    .report-view .section {
+      margin-bottom: 14px;
+      border: 1px solid var(--border-medium);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .report-view .section-header {
+      background: var(--bg-panel-alt);
+      padding: 8px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border-medium);
+    }
+    .report-view .section-body {
+      padding: 10px 14px;
+    }
+    .report-view .kv-row {
+      display: flex;
+      gap: 8px;
+      padding: 3px 0;
+    }
+    .report-view .kv-label {
+      width: 180px;
+      flex-shrink: 0;
+      font-weight: 600;
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+    .report-view .kv-value {
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+    .report-view .empty {
+      color: var(--text-faint);
+      font-style: italic;
+    }
+    .report-view .report-table {
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .report-view .report-table th {
+      text-align: left;
+      padding: 6px 16px 6px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--text-dim);
+      background: var(--bg-panel-alt);
+      border-bottom: 1px solid var(--border-medium);
+      white-space: nowrap;
+    }
+    .report-view .report-table td {
+      padding: 6px 16px 6px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+    .report-view .report-table tr:last-child td { border-bottom: none; }
+    .report-view .unit-comment-row td {
+      padding: 2px 10px 6px 30px;
+      font-style: italic;
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+    .report-view .narrative-block {
+      white-space: pre-wrap;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+    }
+    .report-view .report-footer {
+      margin-top: 16px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border-medium);
+      font-size: 11px;
+      color: var(--text-dim);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 20px;
+    }
+    .report-view .internal-section { border-color: rgba(251, 191, 36, .3); }
+    .report-view .internal-section .section-header { background: rgba(251, 191, 36, .1); color: var(--color-amber); border-color: rgba(251, 191, 36, .3); }
+    .report-view .internal-toggle {
+      background: none;
+      border: 1px solid var(--border-medium);
+      border-radius: 4px;
+      color: var(--text-dim);
+      font-size: 12px;
+      padding: 4px 12px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .report-view .internal-toggle:hover { color: var(--text-muted); border-color: var(--color-amber); }
+
+    /* ── Chat drawer ── */
+    .chat-drawer {
+      flex-shrink: 0;
+      border-top: 1px solid var(--border-medium);
+      background: var(--bg-panel);
+    }
+    .chat-drawer-toggle {
+      width: 100%;
+      background: none;
+      border: none;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .chat-drawer-toggle:hover { color: var(--text-secondary); }
+    .chat-drawer-toggle .chevron {
+      transition: transform .2s;
+      font-size: 16px;
+    }
+    .chat-drawer-toggle .chevron.open { transform: rotate(180deg); }
+    .chat-drawer-body {
+      max-height: 40vh;
+      overflow-y: auto;
+      padding: 0 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .chat-drawer-body::-webkit-scrollbar       { width: 6px; }
+    .chat-drawer-body::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+
+    /* ── Messages area ── */
+    .messages {
+      flex: 1;
+      min-height: 0;   /* Required: allows flex item to shrink below content height so overflow-y scrolls */
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .messages::-webkit-scrollbar       { width: 6px; }
+    .messages::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+
+    .msg {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--color-blue);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--bg-panel-alt);
+      border: 1px solid var(--border-default);
+      border-bottom-left-radius: 4px;
+      overflow: hidden;  /* contain floated map */
+    }
+    .msg.assistant.streaming-msg {
+      overflow: visible;  /* Allow element to grow during streaming so scroll container tracks height */
+    }
+    .msg.user.queued-msg {
+      opacity: 0.6;
+      position: relative;
+    }
+    .queued-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      opacity: 0.7;
+      margin-top: 4px;
+    }
+    .msg.assistant p             { margin-bottom: 8px; }
+    .msg.assistant p:last-child  { margin-bottom: 0; }
+    .msg.assistant strong        { color: var(--text-primary); }
+    .msg.assistant code          { background: var(--border-medium); padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+    .msg.assistant pre           { background: var(--bg-page); border: 1px solid var(--border-default); border-radius: 6px; padding: 10px; margin: 8px 0; overflow-x: auto; }
+    .msg.assistant pre code      { background: none; padding: 0; }
+    .msg.assistant ul,
+    .msg.assistant ol            { margin: 4px 0 8px 20px; }
+    .msg.assistant li            { margin-bottom: 4px; }
+    .msg.assistant a             { color: #93c5fd; text-decoration: underline; text-underline-offset: 2px; }
+    .msg.assistant a:hover       { color: #bfdbfe; }
+    .msg.assistant blockquote    { border-left: 3px solid var(--color-blue); padding-left: 12px; margin: 8px 0; color: var(--text-muted); }
+    .msg.assistant table         { border-collapse: collapse; margin: 8px 0; font-size: 13px; width: 100%; }
+    .msg.assistant th,
+    .msg.assistant td            { padding: 6px 12px; text-align: left; border-bottom: 1px solid var(--border-default); white-space: nowrap; }
+    .msg.assistant th            { font-weight: 600; color: var(--text-primary); background: var(--bg-page); }
+    .msg.assistant tr:last-child td { border-bottom: none; }
+
+    /* ── Inline map ── */
+    .chat-map-wrap {
+      float: right;
+      width: 275px;
+      height: 225px;
+      margin: 0 0 10px 14px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border-default);
+    }
+    .chat-map-wrap .leaflet-container {
+      width: 100%;
+      height: 100%;
+      border-radius: 8px;
+    }
+    /* On narrow screens, map goes full-width above text */
+    @media (max-width: 600px) {
+      .chat-map-wrap {
+        float: none;
+        width: 100%;
+        height: 160px;
+        margin: 0 0 10px 0;
+      }
+    }
+
+    /* ── Tool indicators ── */
+    .tool-indicator {
+      align-self: flex-start;
+      max-width: 85%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      background: var(--border-subtle);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .tool-indicator .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border-medium);
+      border-top-color: var(--color-blue);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .tool-result {
+      align-self: flex-start;
+      max-width: 85%;
+      padding: 8px 14px;
+      background: var(--green-alpha);
+      border: 1px solid rgba(34, 197, 94, .2);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--color-green);
+      cursor: pointer;
+    }
+    .tool-result:hover { background: rgba(34, 197, 94, .2); }
+    .tool-error { background: rgba(239, 68, 68, .1); border-color: rgba(239, 68, 68, .2); color: #f87171; }
+    .tool-error:hover { background: rgba(239, 68, 68, .2); }
+    .tool-image-wrap { margin-top: 6px; }
+    .tool-image {
+      display: block;
+      max-width: 240px;
+      max-height: 180px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .tool-image:hover { opacity: .85; }
+    .tool-image-caption {
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--text-dim);
+      font-style: italic;
+    }
+
+    /* ── Incident summary panel ── */
+    .incident-summary {
+      flex-shrink: 0;
+      margin: 12px 20px 0;
+      padding: 12px 16px;
+      background: var(--bg-panel-alt);
+      border: 1px solid var(--border-default);
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+    }
+    .incident-summary .summary-nature    { font-weight: 600; color: var(--text-primary); font-size: 14px; }
+    .incident-summary .summary-short-dsc { color: var(--text-muted); font-weight: 400; }
+    .incident-summary .summary-address   { color: var(--text-secondary); }
+    .incident-summary .summary-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 16px;
+      color: var(--text-dim);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .incident-summary .summary-meta span { white-space: nowrap; }
+
+    .completeness-bar          { display: inline-flex; align-items: center; gap: 6px; }
+    .completeness-bar .bar     { display: inline-block; width: 48px; height: 6px; background: var(--border-medium); border-radius: 3px; overflow: hidden; vertical-align: middle; }
+    .completeness-bar .bar-fill { display: block; height: 100%; background: var(--color-blue); border-radius: 3px; transition: width .3s; }
+
+    /* ── Typing indicator ── */
+    .typing {
+      align-self: flex-start;
+      display: flex;
+      gap: 4px;
+      padding: 12px 16px;
+      background: var(--bg-panel-alt);
+      border: 1px solid var(--border-default);
+      border-radius: 12px;
+      border-bottom-left-radius: 4px;
+    }
+    .typing span              { width: 7px; height: 7px; background: var(--text-dim); border-radius: 50%; animation: bounce 1.4s infinite; }
+    .typing span:nth-child(2) { animation-delay: .2s; }
+    .typing span:nth-child(3) { animation-delay: .4s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30%           { transform: translateY(-6px); }
+    }
+
+    /* ── Input bar ── */
+    .input-bar {
+      border-top: 1px solid var(--border-default);
+      padding: 12px 20px;
+      background: var(--bg-panel);
+      flex-shrink: 0;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .input-bar textarea {
+      flex: 1;
+      background: var(--bg-page);
+      border: 1px solid var(--border-medium);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      padding: 10px 14px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      min-height: 42px;
+      max-height: 120px;
+      line-height: 1.5;
+    }
+    .input-bar textarea:focus       { outline: none; border-color: var(--color-blue); }
+    .input-bar textarea::placeholder { color: var(--text-dim); }
+    .input-bar textarea:disabled    { opacity: .5; }
+
+    .attach-btn {
+      background: var(--bg-page);
+      border: 1px solid var(--border-medium);
+      border-radius: 8px;
+      color: var(--text-muted);
+      font-size: 20px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 42px;
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    .attach-btn:hover:not(:disabled) { border-color: var(--color-blue); color: var(--text-secondary); }
+    .attach-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    .send-btn {
+      background: var(--color-blue);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      height: 42px;
+    }
+    .send-btn:hover:not(:disabled) { background: #4a94f0; }
+    .send-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Image preview strip ── */
+    .image-preview {
+      display: flex;
+      gap: 8px;
+      padding: 8px 20px 0;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .preview-thumb {
+      position: relative;
+      width: 64px;
+      height: 64px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border-medium);
+    }
+    .preview-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .remove-img {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      background: rgba(0,0,0,.6);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+    .remove-img:hover { background: rgba(220,38,38,.8); }
+
+    /* ── Image thumbnails in user messages ── */
+    .msg-images {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .msg-images img {
+      width: 120px;
+      height: 120px;
+      object-fit: cover;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid rgba(255,255,255,.2);
+    }
+    .msg-images img:hover { opacity: .85; }
+
+    /* ── Lightbox ── */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      cursor: pointer;
+    }
+    .lightbox img {
+      max-width: 90vw;
+      max-height: 80vh;
+      border-radius: 8px;
+    }
+    .lightbox-caption {
+      color: #fff;
+      font-size: 14px;
+      margin-top: 10px;
+      text-align: center;
+      max-width: 80vw;
+    }
+    .lightbox-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(255,255,255,.15);
+      border: none;
+      color: #fff;
+      font-size: 28px;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background .15s;
+    }
+    .lightbox-nav:hover { background: rgba(255,255,255,.3); }
+    .lightbox-prev { left: 16px; }
+    .lightbox-next { right: 16px; }
+    .lightbox-close {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: rgba(255,255,255,.15);
+      border: none;
+      color: #fff;
+      font-size: 22px;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .lightbox-close:hover { background: rgba(255,255,255,.3); }
+    .lightbox-counter {
+      color: rgba(255,255,255,.6);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+
+    /* ── Suggestion chips ── */
+    .chat-hints {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 20px;
+      border-top: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+    .chat-hint {
+      background: var(--border-subtle);
+      border: 1px solid var(--border-default);
+      color: var(--text-muted);
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 14px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .chat-hint:hover {
+      background: rgba(96, 165, 250, .1);
+      border-color: var(--color-blue);
+      color: var(--text-secondary);
+    }
+
+    /* ── Error banner ── */
+    .error-banner {
+      background: var(--red-alpha);
+      border: 1px solid rgba(220, 38, 38, .3);
+      color: var(--color-error);
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      align-self: stretch;
+      text-align: center;
+    }
+
+    /* ── Presence indicators ── */
+    .presence-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .presence-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+      border: 2px solid var(--bg-panel);
+      cursor: default;
+    }
+    .presence-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-left: 4px;
+      white-space: nowrap;
+    }
+
+    /* ── Turn lock banner ── */
+    .turn-lock-banner {
+      background: var(--amber-alpha);
+      border: 1px solid rgba(245, 158, 11, .3);
+      color: var(--color-amber);
+      padding: 8px 16px;
+      font-size: 13px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    /* ── Remote user message label ── */
+    .msg-attribution {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
+    /* ── Chat responsive ── */
+    @media (max-width: 640px) {
+      .msg            { max-width: 95%; }
+      .chat-header h1 { font-size: 14px; }
+      .input-bar      { padding: 8px 12px; }
+    }
+</style>
+{% endblock %}
+
+{% block header %}{% endblock %}
+
+{% block body %}
+{% if is_locked %}
+{# ═══════════════════════════════════════════════════════════════════
+   Locked report view: submitted/approved — report-first, chat drawer
+   ═══════════════════════════════════════════════════════════════════ #}
+<div class="chat-app" x-data="lockedApp()" x-cloak>
+  <!-- Header -->
+  <div class="chat-header">
+    <div class="chat-header-left">
+      <a href="/dashboard#reports" class="back-link">&larr; Reports</a>
+      <h1>{{ incident_number }}</h1>
+      <span class="status-badge {{ incident_status }}">&#128274; {{ incident_status | replace("_", " ") | title }}</span>
+    </div>
+    <div class="header-actions">
+      <div class="export-wrap" x-data="{open: false}" @click.away="open = false">
+        <button class="export-btn" @click="open = !open">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export
+        </button>
+        <div class="export-menu" x-show="open" x-cloak x-transition.opacity>
+          <button @click="exportChat('json'); open = false"><span class="fmt">.json</span> Raw data</button>
+          <button @click="exportChat('md'); open = false"><span class="fmt">.md</span> Markdown</button>
+        </div>
+      </div>
+      <a href="/reports/{{ incident_id }}/print" target="_blank" class="print-link">Print Report</a>
+      <button class="print-link" style="cursor:pointer" @click="reopenReport()" x-show="!reopening" title="Reopen this report for editing">Reopen</button>
+      <span x-show="reopening" style="font-size:12px;color:var(--text-dim)">Reopening&hellip;</span>
+    </div>
+  </div>
+
+  <!-- ── Report View (scrollable) ── -->
+  <div class="report-view">
+
+    <!-- Incident Information -->
+    <div class="section">
+      <div class="section-header">Incident Information</div>
+      <div class="section-body">
+        <div class="kv-row">
+          <span class="kv-label">Type</span>
+          <span class="kv-value">{% if doc.incident_type %}{{ doc.incident_type | replace("||", " > ") | replace("_", " ") | title }}{% else %}<span class="empty">Not set</span>{% endif %}</span>
+        </div>
+        {% if doc.additional_incident_types %}
+        <div class="kv-row">
+          <span class="kv-label">Additional Types</span>
+          <span class="kv-value">{% for t in doc.additional_incident_types %}{{ t | replace("||", " > ") | replace("_", " ") | title }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+        </div>
+        {% endif %}
+        {% if doc.automatic_alarm is not none %}
+        <div class="kv-row">
+          <span class="kv-label">Automatic Alarm</span>
+          <span class="kv-value">{{ "Yes" if doc.automatic_alarm else "No" }}</span>
+        </div>
+        {% endif %}
+        {% if doc.location_use %}
+        <div class="kv-row">
+          <span class="kv-label">Location Use</span>
+          <span class="kv-value">{{ doc.location_use | replace("||", " > ") | replace("_", " ") | title }}</span>
+        </div>
+        {% endif %}
+        {% set zip_val = doc.zip_code or doc.extras.get("zip_code", "") %}
+        <div class="kv-row">
+          <span class="kv-label">Address</span>
+          <span class="kv-value">
+            {% if doc.address -%}
+              {{ doc.address }}
+              {%- if doc.apt_suite %}, {{ doc.apt_suite }}{% endif %}
+              {%- if doc.city %}, {{ doc.city }}{% endif %}
+              {%- if doc.state %}, {{ doc.state }}{% endif %}
+              {%- if zip_val %} {{ zip_val }}{% endif %}
+              {%- if doc.county %} ({{ doc.county }} County){% endif %}
+            {%- else -%}
+              <span class="empty">Not set</span>
+            {%- endif %}
+          </span>
+        </div>
+        {% if doc.latitude and doc.longitude %}
+        <div class="kv-row">
+          <span class="kv-label">GPS</span>
+          <span class="kv-value">{{ "%.4f" | format(doc.latitude) }}, {{ "%.4f" | format(doc.longitude) }}</span>
+        </div>
+        {% endif %}
+        {% if doc.arrival_conditions %}
+        <div class="kv-row">
+          <span class="kv-label">Arrival Conditions</span>
+          <span class="kv-value">{{ doc.arrival_conditions | replace("_", " ") | title }}</span>
+        </div>
+        {% endif %}
+        {% if doc.people_present is not none %}
+        <div class="kv-row">
+          <span class="kv-label">People Present</span>
+          <span class="kv-value">{{ "Yes" if doc.people_present else "No" }}</span>
+        </div>
+        {% endif %}
+        {% if doc.displaced_count %}
+        <div class="kv-row">
+          <span class="kv-label">Displaced</span>
+          <span class="kv-value">{{ doc.displaced_count }}</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Fire Details -->
+    {% if doc.outside_fire_cause or doc.outside_fire_acres %}
+    <div class="section">
+      <div class="section-header">Fire Details</div>
+      <div class="section-body">
+        {% if doc.outside_fire_cause %}
+        <div class="kv-row">
+          <span class="kv-label">Outside Fire Cause</span>
+          <span class="kv-value">{{ doc.outside_fire_cause | replace("_", " ") | title }}</span>
+        </div>
+        {% endif %}
+        {% if doc.outside_fire_acres %}
+        <div class="kv-row">
+          <span class="kv-label">Acres Burned</span>
+          <span class="kv-value">{{ doc.outside_fire_acres }} acres</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Response Timeline -->
+    {% if doc.timestamps %}
+    <div class="section">
+      <div class="section-header">Response Timeline</div>
+      <div class="section-body">
+        {% for label, val in doc.timestamps | sort_timestamps %}
+        <div class="kv-row">
+          <span class="kv-label">{{ label }}</span>
+          <span class="kv-value" style="font-family:monospace">{{ val | fmt_dt }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Actions & Tactics -->
+    {% if doc.action_taken %}
+    <div class="section">
+      <div class="section-header">Actions &amp; Tactics</div>
+      <div class="section-body">
+        <div class="kv-row">
+          <span class="kv-label">Action Taken</span>
+          <span class="kv-value">{{ "Yes" if doc.action_taken == "ACTION" else "No Action Taken" }}</span>
+        </div>
+        {% if doc.action_taken == "ACTION" and doc.action_codes %}
+        {% for category, subs in doc.action_codes | group_action_codes %}
+        <div class="kv-row">
+          <span class="kv-label">{{ category }}</span>
+          <span class="kv-value">{{ subs | join(", ") if subs else "--" }}</span>
+        </div>
+        {% endfor %}
+        {% endif %}
+        {% if doc.action_taken == "NOACTION" and doc.noaction_reason %}
+        <div class="kv-row">
+          <span class="kv-label">Reason</span>
+          <span class="kv-value">{{ doc.noaction_reason | replace("_", " ") | title }}</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Apparatus Response -->
+    {% if doc.units %}
+    {% set has_staged = doc.units | selectattr("staged") | list | length > 0 %}
+    {% set has_canceled = doc.units | selectattr("canceled") | list | length > 0 %}
+    {% set has_iq = doc.units | selectattr("in_quarters") | list | length > 0 %}
+    {% set has_mode = doc.units | selectattr("response_mode") | list | length > 0 %}
+    <div class="section">
+      <div class="section-header">Apparatus Response</div>
+      <div class="section-body" style="padding:0">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Unit</th>
+              <th>Dispatched</th>
+              <th>Enroute</th>
+              {% if has_staged %}<th>Staged</th>{% endif %}
+              <th>On Scene</th>
+              <th>Cleared</th>
+              {% if has_canceled %}<th>Canceled</th>{% endif %}
+              {% if has_iq %}<th>In Quarters</th>{% endif %}
+              {% if has_mode %}<th>Mode</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for unit in doc.units %}
+            <tr>
+              <td style="font-weight:600">{{ unit.unit_id }}</td>
+              <td style="font-family:monospace">{{ unit.dispatch | fmt_time if unit.dispatch else "--" }}</td>
+              <td style="font-family:monospace">{{ unit.enroute | fmt_time if unit.enroute else "--" }}</td>
+              {% if has_staged %}<td style="font-family:monospace">{{ unit.staged | fmt_time if unit.staged else "--" }}</td>{% endif %}
+              <td style="font-family:monospace">{{ unit.on_scene | fmt_time if unit.on_scene else "--" }}</td>
+              <td style="font-family:monospace">{{ unit.cleared | fmt_time if unit.cleared else "--" }}</td>
+              {% if has_canceled %}<td style="font-family:monospace">{{ unit.canceled | fmt_time if unit.canceled else "--" }}</td>{% endif %}
+              {% if has_iq %}<td style="font-family:monospace">{{ unit.in_quarters | fmt_time if unit.in_quarters else "--" }}</td>{% endif %}
+              {% if has_mode %}<td>{{ unit.response_mode | replace("_", " ") | title if unit.response_mode else "--" }}</td>{% endif %}
+            </tr>
+            {% if unit.comment %}
+            <tr class="unit-comment-row">
+              <td colspan="99">{{ unit.comment }}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Personnel -->
+    {% if doc.units %}
+    {% set has_personnel = doc.units | selectattr("personnel") | list | length > 0 %}
+    {% if has_personnel %}
+    {% set ic = dispatch.get("ic", "") if dispatch else "" %}
+    <div class="section">
+      <div class="section-header">Personnel</div>
+      <div class="section-body" style="padding:0">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Rank</th>
+              <th>Unit</th>
+              <th>Role</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for unit in doc.units %}
+            {% for member in unit.personnel %}
+            {% set clean_name = member.name | strip_rank %}
+            {% set is_ic = ic and (ic in member.name or ic in clean_name or member.name in ic or clean_name in ic) %}
+            <tr>
+              <td style="font-weight:600">{{ clean_name }}</td>
+              <td>{{ member.rank | title if member.rank else "--" }}</td>
+              <td>{{ unit.unit_id }}</td>
+              <td>{% if is_ic %}IC{% elif member.role %}{{ member.role | title }}{% elif member.position and member.position != member.rank %}{{ member.position | title }}{% else %}--{% endif %}</td>
+            </tr>
+            {% endfor %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <!-- Dispatch Comments -->
+    {% if doc.dispatch_notes %}
+    <div class="section">
+      <div class="section-header">Dispatch Comments</div>
+      <div class="section-body">
+        {% for note in doc.dispatch_notes %}
+        <div style="margin-bottom:6px{% if not loop.last %};padding-bottom:6px;border-bottom:1px solid var(--border-subtle){% endif %}">
+          <span style="font-family:monospace;font-size:11px;color:var(--text-dim)">{{ note.timestamp | fmt_dt if note.timestamp else "--" }}</span>
+          {% if note.unit %}<span style="font-weight:600;font-size:11px;color:var(--text-dim)">[{{ note.unit }}]</span>{% endif %}
+          <span style="font-size:13px;color:var(--text-muted)">{{ note.text }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% elif doc.dispatch_comments %}
+    <div class="section">
+      <div class="section-header">Dispatch Comments</div>
+      <div class="section-body">
+        <div class="narrative-block">{{ doc.dispatch_comments }}</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Narrative -->
+    {% if doc.narrative %}
+    <div class="section">
+      <div class="section-header">Narrative</div>
+      <div class="section-body">
+        <div class="narrative-block">{{ doc.narrative }}</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Attachments -->
+    {% if doc.attachments %}
+    <div class="section">
+      <div class="section-header">Attachments</div>
+      <div class="section-body" style="padding:0">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Filename</th>
+              <th>Uploaded</th>
+              <th>By</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for att in doc.attachments %}
+            <tr>
+              <td>{{ att.filename }}</td>
+              <td style="font-family:monospace">{{ att.uploaded_at | fmt_dt }}</td>
+              <td>{{ att.uploaded_by }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Casualty & Rescue -->
+    {% if doc.extras.get("casualty_rescues") %}
+    {% set cr_type_labels = {"NONFF": "Civilian", "FF": "Firefighter"} %}
+    {% set cr_injury_labels = {"INJURED_NONFATAL": "Injured (Non-Fatal)", "INJURED_FATAL": "Fatal Injury", "NOT_INJURED": "Not Injured"} %}
+    {% set cr_rescue_labels = {
+      "RESCUED_BY_FIREFIGHTER": "Rescued by Firefighter",
+      "EVAC_ASSISTED_BY_FIREFIGHTER": "Evac Assisted by Firefighter",
+      "SELF_EVACUATED": "Self-Evacuated",
+      "RESCUED_BY_OTHER": "Rescued by Other",
+      "NOT_RESCUED": "Not Rescued",
+    } %}
+    <div class="section">
+      <div class="section-header">Casualty &amp; Rescue ({{ doc.extras.casualty_rescues | length }})</div>
+      <div class="section-body">
+        {% for cr in doc.extras.casualty_rescues %}
+        {% if not loop.first %}<hr style="border:none;border-top:1px solid var(--border-subtle);margin:8px 0">{% endif %}
+        <div style="font-weight:600;font-size:12px;margin-bottom:4px">
+          Person {{ loop.index }}: {{ cr_type_labels.get(cr.get("type"), cr.get("type", "--") | replace("_", " ") | title) }}{% if cr.get("gender") %}, {{ cr.gender | title }}{% endif %}
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Injury</span>
+          <span class="kv-value">{{ cr_injury_labels.get(cr.get("injury_type"), cr.get("injury_type", "--") | replace("_", " ") | title) }}</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Rescue</span>
+          <span class="kv-value">{{ cr_rescue_labels.get(cr.get("rescue_type"), cr.get("rescue_type", "--") | replace("_", " ") | title) }}</span>
+        </div>
+        {% if cr.get("injury_cause") %}
+        <div class="kv-row">
+          <span class="kv-label">Cause</span>
+          <span class="kv-value">{{ cr.injury_cause | replace("_", " ") | title }}</span>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Additional Details (extras) -->
+    {% set skip_extras = ["station", "zip_code", "casualty_rescues", "dispatch_notes"] %}
+    {% set extras_labels = {
+      "smoke_alarm_presence": "Smoke Alarm",
+      "fire_alarm_presence": "Fire Alarm",
+      "sprinkler_presence": "Fire Suppression / Sprinkler",
+      "electric_hazards": "Electrical Hazards",
+      "solar_present": "Solar Panels",
+      "battery_ess_present": "Battery / ESS",
+      "generator_present": "Generator",
+      "csst_present": "CSST Gas Lines",
+      "patient_count": "Patient Count",
+      "care_disposition": "Care Disposition",
+      "transport_disposition": "Transport Disposition",
+      "patient_status": "Patient Status",
+      "impediment_narrative": "Impediment",
+      "rescue_mode": "Rescue Mode",
+      "rescue_actions": "Rescue Actions",
+      "rescue_impediment": "Rescue Impediment",
+      "rescue_elevation": "Rescue Elevation",
+    } %}
+    {% set extra_keys = [] %}
+    {% for k in doc.extras %}{% if k not in skip_extras %}{% if extra_keys.append(k) %}{% endif %}{% endif %}{% endfor %}
+    {% if extra_keys %}
+    <div class="section">
+      <div class="section-header">Additional Details</div>
+      <div class="section-body">
+        {% for k in extra_keys %}
+        {% set val = doc.extras[k] %}
+        <div class="kv-row">
+          <span class="kv-label">{{ extras_labels.get(k, k | replace("_", " ") | title) }}</span>
+          <span class="kv-value">
+            {% if val is sameas true -%}
+              Yes
+            {%- elif val is sameas false -%}
+              No
+            {%- elif val is string -%}
+              {{ val | replace("_", " ") | title }}
+            {%- elif val is iterable and val is not mapping -%}
+              {% for item in val %}{% if item is mapping %}{% for ik, iv in item.items() %}{{ ik | replace("_", " ") | title }}: {{ iv | replace("_", " ") | title if iv is string else iv }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not loop.last %}; {% endif %}{% elif item is string %}{{ item | replace("_", " ") | title }}{% else %}{{ item }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+            {%- elif val is mapping -%}
+              {% for sk, sv in val.items() %}{{ sk | replace("_", " ") | title }}: {{ sv | replace("_", " ") | title if sv is string else sv }}{% if not loop.last %}; {% endif %}{% endfor %}
+            {%- else -%}
+              {{ val }}
+            {%- endif %}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Internal Notes (togglable) -->
+    {% if doc.internal_notes or doc.edit_history %}
+    <button class="internal-toggle" @click="showInternal = !showInternal" x-text="showInternal ? 'Hide internal notes' : 'Show internal notes & edit history'">Show internal notes & edit history</button>
+    {% endif %}
+    {% if doc.internal_notes %}
+    <div class="section internal-section" x-show="showInternal" x-cloak style="margin-top:10px">
+      <div class="section-header">Internal Notes</div>
+      <div class="section-body">
+        <div class="narrative-block">{{ doc.internal_notes }}</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Edit History (togglable) -->
+    {% if doc.edit_history %}
+    <div class="section internal-section" x-show="showInternal" x-cloak style="margin-top:10px">
+      <div class="section-header">Edit History</div>
+      <div class="section-body" style="padding:0">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Editor</th>
+              <th>Fields Changed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in doc.edit_history %}
+            <tr>
+              <td style="font-family:monospace; font-size:11px">{{ entry.timestamp | fmt_dt }}</td>
+              <td>{{ entry.editor_name }}</td>
+              <td style="font-size:11px">{{ entry.fields_changed | join(", ") }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Footer -->
+    <div class="report-footer">
+      <span>Report by: {{ doc.created_by }}</span>
+      <span>Created: {{ doc.created_at | fmt_dt }}</span>
+      {% if doc.updated_at %}<span>Updated: {{ doc.updated_at | fmt_dt }}</span>{% endif %}
+      {% if doc.contributed_by %}<span>Contributors: {{ doc.contributed_by | join(", ") }}</span>{% endif %}
+    </div>
+  </div>
+
+  <!-- ── Chat Drawer ── -->
+  <div class="chat-drawer">
+    <button class="chat-drawer-toggle" @click="drawerOpen = !drawerOpen">
+      <span>Chat History <span x-show="messageCount > 0" x-text="'(' + messageCount + ' messages)'"></span></span>
+      <span class="chevron" :class="drawerOpen && 'open'">&#9650;</span>
+    </button>
+    <div class="chat-drawer-body" x-show="drawerOpen" x-cloak x-transition>
+      <template x-if="messages.length === 0 && !loading">
+        <div style="color:var(--text-dim); font-size:13px; text-align:center; padding:12px 0;">No conversation history.</div>
+      </template>
+      <template x-if="loading">
+        <div style="color:var(--text-dim); font-size:13px; text-align:center; padding:12px 0;">Loading...</div>
+      </template>
+      <template x-for="(msg, i) in messages" :key="i">
+        <div>
+          <template x-if="msg.type === 'message'">
+            <div class="msg" :class="msg.role">
+              <div class="msg-images" x-show="msg.images && msg.images.length">
+                <template x-for="(img, j) in (msg.images || [])" :key="j">
+                  <img :src="img" @click="openLightbox(msg.images, j)">
+                </template>
+              </div>
+              <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : DOMPurify.sanitize(msg.content)"></div>
+            </div>
+          </template>
+          <template x-if="msg.type === 'tool'">
+            <div :class="msg.is_error ? 'tool-result tool-error' : 'tool-result'">
+              <span x-text="(msg.is_error ? '\u2717 ' : '\u2713 ') + msg.summary"></span>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Lightbox -->
+  <div class="lightbox" x-show="lightbox.open" @click="lightbox.open = false" x-cloak>
+    <button class="lightbox-close" @click.stop="lightbox.open = false">&times;</button>
+    <template x-if="lightbox.items.length > 1">
+      <button class="lightbox-nav lightbox-prev" @click.stop="lightboxPrev()">&lsaquo;</button>
+    </template>
+    <img :src="lightbox.items[lightbox.index]?.src || ''" @click.stop>
+    <div class="lightbox-counter" x-show="lightbox.items.length > 1" x-text="`${lightbox.index + 1} / ${lightbox.items.length}`"></div>
+    <template x-if="lightbox.items.length > 1">
+      <button class="lightbox-nav lightbox-next" @click.stop="lightboxNext()">&rsaquo;</button>
+    </template>
+  </div>
+</div>
+{% else %}
+{# ═══════════════════════════════════════════════════════════════════
+   Unlocked report: draft/in_progress/ready_review — full chat UI
+   ═══════════════════════════════════════════════════════════════════ #}
+<div class="chat-app" x-data="chatApp()" x-cloak>
+  <!-- Compact header -->
+  <div class="chat-header">
+    <div class="chat-header-left">
+      <a href="/dashboard#reports" class="back-link">&larr; Reports</a>
+      <h1>{{ incident_number }}</h1>
+      <span class="status-badge {{ incident_status }}" x-text="status">{{ incident_status }}</span>
+    </div>
+    <div class="header-actions">
+      <!-- Presence: who else is viewing this report -->
+      <div class="presence-bar" x-show="Object.keys(presenceUsers).length > 0">
+        <template x-for="(u, email) in presenceUsers" :key="email">
+          <span class="presence-avatar" :style="'background:' + u.color" :title="u.name" x-text="u.initials"></span>
+        </template>
+        <span class="presence-label" x-text="presenceLabel"></span>
+      </div>
+      <div class="export-wrap" x-data="{open: false}" @click.away="open = false">
+        <button class="export-btn" @click="open = !open">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export
+        </button>
+        <div class="export-menu" x-show="open" x-cloak x-transition.opacity>
+          <button @click="exportChat('json'); open = false"><span class="fmt">.json</span> Raw data</button>
+          <button @click="exportChat('md'); open = false"><span class="fmt">.md</span> Markdown</button>
+          <button @click="exportChat('print'); open = false"><span class="fmt">&#9113;</span> Print</button>
+        </div>
+      </div>
+      <a href="/reports/{{ incident_id }}/print" target="_blank" class="print-link">Print Report</a>
+    </div>
+  </div>
+
+  {% if dispatch %}
+  <!-- Incident summary panel -->
+  <div class="incident-summary">
+    <div>
+      <span class="summary-nature">{{ dispatch.nature }}</span>
+      {% if dispatch.short_dsc %}<span class="summary-short-dsc"> &mdash; {{ dispatch.short_dsc }}</span>{% endif %}
+    </div>
+    {% if dispatch.address %}<div class="summary-address">{{ dispatch.address }}</div>{% endif %}
+    <div class="summary-meta">
+      {% if dispatch.time_reported %}<span>{{ dispatch.time_reported }}</span>{% endif %}
+      {% if dispatch.ic %}<span>IC: {{ dispatch.ic }}</span>{% endif %}
+      {% if dispatch.responding_units %}<span>Units: {{ dispatch.responding_units }}</span>{% endif %}
+      <span class="completeness-bar" x-show="completeness">Report: <span x-text="(completeness?.filled ?? 0) + '/' + (completeness?.total ?? 0)"></span> <span class="bar"><span class="bar-fill" :style="'width:' + (completeness?.total ? (completeness.filled / completeness.total * 100) : 0) + '%'"></span></span></span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Turn lock banner (shown when another user's turn is active) -->
+  <div class="turn-lock-banner" x-show="turnHolder && turnHolder.email && turnHolder.email !== currentUserEmail" x-cloak>
+    Claude is responding to <strong x-text="turnHolder?.name || 'another user'"></strong> &mdash; you can watch and send when their turn finishes.
+  </div>
+
+  <!-- Messages -->
+  <div class="messages" x-ref="messages" @wheel="_onWheel($event)" @touchstart="_onTouchStart($event)" @touchmove="_onTouchMove($event)">
+    <!-- Message list -->
+    <template x-for="(msg, i) in messages" :key="i">
+      <div>
+        <!-- User or assistant message -->
+        <template x-if="msg.type === 'message'">
+          <div class="msg" :class="msg.role">
+            <template x-if="msg.role === 'user' && msg.sender_name && msg.sender_email !== currentUserEmail">
+              <div class="msg-attribution" x-text="msg.sender_name"></div>
+            </template>
+            <div class="msg-images" x-show="msg.images && msg.images.length">
+              <template x-for="(img, j) in (msg.images || [])" :key="j">
+                <img :src="img" @click="openLightbox(msg.images, j)">
+              </template>
+            </div>
+            <div x-html="msg.role === 'assistant' ? renderMarkdown(msg.content, false, i) : DOMPurify.sanitize(msg.content)"></div>
+          </div>
+        </template>
+        <!-- Tool indicator (morphs from spinner → result) -->
+        <template x-if="msg.type === 'tool'">
+          <div :class="msg.pending ? 'tool-indicator' : (msg.is_error ? 'tool-result tool-error' : 'tool-result')">
+            <template x-if="msg.pending"><div class="spinner"></div></template>
+            <span x-text="msg.pending ? msg.label : ((msg.is_error ? '\u2717 ' : '\u2713 ') + msg.summary)"></span>
+            <template x-if="!msg.pending && msg.image_url">
+              <div class="tool-image-wrap">
+                <img :src="msg.image_url" class="tool-image" @click="openLightbox([{src: msg.image_url, caption: msg.image_title}], 0, true)">
+                <div class="tool-image-caption" x-show="msg.image_title" x-text="msg.image_title"></div>
+              </div>
+            </template>
+          </div>
+        </template>
+        <!-- Error -->
+        <template x-if="msg.type === 'error'">
+          <div class="error-banner" x-text="msg.content"></div>
+        </template>
+      </div>
+    </template>
+
+    <!-- Typing indicator (shown while waiting for first token) -->
+    <template x-if="streaming && !currentText">
+      <div class="typing"><span></span><span></span><span></span></div>
+    </template>
+
+    <!-- Streaming assistant message (overflow:visible so flex layout tracks growing height) -->
+    <template x-if="streaming && currentText">
+      <div class="msg assistant streaming-msg" x-ref="streamingMsg" x-html="renderMarkdown(currentText, true)"></div>
+    </template>
+
+    <!-- Queued user messages (shown below streaming, sent after current turn) -->
+    <template x-for="(qm, qi) in _messageQueue" :key="'q'+qi">
+      <div class="msg user queued-msg">
+        <div class="msg-images" x-show="qm.images && qm.images.length">
+          <template x-for="(img, j) in (qm.images || [])" :key="j">
+            <img :src="img.dataUrl">
+          </template>
+        </div>
+        <div x-text="qm.displayText"></div>
+        <div class="queued-label">Queued</div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Quick action chips -->
+  <div class="chat-hints" x-show="!streaming">
+    <button class="chat-hint" @click="sendMessage('Show the dispatch log')">Show dispatch log</button>
+    <button class="chat-hint" @click="sendMessage('Who was on duty for this call?')">Who was on duty?</button>
+    <button class="chat-hint" @click="sendMessage('Fill in timestamps from dispatch')">Fill in timestamps</button>
+    <button class="chat-hint" @click="$refs.fileInput.click()">Attach accountability board</button>
+    <button class="chat-hint" @click="$refs.fileInput.click()">Attach scene photo</button>
+    <button class="chat-hint" @click="sendMessage('What fields are still missing?')">What's missing?</button>
+  </div>
+
+  <!-- Image preview strip -->
+  <div class="image-preview" x-show="pendingImages.length > 0">
+    <template x-for="(img, i) in pendingImages" :key="i">
+      <div class="preview-thumb">
+        <img :src="img.dataUrl">
+        <button class="remove-img" @click="pendingImages.splice(i, 1)">&times;</button>
+      </div>
+    </template>
+  </div>
+
+  <!-- Input bar -->
+  <div class="input-bar">
+    <button class="attach-btn" @click="$refs.fileInput.click()" :disabled="streaming" title="Attach a scene photo, whiteboard, or run sheet">&#128206;</button>
+    <input type="file" x-ref="fileInput" accept="image/jpeg,image/png,image/webp,image/gif" multiple @change="handleFiles($event)" style="display:none" capture="environment">
+    <textarea
+      x-ref="input"
+      x-model="inputText"
+      :placeholder="streaming ? 'Type your next message — it will send when the current response finishes...' : 'Describe what happened, or attach a photo...'"
+      @keydown.enter.prevent="if (!$event.shiftKey) sendMessage()"
+      @input="autoResize($event)"
+      rows="1"
+    ></textarea>
+    <button class="send-btn" :disabled="!inputText.trim() && !pendingImages.length" @click="sendMessage()">Send</button>
+  </div>
+
+  <!-- Lightbox -->
+  <div class="lightbox" x-show="lightbox.open" @click="lightbox.open = false" x-cloak>
+    <button class="lightbox-close" @click.stop="lightbox.open = false">&times;</button>
+    <template x-if="lightbox.items.length > 1">
+      <button class="lightbox-nav lightbox-prev" @click.stop="lightboxPrev()">&lsaquo;</button>
+    </template>
+    <img :src="lightbox.items[lightbox.index]?.src || ''" @click.stop>
+    <div class="lightbox-caption" x-show="lightbox.items[lightbox.index]?.caption" x-text="lightbox.items[lightbox.index]?.caption || ''"></div>
+    <div class="lightbox-counter" x-show="lightbox.items.length > 1" x-text="`${lightbox.index + 1} / ${lightbox.items.length}`"></div>
+    <template x-if="lightbox.items.length > 1">
+      <button class="lightbox-nav lightbox-next" @click.stop="lightboxNext()">&rsaquo;</button>
+    </template>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block body_scripts %}
+<script>
+{% if is_locked %}
+function lockedApp() {
+  return {
+    messages: [],
+    loading: true,
+    drawerOpen: false,
+    showInternal: false,
+    reopening: false,
+    lightbox: { open: false, items: [], index: 0 },
+    incidentId: '{{ incident_id }}',
+
+    get messageCount() {
+      return this.messages.filter(m => m.type === 'message').length;
+    },
+
+    async init() {
+      try {
+        const res = await authFetch(`/reports/${this.incidentId}/conversation`);
+        if (res.ok) {
+          const data = await res.json();
+          for (const msg of data.messages || []) {
+            if (msg.content) {
+              const m = {type: 'message', role: msg.role, content: msg.content};
+              if (msg.images && msg.images.length) m.images = msg.images;
+              this.messages.push(m);
+            }
+            if (msg.tool_use) {
+              const grouped = [];
+              for (const tu of msg.tool_use) {
+                const prev = grouped[grouped.length - 1];
+                if (prev && prev.name === tu.name) prev.count++;
+                else grouped.push({name: tu.name, count: 1});
+              }
+              for (const g of grouped) {
+                const summary = g.count > 1
+                  ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups`
+                  : g.name + ' completed';
+                this.messages.push({
+                  type: 'tool', summary, is_error: false
+                });
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load history:', e);
+      }
+      this.loading = false;
+    },
+
+    renderMarkdown(text) {
+      if (!text) return '';
+      try {
+        return DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+      } catch {
+        return text;
+      }
+    },
+
+    async exportChat(format) {
+      try {
+        const res = await authFetch(`/reports/${this.incidentId}/conversation`);
+        if (!res.ok) { alert('Failed to load conversation'); return; }
+        const data = await res.json();
+        const msgs = data.messages || [];
+        const num = '{{ incident_number }}';
+        const date = '{{ incident_date }}';
+
+        if (format === 'json') {
+          const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+          this._download(blob, `${num}-chat.json`);
+        } else if (format === 'md') {
+          let md = `# Chat History — ${num} (${date})\n\n`;
+          md += `**Turns**: ${data.turn_count || '?'}  |  **Input tokens**: ${(data.total_input_tokens || 0).toLocaleString()}  |  **Output tokens**: ${(data.total_output_tokens || 0).toLocaleString()}\n\n---\n\n`;
+          for (const m of msgs) {
+            const label = m.role === 'user' ? 'User' : 'Assistant';
+            md += `### ${label}\n\n${m.content || ''}\n\n`;
+            if (m.tool_results?.length) {
+              for (const tr of m.tool_results) {
+                md += `> **Result** (${tr.name || 'tool'}): ${tr.summary || ''}\n\n`;
+              }
+            }
+            md += '---\n\n';
+          }
+          const blob = new Blob([md], {type: 'text/markdown'});
+          this._download(blob, `${num}-chat.md`);
+        }
+      } catch (e) {
+        console.error('Export error:', e);
+        alert('Export failed — see console for details');
+      }
+    },
+
+    _download(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+
+    openLightbox(items, index) {
+      this.lightbox.items = items.map(src => ({src, caption: ''}));
+      this.lightbox.index = index;
+      this.lightbox.open = true;
+    },
+    lightboxPrev() {
+      this.lightbox.index = (this.lightbox.index - 1 + this.lightbox.items.length) % this.lightbox.items.length;
+    },
+    lightboxNext() {
+      this.lightbox.index = (this.lightbox.index + 1) % this.lightbox.items.length;
+    },
+
+    async reopenReport() {
+      if (!confirm('Reopen this report for editing? It will return to draft status.')) return;
+      this.reopening = true;
+      try {
+        const res = await authFetch(`/reports/${this.incidentId}/reopen`, {method: 'POST'});
+        if (res.ok) {
+          window.location.reload();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Failed to reopen report');
+          this.reopening = false;
+        }
+      } catch (e) {
+        console.error('Reopen error:', e);
+        alert('Failed to reopen report');
+        this.reopening = false;
+      }
+    },
+  };
+}
+{% else %}
+function chatApp() {
+  // How long (ms) to wait with no streaming events before polling the server.
+  // Covers silent WS drops where the done event is lost.
+  const STREAMING_WATCHDOG_MS = 30_000;
+
+  // Stable color palette for presence avatars
+  const _avatarColors = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981','#06b6d4','#f97316','#6366f1'];
+  let _colorIdx = 0;
+  const _userColors = {};
+  function _colorFor(email) {
+    if (!_userColors[email]) _userColors[email] = _avatarColors[_colorIdx++ % _avatarColors.length];
+    return _userColors[email];
+  }
+  function _initials(name) {
+    const parts = (name || '?').split(/\s+/);
+    return parts.length > 1 ? (parts[0][0] + parts[parts.length-1][0]).toUpperCase() : name.slice(0,2).toUpperCase();
+  }
+
+  // Open all markdown links in a new tab.
+  // DOMPurify strips target by default, so we add it via a hook after sanitization.
+  DOMPurify.addHook('afterSanitizeAttributes', function(node) {
+    if (node.tagName === 'A' && node.getAttribute('href')) {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener');
+    }
+  });
+
+  return {
+    messages: [],
+    inputText: '',
+    streaming: false,
+    currentText: '',
+    status: '{{ incident_status }}',
+    completeness: {{ completeness | tojson }},
+    incidentId: '{{ incident_id }}',
+    pendingImages: [],
+    lightbox: { open: false, items: [], index: 0 },
+    _userScrolledAway: false,
+    _lastTouchY: 0,
+    _centrifuge: null,
+    _subscription: null,
+    _messageQueue: [],
+    _turnCount: 0,
+    // Multi-user state
+    currentUserEmail: '{{ user_email }}',
+    currentUserName: '{{ user_name }}',
+    presenceUsers: {},   // {email: {name, initials, color}} — excludes self
+    turnHolder: null,    // {email, name} — who has the current turn
+    _blockedMessage: null, // Message blocked by 409, auto-retry after done
+    _localTurnActive: false, // True when this session initiated an RPC turn
+    _streamingWatchdog: null, // Safety timer: polls server if no events arrive
+
+    get presenceLabel() {
+      const names = Object.values(this.presenceUsers).map(u => u.name.split(' ')[0]);
+      if (names.length === 0) return '';
+      if (names.length === 1) return names[0] + ' is also here';
+      return names.join(', ') + ' are also here';
+    },
+
+    async init() {
+      // Guard against double-init (Alpine auto-calls + x-init, or re-mount)
+      if (this._centrifuge) return;
+
+      // After a reset, skip stale history and start fresh
+      const params = new URLSearchParams(location.search);
+      const isReset = params.get('reset') === '1';
+      if (isReset) {
+        // Clean the URL so refresh doesn't re-trigger
+        params.delete('reset');
+        const clean = params.toString();
+        history.replaceState(null, '', location.pathname + (clean ? '?' + clean : ''));
+      }
+
+      // Set up Centrifuge WebSocket connection
+      const channel = `chat:incident:${this.incidentId}`;
+      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this._centrifuge = new Centrifuge(`${wsProto}//${location.host}/connection/websocket`);
+      this._subscription = this._centrifuge.newSubscription(channel);
+      this._subscription.on('publication', (ctx) => {
+        const {event, ...data} = ctx.data;
+        this.handleEvent(event, data);
+      });
+
+      // Presence: join/leave events for multi-user awareness
+      this._subscription.on('join', (ctx) => {
+        const info = ctx.info || {};
+        const email = info.user || '';
+        const connInfo = info.conn_info || {};
+        if (email && email !== this.currentUserEmail) {
+          this.presenceUsers[email] = {
+            name: connInfo.name || email.split('@')[0],
+            initials: _initials(connInfo.name || email),
+            color: _colorFor(email),
+          };
+        }
+      });
+      this._subscription.on('leave', (ctx) => {
+        const email = (ctx.info || {}).user || '';
+        if (email) delete this.presenceUsers[email];
+      });
+
+      this._subscription.subscribe();
+      this._centrifuge.connect();
+
+      // On (re)subscribe: recover any missed messages and refresh presence
+      this._subscription.on('subscribed', async () => {
+        // If we were streaming when the connection dropped, poll server for missed turns
+        if (this.streaming) {
+          console.log('Reconnected while streaming — polling server for recovery');
+          this._pollForRecovery();
+        }
+        // Refresh presence
+        try {
+          const result = await this._subscription.presence();
+          this.presenceUsers = {};  // Clear stale presence
+          for (const [, info] of Object.entries(result.clients || {})) {
+            const email = info.user || '';
+            const connInfo = info.conn_info || {};
+            if (email && email !== this.currentUserEmail) {
+              this.presenceUsers[email] = {
+                name: connInfo.name || email.split('@')[0],
+                initials: _initials(connInfo.name || email),
+                color: _colorFor(email),
+              };
+            }
+          }
+        } catch (e) {
+          console.debug('Presence query not available:', e);
+        }
+      });
+
+      // Load conversation history (always, even after reset — the engine
+      // clears stale messages server-side, so whatever comes back is current)
+      try {
+        const res = await authFetch(`/reports/${this.incidentId}/conversation`);
+        if (res.ok) {
+          const data = await res.json();
+          for (const msg of data.messages || []) {
+            if (msg.content) {
+              const m = {type: 'message', role: msg.role, content: msg.content};
+              if (msg.images && msg.images.length) m.images = msg.images;
+              this.messages.push(m);
+            }
+            if (msg.tool_use) {
+              // Collapse consecutive same-tool entries into one pill
+              const grouped = [];
+              for (const tu of msg.tool_use) {
+                const prev = grouped[grouped.length - 1];
+                if (prev && prev.name === tu.name) {
+                  prev.count++;
+                } else {
+                  grouped.push({name: tu.name, count: 1});
+                }
+              }
+              for (const g of grouped) {
+                const summary = g.count > 1
+                  ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups`
+                  : g.name + ' completed';
+                this.messages.push({
+                  type: 'tool',
+                  label: '',
+                  toolName: g.name,
+                  pending: false,
+                  pendingCount: 0,
+                  totalCount: g.count,
+                  summary,
+                  is_error: false
+                });
+              }
+            }
+          }
+          this._turnCount = data.turn_count || 0;
+          this.scrollToBottom(true);
+        }
+      } catch (e) {
+        console.error('Failed to load history:', e);
+      }
+
+      if (this.messages.length === 0 && !isReset) {
+        // Truly fresh conversation (no reset in progress) — auto-start
+        this.$nextTick(() => this.sendMessage('Begin report'));
+      } else if (this.messages.length === 0 && isReset) {
+        // Reset just happened — the server turn is still running.
+        // Show typing indicator and wait for events to arrive via WS.
+        this.streaming = true;
+      } else if (!isReset) {
+        // Existing conversation — check if the agent's response was lost
+        const lastMsg = this.messages[this.messages.length - 1];
+        if (lastMsg && lastMsg.type === 'message' && lastMsg.role === 'user') {
+          // Last saved message was from the user — response may be in-flight
+          // or lost. Show typing indicator and let _pollForRecovery handle it
+          // (fires on next WS subscribe). Avoids duplicate sends.
+          this.streaming = true;
+          this._pollForRecovery();
+        }
+      }
+    },
+
+    renderMarkdown(text, isStreaming, msgIndex) {
+      if (!text) return '';
+      try {
+        let html = DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+        // Detect GPS coordinates and inject a map (skip during streaming)
+        if (!isStreaming && msgIndex !== undefined) {
+          const gpsMatch = text.match(/\*?\*?GPS\*?\*?:?\s*(-?\d+\.\d+),\s*(-?\d+\.\d+)/i)
+            || text.match(/\*?\*?(?:Lat|Latitude)\*?\*?:?\s*(-?\d+\.\d+).*?(?:Lon|Lng|Longitude):?\s*(-?\d+\.\d+)/i);
+          if (gpsMatch) {
+            const lat = parseFloat(gpsMatch[1]);
+            const lng = parseFloat(gpsMatch[2]);
+            if (lat > 40 && lat < 60 && lng > -130 && lng < -120) {
+              const mapId = `chat-map-${msgIndex}`;
+              html = `<div class="chat-map-wrap"><div id="${mapId}" class="chat-map"></div></div>` + html;
+              requestAnimationFrame(() => this._initMap(mapId, lat, lng));
+            }
+          }
+        }
+        return html;
+      } catch {
+        return text;
+      }
+    },
+
+    _initMap(mapId, lat, lng) {
+      const el = document.getElementById(mapId);
+      if (!el || el._leaflet_id) return;
+      // Retry if element not in DOM yet
+      if (!el.offsetParent) {
+        setTimeout(() => this._initMap(mapId, lat, lng), 100);
+        return;
+      }
+      const map = L.map(mapId, {zoomControl: false, attributionControl: false}).setView([lat, lng], 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+      }).addTo(map);
+      L.marker([lat, lng]).addTo(map);
+      // Fix tile rendering after container resize
+      setTimeout(() => map.invalidateSize(), 200);
+    },
+
+    async exportChat(format) {
+      try {
+        const res = await authFetch(`/reports/${this.incidentId}/conversation`);
+        if (!res.ok) { alert('Failed to load conversation'); return; }
+        const data = await res.json();
+        const msgs = data.messages || [];
+        const num = '{{ incident_number }}';
+        const date = '{{ incident_date }}';
+
+        if (format === 'json') {
+          const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+          this._download(blob, `${num}-chat.json`);
+
+        } else if (format === 'md') {
+          let md = `# Chat History — ${num} (${date})\n\n`;
+          md += `**Turns**: ${data.turn_count || '?'}  |  **Input tokens**: ${(data.total_input_tokens || 0).toLocaleString()}  |  **Output tokens**: ${(data.total_output_tokens || 0).toLocaleString()}\n\n---\n\n`;
+          for (const m of msgs) {
+            const label = m.role === 'user' ? 'User' : 'Assistant';
+            md += `### ${label}\n\n${m.content || ''}\n\n`;
+            if (m.tool_use?.length) {
+              for (const t of m.tool_use) {
+                md += `> **Tool**: \`${t.name || 'unknown'}\`\n\n`;
+              }
+            }
+            if (m.tool_results?.length) {
+              for (const tr of m.tool_results) {
+                md += `> **Result** (${tr.name || 'tool'}): ${tr.summary || ''}\n\n`;
+              }
+            }
+            md += '---\n\n';
+          }
+          const blob = new Blob([md], {type: 'text/markdown'});
+          this._download(blob, `${num}-chat.md`);
+
+        } else if (format === 'print') {
+          // Scan messages for GPS coordinates
+          let mapLat = null, mapLng = null;
+          for (const m of msgs) {
+            if (!m.content) continue;
+            const gps = m.content.match(/\*?\*?GPS\*?\*?:?\s*(-?\d+\.\d+),\s*(-?\d+\.\d+)/i)
+              || m.content.match(/\*?\*?(?:Lat|Latitude)\*?\*?:?\s*(-?\d+\.\d+).*?(?:Lon|Lng|Longitude):?\s*(-?\d+\.\d+)/i);
+            if (gps) { mapLat = parseFloat(gps[1]); mapLng = parseFloat(gps[2]); break; }
+          }
+
+          const w = window.open('', '_blank');
+          let html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+            <title>Chat — ${num}</title>
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.css">
+            <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9/dist/leaflet.min.js"><\/script>
+            <style>
+              body { font-family: -apple-system, system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #1a1a1a; font-size: 14px; }
+              h1 { font-size: 18px; border-bottom: 2px solid #c00; padding-bottom: 8px; }
+              .meta { color: #666; font-size: 12px; margin-bottom: 20px; }
+              .msg { margin-bottom: 16px; padding: 10px 14px; border-radius: 8px; page-break-inside: avoid; }
+              .msg-user { background: #f0f4ff; border: 1px solid #d0d8e8; }
+              .msg-assistant { background: #f8f8f8; border: 1px solid #e0e0e0; }
+              .msg-role { font-weight: 600; font-size: 11px; text-transform: uppercase; color: #666; margin-bottom: 4px; }
+              .msg-tool { font-size: 12px; color: #888; padding: 2px 14px; font-style: italic; }
+              .print-map { float: right; width: 275px; height: 225px; margin: 0 0 10px 14px; border-radius: 8px; border: 1px solid #ddd; }
+              p { margin: 6px 0; }
+              table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+              th, td { padding: 4px 8px; border: 1px solid #ddd; text-align: left; font-size: 13px; }
+              th { background: #f5f5f5; }
+              @media print { body { padding: 0; } .msg { break-inside: avoid; } }
+            </style></head><body>`;
+          html += `<h1>Chat History &mdash; ${this._esc(num)}</h1>`;
+          html += `<div class="meta">Date: ${this._esc(date)} &nbsp;|&nbsp; Turns: ${data.turn_count || '?'} &nbsp;|&nbsp; Input: ${(data.total_input_tokens || 0).toLocaleString()} tokens &nbsp;|&nbsp; Output: ${(data.total_output_tokens || 0).toLocaleString()} tokens</div>`;
+          let mapInserted = false;
+          for (const m of msgs) {
+            const cls = m.role === 'user' ? 'msg-user' : 'msg-assistant';
+            const label = m.role === 'user' ? 'User' : 'Assistant';
+            const rendered = m.role === 'assistant'
+              ? DOMPurify.sanitize(marked.parse(m.content || '', {breaks: true}))
+              : this._esc(m.content || '');
+            html += `<div class="msg ${cls}"><div class="msg-role">${label}</div>`;
+            // Insert map in the message that contains GPS coordinates
+            if (!mapInserted && mapLat && m.content?.match(/GPS|Lat/i)) {
+              html += '<div id="print-map" class="print-map"></div>';
+              mapInserted = true;
+            }
+            html += rendered;
+            if (m.tool_use?.length) {
+              for (const t of m.tool_use) {
+                html += `<div class="msg-tool">Tool: ${this._esc(t.name || '')}</div>`;
+              }
+            }
+            if (m.tool_results?.length) {
+              for (const tr of m.tool_results) {
+                html += `<div class="msg-tool">Result (${this._esc(tr.name || 'tool')}): ${this._esc(tr.summary || '')}</div>`;
+              }
+            }
+            html += '</div>';
+          }
+          // Init map and print after tiles load
+          if (mapLat) {
+            html += `<script>
+              window.addEventListener('load', function() {
+                var map = L.map('print-map', {zoomControl: false, attributionControl: false}).setView([${mapLat}, ${mapLng}], 13);
+                var tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19}).addTo(map);
+                L.marker([${mapLat}, ${mapLng}]).addTo(map);
+                tileLayer.on('load', function() { setTimeout(function() { window.print(); }, 300); });
+              });
+            <\/script>`;
+          } else {
+            html += `<script>window.onload = function() { window.print(); };<\/script>`;
+          }
+          html += '</body></html>';
+          w.document.write(html);
+          w.document.close();
+        }
+      } catch (e) {
+        console.error('Export error:', e);
+        alert('Export failed — see console for details');
+      }
+    },
+
+    _download(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+
+    _esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    },
+
+    autoResize(e) {
+      const ta = e.target;
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+    },
+
+    async handleFiles(event) {
+      const files = Array.from(event.target.files || []);
+      const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+      for (const file of files) {
+        if (this.pendingImages.length >= 3) break;
+        if (!allowed.includes(file.type)) continue;
+        const img = await this.compressImage(file);
+        if (img) this.pendingImages.push(img);
+      }
+      event.target.value = '';
+    },
+
+    compressImage(file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const MAX = 1536;
+            let w = img.width, h = img.height;
+            if (w > MAX || h > MAX) {
+              const scale = MAX / Math.max(w, h);
+              w = Math.round(w * scale);
+              h = Math.round(h * scale);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            const base64 = dataUrl.split(',')[1];
+            resolve({dataUrl, base64, mediaType: 'image/jpeg'});
+          };
+          img.onerror = () => resolve(null);
+          img.src = e.target.result;
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      });
+    },
+
+    openLightbox(items, index, isObjects) {
+      // items can be an array of URL strings or {src, caption} objects
+      this.lightbox.items = isObjects ? items : items.map(src => ({src, caption: ''}));
+      // Collect all attachment images from messages for prev/next navigation
+      if (!isObjects) {
+        // User-message images — just use the array as-is
+      } else {
+        // Tool images — gather all attachment images in the conversation
+        const all = [];
+        let startIdx = 0;
+        for (const m of this.messages) {
+          if (m.type === 'tool' && m.image_url) {
+            if (m.image_url === items[0]?.src) startIdx = all.length;
+            all.push({src: m.image_url, caption: m.image_title || ''});
+          }
+        }
+        if (all.length > 1) {
+          this.lightbox.items = all;
+          index = startIdx;
+        }
+      }
+      this.lightbox.index = index;
+      this.lightbox.open = true;
+    },
+    lightboxPrev() {
+      this.lightbox.index = (this.lightbox.index - 1 + this.lightbox.items.length) % this.lightbox.items.length;
+    },
+    lightboxNext() {
+      this.lightbox.index = (this.lightbox.index + 1) % this.lightbox.items.length;
+    },
+
+    scrollToBottom(force) {
+      if (force) {
+        this._userScrolledAway = false;
+      } else if (this._userScrolledAway) {
+        return;  // User scrolled up — don't fight them
+      }
+      const el = this.$refs.messages;
+      if (!el) return;
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    _onWheel(e) {
+      // Scrolling up → immediately lock (no rAF delay — prevents race
+      // with scrollToBottom which can sneak in before the next frame)
+      if (e.deltaY < 0) {
+        this._userScrolledAway = true;
+        return;
+      }
+      // Scrolling down → check if we've reached the bottom (defer to
+      // after the browser applies the scroll delta)
+      requestAnimationFrame(() => {
+        const el = this.$refs.messages;
+        if (!el) return;
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        if (nearBottom) this._userScrolledAway = false;
+      });
+    },
+
+    _onTouchStart(e) {
+      this._lastTouchY = e.touches[0]?.clientY ?? 0;
+    },
+
+    _onTouchMove(e) {
+      const y = e.touches[0]?.clientY ?? 0;
+      // Finger moving down on screen = scrolling up through content
+      if (y > this._lastTouchY) {
+        this._userScrolledAway = true;
+      }
+      this._lastTouchY = y;
+      // Scrolling toward bottom — check position after move
+      requestAnimationFrame(() => {
+        const el = this.$refs.messages;
+        if (!el) return;
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        if (nearBottom) this._userScrolledAway = false;
+      });
+    },
+
+    async sendMessage(overrideText) {
+      const text = overrideText || this.inputText.trim();
+      const images = this.pendingImages.slice();
+      if (!text && !images.length) return;
+
+      const displayText = text || '(Attached photo)';
+
+      // If already streaming, queue for send after current turn completes.
+      // The message is rendered below the streaming bubble from _messageQueue
+      // so the user sees it immediately (like Claude Code CLI).
+      if (this.streaming) {
+        this._messageQueue.push({displayText, images});
+        this.inputText = '';
+        this.pendingImages = [];
+        if (this.$refs.input) this.$refs.input.style.height = 'auto';
+        this.scrollToBottom(true);
+        return;
+      }
+
+      // Add user message with image thumbnails
+      const msgObj = {type: 'message', role: 'user', content: displayText};
+      if (images.length) msgObj.images = images.map(img => img.dataUrl);
+      this.messages.push(msgObj);
+      this.inputText = '';
+      this.pendingImages = [];
+      if (this.$refs.input) this.$refs.input.style.height = 'auto';
+      this.scrollToBottom(true);
+
+      await this._sendViaRPC(displayText, images);
+    },
+
+    _setTurnActive(active) {
+      // Persist turn state across page reloads (EasyAuth 401 → reload)
+      try {
+        const key = 'turnActive:' + this.incidentId;
+        if (active) sessionStorage.setItem(key, '1');
+        else sessionStorage.removeItem(key);
+      } catch {}
+    },
+    _isTurnActive() {
+      try { return sessionStorage.getItem('turnActive:' + this.incidentId) === '1'; } catch { return false; }
+    },
+
+    _waitForConnect(timeoutMs = 10000) {
+      // Return a promise that resolves when the centrifuge client is connected.
+      // If already connected, resolves immediately. Times out to avoid hanging.
+      if (this._centrifuge.state === 'connected') return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error('WebSocket connection timeout — please refresh the page.'));
+        }, timeoutMs);
+        this._centrifuge.once('connected', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    },
+
+    async _sendViaRPC(displayText, images) {
+      this.streaming = true;
+      this.currentText = '';
+      this._localTurnActive = true;
+      this._setTurnActive(true);
+      this._startStreamingWatchdog();
+
+      const payload = {
+        incident_id: this.incidentId,
+        message: displayText,
+      };
+      if (images && images.length) {
+        payload.images = images.map(img => ({data: img.base64, media_type: img.mediaType}));
+      }
+
+      try {
+        await this._waitForConnect();
+        await this._centrifuge.rpc('send_message', payload);
+        // RPC succeeded — events arrive on same WS, in order
+      } catch (err) {
+        if (err.code === 409) {
+          // Turn lock conflict — parse holder info from error message
+          let holder = 'another user', holderEmail = '';
+          try {
+            const info = JSON.parse(err.message);
+            holder = info.holder_name || holder;
+            holderEmail = info.holder_email || '';
+          } catch {}
+          this.turnHolder = {email: holderEmail, name: holder};
+          this._blockedMessage = {displayText, images};
+          // Same-user lock: keep streaming for typing dots
+          // Other-user lock: stop streaming, banner shows instead
+          if (holderEmail && holderEmail === this.currentUserEmail) {
+            // streaming stays true — dots show until previous turn's done event
+          } else {
+            this.streaming = false;
+          }
+          return;
+        }
+        console.error('Chat RPC error:', err);
+        // Remove the user message that was optimistically added (unsent)
+        const lastMsg = this.messages[this.messages.length - 1];
+        if (lastMsg && lastMsg.role === 'user') this.messages.pop();
+        this.messages.push({type: 'error', content: 'Message failed to send — please try again. (' + (err.message || 'connection error') + ')'});
+        // Restore the text so the user doesn't have to retype
+        this.inputText = lastMsg?.content || '';
+        this.streaming = false;
+        this._localTurnActive = false;
+        this._setTurnActive(false);
+      }
+    },
+
+    _startStreamingWatchdog() {
+      // Safety net: if streaming stalls (no events within timeout), poll server.
+      // Covers cases where the done event is lost (WS silent drop, etc.)
+      this._resetStreamingWatchdog();
+      this._streamingWatchdog = setTimeout(() => {
+        if (this.streaming) {
+          console.warn(`Streaming watchdog fired — no events for ${STREAMING_WATCHDOG_MS/1000}s, polling for recovery`);
+          this._pollForRecovery();
+        }
+      }, STREAMING_WATCHDOG_MS);
+    },
+
+    _resetStreamingWatchdog() {
+      if (this._streamingWatchdog) {
+        clearTimeout(this._streamingWatchdog);
+        this._streamingWatchdog = null;
+      }
+    },
+
+    async _pollForRecovery() {
+      // Poll server to recover from missed events (reconnection or watchdog)
+      this._resetStreamingWatchdog();
+      if (!this.streaming) return;
+      try {
+        const res = await authFetch(`/reports/${this.incidentId}/conversation`);
+        if (!res.ok) {
+          // Fetch failed (non-401) — stop spinner so user isn't stuck
+          this.streaming = false;
+          this._setTurnActive(false);
+          return;
+        }
+        const data = await res.json();
+        const serverTurnCount = data.turn_count || 0;
+
+        if (serverTurnCount > this._turnCount) {
+          console.log(`Turn completed (${this._turnCount} → ${serverTurnCount}), recovering`);
+          this.currentText = '';
+          this.messages = [];
+          for (const msg of data.messages || []) {
+            if (msg.content) {
+              const m = {type: 'message', role: msg.role, content: msg.content};
+              if (msg.images && msg.images.length) m.images = msg.images;
+              this.messages.push(m);
+            }
+            if (msg.tool_use) {
+              const grouped = [];
+              for (const tu of msg.tool_use) {
+                const prev = grouped[grouped.length - 1];
+                if (prev && prev.name === tu.name) prev.count++;
+                else grouped.push({name: tu.name, count: 1});
+              }
+              for (const g of grouped) {
+                const summary = g.count > 1
+                  ? `${g.count} ${g.name.replace(/_/g, ' ')} lookups`
+                  : g.name + ' completed';
+                this.messages.push({
+                  type: 'tool', label: '', toolName: g.name,
+                  pending: false, pendingCount: 0, totalCount: g.count,
+                  summary, is_error: false
+                });
+              }
+            }
+          }
+          this._turnCount = serverTurnCount;
+          if (data.status) this.status = data.status;
+          this.streaming = false;
+          this._localTurnActive = false;
+          this._setTurnActive(false);
+          this.turnHolder = null;
+          this.scrollToBottom(true);
+          // Process queued messages after recovery (same as done handler)
+          if (this._messageQueue.length) {
+            const queued = this._messageQueue.shift();
+            const msgObj = {type: 'message', role: 'user', content: queued.displayText};
+            if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
+            this.messages.push(msgObj);
+            this.$nextTick(() => {
+              this.scrollToBottom(true);
+              this._sendViaRPC(queued.displayText, queued.images);
+            });
+          } else if (this._blockedMessage) {
+            const blocked = this._blockedMessage;
+            this._blockedMessage = null;
+            this.$nextTick(() => this._sendViaRPC(blocked.displayText, blocked.images));
+          } else {
+            this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+          }
+        } else if (this._localTurnActive) {
+          // Local RPC turn in flight — don't kill the spinner.
+          // Re-arm watchdog so we poll again if still no response.
+          console.log('No new server turn but local turn active — re-arming watchdog');
+          this._startStreamingWatchdog();
+        } else {
+          // Server has no new turn and no local turn — stop the spinner.
+          // This handles stale page-load recovery (e.g. tab was closed
+          // before the response arrived and the turn has since expired).
+          console.log('No new server turn — stopping recovery spinner');
+          this.streaming = false;
+          this._setTurnActive(false);
+          this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+        }
+      } catch (e) {
+        console.warn('Recovery poll failed:', e);
+        this.streaming = false;
+        this._setTurnActive(false);
+      }
+    },
+
+    handleEvent(type, data) {
+      if (type === 'turn_start') {
+        // Another user started a turn — show indicator
+        this.turnHolder = {email: data.user_email, name: data.user_name};
+        // If it's someone else's turn, mark streaming so we show their progress
+        if (data.user_email !== this.currentUserEmail) {
+          this.streaming = true;
+          this.currentText = '';
+          this._startStreamingWatchdog();
+        }
+        return;
+      }
+
+      if (type === 'user_message') {
+        // Message from another user — add it to our local view
+        if (data.user_email !== this.currentUserEmail) {
+          this.messages.push({
+            type: 'message',
+            role: 'user',
+            content: data.content,
+            sender_email: data.user_email,
+            sender_name: data.user_name,
+          });
+          this.scrollToBottom();
+        }
+        return;
+      }
+
+      // Any streaming event proves the connection is alive — reset watchdog
+      if (this.streaming) this._startStreamingWatchdog();
+
+      if (type === 'text') {
+        this.currentText += data.content || '';
+        this.scrollToBottom();
+      } else if (type === 'tool_call') {
+        // Finalize current text if any
+        if (this.currentText) {
+          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+          this.currentText = '';
+        }
+        const labels = {
+          get_incident: 'Loading incident data...',
+          update_incident: 'Saving changes...',
+          reset_incident: 'Resetting report...',
+          submit_incident: 'Submitting to NERIS...',
+          get_dispatch_call: 'Looking up dispatch data...',
+          list_dispatch_calls: 'Loading recent calls...',
+          search_dispatch_calls: 'Searching dispatch calls...',
+          get_on_duty_crew: 'Checking crew schedule...',
+          get_neris_values: 'Looking up NERIS values...',
+          list_neris_value_sets: 'Loading value sets...',
+          get_personnel: 'Looking up personnel...',
+          list_attachments: 'Checking attachments...',
+          get_attachment: 'Loading attachment...',
+          update_attachment: 'Labeling attachment...',
+          delete_attachment: 'Removing attachment...',
+        };
+        const label = labels[data.name] || data.name.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase()) + '...';
+        // Collapse consecutive calls for the same tool into one indicator
+        const last = this.messages[this.messages.length - 1];
+        if (last && last.type === 'tool' && last.toolName === data.name && last.pending) {
+          last.pendingCount++;
+          last.totalCount++;
+        } else {
+          this.messages.push({
+            type: 'tool',
+            label,
+            toolName: data.name,
+            pending: true,
+            pendingCount: 1,
+            totalCount: 1,
+            summary: '',
+            is_error: false
+          });
+        }
+        this.scrollToBottom();
+      } else if (type === 'tool_result') {
+        // Find matching pending tool indicator and transition it
+        for (let i = this.messages.length - 1; i >= 0; i--) {
+          const m = this.messages[i];
+          if (m.type === 'tool' && m.pending) {
+            m.pendingCount--;
+            if (data.is_error) m.is_error = true;
+            m.summary = data.summary || data.name;
+            if (data.image_url) m.image_url = data.image_url;
+            if (data.image_title) m.image_title = data.image_title;
+            if (m.pendingCount <= 0) {
+              m.pending = false;
+              if (m.totalCount > 1) {
+                m.summary = `${m.totalCount} ${m.toolName.replace(/_/g, ' ')} lookups`;
+              }
+            }
+            break;
+          }
+        }
+        this.scrollToBottom();
+        // After a successful reset, clear local UI state but stay connected.
+        // The server turn is still running (import_from_neris, then Claude
+        // iteration), so we must NOT reload the page or re-send — just clear
+        // the stale messages and let the in-flight events arrive naturally.
+        if (data.name === 'reset_incident' && !(data.summary || '').startsWith('Error')) {
+          this.messages = [];
+          this.currentText = '';
+          this._turnCount = 0;
+          return;
+        }
+      } else if (type === 'status_update') {
+        if (data.completeness) this.completeness = data.completeness;
+        if (data.status) {
+          this.status = data.status;
+        }
+      } else if (type === 'done') {
+        this._resetStreamingWatchdog();
+        // Finalize any partial streaming message
+        if (this.currentText) {
+          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+          this.currentText = '';
+        }
+        this._turnCount++;  // Track completed turn
+        this.streaming = false;
+        this._localTurnActive = false;
+        this._setTurnActive(false);
+        this.turnHolder = null;  // Turn lock released
+        // Wait for Alpine DOM flush (chat-hints appear, streaming-msg removed)
+        // so the messages container height is correct before scrolling.
+        this.$nextTick(() => this.scrollToBottom(true));
+
+        // Send next queued message if user typed while we were streaming.
+        // Move it from the queue into the messages array (after finalized
+        // assistant text) so it appears in the correct chronological order.
+        if (this._messageQueue.length) {
+          const queued = this._messageQueue.shift();
+          const msgObj = {type: 'message', role: 'user', content: queued.displayText};
+          if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
+          this.messages.push(msgObj);
+          this.$nextTick(() => {
+            this.scrollToBottom(true);
+            this._sendViaRPC(queued.displayText, queued.images);
+          });
+          return;
+        }
+        // Auto-retry message that was blocked by turn lock (409)
+        if (this._blockedMessage) {
+          const blocked = this._blockedMessage;
+          this._blockedMessage = null;
+          this.$nextTick(() => this._sendViaRPC(blocked.displayText, blocked.images));
+          return;
+        }
+        this.$nextTick(() => { if (this.$refs.input) this.$refs.input.focus(); });
+      } else if (type === 'error') {
+        this._resetStreamingWatchdog();
+        console.error('Chat error:', data);
+        if (this.currentText) {
+          this.messages.push({type: 'message', role: 'assistant', content: this.currentText});
+          this.currentText = '';
+        }
+        this.messages.push({type: 'error', content: data.message});
+        this._turnCount++;  // Error turns also increment server-side
+        this.streaming = false;
+        this._localTurnActive = false;
+        this._setTurnActive(false);
+        this.turnHolder = null;  // Turn lock released on error too
+        this.$nextTick(() => this.scrollToBottom(true));
+
+        // Process queued messages even after errors
+        if (this._messageQueue.length) {
+          const queued = this._messageQueue.shift();
+          const msgObj = {type: 'message', role: 'user', content: queued.displayText};
+          if (queued.images && queued.images.length) msgObj.images = queued.images.map(img => img.dataUrl);
+          this.messages.push(msgObj);
+          this.$nextTick(() => {
+            this.scrollToBottom(true);
+            this._sendViaRPC(queued.displayText, queued.images);
+          });
+        }
+      }
+    }
+  };
+}
+{% endif %}
+</script>
+{% endblock %}

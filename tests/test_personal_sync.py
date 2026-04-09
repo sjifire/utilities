@@ -1,7 +1,7 @@
 """Tests for sjifire.calendar.personal_sync module."""
 
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -138,21 +138,18 @@ class TestPersonalSyncResult:
 class TestPersonalCalendarSyncInit:
     """Tests for PersonalCalendarSync initialization."""
 
-    @patch("sjifire.calendar.personal_sync.get_graph_credentials")
-    @patch("sjifire.calendar.personal_sync.ClientSecretCredential")
-    @patch("sjifire.calendar.personal_sync.GraphServiceClient")
-    def test_initializes_with_credentials(self, mock_client, mock_cred, mock_get_creds):
-        """Initializes Graph client with credentials."""
-        mock_get_creds.return_value = ("tenant", "client", "secret")
+    @patch("sjifire.calendar.personal_sync.get_graph_client")
+    def test_initializes_with_credentials(self, mock_get_client):
+        """Initializes Graph client via get_graph_client factory."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
 
         from sjifire.calendar.personal_sync import PersonalCalendarSync
 
         sync = PersonalCalendarSync()
 
-        mock_get_creds.assert_called_once()
-        mock_cred.assert_called_once_with(
-            tenant_id="tenant", client_id="client", client_secret="secret"
-        )
+        mock_get_client.assert_called_once()
+        assert sync.client is mock_client
         assert sync._calendar_cache == {}
 
 

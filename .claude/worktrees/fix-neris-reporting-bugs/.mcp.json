@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sjifire": {
+      "type": "http",
+      "url": "https://ops.sjifire.org/mcp"
+    }
+  }
+}

@@ -1,0 +1,172 @@
+[
+  {
+    "AgencyCode": "SJEM",
+    "JoinedResponders": "A12 SJEM",
+    "LongTermCallID": "26-002356",
+    "Nature": "TRANSFER",
+    "RespondToAddress": "1117 SPRING ST; PIMC",
+    "TimeDateReported": "02:50:54 02/17/2026",
+    "ZoneCode": "SJE",
+    "_id": "1facd258-e2a1-0e29-c15d-f2bea3935d44",
+    "agencies": [
+      "syaobgy",
+      "sxaoagx"
+    ],
+    "city": "FRIDAY HARBOR",
+    "created": 1771325457,
+    "dblPrivate": false,
+    "groups": [
+      "cxgnggy",
+      "cydqzkx"
+    ],
+    "iSpyGeoLocation": "48.52697,-123.029816",
+    "isLive": false,
+    "isbucaddemo": false,
+    "membernotificationsent": "{\"sjiems\": true, \"sanjuan\": true}",
+    "status": "Updated",
+    "udm_results": {
+      "hasEMS": true,
+      "hasFire": true,
+      "hasLaw": false,
+      "isLocal": true
+    },
+    "usingPreferedAddress": false,
+    "usingPreferedNature": false
+  },
+  {
+    "AgencyCode": "SJF3",
+    "JoinedResponders": "BN31 DIV37 E31 E33 EMS11 EMS13 L31 M12 SJEM SJF3",
+    "LongTermCallID": "26-002358",
+    "Nature": "FIRE-ALARM",
+    "RespondToAddress": "204 FRONT ST N; PORT OF FRIDAY HARBOR; C35",
+    "TimeDateReported": "07:17:29 02/17/2026",
+    "ZoneCode": "SJF",
+    "_id": "5f7f3114-b299-70d8-a324-749a513c63eb",
+    "agencies": [
+      "sxaoagx",
+      "syaobgy",
+      "syjrwwy"
+    ],
+    "city": "FRIDAY HARBOR",
+    "created": 1771341518,
+    "dblPrivate": false,
+    "groups": [
+      "cxempzx",
+      "cydqzkx",
+      "cxgnggy"
+    ],
+    "iSpyGeoLocation": "48.53651,-123.016831",
+    "isLive": false,
+    "isbucaddemo": false,
+    "membernotificationsent": "{\"sjf3\": true, \"sjiems\": true, \"sanjuan\": true}",
+    "status": "Updated",
+    "udm_results": {
+      "hasEMS": true,
+      "hasFire": true,
+      "hasLaw": false,
+      "isLocal": true
+    },
+    "usingPreferedAddress": false,
+    "usingPreferedNature": false
+  },
+  {
+    "AgencyCode": "SJEM",
+    "JoinedResponders": "A13 EMS11 EMS13 P37 SJEM",
+    "LongTermCallID": "26-002359",
+    "Nature": "MEDICAL BLS",
+    "RespondToAddress": "268 JENSEN BAY RD",
+    "TimeDateReported": "07:37:27 02/17/2026",
+    "ZoneCode": "SJE",
+    "_id": "60014594-13c5-a538-f867-f3642073761b",
+    "agencies": [
+      "syaobgy",
+      "sxaoagx"
+    ],
+    "city": "FRIDAY HARBOR",
+    "created": 1771342772,
+    "dblPrivate": false,
+    "groups": [
+      "cxgnggy",
+      "cydqzkx"
+    ],
+    "iSpyGeoLocation": "48.483229,-123.028364",
+    "isLive": false,
+    "isbucaddemo": false,
+    "membernotificationsent": "{\"sjiems\": true, \"sanjuan\": true}",
+    "status": "Updated",
+    "udm_results": {
+      "hasEMS": true,
+      "hasFire": true,
+      "hasLaw": false,
+      "isLocal": true
+    },
+    "usingPreferedAddress": false,
+    "usingPreferedNature": false
+  },
+  {
+    "AgencyCode": "SJF2",
+    "JoinedResponders": "203 A21 CAR23 D2 SJF2",
+    "LongTermCallID": "26-002354",
+    "Nature": "WELFARE CHECK",
+    "RespondToAddress": "5164 DEER HARBOR RD; DH MARINA: SLIP 4",
+    "TimeDateReported": "21:31:09 02/16/2026",
+    "ZoneCode": "ORCF",
+    "_id": "b04e2223-d502-c563-aeea-71a09af08e26",
+    "agencies": [
+      "syaobgy"
+    ],
+    "city": "EASTSOUND",
+    "created": 1771345619,
+    "dblPrivate": false,
+    "groups": [
+      "cxojnmy",
+      "cxgnggy"
+    ],
+    "iSpyGeoLocation": "48.620078,-123.001165",
+    "isLive": false,
+    "isbucaddemo": false,
+    "membernotificationsent": "{\"sanjuan\": true}",
+    "status": "Updated",
+    "udm_results": {
+      "hasEMS": true,
+      "hasFire": true,
+      "hasLaw": false,
+      "isLocal": true
+    },
+    "usingPreferedAddress": false,
+    "usingPreferedNature": false
+  },
+  {
+    "AgencyCode": "OREM",
+    "JoinedResponders": "A21 OREM",
+    "LongTermCallID": "26-002376",
+    "Nature": "AGENCY ASSIST",
+    "RespondToAddress": "1323 MT BAKER RD; SJSO ORCAS",
+    "TimeDateReported": "11:52:22 02/17/2026",
+    "ZoneCode": "ORCE",
+    "_id": "0cabefb3-f1ac-eef9-b10b-a886a2186cb3",
+    "agencies": [
+      "syaobgy"
+    ],
+    "city": "EASTSOUND",
+    "created": 1771357942,
+    "dblPrivate": false,
+    "groups": [
+      "cxgnggy",
+      "cxojnmy"
+    ],
+    "iSpyGeoLocation": "48.702864,-122.91225",
+    "isLive": false,
+    "isbucaddemo": false,
+    "membernotificationsent": "{\"sanjuan\": true}",
+    "status": "Updated",
+    "udm_results": {
+      "hasEMS": true,
+      "hasFire": true,
+      "hasLaw": false,
+      "isLocal": true
+    },
+    "usingPreferedAddress": false,
+    "usingPreferedNature": false
+  }
+]

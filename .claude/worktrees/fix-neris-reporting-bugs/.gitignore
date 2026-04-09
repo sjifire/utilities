@@ -1,0 +1,28 @@
+# Environment
+.env*
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Testing
+.coverage
+.pytest_cache/
+.hypothesis/
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Backups (contain sensitive member/user data)
+backups/
+docs/neris/reporting-field-analysis.md

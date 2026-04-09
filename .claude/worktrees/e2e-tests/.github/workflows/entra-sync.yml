@@ -1,0 +1,133 @@
+name: Entra ID Sync
+
+on:
+  schedule:
+    # Run at 8am Pacific, Monday-Friday (16:00 UTC = 8am PST / 9am PDT)
+    - cron: '0 16 * * 1-5'
+    # Run at noon Pacific, Monday-Friday (20:00 UTC = 12pm PST / 1pm PDT)
+    - cron: '0 20 * * 1-5'
+    # Run at 6pm Pacific, Monday-Friday (02:00 UTC next day = 6pm PST / 7pm PDT)
+    - cron: '0 2 * * 2-6'
+    # Run at noon Pacific, Saturday (20:00 UTC = 12pm PST / 1pm PDT)
+    - cron: '0 20 * * 6'
+    # Run at noon Pacific, Sunday (20:00 UTC = 12pm PST / 1pm PDT)
+    - cron: '0 20 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no changes)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+  actions: none
+  checks: none
+  deployments: none
+  issues: none
+  packages: none
+  pull-requests: none
+  repository-projects: none
+  security-events: none
+  statuses: none
+
+jobs:
+  sync:
+    name: Sync Aladtec to Entra ID
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: bb2cb591-58ff-4687-bf14-502049dee01b
+          tenant-id: 4122848f-c317-4267-9c07-7c504150d1bd
+          allow-no-subscriptions: true
+
+      - name: Get secrets from Key Vault
+        uses: azure/cli@v2
+        with:
+          azcliversion: agentazcliversion
+          inlineScript: |
+            ALADTEC_URL=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-URL --query value -o tsv)
+            echo "::add-mask::$ALADTEC_URL"
+            echo "ALADTEC_URL=$ALADTEC_URL" >> $GITHUB_ENV
+
+            ALADTEC_USERNAME=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-USERNAME --query value -o tsv)
+            echo "::add-mask::$ALADTEC_USERNAME"
+            echo "ALADTEC_USERNAME=$ALADTEC_USERNAME" >> $GITHUB_ENV
+
+            ALADTEC_PASSWORD=$(az keyvault secret show --vault-name gh-website-utilities --name ALADTEC-PASSWORD --query value -o tsv)
+            echo "::add-mask::$ALADTEC_PASSWORD"
+            echo "ALADTEC_PASSWORD=$ALADTEC_PASSWORD" >> $GITHUB_ENV
+
+            MS_GRAPH_TENANT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-TENANT-ID --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_TENANT_ID"
+            echo "MS_GRAPH_TENANT_ID=$MS_GRAPH_TENANT_ID" >> $GITHUB_ENV
+
+            MS_GRAPH_CLIENT_ID=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-ID --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_CLIENT_ID"
+            echo "MS_GRAPH_CLIENT_ID=$MS_GRAPH_CLIENT_ID" >> $GITHUB_ENV
+
+            MS_GRAPH_CLIENT_SECRET=$(az keyvault secret show --vault-name gh-website-utilities --name MS-GRAPH-CLIENT-SECRET --query value -o tsv)
+            echo "::add-mask::$MS_GRAPH_CLIENT_SECRET"
+            echo "MS_GRAPH_CLIENT_SECRET=$MS_GRAPH_CLIENT_SECRET" >> $GITHUB_ENV
+
+            # Download Exchange certificate from Key Vault to a mounted path
+            az keyvault secret download --vault-name gh-website-utilities --name exchange-powershell-cert --file $GITHUB_WORKSPACE/exchange-cert.pfx --encoding base64
+            echo "EXCHANGE_CERTIFICATE_PATH=$GITHUB_WORKSPACE/exchange-cert.pfx" >> $GITHUB_ENV
+            echo "EXCHANGE_CERTIFICATE_PASSWORD=" >> $GITHUB_ENV
+
+      - name: Verify certificate
+        run: |
+            ls -la ${{ github.workspace }}/exchange-cert.pfx
+            file ${{ github.workspace }}/exchange-cert.pfx
+
+      - name: Install PowerShell modules
+        shell: pwsh
+        run: |
+          Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber -Scope CurrentUser
+
+          # Verify certificate is readable
+          $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($env:EXCHANGE_CERTIFICATE_PATH)
+          Write-Host "Certificate thumbprint: $($cert.Thumbprint)"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run Entra user sync
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            uv run entra-user-sync --disable-inactive --dry-run --json
+          else
+            uv run entra-user-sync --disable-inactive --json
+          fi
+
+      - name: Run group sync (M365 + Exchange)
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            uv run ms-group-sync --all --dry-run
+          else
+            uv run ms-group-sync --all
+          fi
+
+      - name: Upload backup artifacts
+        if: ${{ inputs.dry_run != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: entra-backup-${{ github.run_id }}
+          path: backups/
+          retention-days: 7
