@@ -9,6 +9,7 @@ from sjifire.exchange.client import ExchangeOnlineClient
 
 
 def main() -> None:
+    """Find and report users with custom Outlook email signatures."""
     client = ExchangeOnlineClient()
 
     # Get all user mailboxes with signature configuration in one connection
