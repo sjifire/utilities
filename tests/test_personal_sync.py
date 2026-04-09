@@ -1,7 +1,7 @@
 """Tests for sjifire.calendar.personal_sync module."""
 
-from datetime import date, datetime
-from unittest.mock import MagicMock, patch
+from datetime import date
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
