@@ -16,6 +16,8 @@ from sjifire.calendar.duty_sync import DutyCalendarSync, ROPCCredential
 def mock_msal_app():
     """Mock msal.ConfidentialClientApplication."""
     with patch("sjifire.calendar.duty_sync.msal.ConfidentialClientApplication") as mock:
+        # Default: no cached accounts, so password flow is used
+        mock.return_value.get_accounts.return_value = []
         yield mock
 
 
@@ -168,7 +170,7 @@ class TestGetToken:
             "error_description": "Invalid username or password",
         }
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(RuntimeError) as exc_info:
             credential.get_token("scope1")
 
         assert "ROPC authentication failed" in str(exc_info.value)
@@ -182,7 +184,7 @@ class TestGetToken:
             "error_description": "User account is locked",
         }
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(RuntimeError) as exc_info:
             credential.get_token("scope1")
 
         assert "User account is locked" in str(exc_info.value)
@@ -195,7 +197,7 @@ class TestGetToken:
             # No error_description
         }
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(RuntimeError) as exc_info:
             credential.get_token("scope1")
 
         assert "No description" in str(exc_info.value)
@@ -235,7 +237,7 @@ class TestROPCCredentialSecurity:
             "error_description": "Authentication failed",
         }
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(RuntimeError) as exc_info:
             credential.get_token("scope1")
 
         assert "test-password" not in str(exc_info.value)
@@ -253,6 +255,77 @@ class TestROPCCredentialSecurity:
         # Just verify the credential was created correctly
         # (repr/str may contain password by default, but that's Python's behavior)
         assert cred._password == "password123"
+
+    def test_client_secret_not_stored(self, mock_msal_app):
+        """Client secret and client ID are not stored as instance attributes."""
+        cred = ROPCCredential(
+            tenant_id="t",
+            client_id="my-client-id",
+            client_secret="my-secret",
+            username="u",
+            password="p",
+        )
+
+        assert not hasattr(cred, "_client_secret")
+        assert not hasattr(cred, "_client_id")
+
+
+# =============================================================================
+# Token Caching Tests
+# =============================================================================
+
+
+class TestTokenCaching:
+    """Tests for MSAL token caching in ROPCCredential."""
+
+    def test_tries_silent_before_password(self, credential, mock_msal_app):
+        """Uses cached token from acquire_token_silent when available."""
+        mock_app = mock_msal_app.return_value
+        mock_account = MagicMock()
+        mock_app.get_accounts.return_value = [mock_account]
+        mock_app.acquire_token_silent.return_value = {
+            "access_token": "cached-token",
+            "expires_in": 3600,
+        }
+
+        result = credential.get_token("scope1")
+
+        assert result.token == "cached-token"
+        mock_app.acquire_token_silent.assert_called_once_with(
+            ["scope1"], account=mock_account
+        )
+        mock_app.acquire_token_by_username_password.assert_not_called()
+
+    def test_falls_back_to_password_when_silent_fails(self, credential, mock_msal_app):
+        """Falls back to password flow when silent returns None."""
+        mock_app = mock_msal_app.return_value
+        mock_app.get_accounts.return_value = [MagicMock()]
+        mock_app.acquire_token_silent.return_value = None
+        mock_app.acquire_token_by_username_password.return_value = {
+            "access_token": "password-token",
+            "expires_in": 3600,
+        }
+
+        result = credential.get_token("scope1")
+
+        assert result.token == "password-token"
+        mock_app.acquire_token_silent.assert_called_once()
+        mock_app.acquire_token_by_username_password.assert_called_once()
+
+    def test_uses_password_when_no_accounts(self, credential, mock_msal_app):
+        """Uses password flow directly when no cached accounts exist."""
+        mock_app = mock_msal_app.return_value
+        mock_app.get_accounts.return_value = []
+        mock_app.acquire_token_by_username_password.return_value = {
+            "access_token": "fresh-token",
+            "expires_in": 3600,
+        }
+
+        result = credential.get_token("scope1")
+
+        assert result.token == "fresh-token"
+        mock_app.acquire_token_silent.assert_not_called()
+        mock_app.acquire_token_by_username_password.assert_called_once()
 
 
 # =============================================================================

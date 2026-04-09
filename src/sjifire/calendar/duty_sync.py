@@ -60,8 +60,6 @@ class ROPCCredential(TokenCredential):
             password: User's password
         """
         self._authority = f"https://login.microsoftonline.com/{tenant_id}"
-        self._client_id = client_id
-        self._client_secret = client_secret
         self._username = username
         self._password = password
         self._app = msal.ConfidentialClientApplication(
@@ -85,9 +83,21 @@ class ROPCCredential(TokenCredential):
             AccessToken with token and expiration
 
         Raises:
-            Exception: If authentication fails
+            RuntimeError: If authentication fails
         """
         _ = kwargs  # Explicitly mark as unused
+
+        # Try cached token first to avoid redundant password auth
+        accounts = self._app.get_accounts(username=self._username)
+        if accounts:
+            result = self._app.acquire_token_silent(list(scopes), account=accounts[0])
+            if result and "access_token" in result:
+                return AccessToken(
+                    token=result["access_token"],
+                    expires_on=result.get("expires_in", 3600) + int(datetime.now().timestamp()),
+                )
+
+        # Fall back to password flow
         result = self._app.acquire_token_by_username_password(
             username=self._username,
             password=self._password,
@@ -103,7 +113,7 @@ class ROPCCredential(TokenCredential):
         # Authentication failed
         error = result.get("error", "unknown_error")
         error_desc = result.get("error_description", "No description")
-        raise Exception(f"ROPC authentication failed: {error} - {error_desc}")
+        raise RuntimeError(f"ROPC authentication failed: {error} - {error_desc}")
 
 
 def _detect_shift_change_hour_from_schedules(schedules: list[DaySchedule]) -> int | None:
