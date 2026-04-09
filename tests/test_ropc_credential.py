@@ -265,8 +265,8 @@ class TestDetectIfGroup:
 
     @pytest.fixture
     def mock_graph_client(self):
-        """Mock GraphServiceClient."""
-        with patch("sjifire.calendar.duty_sync.GraphServiceClient") as mock:
+        """Mock create_graph_client factory."""
+        with patch("sjifire.calendar.duty_sync.create_graph_client") as mock:
             yield mock
 
     @pytest.fixture

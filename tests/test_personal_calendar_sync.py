@@ -124,11 +124,10 @@ class TestEnsureAladtecCategory:
     def sync(self, mock_env_vars):
         """Create PersonalCalendarSync with mocked client."""
         with (
-            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
+            mock_client_class.return_value = mock_client  # get_graph_client() returns this
             sync = PersonalCalendarSync()
             sync.client = mock_client
             return sync
@@ -188,11 +187,10 @@ class TestGetPrimaryCalendarId:
     def sync(self, mock_env_vars):
         """Create PersonalCalendarSync with mocked client."""
         with (
-            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
+            mock_client_class.return_value = mock_client  # get_graph_client() returns this
             sync = PersonalCalendarSync()
             sync.client = mock_client
             return sync
@@ -228,11 +226,10 @@ class TestGetOrCreateCalendarPrimaryMode:
     def sync(self, mock_env_vars):
         """Create PersonalCalendarSync with mocked client."""
         with (
-            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
+            mock_client_class.return_value = mock_client  # get_graph_client() returns this
             sync = PersonalCalendarSync()
             sync.client = mock_client
             return sync
@@ -260,11 +257,10 @@ class TestCreateEventWithCategory:
     def sync(self, mock_env_vars):
         """Create PersonalCalendarSync with mocked client."""
         with (
-            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
+            mock_client_class.return_value = mock_client  # get_graph_client() returns this
             sync = PersonalCalendarSync()
             sync.client = mock_client
             return sync
@@ -317,11 +313,10 @@ class TestGetExistingEventsWithFilter:
     def sync(self, mock_env_vars):
         """Create PersonalCalendarSync with mocked client."""
         with (
-            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
+            mock_client_class.return_value = mock_client  # get_graph_client() returns this
             sync = PersonalCalendarSync()
             sync.client = mock_client
             return sync
@@ -376,11 +371,10 @@ class TestUpdateEventWithCategory:
     def sync(self, mock_env_vars):
         """Create PersonalCalendarSync with mocked client."""
         with (
-            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
+            mock_client_class.return_value = mock_client  # get_graph_client() returns this
             sync = PersonalCalendarSync()
             sync.client = mock_client
             return sync
@@ -424,11 +418,10 @@ class TestGetAladtecCategoryEvents:
     def sync(self, mock_env_vars):
         """Create PersonalCalendarSync with mocked client."""
         with (
-            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
+            mock_client_class.return_value = mock_client  # get_graph_client() returns this
             sync = PersonalCalendarSync()
             sync.client = mock_client
             return sync
@@ -494,11 +487,10 @@ class TestPurgeAladtecEvents:
     def sync(self, mock_env_vars):
         """Create PersonalCalendarSync with mocked client."""
         with (
-            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
+            mock_client_class.return_value = mock_client  # get_graph_client() returns this
             sync = PersonalCalendarSync()
             sync.client = mock_client
             return sync
@@ -645,11 +637,10 @@ class TestSyncUserLogic:
     def sync(self, mock_env_vars, mock_aladtec_url):
         """Create PersonalCalendarSync with mocked client."""
         with (
-            patch("sjifire.calendar.personal_sync.ClientSecretCredential"),
-            patch("sjifire.calendar.personal_sync.GraphServiceClient") as mock_client_class,
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
         ):
             mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
+            mock_client_class.return_value = mock_client  # get_graph_client() returns this
             sync = PersonalCalendarSync()
             sync.client = mock_client
             return sync

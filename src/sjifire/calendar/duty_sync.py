@@ -30,6 +30,7 @@ from sjifire.core.config import (
     get_timezone,
     get_timezone_name,
 )
+from sjifire.core.msgraph_client import create_graph_client
 from sjifire.core.schedule import detect_shift_change_hour, should_exclude_section
 
 logger = logging.getLogger(__name__)
@@ -175,13 +176,13 @@ class DutyCalendarSync:
         self.mailbox = mailbox or get_service_email()
         self._tenant_id, self._client_id, self._client_secret = get_graph_credentials()
 
-        # Start with app-only credential for initial detection
+        # Start with app-only credential (retry middleware included via factory)
         self._app_credential = ClientSecretCredential(
             tenant_id=self._tenant_id,
             client_id=self._client_id,
             client_secret=self._client_secret,
         )
-        self.client = GraphServiceClient(credentials=self._app_credential)
+        self.client = create_graph_client(self._app_credential)
         self._user_cache: dict[str, dict] | None = None
         self._group_id: str | None = None
         self._is_group: bool | None = None  # None = not yet determined
@@ -248,7 +249,7 @@ class DutyCalendarSync:
                 username=username,
                 password=password,
             )
-            self._delegated_client = GraphServiceClient(credentials=delegated_credential)
+            self._delegated_client = create_graph_client(delegated_credential)
             logger.debug("Delegated auth client initialized with ROPC")
         except Exception as e:
             logger.error("Failed to set up delegated auth: %s", e)
