@@ -5,8 +5,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from azure.identity import ClientSecretCredential
-from msgraph import GraphServiceClient
 from msgraph.generated.models.body_type import BodyType
 from msgraph.generated.models.date_time_time_zone import DateTimeTimeZone
 from msgraph.generated.models.event import Event
@@ -18,11 +16,11 @@ from msgraph.generated.users.item.calendars.item.events.events_request_builder i
 from sjifire.aladtec.schedule_scraper import ScheduleEntry
 from sjifire.calendar.models import get_aladtec_url
 from sjifire.core.config import (
-    get_graph_credentials,
     get_org_config,
     get_timezone,
     get_timezone_name,
 )
+from sjifire.core.msgraph_client import get_graph_client
 
 logger = logging.getLogger(__name__)
 
@@ -99,13 +97,7 @@ class PersonalCalendarSync:
 
     def __init__(self) -> None:
         """Initialize with Graph API credentials."""
-        tenant_id, client_id, client_secret = get_graph_credentials()
-        credential = ClientSecretCredential(
-            tenant_id=tenant_id,
-            client_id=client_id,
-            client_secret=client_secret,
-        )
-        self.client = GraphServiceClient(credentials=credential)
+        self.client = get_graph_client()
         self._calendar_cache: dict[str, str] = {}  # user_email -> calendar_id
         self._uses_primary_calendar: set[str] = set()  # users using primary calendar
 
