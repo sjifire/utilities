@@ -580,14 +580,12 @@ class DutyCalendarSync:
         except (ValueError, AttributeError):
             return None
 
-    async def create_event(self, event: AllDayDutyEvent) -> str | None:
-        """Create an all-day calendar event with HTML body."""
-        # For all-day events, use date only (no time component)
-        # End date should be the next day for a single all-day event
+    def _build_duty_event(self, event: AllDayDutyEvent) -> Event:
+        """Build a Graph Event object from an all-day duty event."""
         start_date = event.event_date.strftime("%Y-%m-%d")
         end_date = (event.event_date + timedelta(days=1)).strftime("%Y-%m-%d")
 
-        graph_event = Event(
+        return Event(
             subject=event.subject,
             body=ItemBody(
                 content_type=BodyType.Html,
@@ -604,6 +602,10 @@ class DutyCalendarSync:
             is_all_day=True,
             is_reminder_on=False,
         )
+
+    async def create_event(self, event: AllDayDutyEvent) -> str | None:
+        """Create an all-day calendar event with HTML body."""
+        graph_event = self._build_duty_event(event)
 
         try:
             # Use group or user endpoint based on detection
@@ -625,27 +627,7 @@ class DutyCalendarSync:
             logger.error("Cannot update event without event_id")
             return False
 
-        # For all-day events, use date only (no time component)
-        start_date = event.event_date.strftime("%Y-%m-%d")
-        end_date = (event.event_date + timedelta(days=1)).strftime("%Y-%m-%d")
-
-        graph_event = Event(
-            subject=event.subject,
-            body=ItemBody(
-                content_type=BodyType.Html,
-                content=event.body_html,
-            ),
-            start=DateTimeTimeZone(
-                date_time=start_date,
-                time_zone=get_timezone_name(),
-            ),
-            end=DateTimeTimeZone(
-                date_time=end_date,
-                time_zone=get_timezone_name(),
-            ),
-            is_all_day=True,
-            is_reminder_on=False,
-        )
+        graph_event = self._build_duty_event(event)
 
         try:
             # Use group or user endpoint based on detection
