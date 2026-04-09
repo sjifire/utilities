@@ -1,12 +1,16 @@
 """Tests for sjifire.calendar.personal_sync module."""
 
-from datetime import date
-from unittest.mock import patch
+from datetime import date, datetime
+from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
+
+import pytest
 
 from sjifire.aladtec.schedule_scraper import ScheduleEntry
 from sjifire.calendar.personal_sync import (
     ExistingEvent,
     PersonalSyncResult,
+    _parse_graph_datetime,
     make_event_body,
     make_event_subject,
     normalize_body_for_comparison,
@@ -150,6 +154,59 @@ class TestPersonalCalendarSyncInit:
             tenant_id="tenant", client_id="client", client_secret="secret"
         )
         assert sync._calendar_cache == {}
+
+
+class TestParseGraphDatetime:
+    """Tests for _parse_graph_datetime helper function."""
+
+    @pytest.fixture(autouse=True)
+    def mock_local_tz(self):
+        """Use US/Pacific as the local timezone for all tests."""
+        with patch(
+            "sjifire.calendar.personal_sync.get_timezone",
+            return_value=ZoneInfo("US/Pacific"),
+        ):
+            yield
+
+    def test_utc_converts_to_local(self):
+        """UTC datetime is converted to configured local timezone."""
+        result = _parse_graph_datetime("2026-02-15T08:00:00", "UTC")
+        assert result.date() == date(2026, 2, 15)
+        assert result.strftime("%H:%M") == "00:00"  # UTC-8
+        assert result.tzinfo is not None
+
+    def test_iana_timezone_converts(self):
+        """IANA timezone (e.g., America/New_York) is converted to local."""
+        result = _parse_graph_datetime("2026-02-15T15:00:00", "America/New_York")
+        # 3 PM ET = noon PT (ET is UTC-5, PT is UTC-8)
+        assert result.strftime("%H:%M") == "12:00"
+
+    def test_unknown_timezone_falls_back_to_local(self):
+        """Unknown timezone falls back to local without crashing."""
+        result = _parse_graph_datetime("2026-02-15T18:00:00", "Invalid/Timezone")
+        assert result.strftime("%H:%M") == "18:00"
+        assert result.tzinfo == ZoneInfo("US/Pacific")
+
+    def test_no_timezone_assumes_local(self):
+        """None timezone assumes local timezone."""
+        result = _parse_graph_datetime("2026-02-15T18:00:00", None)
+        assert result.strftime("%H:%M") == "18:00"
+        assert result.tzinfo == ZoneInfo("US/Pacific")
+
+    def test_microseconds_stripped(self):
+        """Microseconds in datetime string are stripped cleanly."""
+        result = _parse_graph_datetime("2026-02-15T18:00:00.0000000", None)
+        assert result.strftime("%H:%M") == "18:00"
+
+    def test_invalid_datetime_raises_valueerror(self):
+        """Invalid datetime string raises ValueError."""
+        with pytest.raises(ValueError):
+            _parse_graph_datetime("not-a-date", None)
+
+    def test_utc_case_insensitive(self):
+        """UTC detection is case-insensitive."""
+        result = _parse_graph_datetime("2026-02-15T08:00:00", "utc")
+        assert result.strftime("%H:%M") == "00:00"  # Same as uppercase UTC
 
 
 class TestNormalizeBodyForComparison:
