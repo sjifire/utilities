@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import date, datetime, timedelta
 
 import msal
@@ -134,8 +135,6 @@ MAX_CONCURRENT_REQUESTS = 10
 
 def _extract_crew_data_json(html: str) -> str | None:
     """Extract the CREW_DATA JSON string from an HTML body, or None if absent."""
-    import re
-
     from sjifire.calendar.models import CREW_DATA_MARKER
 
     match = re.search(rf"<!--\s*{re.escape(CREW_DATA_MARKER)}(.*?)-->", html, re.DOTALL)
@@ -161,9 +160,7 @@ def normalize_html_for_comparison(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(separator=" ")
 
-    import re as regex
-
-    normalized = regex.sub(r"\s+", " ", text)
+    normalized = re.sub(r"\s+", " ", text)
     return normalized.strip()
 
 
@@ -234,7 +231,7 @@ class DutyCalendarSync:
                         self._setup_delegated_client()
                         return True
         except Exception as e:
-            logger.debug("Error checking for group: %s", e)
+            logger.warning("Error checking for group: %s", e)
 
         self._is_group = False
         return False
