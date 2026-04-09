@@ -39,9 +39,7 @@ class TestGetGraphClient:
     @patch("sjifire.core.msgraph_client.create_graph_client")
     @patch("sjifire.core.msgraph_client.ClientSecretCredential")
     @patch("sjifire.core.msgraph_client.get_graph_credentials")
-    def test_uses_credentials_from_config(
-        self, mock_get_creds, mock_credential_class, mock_create
-    ):
+    def test_uses_credentials_from_config(self, mock_get_creds, mock_credential_class, mock_create):
         """Should use credentials from get_graph_credentials."""
         mock_get_creds.return_value = (TEST_TENANT_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET)
         mock_credential = MagicMock()
