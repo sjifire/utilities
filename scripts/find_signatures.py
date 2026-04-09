@@ -79,8 +79,10 @@ def main() -> None:
             sig_type = "HTML" if u.get("HasHtml") else "Text"
             print(f"  {u['DisplayName']:<30} {u['UPN']:<40} {sig_type}")
 
-    print(f"\nTotal: {len(users)} users with signatures "
-          f"({len(auto_add)} auto-add, {len(defined_only)} defined only)")
+    print(
+        f"\nTotal: {len(users)} users with signatures "
+        f"({len(auto_add)} auto-add, {len(defined_only)} defined only)"
+    )
 
 
 if __name__ == "__main__":
