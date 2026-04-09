@@ -291,9 +291,7 @@ class TestTokenCaching:
         result = credential.get_token("scope1")
 
         assert result.token == "cached-token"
-        mock_app.acquire_token_silent.assert_called_once_with(
-            ["scope1"], account=mock_account
-        )
+        mock_app.acquire_token_silent.assert_called_once_with(["scope1"], account=mock_account)
         mock_app.acquire_token_by_username_password.assert_not_called()
 
     def test_falls_back_to_password_when_silent_fails(self, credential, mock_msal_app):
@@ -467,3 +465,34 @@ class TestDetectIfGroup:
 
         # Should have set up delegated client
         assert sync._delegated_client is not None
+
+
+# =============================================================================
+# _setup_delegated_client Failure Tests
+# =============================================================================
+
+
+class TestSetupDelegatedClientFailure:
+    """Tests for _setup_delegated_client error handling."""
+
+    @pytest.fixture
+    def sync(self, mock_env_vars):
+        """Create DutyCalendarSync instance."""
+        with (
+            patch("sjifire.calendar.duty_sync.get_graph_credentials") as mock_graph,
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient"),
+        ):
+            mock_graph.return_value = ("tenant", "client", "secret")
+            yield DutyCalendarSync("test@sjifire.org")
+
+    def test_raises_runtime_error_when_credentials_unavailable(self, sync):
+        """Raises RuntimeError when service account credentials are missing."""
+        with (
+            patch(
+                "sjifire.calendar.duty_sync.get_service_account_credentials",
+                side_effect=Exception("no creds"),
+            ),
+            pytest.raises(RuntimeError, match="Delegated auth required"),
+        ):
+            sync._setup_delegated_client()
