@@ -12,11 +12,13 @@ import re
 from datetime import timedelta
 
 from sjifire.core.config import get_org_config
+from sjifire.core.pii import redact_pii
 from sjifire.core.schedule import position_sort_key
 from sjifire.ops.dispatch.models import (
     CrewOnDuty,
     DispatchAnalysis,
     DispatchCallDocument,
+    SanitizedNote,
     UnitTiming,
 )
 from sjifire.ops.schedule.models import ScheduleEntryCache
@@ -49,6 +51,14 @@ async def enrich_dispatch(doc: DispatchCallDocument) -> DispatchAnalysis:
     # LLM analysis with crew roster included in the prompt
     analysis = await analyze_dispatch(doc, crew_context)
 
+    # Defense in depth: regex safety net over LLM output.  The cheatsheet
+    # prompt instructs the LLM to strip patient/civilian demographics,
+    # names, and phone numbers from its sanitized_* fields, but we don't
+    # blindly trust it.  Run redact_pii over every PII-bearing field so
+    # any slippage gets caught at ingestion rather than leaking to
+    # reports or NERIS downstream.  Idempotent — clean text is unchanged.
+    _scrub_llm_output(analysis)
+
     # Attach the crew roster
     analysis.on_duty_crew = crew
 
@@ -63,6 +73,42 @@ async def enrich_dispatch(doc: DispatchCallDocument) -> DispatchAnalysis:
     _extract_unit_times(doc, analysis)
 
     return analysis
+
+
+# ---------------------------------------------------------------------------
+# PII safety net
+# ---------------------------------------------------------------------------
+
+
+def _scrub_llm_output(analysis: DispatchAnalysis) -> None:
+    """Run regex PII redaction over every LLM-written field in-place.
+
+    Defense in depth: the enrichment prompt tells the LLM to keep its
+    sanitized_* output free of patient/civilian demographics, names,
+    and phone numbers, but we don't rely on that alone.  This pass
+    catches any obvious PII the LLM missed, skipped, or echoed back
+    verbatim, so downstream consumers (chat engine, MCP tools,
+    incident documents, NERIS) never see it.
+
+    Idempotent — already-clean text is unchanged.  Only touches
+    LLM-authored fields; deterministic fields (``unit_times``,
+    ``on_duty_crew``, ``incident_commander_name``, ``alarm_time``,
+    etc.) are left alone.
+    """
+    analysis.summary = redact_pii(analysis.summary)
+    analysis.short_dsc = redact_pii(analysis.short_dsc)
+    analysis.outcome = redact_pii(analysis.outcome)
+    analysis.actions_taken = [redact_pii(a) for a in analysis.actions_taken]
+    analysis.key_events = [redact_pii(e) for e in analysis.key_events]
+    analysis.sanitized_cad_comments = redact_pii(analysis.sanitized_cad_comments)
+    analysis.sanitized_radio_notes = [
+        SanitizedNote(
+            timestamp=n.timestamp,
+            unit=n.unit,
+            text=redact_pii(n.text),
+        )
+        for n in analysis.sanitized_radio_notes
+    ]
 
 
 # ---------------------------------------------------------------------------
