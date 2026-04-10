@@ -60,36 +60,3 @@ def redact_pii(text: str) -> str:
     text = _PHONE_RE.sub("[phone]", text)
     text = _CALLER_RE.sub("[caller]", text)
     return text
-
-
-def redact_dispatch_dict(d: dict) -> dict:
-    """Redact PII from a dispatch call dict (output of ``to_dict()``).
-
-    Modifies the dict **in place** and returns it.  Redacts:
-
-    - ``cad_comments`` (raw CAD blob)
-    - ``responder_details[].radio_log`` (individual radio log entries)
-    - ``analysis.summary``, ``analysis.key_events``, ``analysis.short_dsc``
-
-    Args:
-        d: Dispatch call dict from ``DispatchCallDocument.to_dict()``
-
-    Returns:
-        The same dict with PII fields redacted.
-    """
-    if d.get("cad_comments"):
-        d["cad_comments"] = redact_pii(d["cad_comments"])
-
-    for entry in d.get("responder_details", []):
-        if entry.get("radio_log"):
-            entry["radio_log"] = redact_pii(entry["radio_log"])
-
-    analysis = d.get("analysis")
-    if isinstance(analysis, dict):
-        if analysis.get("summary"):
-            analysis["summary"] = redact_pii(analysis["summary"])
-        if analysis.get("short_dsc"):
-            analysis["short_dsc"] = redact_pii(analysis["short_dsc"])
-        analysis["key_events"] = [redact_pii(e) for e in analysis.get("key_events", [])]
-
-    return d

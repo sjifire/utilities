@@ -9,6 +9,7 @@ Covers:
 - End-to-end wiring via chat engine slim dict
 """
 
+import json
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
@@ -373,6 +374,173 @@ class TestSanitizeDispatchForLlm:
         assert "[patient]" in notes_by_unit["M31"]
         assert "PeaceHealth" in notes_by_unit["M31"]
 
+    def test_extra_llm_notes_are_ignored(self):
+        """If the LLM invents a note not in ``responder_details``, ignore it.
+
+        We only walk ``responder_details`` and look up sanitized matches
+        by ``(timestamp, unit)``. Any LLM note that doesn't match a raw
+        entry is silently dropped — we don't invent radio log entries
+        from thin air.
+        """
+        doc = _make_doc()
+        doc.analysis = _make_analysis(
+            sanitized_radio_notes=[
+                SanitizedNote(
+                    timestamp="2026-02-12T14:38:00",
+                    unit="E31",
+                    text="pt contact the patient, alert",
+                ),
+                SanitizedNote(
+                    timestamp="2026-02-12T14:42:00",
+                    unit="M31",
+                    text="transporting the patient",
+                ),
+                # Extra entry invented by the LLM — no matching raw entry
+                SanitizedNote(
+                    timestamp="2026-02-12T15:00:00",
+                    unit="BN31",
+                    text="command terminated",
+                ),
+            ]
+        )
+
+        result = sanitize_dispatch_for_llm(doc)
+
+        # Only NOTE entries from raw responder_details should appear — the
+        # fabricated BN31 entry should NOT be added to the output.
+        note_units = [
+            e["unit_number"] for e in result["responder_details"] if e.get("status") == "NOTE"
+        ]
+        assert note_units == ["E31", "M31"]
+        assert "command terminated" not in json.dumps(result)
+
+    def test_timestamp_with_fractional_seconds_matches(self):
+        """Raw timestamps with microseconds should match LLM-truncated ones.
+
+        This is the common LLM behavior: raw iSpyFire sends
+        ``2026-02-12T14:38:00.123456`` and the enrichment LLM echoes
+        back ``2026-02-12T14:38:00`` (no fractional seconds). Without
+        timestamp normalization the lookup would miss and fall back to
+        regex — silently degrading sanitization quality.
+        """
+        doc = _make_doc(
+            responder_details=[
+                {
+                    "unit_number": "E31",
+                    "agency_code": "SJF",
+                    "status": "NOTE",
+                    # Raw has microseconds
+                    "time_of_status_change": "2026-02-12T14:38:00.123456",
+                    "radio_log": "pt contact 13yo female, conscious",
+                },
+            ]
+        )
+        doc.analysis = _make_analysis(
+            sanitized_radio_notes=[
+                SanitizedNote(
+                    # LLM drops microseconds
+                    timestamp="2026-02-12T14:38:00",
+                    unit="E31",
+                    text="pt contact the patient, conscious",
+                ),
+            ]
+        )
+
+        result = sanitize_dispatch_for_llm(doc)
+
+        note = next(e for e in result["responder_details"] if e.get("status") == "NOTE")
+        # LLM-sanitized text should be used (not regex fallback)
+        assert note["radio_log"] == "pt contact the patient, conscious"
+        # Raw PII should not appear
+        assert "13yo" not in note["radio_log"]
+
+    def test_timestamp_with_z_suffix_matches(self):
+        """Raw with ``Z`` suffix should match LLM echoing ``+00:00`` (or vice versa)."""
+        doc = _make_doc(
+            responder_details=[
+                {
+                    "unit_number": "E31",
+                    "agency_code": "SJF",
+                    "status": "NOTE",
+                    "time_of_status_change": "2026-02-12T14:38:00+00:00",
+                    "radio_log": "pt contact 13yo female",
+                },
+            ]
+        )
+        doc.analysis = _make_analysis(
+            sanitized_radio_notes=[
+                SanitizedNote(
+                    timestamp="2026-02-12T14:38:00Z",  # Z instead of +00:00
+                    unit="E31",
+                    text="pt contact the patient",
+                ),
+            ]
+        )
+
+        result = sanitize_dispatch_for_llm(doc)
+
+        note = next(e for e in result["responder_details"] if e.get("status") == "NOTE")
+        assert note["radio_log"] == "pt contact the patient"
+        assert "13yo" not in note["radio_log"]
+
+    def test_timestamp_totally_unparseable_falls_back_exact_match(self):
+        """Non-ISO timestamps still work via exact string match."""
+        doc = _make_doc(
+            responder_details=[
+                {
+                    "unit_number": "E31",
+                    "agency_code": "SJF",
+                    "status": "NOTE",
+                    "time_of_status_change": "NOT_A_TIMESTAMP",
+                    "radio_log": "pt contact 13yo female",
+                },
+            ]
+        )
+        doc.analysis = _make_analysis(
+            sanitized_radio_notes=[
+                SanitizedNote(
+                    timestamp="NOT_A_TIMESTAMP",  # matches verbatim
+                    unit="E31",
+                    text="pt contact the patient",
+                ),
+            ]
+        )
+
+        result = sanitize_dispatch_for_llm(doc)
+
+        note = next(e for e in result["responder_details"] if e.get("status") == "NOTE")
+        assert note["radio_log"] == "pt contact the patient"
+
+    def test_html_entities_in_raw_fallback_are_decoded(self):
+        """Regression for the fallback-path HTML entity bypass.
+
+        Raw radio_log containing HTML-encoded whitespace (``&#32;``)
+        would defeat the age regex if not unescaped first. This test
+        forces the fallback path (no sanitized_radio_notes) and an
+        HTML-encoded PII input that only the regex should see.
+        """
+        doc = _make_doc(
+            responder_details=[
+                {
+                    "unit_number": "E31",
+                    "agency_code": "SJF",
+                    "status": "NOTE",
+                    "time_of_status_change": "2026-02-12T14:38:00",
+                    # &#32; is HTML entity for space — would defeat \s+
+                    "radio_log": "pt contact 13yo&#32;female, conscious",
+                },
+            ]
+        )
+        doc.analysis = DispatchAnalysis()  # force regex fallback
+
+        result = sanitize_dispatch_for_llm(doc)
+
+        note = next(e for e in result["responder_details"] if e.get("status") == "NOTE")
+        # Regex must have matched after HTML-decode
+        assert "13yo" not in note["radio_log"]
+        assert "female" not in note["radio_log"]
+        assert "[patient]" in note["radio_log"]
+
     def test_fully_unenriched_doc_falls_back_to_regex(self):
         doc = _make_doc()
         doc.analysis = DispatchAnalysis()  # fully empty
@@ -605,6 +773,45 @@ class TestDispatchMcpToolsSanitization:
 
         assert result["count"] == 1
         assert "13yo" not in result["calls"][0]["cad_comments"]
+
+    async def test_get_open_dispatch_calls_returns_sanitized(self, auth_user):
+        from sjifire.ops.dispatch.store import DispatchStore
+        from sjifire.ops.dispatch.tools import get_open_dispatch_calls
+
+        doc = _make_doc()
+        doc.analysis = _make_analysis()
+
+        with patch.object(DispatchStore, "fetch_open", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = [doc]
+            result = await get_open_dispatch_calls()
+
+        assert result["count"] == 1
+        call = result["calls"][0]
+        assert "13yo" not in call["cad_comments"]
+        assert "378-4141" not in call["cad_comments"]
+        assert "the patient" in call["cad_comments"]
+        note_entries = [e for e in call["responder_details"] if e.get("status") == "NOTE"]
+        for entry in note_entries:
+            assert "13yo" not in entry["radio_log"]
+            assert "72yo" not in entry["radio_log"]
+
+    async def test_search_by_date_range_returns_sanitized(self, auth_user):
+        """The date-range path of ``search_dispatch_calls`` also needs sanitization."""
+        from sjifire.ops.dispatch.store import DispatchStore
+        from sjifire.ops.dispatch.tools import search_dispatch_calls
+
+        doc = _make_doc()
+        doc.analysis = _make_analysis()
+
+        with patch.object(
+            DispatchStore, "list_by_date_range", new_callable=AsyncMock
+        ) as mock_range:
+            mock_range.return_value = [doc]
+            result = await search_dispatch_calls(start_date="2026-02-12", end_date="2026-02-12")
+
+        assert result["count"] == 1
+        assert "13yo" not in result["calls"][0]["cad_comments"]
+        assert "the patient" in result["calls"][0]["cad_comments"]
 
 
 # ---------------------------------------------------------------------------

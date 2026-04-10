@@ -634,6 +634,98 @@ class TestSlimDispatchContext:
         assert "agency_code" not in data
         assert "zone_code" not in data
 
+    async def test_dispatch_cad_comments_are_sanitized(self):
+        """Regression: the slim dispatch cad_comments must be sanitized.
+
+        Guards against the chat engine accidentally dropping its
+        ``sanitize_cad_comments`` call. Uses raw PII-bearing CAD and
+        a populated ``sanitized_cad_comments`` LLM field; the slim
+        dict must carry the sanitized version, not the raw.
+        """
+        from sjifire.ops.chat.engine import _fetch_context
+        from sjifire.ops.dispatch.models import (
+            DispatchAnalysis,
+            DispatchCallDocument,
+            SanitizedNote,
+        )
+        from sjifire.ops.dispatch.store import DispatchStore
+        from sjifire.ops.incidents.models import IncidentDocument
+
+        incident = IncidentDocument(
+            id="test-inc-pii",
+            incident_number="26-008888",
+            incident_datetime="2026-02-15T00:00:00+00:00",
+            created_by="test@sjifire.org",
+            station="S31",
+        )
+        async with IncidentStore() as store:
+            await store.create(incident)
+
+        dispatch = DispatchCallDocument(
+            id="dispatch-uuid-pii",
+            year="2026",
+            long_term_call_id="26-008888",
+            nature="Medical Aid",
+            address="200 Spring St",
+            agency_code="SJF3",
+            responding_units="E31, M31",
+            responder_details=[
+                {
+                    "unit_number": "E31",
+                    "agency_code": "SJF3",
+                    "status": "NOTE",
+                    "time_of_status_change": "2026-02-15T14:38:00",
+                    "radio_log": "pt contact 13yo female, conscious",
+                },
+            ],
+            cad_comments=(
+                "13yo female passenger injured\ncallback (360) 555-1234\ncaller: John Smith advises"
+            ),
+            geo_location="48.53,-123.01",
+            analysis=DispatchAnalysis(
+                incident_commander="BN31",
+                summary="Medical aid at 200 Spring St, patient transported.",
+                sanitized_cad_comments=(
+                    "the patient injured\ncallback [phone]\nthe caller advises"
+                ),
+                sanitized_radio_notes=[
+                    SanitizedNote(
+                        timestamp="2026-02-15T14:38:00",
+                        unit="E31",
+                        text="pt contact the patient, conscious",
+                    ),
+                ],
+            ),
+        )
+        DispatchStore._memory[dispatch.id] = dispatch.to_cosmos()
+
+        with (
+            patch(
+                "sjifire.ops.schedule.tools.get_on_duty_crew",
+                return_value={"crew": [], "count": 0},
+            ),
+            patch(
+                "sjifire.ops.personnel.tools.get_operational_personnel",
+                return_value=[],
+            ),
+        ):
+            _, dispatch_json, _, _, _ = await _fetch_context("test-inc-pii", _TEST_USER)
+
+        # The entire slim dispatch JSON going to Claude must NOT contain raw PII
+        assert "13yo" not in dispatch_json
+        assert "female" not in dispatch_json
+        assert "555-1234" not in dispatch_json
+        assert "John Smith" not in dispatch_json
+
+        # And it SHOULD contain the sanitized replacements
+        data = json.loads(dispatch_json)
+        assert "the patient" in data["cad_comments"]
+        assert "[phone]" in data["cad_comments"]
+        assert "the caller" in data["cad_comments"]
+
+        # Address still present — not PII
+        assert data["address"] == "200 Spring St"
+
 
 class TestFormatUnitTimesTable:
     """Verify _format_unit_times_table produces a readable table."""

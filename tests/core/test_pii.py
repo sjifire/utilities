@@ -1,12 +1,15 @@
-"""Tests for PII redaction in dispatch logs.
+"""Tests for PII redaction helpers in ``sjifire.core.pii``.
 
-Covers redact_pii() text redaction and redact_dispatch_dict() structural
-redaction for dispatch call dicts.
+Covers ``redact_pii`` text redaction patterns (age+gender, standalone
+age, phone numbers, caller names) plus preservation of operational
+content.  The higher-level LLM-preferred sanitization helpers live in
+``sjifire.ops.dispatch.sanitize`` and are tested in
+``tests/ops/test_dispatch_sanitize.py``.
 """
 
 import pytest
 
-from sjifire.core.pii import redact_dispatch_dict, redact_pii
+from sjifire.core.pii import redact_pii
 
 # ---------------------------------------------------------------------------
 # redact_pii — age + gender patterns
@@ -225,130 +228,3 @@ class TestRedactEdgeCases:
         assert "patient is conscious" in result
 
 
-# ---------------------------------------------------------------------------
-# redact_dispatch_dict — structural redaction
-# ---------------------------------------------------------------------------
-
-
-class TestRedactDispatchDict:
-    def test_redacts_cad_comments(self):
-        d = {"cad_comments": "13yo female injured, callback (360) 555-1234"}
-        result = redact_dispatch_dict(d)
-        assert result["cad_comments"] == "[patient] injured, callback [phone]"
-
-    def test_redacts_responder_radio_log(self):
-        d = {
-            "responder_details": [
-                {"unit_number": "E31", "status": "NOTE", "radio_log": "72yo male fell"},
-                {"unit_number": "M31", "status": "ENRT", "radio_log": "M31 enroute"},
-            ]
-        }
-        result = redact_dispatch_dict(d)
-        assert result["responder_details"][0]["radio_log"] == "[patient] fell"
-        assert result["responder_details"][1]["radio_log"] == "M31 enroute"
-
-    def test_redacts_analysis_summary(self):
-        d = {
-            "analysis": {
-                "summary": "72-year-old male fell from standing position",
-                "short_dsc": "72yo male fall, transported",
-                "key_events": [
-                    "17:05 M31 — pt contact, 13yo female, conscious",
-                    "17:10 BN31 — nothing showing, investigating",
-                ],
-            }
-        }
-        result = redact_dispatch_dict(d)
-        assert "72-year-old" not in result["analysis"]["summary"]
-        assert "[patient]" in result["analysis"]["summary"]
-        assert "72yo" not in result["analysis"]["short_dsc"]
-        assert "13yo" not in result["analysis"]["key_events"][0]
-        # Operational content preserved
-        assert "nothing showing" in result["analysis"]["key_events"][1]
-
-    def test_handles_empty_fields(self):
-        d = {
-            "cad_comments": "",
-            "responder_details": [],
-            "analysis": {"summary": "", "short_dsc": "", "key_events": []},
-        }
-        result = redact_dispatch_dict(d)
-        assert result["cad_comments"] == ""
-        assert result["analysis"]["key_events"] == []
-
-    def test_handles_missing_fields(self):
-        d = {"nature": "Fire Alarm", "address": "100 First St"}
-        result = redact_dispatch_dict(d)
-        assert result == {"nature": "Fire Alarm", "address": "100 First St"}
-
-    def test_handles_no_analysis(self):
-        d = {"cad_comments": "test", "analysis": None}
-        result = redact_dispatch_dict(d)
-        assert result["analysis"] is None
-
-    def test_modifies_in_place(self):
-        d = {"cad_comments": "13yo female injured"}
-        result = redact_dispatch_dict(d)
-        assert result is d  # same object
-        assert d["cad_comments"] == "[patient] injured"
-
-    def test_full_dispatch_dict(self):
-        """Test with a realistic full dispatch dict structure."""
-        d = {
-            "id": "call-uuid-123",
-            "long_term_call_id": "26-001678",
-            "nature": "Medical Aid",
-            "address": "200 Spring St",
-            "city": "Friday Harbor",
-            "state": "WA",
-            "time_reported": "2026-02-12T14:30:00",
-            "geo_location": "48.5343,-123.0170",
-            "cad_comments": "55 y/o male, chest pain, callback (360) 378-5141",
-            "responding_units": "E31,M31",
-            "responder_details": [
-                {
-                    "unit_number": "E31",
-                    "status": "NOTE",
-                    "radio_log": "pt contact, 55yo male, conscious and alert",
-                    "time_of_status_change": "2026-02-12T14:38:00",
-                },
-                {
-                    "unit_number": "M31",
-                    "status": "ENRT",
-                    "radio_log": "M31 enroute w/2",
-                    "time_of_status_change": "2026-02-12T14:31:00",
-                },
-            ],
-            "analysis": {
-                "incident_commander": "BN31",
-                "summary": "55 year old male with chest pain at 200 Spring St",
-                "short_dsc": "55yo male chest pain, transported",
-                "key_events": [
-                    "14:38 E31 — pt contact, 55yo male, alert",
-                    "14:42 M31 — BLS initiated",
-                    "14:50 M31 — transporting to PeaceHealth",
-                ],
-                "patient_count": 1,
-                "outcome": "transported",
-            },
-        }
-        result = redact_dispatch_dict(d)
-
-        # PII stripped
-        assert "55 y/o" not in result["cad_comments"]
-        assert "55yo" not in result["cad_comments"]
-        assert "378-5141" not in result["cad_comments"]
-        assert "55yo" not in result["responder_details"][0]["radio_log"]
-        assert "55 year old" not in result["analysis"]["summary"]
-        assert "55yo" not in result["analysis"]["short_dsc"]
-        assert "55yo" not in result["analysis"]["key_events"][0]
-
-        # Operational content preserved
-        assert result["address"] == "200 Spring St"
-        assert result["nature"] == "Medical Aid"
-        assert "chest pain" in result["cad_comments"]
-        assert "conscious and alert" in result["responder_details"][0]["radio_log"]
-        assert result["responder_details"][1]["radio_log"] == "M31 enroute w/2"
-        assert "BLS initiated" in result["analysis"]["key_events"][1]
-        assert "transporting to PeaceHealth" in result["analysis"]["key_events"][2]
-        assert result["analysis"]["patient_count"] == 1

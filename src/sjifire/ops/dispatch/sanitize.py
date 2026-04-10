@@ -13,9 +13,32 @@ incident documents (which ultimately flow to NERIS).
 """
 
 import html
+from datetime import datetime
 
 from sjifire.core.pii import redact_pii
 from sjifire.ops.dispatch.models import DispatchCallDocument
+
+
+def _normalize_ts(ts: str) -> str:
+    """Canonicalize an ISO 8601 timestamp for lookup matching.
+
+    The enrichment LLM often drops sub-second precision when echoing
+    timestamps (``2026-02-12T14:38:00.123456`` → ``2026-02-12T14:38:00``)
+    and may normalize ``Z`` suffixes to ``+00:00`` or vice versa.
+    Normalize both sides to second-precision ISO format before using
+    them as dict keys so a minor format mismatch doesn't cause silent
+    regex fallback.
+
+    Falls back to the original string if parsing fails so exact-string
+    matches still work for non-ISO timestamps.
+    """
+    if not ts:
+        return ""
+    try:
+        dt = datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return ts
+    return dt.replace(microsecond=0).isoformat()
 
 
 def sanitize_cad_comments(doc: DispatchCallDocument) -> str:
@@ -101,11 +124,15 @@ def sanitize_dispatch_for_llm(doc: DispatchCallDocument) -> dict:
     if doc.cad_comments or (doc.analysis and doc.analysis.sanitized_cad_comments):
         d["cad_comments"] = sanitize_cad_comments(doc)
 
-    # responder_details: sanitize NOTE radio_log entries
+    # responder_details: sanitize NOTE radio_log entries.
+    # Match sanitized notes back to raw entries by (timestamp, unit).
+    # Normalize timestamps on both sides — see ``_normalize_ts``.
     sanitized_lookup: dict[tuple[str, str], str] = {}
     if doc.analysis and doc.analysis.sanitized_radio_notes:
         sanitized_lookup = {
-            (n.timestamp, n.unit): n.text for n in doc.analysis.sanitized_radio_notes if n.text
+            (_normalize_ts(n.timestamp), n.unit): n.text
+            for n in doc.analysis.sanitized_radio_notes
+            if n.text
         }
 
     for entry in d.get("responder_details", []):
@@ -115,15 +142,22 @@ def sanitize_dispatch_for_llm(doc: DispatchCallDocument) -> dict:
         if not raw_text:
             continue
         key = (
-            str(entry.get("time_of_status_change", "")),
+            _normalize_ts(str(entry.get("time_of_status_change", ""))),
             entry.get("unit_number", ""),
         )
         if key in sanitized_lookup:
-            entry["radio_log"] = sanitized_lookup[key]
+            # LLM output may still carry HTML entities from the source.
+            entry["radio_log"] = html.unescape(sanitized_lookup[key])
         else:
-            entry["radio_log"] = redact_pii(raw_text)
+            # Regex fallback: HTML-decode first so entities like &#32;
+            # don't defeat the \s+ in the age/gender pattern.
+            entry["radio_log"] = redact_pii(html.unescape(raw_text))
 
-    # analysis: safety-net regex pass over text fields
+    # analysis: safety-net regex pass over text fields, plus filter
+    # sanitized_radio_notes to only entries that correspond to real
+    # NOTE entries in responder_details. This guards against the
+    # enrichment LLM fabricating notes — we never surface invented
+    # radio log entries to Claude.
     analysis = d.get("analysis")
     if isinstance(analysis, dict):
         if analysis.get("summary"):
@@ -131,8 +165,19 @@ def sanitize_dispatch_for_llm(doc: DispatchCallDocument) -> dict:
         if analysis.get("short_dsc"):
             analysis["short_dsc"] = redact_pii(analysis["short_dsc"])
         analysis["key_events"] = [redact_pii(e) for e in analysis.get("key_events", [])]
-        # Raw sanitized fields are already clean by construction; no need to
-        # re-process them. They're kept in the dict so callers that want
-        # them explicitly can still access them.
+
+        raw_note_keys = {
+            (
+                _normalize_ts(str(e.get("time_of_status_change", ""))),
+                e.get("unit_number", ""),
+            )
+            for e in d.get("responder_details", [])
+            if e.get("status") == "NOTE"
+        }
+        analysis["sanitized_radio_notes"] = [
+            n
+            for n in analysis.get("sanitized_radio_notes", [])
+            if (_normalize_ts(n.get("timestamp", "")), n.get("unit", "")) in raw_note_keys
+        ]
 
     return d
