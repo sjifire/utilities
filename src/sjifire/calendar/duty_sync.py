@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import date, datetime, timedelta
 
 import msal
@@ -61,8 +62,6 @@ class ROPCCredential(TokenCredential):
             password: User's password
         """
         self._authority = f"https://login.microsoftonline.com/{tenant_id}"
-        self._client_id = client_id
-        self._client_secret = client_secret
         self._username = username
         self._password = password
         self._app = msal.ConfidentialClientApplication(
@@ -86,9 +85,21 @@ class ROPCCredential(TokenCredential):
             AccessToken with token and expiration
 
         Raises:
-            Exception: If authentication fails
+            RuntimeError: If authentication fails
         """
         _ = kwargs  # Explicitly mark as unused
+
+        # Try cached token first to avoid redundant password auth
+        accounts = self._app.get_accounts(username=self._username)
+        if accounts:
+            result = self._app.acquire_token_silent(list(scopes), account=accounts[0])
+            if result and "access_token" in result:
+                return AccessToken(
+                    token=result["access_token"],
+                    expires_on=result.get("expires_in", 3600) + int(datetime.now().timestamp()),
+                )
+
+        # Fall back to password flow
         result = self._app.acquire_token_by_username_password(
             username=self._username,
             password=self._password,
@@ -104,7 +115,7 @@ class ROPCCredential(TokenCredential):
         # Authentication failed
         error = result.get("error", "unknown_error")
         error_desc = result.get("error_description", "No description")
-        raise Exception(f"ROPC authentication failed: {error} - {error_desc}")
+        raise RuntimeError(f"ROPC authentication failed: {error} - {error_desc}")
 
 
 def _detect_shift_change_hour_from_schedules(schedules: list[DaySchedule]) -> int | None:
@@ -125,8 +136,6 @@ MAX_CONCURRENT_REQUESTS = 10
 
 def _extract_crew_data_json(html: str) -> str | None:
     """Extract the CREW_DATA JSON string from an HTML body, or None if absent."""
-    import re
-
     from sjifire.calendar.models import CREW_DATA_MARKER
 
     match = re.search(rf"<!--\s*{re.escape(CREW_DATA_MARKER)}(.*?)-->", html, re.DOTALL)
@@ -152,9 +161,7 @@ def normalize_html_for_comparison(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(separator=" ")
 
-    import re as regex
-
-    normalized = regex.sub(r"\s+", " ", text)
+    normalized = re.sub(r"\s+", " ", text)
     return normalized.strip()
 
 
@@ -225,7 +232,7 @@ class DutyCalendarSync:
                         self._setup_delegated_client()
                         return True
         except Exception as e:
-            logger.debug("Error checking for group: %s", e)
+            logger.warning("Error checking for group: %s", e)
 
         self._is_group = False
         return False
@@ -574,14 +581,12 @@ class DutyCalendarSync:
         except (ValueError, AttributeError):
             return None
 
-    async def create_event(self, event: AllDayDutyEvent) -> str | None:
-        """Create an all-day calendar event with HTML body."""
-        # For all-day events, use date only (no time component)
-        # End date should be the next day for a single all-day event
+    def _build_duty_event(self, event: AllDayDutyEvent) -> Event:
+        """Build a Graph Event object from an all-day duty event."""
         start_date = event.event_date.strftime("%Y-%m-%d")
         end_date = (event.event_date + timedelta(days=1)).strftime("%Y-%m-%d")
 
-        graph_event = Event(
+        return Event(
             subject=event.subject,
             body=ItemBody(
                 content_type=BodyType.Html,
@@ -598,6 +603,10 @@ class DutyCalendarSync:
             is_all_day=True,
             is_reminder_on=False,
         )
+
+    async def create_event(self, event: AllDayDutyEvent) -> str | None:
+        """Create an all-day calendar event with HTML body."""
+        graph_event = self._build_duty_event(event)
 
         try:
             # Use group or user endpoint based on detection
@@ -619,27 +628,7 @@ class DutyCalendarSync:
             logger.error("Cannot update event without event_id")
             return False
 
-        # For all-day events, use date only (no time component)
-        start_date = event.event_date.strftime("%Y-%m-%d")
-        end_date = (event.event_date + timedelta(days=1)).strftime("%Y-%m-%d")
-
-        graph_event = Event(
-            subject=event.subject,
-            body=ItemBody(
-                content_type=BodyType.Html,
-                content=event.body_html,
-            ),
-            start=DateTimeTimeZone(
-                date_time=start_date,
-                time_zone=get_timezone_name(),
-            ),
-            end=DateTimeTimeZone(
-                date_time=end_date,
-                time_zone=get_timezone_name(),
-            ),
-            is_all_day=True,
-            is_reminder_on=False,
-        )
+        graph_event = self._build_duty_event(event)
 
         try:
             # Use group or user endpoint based on detection

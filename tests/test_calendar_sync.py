@@ -1110,3 +1110,132 @@ class TestDutyCalendarSyncSyncWrapper:
         # Check force was passed (5th positional arg)
         call_args = mock_sync_events.call_args
         assert call_args[0][4] is True
+
+
+# =============================================================================
+# Group Calendar Path Tests
+# =============================================================================
+
+
+class TestDutyCalendarSyncGroupCalendar:
+    """Tests for group calendar endpoint paths (if self._is_group branches)."""
+
+    @pytest.fixture
+    def group_sync(self, mock_env_vars):
+        """Create DutyCalendarSync configured as a group calendar."""
+        with (
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient"),
+        ):
+            sync = DutyCalendarSync("group@sjifire.org")
+            sync._is_group = True
+            sync._group_id = "group-123"
+            mock_client = MagicMock()
+            sync._delegated_client = mock_client
+            sync.client = mock_client
+            return sync
+
+    @pytest.fixture
+    def sample_event(self):
+        """Sample AllDayDutyEvent for testing."""
+        return AllDayDutyEvent(
+            event_date=date(2026, 2, 1),
+            until_crew={"S31": [CrewMember(name="John Doe", position="Captain")]},
+            from_crew={"S31": [CrewMember(name="Jane Smith", position="Captain")]},
+            shift_change_hour=18,
+            until_platoon="A",
+            from_platoon="B",
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_event_uses_group_endpoint(self, group_sync, sample_event):
+        """create_event uses groups endpoint for group calendars."""
+        mock_result = MagicMock()
+        mock_result.id = "new-event-id"
+        group_sync._delegated_client.groups.by_group_id.return_value.calendar.events.post = (
+            AsyncMock(return_value=mock_result)
+        )
+
+        result = await group_sync.create_event(sample_event)
+
+        assert result == "new-event-id"
+        group_sync._delegated_client.groups.by_group_id.assert_called_with("group-123")
+
+    @pytest.mark.asyncio
+    async def test_update_event_uses_group_endpoint(self, group_sync, sample_event):
+        """update_event uses groups endpoint for group calendars."""
+        sample_event.event_id = "evt-1"
+        group_sync._delegated_client.groups.by_group_id.return_value.calendar.events.by_event_id.return_value.patch = AsyncMock()
+
+        result = await group_sync.update_event(sample_event)
+
+        assert result is True
+        group_sync._delegated_client.groups.by_group_id.assert_called_with("group-123")
+
+    @pytest.mark.asyncio
+    async def test_delete_event_uses_group_endpoint(self, group_sync):
+        """delete_event uses groups endpoint for group calendars."""
+        group_sync._delegated_client.groups.by_group_id.return_value.calendar.events.by_event_id.return_value.delete = AsyncMock()
+
+        result = await group_sync.delete_event("evt-1")
+
+        assert result is True
+        group_sync._delegated_client.groups.by_group_id.assert_called_with("group-123")
+
+    @pytest.mark.asyncio
+    async def test_get_existing_events_uses_group_calendar_view(self, group_sync):
+        """get_existing_events uses group calendar_view endpoint."""
+        mock_result = MagicMock()
+        mock_result.value = []
+        group_sync._delegated_client.groups.by_group_id.return_value.calendar_view.get = AsyncMock(
+            return_value=mock_result
+        )
+
+        await group_sync.get_existing_events(date(2026, 2, 1), date(2026, 2, 28))
+
+        group_sync._delegated_client.groups.by_group_id.assert_called_with("group-123")
+
+
+# =============================================================================
+# Shift Change Detection Failure Test
+# =============================================================================
+
+
+class TestConvertSchedulesShiftChangeFailure:
+    """Test convert_schedules_to_events when shift change is undetectable."""
+
+    @pytest.fixture
+    def calendar_sync(self, mock_env_vars):
+        """Create DutyCalendarSync instance."""
+        with (
+            patch("sjifire.calendar.duty_sync.ClientSecretCredential"),
+            patch("sjifire.calendar.duty_sync.GraphServiceClient"),
+        ):
+            return DutyCalendarSync()
+
+    def test_returns_empty_when_shift_change_undetectable(self, calendar_sync):
+        """Returns empty list when shift change hour cannot be detected."""
+        # Entries with inconsistent times won't produce a detectable shift change
+        entries = [
+            ScheduleEntry(
+                date=date(2026, 2, 1),
+                section="S31",
+                position="Captain",
+                name="John Doe",
+                start_time="08:00",
+                end_time="16:00",
+            ),
+            ScheduleEntry(
+                date=date(2026, 2, 1),
+                section="S31",
+                position="Firefighter",
+                name="Jane Smith",
+                start_time="09:00",
+                end_time="17:00",
+            ),
+        ]
+        schedules = [DaySchedule(date=date(2026, 2, 1), platoon="A", entries=entries)]
+
+        events = calendar_sync.convert_schedules_to_events(schedules, {})
+
+        assert events == []

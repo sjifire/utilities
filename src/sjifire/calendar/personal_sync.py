@@ -4,6 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from msgraph.generated.models.body_type import BodyType
 from msgraph.generated.models.date_time_time_zone import DateTimeTimeZone
@@ -90,6 +91,45 @@ def normalize_body_for_comparison(body: str) -> str:
     # Normalize whitespace (collapse multiple spaces/newlines)
     text = " ".join(text.split())
     return text
+
+
+def _parse_graph_datetime(dt_str: str, tz_name: str | None) -> datetime:
+    """Parse a Graph API datetime string and convert to local timezone.
+
+    Handles microsecond stripping, timezone application (UTC, IANA, or local
+    fallback), and conversion to the configured local timezone.
+
+    Args:
+        dt_str: ISO datetime string from Graph API (may include microseconds)
+        tz_name: Timezone name from Graph API (e.g., "UTC", "America/New_York")
+
+    Returns:
+        Timezone-aware datetime in the configured local timezone
+
+    Raises:
+        ValueError: If dt_str is not a valid datetime string
+    """
+    # Strip microseconds if present (e.g., ".0000000")
+    if "." in dt_str:
+        dt_str = dt_str.split(".")[0]
+
+    dt = datetime.fromisoformat(dt_str)
+
+    if tz_name and tz_name.upper() == "UTC":
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        dt = dt.astimezone(get_timezone())
+    elif tz_name:
+        try:
+            tz = ZoneInfo(tz_name)
+            dt = dt.replace(tzinfo=tz)
+            dt = dt.astimezone(get_timezone())
+        except KeyError:
+            # Unknown timezone, assume local
+            dt = dt.replace(tzinfo=get_timezone())
+    else:
+        dt = dt.replace(tzinfo=get_timezone())
+
+    return dt
 
 
 class PersonalCalendarSync:
@@ -180,7 +220,6 @@ class PersonalCalendarSync:
         """
         # Note: We filter by date after fetching, not by calendarView endpoint
         # because we need to match events by key for sync logic
-        _ = start_date, end_date  # Used for filtering below
 
         # If using primary calendar, filter by Aladtec category
         uses_primary = user_email.lower() in self._uses_primary_calendar
@@ -214,37 +253,9 @@ class PersonalCalendarSync:
 
                     # Parse event datetime and convert to local timezone
                     try:
-                        dt_str = event.start.date_time
-                        event_tz = event.start.time_zone
-
-                        # Remove microseconds if present (e.g., ".0000000")
-                        if "." in dt_str:
-                            dt_str = dt_str.split(".")[0]
-
-                        # Parse base datetime
-                        event_dt = datetime.fromisoformat(dt_str)
-
-                        # Apply timezone based on Graph's time_zone field
-                        if event_tz and event_tz.upper() == "UTC":
-                            from zoneinfo import ZoneInfo
-
-                            event_dt = event_dt.replace(tzinfo=ZoneInfo("UTC"))
-                            event_dt = event_dt.astimezone(get_timezone())
-                        elif event_tz:
-                            # Try to use the specified timezone
-                            try:
-                                from zoneinfo import ZoneInfo
-
-                                tz = ZoneInfo(event_tz)
-                                event_dt = event_dt.replace(tzinfo=tz)
-                                event_dt = event_dt.astimezone(get_timezone())
-                            except KeyError:
-                                # Unknown timezone, assume local
-                                event_dt = event_dt.replace(tzinfo=get_timezone())
-                        else:
-                            # No timezone - assume local
-                            event_dt = event_dt.replace(tzinfo=get_timezone())
-
+                        event_dt = _parse_graph_datetime(
+                            event.start.date_time, event.start.time_zone
+                        )
                         event_date = event_dt.date()
                     except ValueError:
                         continue
@@ -254,25 +265,10 @@ class PersonalCalendarSync:
                         # Parse end time
                         end_time_str = "00:00"
                         if event.end and event.end.date_time:
-                            end_dt_str = event.end.date_time
-                            if "." in end_dt_str:
-                                end_dt_str = end_dt_str.split(".")[0]
                             try:
-                                end_dt = datetime.fromisoformat(end_dt_str)
-                                # Apply same timezone logic
-                                end_tz = event.end.time_zone
-                                if end_tz and end_tz.upper() == "UTC":
-                                    end_dt = end_dt.replace(tzinfo=ZoneInfo("UTC"))
-                                    end_dt = end_dt.astimezone(get_timezone())
-                                elif end_tz:
-                                    try:
-                                        tz = ZoneInfo(end_tz)
-                                        end_dt = end_dt.replace(tzinfo=tz)
-                                        end_dt = end_dt.astimezone(get_timezone())
-                                    except KeyError:
-                                        end_dt = end_dt.replace(tzinfo=get_timezone())
-                                else:
-                                    end_dt = end_dt.replace(tzinfo=get_timezone())
+                                end_dt = _parse_graph_datetime(
+                                    event.end.date_time, event.end.time_zone
+                                )
                                 end_time_str = end_dt.strftime("%H:%M")
                             except ValueError:
                                 pass
@@ -293,6 +289,30 @@ class PersonalCalendarSync:
             logger.error("Failed to get existing events for %s: %s", user_email, e)
             return {}
 
+    def _build_personal_event(self, user_email: str, entry: ScheduleEntry) -> Event:
+        """Build a Graph Event object from a schedule entry."""
+        categories = None
+        if user_email.lower() in self._uses_primary_calendar:
+            categories = [get_org_config().calendar_category]
+
+        return Event(
+            subject=make_event_subject(entry),
+            body=ItemBody(
+                content_type=BodyType.Text,
+                content=make_event_body(entry),
+            ),
+            start=DateTimeTimeZone(
+                date_time=entry.start_datetime.strftime("%Y-%m-%dT%H:%M:%S"),
+                time_zone=get_timezone_name(),
+            ),
+            end=DateTimeTimeZone(
+                date_time=entry.end_datetime.strftime("%Y-%m-%dT%H:%M:%S"),
+                time_zone=get_timezone_name(),
+            ),
+            is_reminder_on=False,
+            categories=categories,
+        )
+
     async def create_event(
         self,
         user_email: str,
@@ -300,31 +320,7 @@ class PersonalCalendarSync:
         entry: ScheduleEntry,
     ) -> bool:
         """Create a calendar event from a schedule entry."""
-        start_dt = entry.start_datetime
-        end_dt = entry.end_datetime
-
-        # Add category if using primary calendar (to identify Aladtec events)
-        categories = None
-        if user_email.lower() in self._uses_primary_calendar:
-            categories = [get_org_config().calendar_category]
-
-        event = Event(
-            subject=make_event_subject(entry),
-            body=ItemBody(
-                content_type=BodyType.Text,
-                content=make_event_body(entry),
-            ),
-            start=DateTimeTimeZone(
-                date_time=start_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                time_zone=get_timezone_name(),
-            ),
-            end=DateTimeTimeZone(
-                date_time=end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                time_zone=get_timezone_name(),
-            ),
-            is_reminder_on=False,
-            categories=categories,
-        )
+        event = self._build_personal_event(user_email, entry)
 
         try:
             await (
@@ -345,31 +341,7 @@ class PersonalCalendarSync:
         entry: ScheduleEntry,
     ) -> bool:
         """Update an existing calendar event."""
-        start_dt = entry.start_datetime
-        end_dt = entry.end_datetime
-
-        # Add category if using primary calendar (to identify Aladtec events)
-        categories = None
-        if user_email.lower() in self._uses_primary_calendar:
-            categories = [get_org_config().calendar_category]
-
-        event = Event(
-            subject=make_event_subject(entry),
-            body=ItemBody(
-                content_type=BodyType.Text,
-                content=make_event_body(entry),
-            ),
-            start=DateTimeTimeZone(
-                date_time=start_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                time_zone=get_timezone_name(),
-            ),
-            end=DateTimeTimeZone(
-                date_time=end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                time_zone=get_timezone_name(),
-            ),
-            is_reminder_on=False,
-            categories=categories,
-        )
+        event = self._build_personal_event(user_email, entry)
 
         try:
             await (

@@ -873,3 +873,80 @@ class TestSyncUserLogic:
         sync.create_event.assert_not_called()
         sync.delete_event.assert_not_called()
         sync.update_event.assert_not_called()
+
+
+# =============================================================================
+# Error Accumulation Tests
+# =============================================================================
+
+
+class TestSyncUserErrorAccumulation:
+    """Tests for sync_user collecting errors from failed operations."""
+
+    @pytest.fixture
+    def sync(self, mock_env_vars):
+        """Create PersonalCalendarSync with mocked client."""
+        with (
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
+        ):
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client  # get_graph_client() returns this
+            sync = PersonalCalendarSync()
+            sync.client = mock_client
+            return sync
+
+    @pytest.fixture
+    def sample_entry(self):
+        """Sample schedule entry."""
+        return ScheduleEntry(
+            date=date(2026, 2, 1),
+            section="S31",
+            position="Captain",
+            name="John Doe",
+            start_time="18:00",
+            end_time="18:00",
+        )
+
+    @pytest.mark.asyncio
+    async def test_collects_create_errors(self, sync, sample_entry):
+        """Errors from failed create operations are collected."""
+        sync.get_or_create_calendar = AsyncMock(return_value="cal-id")
+        sync.ensure_aladtec_category = AsyncMock(return_value=True)
+        sync.get_existing_events = AsyncMock(return_value={})
+        sync.create_event = AsyncMock(return_value=False)
+
+        result = await sync.sync_user(
+            "test@example.com",
+            [sample_entry],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+        )
+
+        assert result.events_created == 0
+        assert len(result.errors) == 1
+        assert "Failed to create event" in result.errors[0]
+
+    @pytest.mark.asyncio
+    async def test_collects_delete_errors(self, sync, sample_entry):
+        """Errors from failed delete operations are collected."""
+        sync.get_or_create_calendar = AsyncMock(return_value="cal-id")
+        sync.ensure_aladtec_category = AsyncMock(return_value=True)
+        # Existing event not in new entries → will be deleted
+        sync.get_existing_events = AsyncMock(
+            return_value={
+                "2026-02-01|S32 - Firefighter|18:00|18:00": ExistingEvent(
+                    event_id="old-evt", body=""
+                ),
+            }
+        )
+        sync.delete_event = AsyncMock(return_value=False)
+        sync.create_event = AsyncMock(return_value=True)
+
+        result = await sync.sync_user(
+            "test@example.com",
+            [sample_entry],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+        )
+
+        assert len([e for e in result.errors if "delete" in e.lower()]) == 1
