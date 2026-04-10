@@ -57,7 +57,10 @@ async def enrich_dispatch(doc: DispatchCallDocument) -> DispatchAnalysis:
     # blindly trust it.  Run redact_pii over every PII-bearing field so
     # any slippage gets caught at ingestion rather than leaking to
     # reports or NERIS downstream.  Idempotent — clean text is unchanged.
-    _scrub_llm_output(analysis)
+    # Emits a structured log whenever the safety net actually changes
+    # something — see issue #93 for how we use this to measure LLM leak
+    # rate in production.
+    _scrub_llm_output(analysis, dispatch_id=doc.long_term_call_id)
 
     # Attach the crew roster
     analysis.on_duty_crew = crew
@@ -80,7 +83,7 @@ async def enrich_dispatch(doc: DispatchCallDocument) -> DispatchAnalysis:
 # ---------------------------------------------------------------------------
 
 
-def _scrub_llm_output(analysis: DispatchAnalysis) -> None:
+def _scrub_llm_output(analysis: DispatchAnalysis, *, dispatch_id: str = "") -> None:
     """Run regex PII redaction over every LLM-written field in-place.
 
     Defense in depth: the enrichment prompt tells the LLM to keep its
@@ -90,25 +93,67 @@ def _scrub_llm_output(analysis: DispatchAnalysis) -> None:
     verbatim, so downstream consumers (chat engine, MCP tools,
     incident documents, NERIS) never see it.
 
+    Emits a structured WARNING log whenever regex actually changes
+    something — that's a signal the LLM leaked PII.  The log contains
+    only the dispatch id and the list of field names that changed —
+    never the raw text, since by definition it contained PII.  This
+    instrumentation is what feeds the leak-rate measurement in
+    issue #93.
+
     Idempotent — already-clean text is unchanged.  Only touches
     LLM-authored fields; deterministic fields (``unit_times``,
     ``on_duty_crew``, ``incident_commander_name``, ``alarm_time``,
     etc.) are left alone.
+
+    Args:
+        analysis: The DispatchAnalysis to scrub in place.
+        dispatch_id: Human-readable dispatch identifier (e.g. "26-001678")
+            for correlation in logs.  Optional but strongly recommended.
     """
-    analysis.summary = redact_pii(analysis.summary)
-    analysis.short_dsc = redact_pii(analysis.short_dsc)
-    analysis.outcome = redact_pii(analysis.outcome)
-    analysis.actions_taken = [redact_pii(a) for a in analysis.actions_taken]
-    analysis.key_events = [redact_pii(e) for e in analysis.key_events]
-    analysis.sanitized_cad_comments = redact_pii(analysis.sanitized_cad_comments)
-    analysis.sanitized_radio_notes = [
-        SanitizedNote(
-            timestamp=n.timestamp,
-            unit=n.unit,
-            text=redact_pii(n.text),
-        )
+    changed_fields: list[str] = []
+
+    def _scrub(field: str, value: str) -> str:
+        cleaned = redact_pii(value)
+        if cleaned != value:
+            changed_fields.append(field)
+        return cleaned
+
+    analysis.summary = _scrub("summary", analysis.summary)
+    analysis.short_dsc = _scrub("short_dsc", analysis.short_dsc)
+    analysis.outcome = _scrub("outcome", analysis.outcome)
+
+    cleaned_actions = [redact_pii(a) for a in analysis.actions_taken]
+    if cleaned_actions != analysis.actions_taken:
+        changed_fields.append("actions_taken")
+    analysis.actions_taken = cleaned_actions
+
+    cleaned_events = [redact_pii(e) for e in analysis.key_events]
+    if cleaned_events != analysis.key_events:
+        changed_fields.append("key_events")
+    analysis.key_events = cleaned_events
+
+    analysis.sanitized_cad_comments = _scrub(
+        "sanitized_cad_comments", analysis.sanitized_cad_comments
+    )
+
+    cleaned_notes = [
+        SanitizedNote(timestamp=n.timestamp, unit=n.unit, text=redact_pii(n.text))
         for n in analysis.sanitized_radio_notes
     ]
+    if any(
+        c.text != o.text for c, o in zip(cleaned_notes, analysis.sanitized_radio_notes, strict=True)
+    ):
+        changed_fields.append("sanitized_radio_notes")
+    analysis.sanitized_radio_notes = cleaned_notes
+
+    if changed_fields:
+        # Safe to include: dispatch_id and field names are not PII.
+        # NEVER log the before/after text — it contained PII by definition.
+        logger.warning(
+            "pii_safety_net_triggered: dispatch_id=%s fields=%s",
+            dispatch_id or "(unknown)",
+            changed_fields,
+        )
 
 
 # ---------------------------------------------------------------------------

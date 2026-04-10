@@ -7,6 +7,8 @@ content.  The higher-level LLM-preferred sanitization helpers live in
 ``tests/ops/test_dispatch_sanitize.py``.
 """
 
+import typing
+
 import pytest
 
 from sjifire.core.pii import redact_pii
@@ -228,3 +230,81 @@ class TestRedactEdgeCases:
         assert "patient is conscious" in result
 
 
+# ---------------------------------------------------------------------------
+# ReDoS hardening: empirical linear-time proof + size guard
+# ---------------------------------------------------------------------------
+
+
+class TestRedactPiiRedos:
+    """Guard against catastrophic backtracking on pathological input.
+
+    Our regexes don't have nested quantifiers that would cause true
+    ReDoS, but we keep these tests as empirical proof — if someone
+    refactors the patterns in a way that introduces backtracking, the
+    timing assertion will fail loudly.
+    """
+
+    _PATHOLOGICAL_INPUTS: typing.ClassVar[dict[str, str]] = {
+        # Long runs of the ambiguous separator characters
+        "long-whitespace-run": "13" + " " * 10_000 + "-" + " " * 10_000 + "year old male",
+        "long-dash-run": "13" + "-" * 1_000 + "year" + "-" * 1_000 + "old male",
+        # Long input with no match at all (worst case for naive backtracking)
+        "no-match-long": "a" * 50_000,
+        # Long input where the regex must fail near the end of each span
+        "near-miss-year": "yea" * 10_000,
+        "near-miss-yr": "yr " * 10_000,
+        # Lots of real matches interleaved with noise
+        "many-matches": ("13yo male " + "E31 responding " * 3) * 1_000,
+        # Long phone-like string that ultimately doesn't match
+        "phone-near-miss": "123-456-78" * 5_000,
+        # Long caller-like prefix with no capitalized name follow-up
+        "caller-near-miss": "caller: " * 5_000,
+    }
+
+    @pytest.mark.parametrize("label", list(_PATHOLOGICAL_INPUTS.keys()))
+    def test_pathological_input_completes_quickly(self, label: str):
+        """Every redact_pii call should be well under a second on ~50KB."""
+        import time
+
+        text = self._PATHOLOGICAL_INPUTS[label]
+        start = time.perf_counter()
+        result = redact_pii(text)
+        elapsed = time.perf_counter() - start
+
+        # Generous budget — real-world dispatch CAD blobs are <10KB and
+        # complete in ~1ms. On 50KB pathological input we should still
+        # be well under a second.  If this fails it means someone
+        # introduced backtracking into a pattern.
+        assert elapsed < 1.0, (
+            f"redact_pii too slow on '{label}' ({elapsed:.3f}s) — "
+            f"possible regex backtracking introduced"
+        )
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_very_large_input_logs_warning(self, caplog):
+        """Inputs above the soft cap trigger a canary warning log."""
+        import logging
+
+        text = "a" * 200_001  # one byte over _MAX_INPUT_BYTES
+
+        with caplog.at_level(logging.WARNING, logger="sjifire.core.pii"):
+            result = redact_pii(text)
+
+        assert any("oversized input" in rec.message for rec in caplog.records), (
+            f"expected oversized-input warning, got: {[r.message for r in caplog.records]}"
+        )
+        # Still processed the input — no silent skip
+        assert isinstance(result, str)
+        assert len(result) == len(text)
+
+    def test_input_at_cap_does_not_warn(self, caplog):
+        """Exactly at the cap should not emit a warning."""
+        import logging
+
+        text = "a" * 200_000  # exactly at cap
+
+        with caplog.at_level(logging.WARNING, logger="sjifire.core.pii"):
+            redact_pii(text)
+
+        assert not any("oversized input" in rec.message for rec in caplog.records)

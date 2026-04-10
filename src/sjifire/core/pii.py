@@ -6,7 +6,17 @@ dispatch data in Cosmos DB is kept intact; redaction is applied when data
 surfaces to reports, narratives, or the AI chat context.
 """
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
+
+# Sanity cap on the input size redact_pii will process.  Dispatch CAD
+# comments are typically <10KB; the IncidentDocument schema caps
+# dispatch_comments at 100KB.  Anything above this is either malformed
+# upstream data or a crafted adversarial input — log a warning so we
+# notice, but still process (the regexes are linear-time in practice).
+_MAX_INPUT_BYTES = 200_000
 
 # Hyphen-like separators: regular hyphen + en-dash (U+2013)
 _DASH = "-\u2013"
@@ -53,6 +63,16 @@ def redact_pii(text: str) -> str:
     """
     if not text:
         return text
+
+    if len(text) > _MAX_INPUT_BYTES:
+        # Canary: something upstream produced an unexpectedly large blob.
+        # The regexes are linear-time in practice so we still process it,
+        # but we want to notice if it becomes common.
+        logger.warning(
+            "redact_pii received oversized input: %d chars (cap: %d)",
+            len(text),
+            _MAX_INPUT_BYTES,
+        )
 
     # Order matters: age+gender first (more specific), then standalone age
     text = _AGE_GENDER_RE.sub("[patient]", text)

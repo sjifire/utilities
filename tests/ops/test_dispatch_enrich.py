@@ -193,6 +193,155 @@ class TestScrubLlmOutput:
 
 
 # ---------------------------------------------------------------------------
+# Instrumentation — structured logs feed issue #93 leak-rate measurement
+# ---------------------------------------------------------------------------
+
+
+class TestScrubLlmOutputInstrumentation:
+    """Structured logging fires when regex catches LLM leaks.
+
+    The safety net should emit a single structured WARNING log per
+    enrichment with the dispatch_id and list of field names that
+    changed.  NEVER the raw text — that's PII by definition.
+    """
+
+    def test_no_log_when_output_is_clean(self, caplog):
+        import logging
+
+        analysis = DispatchAnalysis(
+            summary="the patient fell from standing",
+            short_dsc="patient fall, transported",
+            sanitized_cad_comments="the patient injured",
+        )
+
+        with caplog.at_level(logging.WARNING, logger="sjifire.ops.dispatch.enrich"):
+            _scrub_llm_output(analysis, dispatch_id="26-001678")
+
+        # No safety-net log should fire — output was already clean
+        assert not any("pii_safety_net_triggered" in rec.message for rec in caplog.records)
+
+    def test_logs_when_summary_leaks(self, caplog):
+        import logging
+
+        analysis = DispatchAnalysis(summary="13yo female fell")
+
+        with caplog.at_level(logging.WARNING, logger="sjifire.ops.dispatch.enrich"):
+            _scrub_llm_output(analysis, dispatch_id="26-001678")
+
+        leak_logs = [r for r in caplog.records if "pii_safety_net_triggered" in r.message]
+        assert len(leak_logs) == 1
+        log = leak_logs[0]
+        assert "26-001678" in log.message
+        assert "summary" in log.message
+        assert log.levelname == "WARNING"
+
+    def test_logs_multiple_changed_fields(self, caplog):
+        import logging
+
+        analysis = DispatchAnalysis(
+            summary="13yo female fell",
+            short_dsc="13yo fall",
+            sanitized_cad_comments="13yo female passenger",
+            sanitized_radio_notes=[
+                SanitizedNote(
+                    timestamp="2026-02-12T14:38:00",
+                    unit="E31",
+                    text="pt contact 13yo female",
+                )
+            ],
+        )
+
+        with caplog.at_level(logging.WARNING, logger="sjifire.ops.dispatch.enrich"):
+            _scrub_llm_output(analysis, dispatch_id="26-001678")
+
+        leak_logs = [r for r in caplog.records if "pii_safety_net_triggered" in r.message]
+        assert len(leak_logs) == 1, "should emit exactly one log per enrichment, not per field"
+        msg = leak_logs[0].message
+        # All four changed fields should be mentioned
+        for field in ("summary", "short_dsc", "sanitized_cad_comments", "sanitized_radio_notes"):
+            assert field in msg, f"expected {field} in log message: {msg}"
+
+    def test_log_does_not_contain_raw_pii(self, caplog):
+        """CRITICAL: the log message must never include the raw PII text."""
+        import logging
+
+        analysis = DispatchAnalysis(
+            summary="13yo female patient named Jane Doe at 360-555-1234",
+            sanitized_cad_comments="caller John Smith advises 72yo male injured",
+        )
+
+        with caplog.at_level(logging.WARNING, logger="sjifire.ops.dispatch.enrich"):
+            _scrub_llm_output(analysis, dispatch_id="26-001678")
+
+        # Every log record — message AND its positional args — must
+        # exclude the raw PII tokens.  caplog.records holds the raw
+        # LogRecord objects; rec.message is post-format, rec.args is
+        # the tuple of values passed to the logger.
+        parts: list[str] = []
+        for rec in caplog.records:
+            parts.append(rec.message)
+            parts.append(rec.getMessage())
+            if rec.args:
+                parts.extend(str(a) for a in rec.args)
+        all_log_text = " ".join(parts)
+
+        assert "Jane Doe" not in all_log_text
+        assert "John Smith" not in all_log_text
+        assert "555-1234" not in all_log_text
+        assert "13yo" not in all_log_text
+        assert "72yo" not in all_log_text
+        assert "female" not in all_log_text
+        assert "male" not in all_log_text
+
+    def test_logs_unknown_when_dispatch_id_missing(self, caplog):
+        """Dispatch ID is optional; log should fall back gracefully."""
+        import logging
+
+        analysis = DispatchAnalysis(summary="13yo female fell")
+
+        with caplog.at_level(logging.WARNING, logger="sjifire.ops.dispatch.enrich"):
+            _scrub_llm_output(analysis)  # no dispatch_id
+
+        leak_logs = [r for r in caplog.records if "pii_safety_net_triggered" in r.message]
+        assert len(leak_logs) == 1
+        assert "(unknown)" in leak_logs[0].message
+
+    async def test_enrich_dispatch_passes_long_term_call_id_to_scrub(self, caplog):
+        """Leak logs are correlatable to the originating dispatch call.
+
+        End-to-end verification that ``enrich_dispatch`` passes
+        ``doc.long_term_call_id`` into the safety net.
+        """
+        import logging
+
+        doc = DispatchCallDocumentFactory.build(
+            long_term_call_id="26-999001",
+            responder_details=[],
+            cad_comments="13yo female",
+        )
+        leaky = DispatchAnalysis(summary="13yo female fell")
+
+        with (
+            patch(
+                "sjifire.ops.dispatch.analysis.analyze_dispatch",
+                new_callable=AsyncMock,
+                return_value=leaky,
+            ),
+            patch(
+                "sjifire.ops.dispatch.enrich._get_on_duty_entries",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            caplog.at_level(logging.WARNING, logger="sjifire.ops.dispatch.enrich"),
+        ):
+            await enrich_dispatch(doc)
+
+        leak_logs = [r for r in caplog.records if "pii_safety_net_triggered" in r.message]
+        assert len(leak_logs) >= 1
+        assert "26-999001" in leak_logs[0].message
+
+
+# ---------------------------------------------------------------------------
 # enrich_dispatch integration — safety net catches LLM slippage
 # ---------------------------------------------------------------------------
 
