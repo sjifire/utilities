@@ -46,6 +46,25 @@ class UnitTiming(BaseModel):
     """ISO timestamp when this unit returned to quarters (RTQ status)."""
 
 
+class SanitizedNote(BaseModel):
+    """A radio log NOTE entry with PII removed by the enrichment LLM.
+
+    Mirrors the ``(timestamp, unit, radio_log)`` shape of iSpyFire NOTE
+    entries in ``responder_details``, with ``text`` rewritten to strip
+    patient/civilian demographics, names, and phone numbers while
+    preserving operational content.
+    """
+
+    timestamp: str = ""
+    """ISO 8601 timestamp matching the source ``time_of_status_change``."""
+
+    unit: str = ""
+    """Unit code matching the source ``unit_number``."""
+
+    text: str = ""
+    """Sanitized radio log text (PII removed)."""
+
+
 class DispatchAnalysis(BaseModel):
     """AI-extracted structured analysis of a dispatch call.
 
@@ -97,6 +116,29 @@ class DispatchAnalysis(BaseModel):
     conditions, command changes, patient info, key decisions — everything
     the incident reporter needs. Status changes (enroute, on scene, etc.)
     are excluded since they're already in ``unit_times``.
+    """
+
+    sanitized_cad_comments: str = ""
+    """Full CAD comments blob with PII removed by the enrichment LLM.
+
+    Preserves the original format (timestamp headers + narrative lines)
+    but rewrites patient/civilian demographics, names, and phone numbers
+    as ``the patient``, ``the caller``, etc. Operational content (unit
+    codes, addresses, actions, conditions, dispatcher names) is preserved
+    verbatim. Used as the LLM-facing / report-facing version of
+    ``cad_comments``; the raw blob is retained for human UI display.
+
+    Empty string for un-enriched records — callers should fall back to
+    regex-based redaction of ``cad_comments`` when this is empty.
+    """
+
+    sanitized_radio_notes: list[SanitizedNote] = []
+    """NOTE entries from ``responder_details`` with PII removed.
+
+    One entry per NOTE-status item in the original ``responder_details``,
+    keyed by ``(timestamp, unit)`` so callers can match them back to raw
+    entries. Empty list for un-enriched records — fall back to regex
+    redaction of the raw ``radio_log`` text.
     """
 
 

@@ -18,6 +18,7 @@ from anthropic import AsyncAnthropic, RateLimitError
 
 from sjifire.core.anthropic import MODEL, cached_system, get_client
 from sjifire.core.config import get_org_config, local_now
+from sjifire.core.pii import redact_pii
 from sjifire.ops.auth import UserContext
 from sjifire.ops.chat.budget import check_budget, record_usage
 from sjifire.ops.chat.centrifugo import publish
@@ -35,6 +36,7 @@ from sjifire.ops.chat.tools import (
     execute_tool,
 )
 from sjifire.ops.chat.turn_lock import TurnLockStore
+from sjifire.ops.dispatch.sanitize import sanitize_cad_comments
 
 # Set of fire-and-forget tasks — prevents GC from collecting running tasks.
 _background_tasks: set[asyncio.Task] = set()
@@ -551,7 +553,7 @@ async def _fetch_context(
                         "address": dispatch.address,
                         "time_reported": dispatch.time_reported,
                         "geo_location": dispatch.geo_location,
-                        "cad_comments": dispatch.cad_comments,
+                        "cad_comments": sanitize_cad_comments(dispatch),
                     }
                     if dispatch.analysis:
                         analysis = dispatch.analysis
@@ -560,6 +562,14 @@ async def _fetch_context(
                         analysis_dict = analysis.model_dump(mode="json")
                         unit_times = analysis_dict.pop("unit_times", [])
                         analysis_dict.pop("on_duty_crew", None)
+                        # Redact PII from AI-generated text fields
+                        if analysis_dict.get("summary"):
+                            analysis_dict["summary"] = redact_pii(analysis_dict["summary"])
+                        if analysis_dict.get("short_dsc"):
+                            analysis_dict["short_dsc"] = redact_pii(analysis_dict["short_dsc"])
+                        analysis_dict["key_events"] = [
+                            redact_pii(e) for e in analysis_dict.get("key_events", [])
+                        ]
                         slim["analysis"] = analysis_dict
                         # Format unit_times as a readable table for easy review
                         if unit_times:
