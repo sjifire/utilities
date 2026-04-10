@@ -41,17 +41,17 @@ jobs:
     environment: production
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Azure login with OIDC
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: bb2cb591-58ff-4687-bf14-502049dee01b
           tenant-id: 4122848f-c317-4267-9c07-7c504150d1bd
           allow-no-subscriptions: true
 
       - name: Get secrets from Key Vault
-        uses: azure/cli@v2
+        uses: azure/cli@v3
         with:
           azcliversion: agentazcliversion
           inlineScript: |
@@ -99,7 +99,7 @@ jobs:
           Write-Host "Certificate thumbprint: $($cert.Thumbprint)"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8
         with:
           enable-cache: true
 
@@ -138,7 +138,7 @@ jobs:
 
       - name: Upload backup artifacts
         if: ${{ inputs.dry_run != 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: entra-backup-${{ github.run_id }}
           path: backups/
