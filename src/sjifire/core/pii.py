@@ -39,9 +39,15 @@ _AGE_RE = re.compile(
 _PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}")
 
 # Caller/reporting party names: "caller: John Smith", "RP Jane Doe"
+#
+# The keyword (caller / RP / reporting party) is matched case-insensitively
+# via a scoped flag.  The name capture stays case-sensitive — otherwise the
+# whole pattern over-matches operational narrative like "the caller was mad"
+# or "after the caller hung up" (any two lowercase words after the keyword
+# would be treated as a name).  All-caps names like "CALLER: JOHN SMITH"
+# are a known limitation of the stricter name pattern; the LLM catches those.
 _CALLER_RE = re.compile(
-    rf"(?:caller|rp|reporting\s+party)\s*[:{_DASH}]?\s*[A-Z][a-z]+\s+[A-Z][a-z]+",
-    re.IGNORECASE,
+    rf"(?i:caller|rp|reporting\s+party)\s*[:{_DASH}]?\s*[A-Z][a-z]+\s+[A-Z][a-z]+",
 )
 
 
