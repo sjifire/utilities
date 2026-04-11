@@ -24,6 +24,7 @@ from sjifire.ops.auth import (
     check_is_editor,
     get_current_user,
 )
+from sjifire.ops.dispatch.sanitize import sanitize_cad_comments, sanitize_radio_notes
 from sjifire.ops.incidents.models import (
     ALARM_INFO_KEYS,
     FIRE_DETAIL_KEYS,
@@ -318,24 +319,32 @@ async def _prefill_from_dispatch(incident_number: str) -> dict:
         units.sort(key=lambda u: u.enroute or u.dispatch or "\xff")
         prefill["units"] = units
 
-    # Snapshot dispatch comments (plain string from iSpyFire JoinedComments).
-    # iSpyFire HTML-encodes text (&#x27; for apostrophes, etc.) — decode here.
-    if dispatch.cad_comments:
-        prefill["dispatch_comments"] = html.unescape(dispatch.cad_comments)
+    # Snapshot dispatch comments for the incident document. Incidents are
+    # report-facing (they feed narratives + NERIS submission), so we always
+    # store the LLM-sanitized version. Raw CAD stays on the dispatch record
+    # for human-facing UI surfaces (dashboard, chat sidebar, kiosk).
+    sanitized_cad = sanitize_cad_comments(dispatch)
+    if sanitized_cad:
+        prefill["dispatch_comments"] = sanitized_cad
 
-    # Extract individual NOTE entries for NERIS dispatch.comments
-    notes = _extract_dispatch_notes(dispatch.responder_details)
+    # Build dispatch_notes: parsed CAD timestamp blocks + NOTE radio log
+    # entries, all in sanitized form.
+    notes: list[DispatchNote] = []
 
-    # Parse cad_comments into individual timestamped notes.
-    # The cad_comments blob contains multiple dispatcher entries
-    # separated by timestamp lines; split them so each gets its
-    # own NERIS dispatch.comment entry.
-    if dispatch.cad_comments:
+    if sanitized_cad:
         caller_ts = ""
         if dispatch.time_reported:
             caller_ts = dispatch.time_reported.isoformat()
-        cad_notes = _parse_cad_comments(dispatch.cad_comments, call_ts=caller_ts)
-        notes = cad_notes + notes
+        notes.extend(_parse_cad_comments(sanitized_cad, call_ts=caller_ts))
+
+    notes.extend(
+        DispatchNote(
+            timestamp=n.get("timestamp", ""),
+            unit=n.get("unit", ""),
+            text=n.get("text", ""),
+        )
+        for n in sanitize_radio_notes(dispatch)
+    )
 
     if notes:
         prefill["dispatch_notes"] = notes

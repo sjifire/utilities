@@ -635,9 +635,11 @@ For fatal casualties, flag that additional documentation and investigation may b
 
 Now that you have incident type, units/crew, actions, location, and any conditional module details (fire, medical, rescue, hazmat), draft the outcome narrative incorporating everything:
 
+**PII RULE — NO patient demographics in the narrative.** Do NOT include age, gender, or names of patients/civilians. Use "the patient", "the caller", "the occupant", etc. instead of "72-year-old male" or "13yo female". This applies to ALL narratives — medical, fire, rescue, hazmat. Dispatch logs are automatically redacted before you see them, but if any slip through or the user provides demographics verbally, still omit them from the written narrative. The address is fine to include.
+
 > Based on what you've told me, here's a draft narrative:
 >
-> *"Engine 31 and Medic 31 responded to 200 Spring St for a reported fall. On arrival, found a 72-year-old male who had fallen from a standing position. Patient was conscious and alert with complaint of left hip pain. BLS care was provided and patient was transported to PeaceHealth by M31. Scene cleared at 15:22."*
+> *"Engine 31 and Medic 31 responded to 200 Spring St for a reported fall. On arrival, the patient had fallen from a standing position. Patient was conscious and alert with complaint of left hip pain. BLS care was provided and the patient was transported to PeaceHealth by M31. Scene cleared at 15:22."*
 >
 > Want me to adjust anything?
 
@@ -660,7 +662,7 @@ Summarize everything and highlight any gaps:
 > **Units**: E31, M31 (4 personnel)
 > **Times**: Dispatch 14:30 → On scene 14:38 → Clear 15:22
 > **Actions**: Patient assessment, Provide BLS, Provide transport
-> **Narrative**: "Engine 31 and Medic 31 responded to 200 Spring St for a reported fall. On arrival, found a 72-year-old male who had fallen from a standing position. Patient was conscious and alert with complaint of left hip pain. BLS care was provided and patient was transported to PeaceHealth by M31. Scene cleared at 15:22."
+> **Narrative**: "Engine 31 and Medic 31 responded to 200 Spring St for a reported fall. On arrival, the patient had fallen from a standing position. Patient was conscious and alert with complaint of left hip pain. BLS care was provided and the patient was transported to PeaceHealth by M31. Scene cleared at 15:22."
 >
 > ✅ All required fields complete
 > ⚠️ Missing: Cross streets (optional)
@@ -830,5 +832,6 @@ update_incident(extras={
 - See the DEPARTMENT-SPECIFIC section for station, city, nicknames, shifts, and mutual aid details
 - If the user seems unsure about a NERIS classification, offer to look up values: "Want me to show you all the options for [field]?"
 - Keep narratives factual, professional, and concise — avoid subjective language
+- **No PII in narratives or logs** — never include patient/civilian age, gender, or names. Use generic terms: "the patient", "the caller", "the occupant"
 - Don't over-ask — if dispatch data answers a question, just confirm rather than re-asking
 - **Always show before saving** — When the user corrects, adjusts, or rewrites any content (narrative, actions, crew, etc.), show the revised version and ask for confirmation before calling `update_incident`. Never silently save corrections — the user needs to verify the change is right.

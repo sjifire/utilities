@@ -14,20 +14,25 @@ Given a dispatch call's radio log and CAD comments, extract the following as JSO
   "patient_count": 0,
   "escalated": false,
   "outcome": "Brief outcome: 'transported', 'fire controlled', 'false alarm', 'cancelled', 'no patient', etc.",
-  "key_events": ["Chronological list of significant events from the radio log — scene conditions, size-up reports, command establishment/transfers, patient info, key decisions, hazards, cancellations, staging locations. Exclude routine status changes (enroute, on scene, cleared) since those are captured separately — but ALWAYS include ARSTN/staging events with the staging location. One event per entry, include the unit and time."]
+  "key_events": ["Chronological list of significant events from the radio log — scene conditions, size-up reports, command establishment/transfers, patient info, key decisions, hazards, cancellations, staging locations. Exclude routine status changes (enroute, on scene, cleared) since those are captured separately — but ALWAYS include ARSTN/staging events with the staging location. One event per entry, include the unit and time."],
+  "sanitized_cad_comments": "Full CAD comments blob, rewritten VERBATIM except for PII. Preserve the original format — timestamp headers like '18:56:01 02/02/2026 - M Rennick' on their own line, followed by narrative lines. Preserve all operational content word-for-word: unit codes, addresses, actions, conditions, cross streets, dispatcher names, action/disposition codes. REWRITE only: patient/civilian age + gender (→ 'the patient'), patient/civilian names (→ 'the patient' / 'the occupant'), caller/RP names (→ 'the caller'), phone numbers (→ '[phone]'). Do NOT add or remove lines. Do NOT summarize. If the original is empty, return empty string.",
+  "sanitized_radio_notes": [{"timestamp": "matches time_of_status_change verbatim", "unit": "matches unit_number verbatim", "text": "sanitized radio_log text — same rules as sanitized_cad_comments"}]
 }
 ```
 
 Rules:
 - Return ONLY valid JSON. No markdown, no explanation, no code fences.
 - Include ALL fields shown in the schema above. Every field is required in the response.
+- **NO PII**: Do NOT include patient/civilian age, gender, or names in summary, short_dsc, key_events, sanitized_cad_comments, or sanitized_radio_notes. Use "patient", "caller", "occupant" instead of "72-year-old male" or "13yo female". Example: write "patient fall, transported" not "72yo male fall". The address is fine. Dispatcher names (e.g. "M Rennick" in timestamp headers) are fine — only patient/caller names are PII.
+- **sanitized_cad_comments** must include ONE entry for every line in the original cad_comments blob, in the same order. It is NOT a summary — it is a verbatim copy with PII stripped. Example: "13yo female passenger, possible head injury" → "the patient, possible head injury". Example: "caller: John Smith advises" → "the caller advises". Example: "callback (360) 378-4141" → "callback [phone]".
+- **sanitized_radio_notes** must include ONE entry for every NOTE-status item in responder_details, with timestamp + unit copied verbatim and text sanitized. Skip non-NOTE entries. If there are no NOTE entries, return an empty array.
 - Use unit codes as they appear in the radio log (e.g. BN31, E31, M31).
 - For incident_commander, only include units that explicitly took or were given command.
 - For incident_commander_name, match the IC unit code to the on-duty crew list (if provided) to find the person's name. If command transferred (e.g. "BN31 → L31"), use the most senior officer in the chain — typically the chief officer over a company officer.
 - patient_count should be 0 for non-medical calls.
 - escalated is true if mutual aid was requested, additional alarms struck, significant resource escalation occurred, or additional units/agencies were paged after the initial dispatch (e.g., requesting a second ambulance, all-agency repage).
 - Keep summary factual and concise — no speculation.
-- key_events should capture everything an incident reporter would need: conditions on arrival, command posts, patient details, fire behavior, hazards, mutual aid requests, cancellations, and staging locations. Format each entry as "HH:MM Unit — what happened" (e.g., "17:00 BN31 — nothing showing, investigating, est Farm Rd Command"). Exclude routine status changes (paged, enroute, on scene, cleared, RTQ) since those are in unit_times — but ALWAYS include ARSTN/staging events because staging is NOT the same as arriving on scene (e.g., "17:15 T33 — staging on Cattle Point Rd").
+- key_events should capture everything an incident reporter would need: conditions on arrival, command posts, care provided, fire behavior, hazards, mutual aid requests, cancellations, and staging locations. Format each entry as "HH:MM Unit — what happened" (e.g., "17:00 BN31 — nothing showing, investigating, est Farm Rd Command"). Exclude routine status changes (paged, enroute, on scene, cleared, RTQ) since those are in unit_times — but ALWAYS include ARSTN/staging events because staging is NOT the same as arriving on scene (e.g., "17:15 T33 — staging on Cattle Point Rd").
 
 ---
 

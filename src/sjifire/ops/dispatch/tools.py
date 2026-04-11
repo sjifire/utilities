@@ -7,6 +7,7 @@ storage) are delegated to ``DispatchStore``.
 import logging
 
 from sjifire.ops.auth import get_current_user
+from sjifire.ops.dispatch.sanitize import sanitize_dispatch_for_llm
 from sjifire.ops.dispatch.store import DispatchStore
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ async def list_dispatch_calls(days: int = 30) -> dict:
             docs = await store.list_recent_with_open()
 
         logger.info("Returning %d dispatch calls", len(docs))
-        return {"calls": [d.to_dict() for d in docs], "count": len(docs)}
+        return {"calls": [sanitize_dispatch_for_llm(d) for d in docs], "count": len(docs)}
     except Exception:
         logger.exception("Failed to list dispatch calls")
         return {"error": "Unable to retrieve dispatch calls. Please try again."}
@@ -70,7 +71,7 @@ async def get_dispatch_call(call_id: str) -> dict:
             if doc is None:
                 return {"error": f"Call not found: {call_id}"}
 
-            result = doc.to_dict()
+            result = sanitize_dispatch_for_llm(doc)
 
             # Include site history from archive
             if doc.address:
@@ -108,7 +109,7 @@ async def get_open_dispatch_calls() -> dict:
             docs = await store.fetch_open()
 
         logger.info("Returning %d open dispatch calls", len(docs))
-        return {"calls": [d.to_dict() for d in docs], "count": len(docs)}
+        return {"calls": [sanitize_dispatch_for_llm(d) for d in docs], "count": len(docs)}
     except Exception:
         logger.exception("Failed to get open dispatch calls")
         return {"error": "Unable to retrieve open calls. Please try again."}
@@ -155,7 +156,7 @@ async def search_dispatch_calls(
             if dispatch_id:
                 doc = await store.get_by_dispatch_id(dispatch_id)
                 if doc:
-                    return {"calls": [doc.to_dict()], "count": 1}
+                    return {"calls": [sanitize_dispatch_for_llm(doc)], "count": 1}
                 return {"calls": [], "count": 0}
 
             # Search by date range
@@ -164,7 +165,7 @@ async def search_dispatch_calls(
 
             docs = await store.list_by_date_range(start_date, end_date)
             return {
-                "calls": [d.to_dict() for d in docs],
+                "calls": [sanitize_dispatch_for_llm(d) for d in docs],
                 "count": len(docs),
             }
     except Exception:
