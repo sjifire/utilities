@@ -6,8 +6,9 @@ on:
     - cron: '0 17 * * *'  # 9am PST / 10am PDT
     - cron: '0 0 * * *'   # 4pm PST / 5pm PDT
     - cron: '0 3 * * *'   # 7pm PST / 8pm PDT
-    # Future months: 1x daily at noon Pacific
-    - cron: '0 20 * * *'  # 12pm PST / 1pm PDT
+    # Future months: 1x daily at 3am Pacific (off-hours to avoid Graph
+    # app-quota contention with entra-sync and ops-tasks)
+    - cron: '0 11 * * *'  # 3am PST / 4am PDT
   workflow_dispatch:
     inputs:
       dry_run:
@@ -103,8 +104,8 @@ jobs:
         run: |
           MAILBOX="all-personnel@sjifire.org"
           SCHEDULE_CACHE="/tmp/schedule.json"
-          # Noon schedule (0 20 * * *) syncs 4 months; others sync current month only
-          if [ "${{ github.event.schedule }}" = "0 20 * * *" ]; then
+          # 3am Pacific schedule (0 11 * * *) syncs 4 months; others sync current month only
+          if [ "${{ github.event.schedule }}" = "0 11 * * *" ]; then
             MONTHS="4"
           else
             MONTHS="${{ inputs.months || '1' }}"
@@ -120,7 +121,7 @@ jobs:
         run: |
           SCHEDULE_CACHE="/tmp/schedule.json"
           # Use same months as duty sync
-          if [ "${{ github.event.schedule }}" = "0 20 * * *" ]; then
+          if [ "${{ github.event.schedule }}" = "0 11 * * *" ]; then
             MONTHS="4"
           else
             MONTHS="${{ inputs.months || '1' }}"
