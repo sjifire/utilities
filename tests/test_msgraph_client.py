@@ -126,5 +126,5 @@ class TestCreateGraphClient:
 
     def test_retry_constants(self):
         """Retry constants should be reasonable values."""
-        assert GRAPH_MAX_RETRIES == 5
-        assert GRAPH_RETRY_DELAY == 3.0
+        assert GRAPH_MAX_RETRIES == 8
+        assert GRAPH_RETRY_DELAY == 5.0

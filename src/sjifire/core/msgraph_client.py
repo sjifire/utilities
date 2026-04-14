@@ -18,8 +18,8 @@ from sjifire.core.config import get_graph_credentials
 
 # Retry config for Graph API rate limiting (429) and transient errors (503/504).
 # Kiota's RetryHandler uses exponential backoff with jitter and respects Retry-After headers.
-GRAPH_MAX_RETRIES = 5
-GRAPH_RETRY_DELAY = 3.0  # initial delay in seconds
+GRAPH_MAX_RETRIES = 8
+GRAPH_RETRY_DELAY = 5.0  # initial delay in seconds
 
 
 def _create_retry_options() -> dict:

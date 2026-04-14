@@ -38,6 +38,12 @@ logger = logging.getLogger(__name__)
 logging.getLogger("azure").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+# Pause between users so Outlook's rolling per-mailbox concurrency counters
+# have a moment to drain. Retry throttled users once at the end after a
+# longer cooldown — per-mailbox throttles usually clear by then.
+INTER_USER_PAUSE_SEC = 1.0
+THROTTLE_RETRY_COOLDOWN_SEC = 60.0
+
 
 def parse_month(month_str: str) -> tuple[int, int]:
     """Parse a month string into (year, month)."""
@@ -349,7 +355,8 @@ def main() -> int:
     sync = PersonalCalendarSync()
 
     async def sync_all() -> list:
-        results = []
+        results: list = []
+        throttled_emails: list[str] = []
         for email, entries in entries_by_email.items():
             logger.info("Syncing %s (%d entries)...", email, len(entries))
             result = await sync.sync_user(
@@ -357,6 +364,32 @@ def main() -> int:
             )
             results.append(result)
             logger.info("  %s", result)
+            if result.throttled:
+                throttled_emails.append(email)
+            await asyncio.sleep(INTER_USER_PAUSE_SEC)
+
+        if throttled_emails:
+            logger.warning(
+                "Retrying %d throttled user(s) after %.0fs cooldown: %s",
+                len(throttled_emails),
+                THROTTLE_RETRY_COOLDOWN_SEC,
+                ", ".join(throttled_emails),
+            )
+            await asyncio.sleep(THROTTLE_RETRY_COOLDOWN_SEC)
+            for email in throttled_emails:
+                entries = entries_by_email[email]
+                logger.info("Retry: Syncing %s (%d entries)...", email, len(entries))
+                retry_result = await sync.sync_user(
+                    email, entries, start_date, end_date, args.dry_run, args.force
+                )
+                logger.info("  %s", retry_result)
+                # Replace the original (failed) result with the retry outcome.
+                for i, r in enumerate(results):
+                    if r.user == email:
+                        results[i] = retry_result
+                        break
+                await asyncio.sleep(INTER_USER_PAUSE_SEC)
+
         return results
 
     results = asyncio.run(sync_all())

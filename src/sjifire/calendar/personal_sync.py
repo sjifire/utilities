@@ -27,8 +27,10 @@ logger = logging.getLogger(__name__)
 
 # Timezone loaded from organization.json via get_timezone() / get_timezone_name().
 
-# Concurrency limit for parallel API calls
-MAX_CONCURRENT_REQUESTS = 5
+# Concurrency limit for parallel API calls per user mailbox.
+# Outlook's per-app-per-mailbox concurrency ceiling is 4 — we stay under it
+# to avoid MailboxConcurrency throttling (ApplicationThrottled 429s).
+MAX_CONCURRENT_REQUESTS = 3
 
 
 @dataclass
@@ -37,6 +39,18 @@ class ExistingEvent:
 
     event_id: str
     body: str
+
+
+def _is_throttled(exc: BaseException) -> bool:
+    """Return True if ``exc`` looks like a Graph 429 / throttling response.
+
+    Kiota's ``APIError`` exposes the HTTP status as ``response_status_code``.
+    """
+    status = getattr(exc, "response_status_code", None)
+    if status == 429:
+        return True
+    # Fallback: some wrappers put the code on ``.code``.
+    return getattr(exc, "code", None) == 429
 
 
 @dataclass
@@ -48,6 +62,7 @@ class PersonalSyncResult:
     events_updated: int = 0
     events_deleted: int = 0
     errors: list[str] = field(default_factory=list)
+    throttled: bool = False  # Set when a 429 was seen during this sync
 
     def __str__(self) -> str:  # noqa: D105
         parts = []
@@ -140,6 +155,9 @@ class PersonalCalendarSync:
         self.client = get_graph_client()
         self._calendar_cache: dict[str, str] = {}  # user_email -> calendar_id
         self._uses_primary_calendar: set[str] = set()  # users using primary calendar
+        # Set to True by any helper that observes a 429 during the current
+        # sync_user call. Reset at the top of sync_user.
+        self._throttled_this_run: bool = False
 
     async def ensure_aladtec_category(self, user_email: str) -> bool:
         """Ensure the Aladtec category exists in user's master category list.
@@ -182,7 +200,11 @@ class PersonalCalendarSync:
             if calendar and calendar.id:
                 return calendar.id
         except Exception as e:
-            logger.error("Failed to get primary calendar for %s: %s", user_email, e)
+            if _is_throttled(e):
+                self._throttled_this_run = True
+                logger.warning("Throttled getting primary calendar for %s", user_email)
+            else:
+                logger.error("Failed to get primary calendar for %s: %s", user_email, e)
         return None
 
     async def get_or_create_calendar(self, user_email: str) -> str | None:
@@ -286,7 +308,11 @@ class PersonalCalendarSync:
             return events_by_key
 
         except Exception as e:
-            logger.error("Failed to get existing events for %s: %s", user_email, e)
+            if _is_throttled(e):
+                self._throttled_this_run = True
+                logger.warning("Throttled getting existing events for %s", user_email)
+            else:
+                logger.error("Failed to get existing events for %s: %s", user_email, e)
             return {}
 
     def _build_personal_event(self, user_email: str, entry: ScheduleEntry) -> Event:
@@ -330,7 +356,11 @@ class PersonalCalendarSync:
             )
             return True
         except Exception as e:
-            logger.error("Failed to create event for %s: %s", user_email, e)
+            if _is_throttled(e):
+                self._throttled_this_run = True
+                logger.warning("Throttled creating event for %s", user_email)
+            else:
+                logger.error("Failed to create event for %s: %s", user_email, e)
             return False
 
     async def update_event(
@@ -352,7 +382,11 @@ class PersonalCalendarSync:
             )
             return True
         except Exception as e:
-            logger.error("Failed to update event %s: %s", event_id, e)
+            if _is_throttled(e):
+                self._throttled_this_run = True
+                logger.warning("Throttled updating event %s for %s", event_id, user_email)
+            else:
+                logger.error("Failed to update event %s: %s", event_id, e)
             return False
 
     async def delete_event(
@@ -371,7 +405,11 @@ class PersonalCalendarSync:
             )
             return True
         except Exception as e:
-            logger.error("Failed to delete event %s: %s", event_id, e)
+            if _is_throttled(e):
+                self._throttled_this_run = True
+                logger.warning("Throttled deleting event %s for %s", event_id, user_email)
+            else:
+                logger.error("Failed to delete event %s: %s", event_id, e)
             return False
 
     async def get_aladtec_category_events(
@@ -496,11 +534,17 @@ class PersonalCalendarSync:
             PersonalSyncResult with counts and errors
         """
         result = PersonalSyncResult(user=user_email)
+        # Reset throttle flag — it's per-sync_user-invocation.
+        self._throttled_this_run = False
 
         # Get or create calendar
         calendar_id = await self.get_or_create_calendar(user_email)
         if not calendar_id:
-            result.errors.append("Failed to get/create calendar")
+            if self._throttled_this_run:
+                result.throttled = True
+                result.errors.append("Throttled by Graph API (calendar fetch)")
+            else:
+                result.errors.append("Failed to get/create calendar")
             return result
 
         # Ensure Aladtec category exists in user's category list
@@ -595,6 +639,11 @@ class PersonalCalendarSync:
                 result.events_deleted = sum(1 for r in delete_results if r)
                 result.errors.extend(["Failed to delete event" for r in delete_results if not r])
 
+        # Propagate throttle signal to the caller. Set here (in addition to
+        # the early-return path above) so per-event 429s from parallel
+        # create/update/delete bursts still flag the user for retry.
+        if self._throttled_this_run:
+            result.throttled = True
         return result
 
     def sync(
