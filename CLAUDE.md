@@ -88,6 +88,7 @@ Two types of calendar sync from Aladtec schedules to Outlook:
 - Compares events by key: `{date}|{subject}|{start_time}|{end_time}`
 - `--force` updates all events, `--purge` deletes all Aladtec events
 - `--load-schedule PATH` uses cached schedule instead of fetching from Aladtec
+- **Throttle handling**: Outlook caps concurrent requests at 4 per mailbox per app (`ApplicationThrottled / MailboxConcurrency`). Per-user concurrency is capped at 3, and on `--all` any user that sees a 429 is retried once at the end after a 60s cooldown. Kiota middleware also retries 429/503/504 at the HTTP layer (8 attempts, 5s initial backoff).
 
 **Schedule Caching** (reduces Aladtec API calls):
 ```bash
@@ -479,7 +480,7 @@ All secrets are centralized in Azure Key Vault `gh-website-utilities`. GitHub Ac
 - `ci.yml`: Lint + test + e2e on PR/push (e2e job runs Playwright chromium in parallel)
 - `entra-sync.yml`: Weekday sync at noon Pacific (user sync + group sync + signature sync), uploads backup artifacts
 - `ispyfire-sync.yml`: Daily iSpyFire state backup (dry-run sync + artifact upload). Actual sync runs every 30 min via Container Apps Job (`ops-tasks`)
-- `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month, 1x daily future months)
+- `calendar-sync.yml`: Syncs duty + personal calendars (3x daily current month at 9am/4pm/7pm Pacific, 1x daily 4-month lookahead at 3am Pacific)
 - `ops-deploy.yml`: Deploy ops server on push to main (paths: `src/sjifire/ops/**`, `Dockerfile`, `pyproject.toml`)
 
 All workflows authenticate via OIDC and fetch secrets from Key Vault (no GitHub secrets required).

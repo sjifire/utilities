@@ -950,3 +950,133 @@ class TestSyncUserErrorAccumulation:
         )
 
         assert len([e for e in result.errors if "delete" in e.lower()]) == 1
+
+
+class TestSyncUserThrottleDetection:
+    """Tests that 429 responses surface via PersonalSyncResult.throttled."""
+
+    @pytest.fixture
+    def mock_env_vars(self):
+        """Mock environment variables for Graph API credentials."""
+        with patch.dict(
+            "os.environ",
+            {
+                "MS_GRAPH_TENANT_ID": "test-tenant",
+                "MS_GRAPH_CLIENT_ID": "test-client",
+                "MS_GRAPH_CLIENT_SECRET": "test-secret",
+            },
+        ):
+            yield
+
+    @pytest.fixture
+    def sync(self, mock_env_vars):
+        """Create PersonalCalendarSync with mocked client."""
+        with (
+            patch("sjifire.calendar.personal_sync.get_graph_client") as mock_client_class,
+        ):
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            sync = PersonalCalendarSync()
+            sync.client = mock_client
+            return sync
+
+    @staticmethod
+    def _throttle_error() -> Exception:
+        """Build an exception shaped like a Kiota 429 APIError."""
+        exc = Exception("Application is over its MailboxConcurrency limit.")
+        exc.response_status_code = 429
+        return exc
+
+    @pytest.mark.asyncio
+    async def test_get_primary_calendar_sets_throttled_flag(self, sync):
+        """A 429 on /calendar sets _throttled_this_run and returns None."""
+        sync.client.users.by_user_id.return_value.calendar.get = AsyncMock(
+            side_effect=self._throttle_error()
+        )
+
+        result = await sync._get_primary_calendar_id("test@example.com")
+        assert result is None
+        assert sync._throttled_this_run is True
+
+    @pytest.mark.asyncio
+    async def test_get_primary_calendar_non_throttle_does_not_set_flag(self, sync):
+        """Non-429 errors do not mark the run as throttled."""
+        sync.client.users.by_user_id.return_value.calendar.get = AsyncMock(
+            side_effect=Exception("Some other error")
+        )
+
+        result = await sync._get_primary_calendar_id("test@example.com")
+        assert result is None
+        assert sync._throttled_this_run is False
+
+    @pytest.mark.asyncio
+    async def test_sync_user_surfaces_throttle_on_calendar_fetch(self, sync):
+        """sync_user returns throttled=True when calendar fetch is throttled."""
+        # Force the calendar fetch to 429.
+        sync.client.users.by_user_id.return_value.calendar.get = AsyncMock(
+            side_effect=self._throttle_error()
+        )
+
+        result = await sync.sync_user(
+            "test@example.com",
+            [],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+        )
+
+        assert result.throttled is True
+        assert result.errors  # Throttled fetch still counts as an error
+        assert any("Throttled" in e for e in result.errors)
+
+    @pytest.mark.asyncio
+    async def test_create_event_sets_throttled_flag_on_429(self, sync):
+        """create_event's except block flips _throttled_this_run on 429."""
+        entry = ScheduleEntry(
+            date=date(2026, 2, 1),
+            section="S31",
+            position="Captain",
+            name="John Doe",
+            start_time="18:00",
+            end_time="18:00",
+        )
+        # Skip _build_personal_event (needs Aladtec creds) and go straight
+        # to the Graph call that we want to throttle.
+        sync._build_personal_event = MagicMock(return_value=MagicMock())
+        sync.client.users.by_user_id.return_value.calendars.by_calendar_id.return_value.events.post = AsyncMock(
+            side_effect=self._throttle_error()
+        )
+
+        ok = await sync.create_event("test@example.com", "cal-id", entry)
+        assert ok is False
+        assert sync._throttled_this_run is True
+
+    @pytest.mark.asyncio
+    async def test_delete_event_sets_throttled_flag_on_429(self, sync):
+        """delete_event's except block flips _throttled_this_run on 429."""
+        sync.client.users.by_user_id.return_value.calendars.by_calendar_id.return_value.events.by_event_id.return_value.delete = AsyncMock(
+            side_effect=self._throttle_error()
+        )
+
+        ok = await sync.delete_event("test@example.com", "cal-id", "evt-id")
+        assert ok is False
+        assert sync._throttled_this_run is True
+
+    @pytest.mark.asyncio
+    async def test_throttle_flag_resets_between_users(self, sync):
+        """_throttled_this_run is reset at the top of each sync_user call."""
+        sync.get_or_create_calendar = AsyncMock(return_value="cal-id")
+        sync.ensure_aladtec_category = AsyncMock(return_value=True)
+        sync.get_existing_events = AsyncMock(return_value={})
+
+        # Simulate the flag being left set by a prior run.
+        sync._throttled_this_run = True
+
+        result = await sync.sync_user(
+            "test@example.com",
+            [],
+            date(2026, 2, 1),
+            date(2026, 2, 28),
+        )
+
+        assert result.throttled is False
+        assert sync._throttled_this_run is False

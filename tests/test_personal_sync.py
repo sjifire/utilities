@@ -10,6 +10,7 @@ from sjifire.aladtec.schedule_scraper import ScheduleEntry
 from sjifire.calendar.personal_sync import (
     ExistingEvent,
     PersonalSyncResult,
+    _is_throttled,
     _parse_graph_datetime,
     make_event_body,
     make_event_subject,
@@ -123,6 +124,42 @@ class TestPersonalSyncResult:
         """Shows error count."""
         result = PersonalSyncResult(user="test@example.com", errors=["error1", "error2"])
         assert str(result) == "test@example.com: 2 errors"
+
+    def test_throttled_defaults_false(self):
+        """Throttled flag defaults to False."""
+        result = PersonalSyncResult(user="test@example.com")
+        assert result.throttled is False
+
+    def test_throttled_can_be_set(self):
+        """Throttled flag can be set to True."""
+        result = PersonalSyncResult(user="test@example.com", throttled=True)
+        assert result.throttled is True
+
+
+class TestIsThrottled:
+    """Tests for the _is_throttled helper."""
+
+    def test_detects_429_via_response_status_code(self):
+        """Kiota APIError exposes HTTP status on response_status_code."""
+        exc = Exception("boom")
+        exc.response_status_code = 429
+        assert _is_throttled(exc) is True
+
+    def test_detects_429_via_code_fallback(self):
+        """Falls back to .code for wrappers that put the status there."""
+        exc = Exception("boom")
+        exc.code = 429
+        assert _is_throttled(exc) is True
+
+    def test_non_429_status_is_not_throttled(self):
+        """500/503/other errors are not reported as throttled."""
+        exc = Exception("boom")
+        exc.response_status_code = 503
+        assert _is_throttled(exc) is False
+
+    def test_exception_with_no_status_is_not_throttled(self):
+        """Plain exception without status attributes is not throttled."""
+        assert _is_throttled(Exception("boom")) is False
 
     def test_str_with_multiple_changes(self):
         """Shows multiple change types."""
