@@ -391,6 +391,62 @@ class TestMainWithUserFlag:
         mock_personal_sync.sync_user.assert_not_called()
 
 
+class TestMainThrottleRetry:
+    """Tests for the end-of-run retry loop for throttled users."""
+
+    def test_throttled_user_is_retried_after_cooldown(
+        self, mock_env_vars, mock_member_scraper, mock_schedule_scraper, mock_personal_sync
+    ):
+        """A user flagged as throttled is retried once after the run."""
+        # First call per user returns throttled for agreene, normal for jsmith.
+        # Second call (the retry) for agreene returns success.
+        call_log: list[tuple[str, bool]] = []
+
+        async def fake_sync_user(email, entries, start, end, dry_run, force):
+            throttled_first_time = email == "agreene@sjifire.org" and (email, True) not in call_log
+            call_log.append((email, throttled_first_time))
+            if throttled_first_time:
+                return PersonalSyncResult(
+                    user=email, throttled=True, errors=["Throttled by Graph API"]
+                )
+            return PersonalSyncResult(user=email, events_created=1)
+
+        mock_personal_sync.sync_user = AsyncMock(side_effect=fake_sync_user)
+
+        # Skip real sleeps so the 60s cooldown doesn't slow the test.
+        with (
+            patch.object(sys, "argv", ["personal-calendar-sync", "--all", "--month", "Feb 2026"]),
+            patch("sjifire.scripts.personal_calendar_sync.asyncio.sleep", new=AsyncMock()),
+        ):
+            result = main()
+
+        # 2 users initial pass + 1 retry for agreene = 3 calls.
+        assert mock_personal_sync.sync_user.call_count == 3
+        agreene_calls = [c for c in call_log if c[0] == "agreene@sjifire.org"]
+        assert len(agreene_calls) == 2  # once throttled, once retried
+        # Successful retry means no net error → exit 0.
+        assert result == 0
+
+    def test_throttled_user_still_throttled_on_retry_exits_nonzero(
+        self, mock_env_vars, mock_member_scraper, mock_schedule_scraper, mock_personal_sync
+    ):
+        """If the retry also throttles, the error is surfaced as exit 1."""
+
+        async def always_throttled(email, entries, start, end, dry_run, force):
+            return PersonalSyncResult(user=email, throttled=True, errors=["Throttled by Graph API"])
+
+        mock_personal_sync.sync_user = AsyncMock(side_effect=always_throttled)
+
+        with (
+            patch.object(sys, "argv", ["personal-calendar-sync", "--all", "--month", "Feb 2026"]),
+            patch("sjifire.scripts.personal_calendar_sync.asyncio.sleep", new=AsyncMock()),
+        ):
+            result = main()
+
+        # Retry still failed → nonzero exit.
+        assert result == 1
+
+
 class TestMainWithForceFlag:
     """Tests for main() with --force flag."""
 
