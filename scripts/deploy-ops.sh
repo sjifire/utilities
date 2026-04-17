@@ -159,7 +159,6 @@ _get_secret "MS-GRAPH-TENANT-ID"            > "$TMPDIR/kv-4" &
 _get_secret "MS-GRAPH-CLIENT-ID"            > "$TMPDIR/kv-5" &
 _get_secret "ALADTEC-URL"                   > "$TMPDIR/kv-6" &
 _get_secret "AZURE-STORAGE-ACCOUNT-URL"     > "$TMPDIR/kv-7" &
-_get_secret "AZURE-STORAGE-ACCOUNT-KEY"     > "$TMPDIR/kv-8" &
 wait
 ENTRA_MCP_API_CLIENT_ID=$(cat "$TMPDIR/kv-1")
 ENTRA_REPORT_EDITORS_GROUP_ID=$(cat "$TMPDIR/kv-2")
@@ -168,7 +167,6 @@ MS_GRAPH_TENANT_ID=$(cat "$TMPDIR/kv-4")
 MS_GRAPH_CLIENT_ID=$(cat "$TMPDIR/kv-5")
 ALADTEC_URL=$(cat "$TMPDIR/kv-6")
 AZURE_STORAGE_ACCOUNT_URL=$(cat "$TMPDIR/kv-7")
-AZURE_STORAGE_ACCOUNT_KEY=$(cat "$TMPDIR/kv-8")
 ok "Config fetched"
 
 # ---------------------------------------------------------------------------
@@ -224,6 +222,7 @@ if [ "$EXISTING_SECRETS" -lt 5 ]; then
             "azure-maps-key=keyvaultref:${VAULT_URL}/secrets/AZURE-MAPS-KEY,identityref:system" \
             "kiosk-signing-key=keyvaultref:${VAULT_URL}/secrets/KIOSK-SIGNING-KEY,identityref:system" \
             "centrifugo-api-key=keyvaultref:${VAULT_URL}/secrets/CENTRIFUGO-API-KEY,identityref:system" \
+            "azure-storage-account-key=keyvaultref:${VAULT_URL}/secrets/AZURE-STORAGE-ACCOUNT-KEY,identityref:system" \
         --output none
     ok "Secrets configured"
 fi
@@ -249,7 +248,6 @@ sed \
     -e "s|__ALADTEC_URL__|${ALADTEC_URL}|g" \
     -e "s|__MCP_SERVER_URL__|https://${CUSTOM_DOMAIN}|g" \
     -e "s|__AZURE_STORAGE_ACCOUNT_URL__|${AZURE_STORAGE_ACCOUNT_URL}|g" \
-    -e "s|__AZURE_STORAGE_ACCOUNT_KEY__|${AZURE_STORAGE_ACCOUNT_KEY}|g" \
     "$YAML_TEMPLATE" > "$YAML_RENDERED"
 
 info "Updating Container App via YAML (ops-server + centrifugo sidecar)..."
@@ -307,6 +305,7 @@ _housekeeping_secrets() {
             "azure-maps-key=keyvaultref:${VAULT_URL}/secrets/AZURE-MAPS-KEY,identityref:system" \
             "kiosk-signing-key=keyvaultref:${VAULT_URL}/secrets/KIOSK-SIGNING-KEY,identityref:system" \
             "centrifugo-api-key=keyvaultref:${VAULT_URL}/secrets/CENTRIFUGO-API-KEY,identityref:system" \
+            "azure-storage-account-key=keyvaultref:${VAULT_URL}/secrets/AZURE-STORAGE-ACCOUNT-KEY,identityref:system" \
         --output none 2>/dev/null || true
     echo "ok" > "$TMPDIR/hk-secrets"
 }

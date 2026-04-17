@@ -30,6 +30,9 @@ jobs:
       - name: Run ruff format check
         run: uv run ruff format --check .
 
+      - name: Run type check
+        run: uv run ty check src/
+
   test:
     name: Test
     runs-on: ubuntu-latest

@@ -267,12 +267,12 @@ class AladtecScheduleScraper(AladtecClient):
 
             # Find all scheduled entries (rows with title containing schedule info)
             for row in div.find_all("tr", class_="calendar-event"):
-                title = row.get("title", "")
+                title = str(row.get("title", ""))
                 if not title:
                     continue
 
                 # Skip unfilled/open slots - they have "ust" class or "open-shift" in child elements
-                row_classes = row.get("class", [])
+                row_classes = row.get("class") or []  # BS4 always returns list for class
                 if "ust" in row_classes:
                     continue
                 # Also check for open-shift class in name/time cells

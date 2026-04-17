@@ -28,12 +28,20 @@ _TEST_OFFICER = UserContext(
 
 
 def _fake_get_user(_request):
+    """Sync mock for chat/routes.py which still uses get_request_user."""
     set_current_user(_TEST_USER)
     return _TEST_USER
 
 
-def _fake_get_user_none(_request):
-    return None
+async def _fake_require_auth(_request, **_kwargs):
+    set_current_user(_TEST_USER)
+    return _TEST_USER
+
+
+async def _fake_require_auth_unauth(_request, **_kwargs):
+    from starlette.responses import JSONResponse
+
+    return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
 
 @pytest.fixture(autouse=True)
@@ -48,7 +56,7 @@ def _env(monkeypatch):
     monkeypatch.delenv("AZURE_STORAGE_ACCOUNT_URL", raising=False)
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     monkeypatch.delenv("ENTRA_MCP_API_CLIENT_ID", raising=False)
-    monkeypatch.setattr("sjifire.ops.attachments.routes.get_request_user", _fake_get_user)
+    monkeypatch.setattr("sjifire.ops.attachments.routes.require_auth", _fake_require_auth)
 
 
 class _FakeUploadFile:
@@ -74,7 +82,9 @@ class _FakeRequest:
 
 class TestUploadRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes.get_request_user", _fake_get_user_none)
+        monkeypatch.setattr(
+            "sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth
+        )
         from sjifire.ops.attachments.routes import upload_attachment_route
 
         req = _FakeRequest(path_params={"incident_id": "inc-1"})
@@ -122,7 +132,9 @@ class TestUploadRoute:
 
 class TestListRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes.get_request_user", _fake_get_user_none)
+        monkeypatch.setattr(
+            "sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth
+        )
         from sjifire.ops.attachments.routes import list_attachments_route
 
         req = _FakeRequest(path_params={"incident_id": "inc-1"})
@@ -132,7 +144,9 @@ class TestListRoute:
 
 class TestDownloadRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes.get_request_user", _fake_get_user_none)
+        monkeypatch.setattr(
+            "sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth
+        )
         from sjifire.ops.attachments.routes import download_attachment_route
 
         req = _FakeRequest(
@@ -197,7 +211,9 @@ class TestDownloadRoute:
 
 class TestDeleteRoute:
     async def test_returns_401_when_unauthenticated(self, monkeypatch):
-        monkeypatch.setattr("sjifire.ops.attachments.routes.get_request_user", _fake_get_user_none)
+        monkeypatch.setattr(
+            "sjifire.ops.attachments.routes.require_auth", _fake_require_auth_unauth
+        )
         from sjifire.ops.attachments.routes import delete_attachment_route
 
         req = _FakeRequest(

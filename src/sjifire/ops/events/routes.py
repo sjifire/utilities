@@ -19,12 +19,12 @@ from datetime import date, datetime, timedelta
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from sjifire.ops.attachments.models import ALLOWED_CONTENT_TYPES, MAX_FILE_SIZE
+from sjifire.ops.attachments.models import validate_file_upload
 from sjifire.ops.attachments.store import AttachmentBlobStore
 from sjifire.ops.auth import (
     UserContext,
     check_group_membership,
-    get_request_user,
+    require_auth,
 )
 from sjifire.ops.events.models import (
     AttendeeRecord,
@@ -77,9 +77,9 @@ async def events_page(request: Request) -> Response:
 
 async def events_data(request: Request) -> Response:
     """Return combined calendar events + event records as JSON."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     is_mgr = await _is_manager(user)
     today = date.today()
@@ -195,9 +195,9 @@ async def events_data(request: Request) -> Response:
 
 async def get_record(request: Request) -> Response:
     """Get full event record detail."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
     async with EventStore() as store:
@@ -211,11 +211,9 @@ async def get_record(request: Request) -> Response:
 
 async def create_record(request: Request) -> Response:
     """Create an event record (calendar-linked or manual)."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    if not await _is_manager(user):
-        return JSONResponse({"error": "Manager access required"}, status_code=403)
+    user = await require_auth(request, group_id=_get_event_managers_group_id())
+    if isinstance(user, Response):
+        return user
 
     body = await request.json()
     calendar_event_id = body.get("calendar_event_id", "")
@@ -258,11 +256,9 @@ async def create_record(request: Request) -> Response:
 
 async def update_record(request: Request) -> Response:
     """Update an event record (attendees, notes, etc.)."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    if not await _is_manager(user):
-        return JSONResponse({"error": "Manager access required"}, status_code=403)
+    user = await require_auth(request, group_id=_get_event_managers_group_id())
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
     body = await request.json()
@@ -300,11 +296,9 @@ async def update_record(request: Request) -> Response:
 
 async def upload_file(request: Request) -> Response:
     """Upload a file attachment to an event record."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    if not await _is_manager(user):
-        return JSONResponse({"error": "Manager access required"}, status_code=403)
+    user = await require_auth(request, group_id=_get_event_managers_group_id())
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
 
@@ -314,20 +308,10 @@ async def upload_file(request: Request) -> Response:
         return JSONResponse({"error": "No file provided"}, status_code=400)
 
     content_type = uploaded.content_type or "application/octet-stream"
-    if content_type not in ALLOWED_CONTENT_TYPES:
-        allowed = ", ".join(sorted(ALLOWED_CONTENT_TYPES))
-        return JSONResponse(
-            {"error": f"Content type '{content_type}' not allowed. Allowed: {allowed}"},
-            status_code=400,
-        )
-
     data = await uploaded.read()
-    if len(data) > MAX_FILE_SIZE:
-        max_mb = MAX_FILE_SIZE // (1024 * 1024)
-        return JSONResponse(
-            {"error": f"File too large. Maximum is {max_mb} MB."},
-            status_code=400,
-        )
+    error = validate_file_upload(content_type, len(data))
+    if error:
+        return JSONResponse({"error": error}, status_code=400)
 
     async with EventStore() as store:
         rec = await store.get_by_id(record_id)
@@ -362,11 +346,9 @@ async def upload_file(request: Request) -> Response:
 
 async def parse_attendees(request: Request) -> Response:
     """Parse attendees from an attachment or raw text."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    if not await _is_manager(user):
-        return JSONResponse({"error": "Manager access required"}, status_code=403)
+    user = await require_auth(request, group_id=_get_event_managers_group_id())
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
     body = await request.json()
@@ -422,9 +404,9 @@ async def parse_attendees(request: Request) -> Response:
 
 async def download_attachment(request: Request) -> Response:
     """Download an event attachment."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = await require_auth(request)
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
     att_id = request.path_params["att_id"]
@@ -453,11 +435,9 @@ async def download_attachment(request: Request) -> Response:
 
 async def delete_attachment(request: Request) -> Response:
     """Delete an event attachment."""
-    user = get_request_user(request)
-    if user is None:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    if not await _is_manager(user):
-        return JSONResponse({"error": "Manager access required"}, status_code=403)
+    user = await require_auth(request, group_id=_get_event_managers_group_id())
+    if isinstance(user, Response):
+        return user
 
     record_id = request.path_params["record_id"]
     att_id = request.path_params["att_id"]
