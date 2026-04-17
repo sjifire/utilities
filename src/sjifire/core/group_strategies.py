@@ -8,11 +8,28 @@ WHO should be in each group.
 Supports both Aladtec Member and EntraUser objects via the GroupMember protocol.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Protocol, runtime_checkable
 
 from sjifire.core.config import get_org_config
+
+logger = logging.getLogger(__name__)
+
+_EVIP_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%Y/%m/%d")
+
+
+def _parse_evip_date(value: str) -> date | None:
+    """Parse an EVIP expiration string into a date, or None if unparseable."""
+    value = value.strip()
+    for fmt in _EVIP_DATE_FORMATS:
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 @runtime_checkable
@@ -298,8 +315,26 @@ class ApparatusOperatorStrategy(GroupStrategy):
         return "EVIP certification"
 
     def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
-        """Get members with EVIP certification."""
-        ao_members = [m for m in members if m.evip]
+        """Get members with EVIP certification.
+
+        Membership is kept deliberately permissive: any non-empty EVIP value keeps
+        a member in the group, including expired dates. Expired dates are logged
+        as warnings so admins can follow up without members being auto-dropped.
+        """
+        ao_members: list[GroupMember] = []
+        today = date.today()
+        for m in members:
+            if not m.evip:
+                continue
+            ao_members.append(m)
+            parsed = _parse_evip_date(m.evip)
+            if parsed is not None and parsed < today:
+                logger.warning(
+                    "EVIP expired for %s (%s): %s — kept in Apparatus Operators group",
+                    m.display_name,
+                    m.email,
+                    m.evip,
+                )
         return {"Apparatus Operator": ao_members} if ao_members else {}
 
     def get_config(self, group_key: str) -> GroupConfig:
