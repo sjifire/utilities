@@ -522,6 +522,23 @@ class TestApparatusOperatorStrategy:
         result = self.strategy.get_members(members)
         assert len(result["Apparatus Operator"]) == 3
 
+    def test_get_members_expired_evip_kept_with_warning(self, caplog):
+        """Expired EVIP dates are kept in the group but logged as warnings."""
+        import logging
+
+        members = [
+            make_member(member_id="1", evip="2020-01-01"),
+            make_member(member_id="2", evip="2099-12-31"),
+        ]
+        with caplog.at_level(logging.WARNING, logger="sjifire.core.group_strategies"):
+            result = self.strategy.get_members(members)
+
+        assert len(result["Apparatus Operator"]) == 2
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "EVIP expired" in warnings[0].message
+        assert "2020-01-01" in warnings[0].getMessage()
+
     def test_get_config(self):
         """get_config should return proper GroupConfig."""
         config = self.strategy.get_config("Apparatus Operator")
