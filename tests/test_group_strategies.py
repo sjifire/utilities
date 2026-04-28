@@ -1037,7 +1037,7 @@ class TestFirePreventionStrategy:
         """get_config should return proper GroupConfig."""
         config = self.strategy.get_config("fire-prevention")
         assert config.display_name == "Fire Prevention"
-        assert config.mail_nickname == "fire-prevention"
+        assert config.mail_nickname == "fireprevention"
 
     def test_get_config_enforce_calendar_visibility(self):
         """Calendar must auto-appear in members' Outlook."""

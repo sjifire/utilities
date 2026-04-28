@@ -571,7 +571,7 @@ class FirePreventionStrategy(AllPersonnelStrategy):
         """Return group configuration."""
         return GroupConfig(
             display_name="Fire Prevention",
-            mail_nickname="fire-prevention",
+            mail_nickname="fireprevention",
             description="Fire prevention - shared calendar and email distribution.",
             enforce_calendar_visibility=True,  # Group calendar must appear in Outlook
         )
