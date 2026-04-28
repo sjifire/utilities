@@ -543,6 +543,40 @@ class AllPersonnelStrategy(GroupStrategy):
         return "\n".join(lines)
 
 
+class FirePreventionStrategy(AllPersonnelStrategy):
+    """Strategy for Fire Prevention M365 group membership.
+
+    Same eligibility as All Personnel (everyone in the department), with a
+    shared group calendar enforced into Outlook for fire prevention events,
+    inspections, and public education activities.
+    """
+
+    @property
+    def name(self) -> str:
+        """Return strategy name."""
+        return "fire-prevention"
+
+    def get_members(self, members: list[GroupMember]) -> dict[str, list[GroupMember]]:
+        """Return members for the Fire Prevention group."""
+        eligible = [
+            m
+            for m in members
+            if self._is_active(m)
+            and self._has_aladtec_record(m)
+            and (self._is_staff(m) or self._has_operational_position(m))
+        ]
+        return {"fire-prevention": eligible}
+
+    def get_config(self, group_key: str) -> GroupConfig:
+        """Return group configuration."""
+        return GroupConfig(
+            display_name="Fire Prevention",
+            mail_nickname="fireprevention",
+            description="Fire prevention - shared calendar and email distribution.",
+            enforce_calendar_visibility=True,  # Group calendar must appear in Outlook
+        )
+
+
 # Registry of all available strategies
 STRATEGY_CLASSES: dict[str, type[GroupStrategy]] = {
     "stations": StationStrategy,
@@ -555,6 +589,7 @@ STRATEGY_CLASSES: dict[str, type[GroupStrategy]] = {
     "staff": StaffStrategy,
     "mobe": MobeScheduleStrategy,
     "all-personnel": AllPersonnelStrategy,
+    "fire-prevention": FirePreventionStrategy,
 }
 
 # List of strategy names for CLI

@@ -9,6 +9,7 @@ from sjifire.core.group_strategies import (
     AllPersonnelStrategy,
     ApparatusOperatorStrategy,
     FirefighterStrategy,
+    FirePreventionStrategy,
     GroupConfig,
     GroupMember,
     GroupStrategy,
@@ -104,6 +105,7 @@ class TestStrategyRegistry:
             "staff",
             "mobe",
             "all-personnel",
+            "fire-prevention",
         }
         assert set(STRATEGY_CLASSES.keys()) == expected
 
@@ -985,6 +987,64 @@ class TestAllPersonnelStrategy:
         assert config.enforce_calendar_visibility is True
 
 
+class TestFirePreventionStrategy:
+    """Tests for FirePreventionStrategy - everyone, with shared calendar."""
+
+    def setup_method(self):
+        """Create strategy instance for each test."""
+        self.strategy = FirePreventionStrategy()
+
+    def test_name(self):
+        """Strategy name should be 'fire-prevention'."""
+        assert self.strategy.name == "fire-prevention"
+
+    def test_partial_sync_is_true(self):
+        """FirePreventionStrategy should have partial_sync=True."""
+        assert self.strategy.partial_sync is True
+
+    def test_get_members_uses_fire_prevention_key(self):
+        """get_members should return a 'fire-prevention' key, not 'all-personnel'."""
+        members = [
+            make_member(member_id="1", email="staff@sjifire.org", work_group="Career"),
+        ]
+        result = self.strategy.get_members(members)
+        assert "fire-prevention" in result
+        assert "all-personnel" not in result
+        assert len(result["fire-prevention"]) == 1
+
+    def test_get_members_includes_staff_and_operational_volunteers(self):
+        """Should include staff and volunteers with operational positions."""
+        members = [
+            make_member(member_id="1", email="staff@sjifire.org", work_group="Career"),
+            make_member(
+                member_id="2",
+                email="volff@sjifire.org",
+                work_group="Volunteer",
+                positions=["Firefighter"],
+            ),
+            make_member(
+                member_id="3",
+                email="admin@sjifire.org",
+                work_group="Volunteer",
+                positions=["Administrative"],
+            ),
+        ]
+        result = self.strategy.get_members(members)
+        emails = {m.email for m in result["fire-prevention"]}
+        assert emails == {"staff@sjifire.org", "volff@sjifire.org"}
+
+    def test_get_config(self):
+        """get_config should return proper GroupConfig."""
+        config = self.strategy.get_config("fire-prevention")
+        assert config.display_name == "Fire Prevention"
+        assert config.mail_nickname == "fireprevention"
+
+    def test_get_config_enforce_calendar_visibility(self):
+        """Calendar must auto-appear in members' Outlook."""
+        config = self.strategy.get_config("fire-prevention")
+        assert config.enforce_calendar_visibility is True
+
+
 # =============================================================================
 # AllPersonnelStrategy Internal Methods Tests
 # =============================================================================
@@ -1410,10 +1470,16 @@ class TestGroupStrategyContract:
         strategy = get_strategy("all-personnel")
         assert strategy.partial_sync is True
 
+    def test_fire_prevention_strategy_has_partial_sync_true(self):
+        """FirePreventionStrategy should have partial_sync=True."""
+        strategy = get_strategy("fire-prevention")
+        assert strategy.partial_sync is True
+
     def test_other_strategies_have_partial_sync_false(self):
-        """Strategies other than all-personnel should have partial_sync=False."""
+        """Strategies other than all-personnel and fire-prevention should have partial_sync=False."""
+        partial_sync_strategies = {"all-personnel", "fire-prevention"}
         for name in STRATEGY_NAMES:
-            if name != "all-personnel":
+            if name not in partial_sync_strategies:
                 strategy = get_strategy(name)
                 assert strategy.partial_sync is False, f"{name} should have partial_sync=False"
 

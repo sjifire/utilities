@@ -1034,6 +1034,7 @@ async def backup_groups(
             "volunteers": ["Volunteers"],
             "mobe": ["mobe"],
             "all-personnel": ["all-personnel"],
+            "fire-prevention": ["fire-prevention"],
         }
         for key in sample_keys.get(strategy_name, [strategy_name]):
             try:
